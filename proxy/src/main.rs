@@ -7,7 +7,7 @@ use pingora_core::Result as PingoraResult;
 use pingora_proxy::{ProxyHttp, Session};
 use pingora_proxy::http_proxy_service;
 use pingora::http::ResponseHeader;
-use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair};
+use rcgen::{Certificate, CertificateParams, DistinguishedName, DnType, KeyPair, IsCa, BasicConstraints, KeyUsagePurpose};
 use rdkafka::config::ClientConfig;
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use serde::Serialize;
@@ -21,12 +21,24 @@ use tracing::{error, info, warn};
 #[derive(Clone)]
 struct CertCache {
     certs: Arc<RwLock<HashMap<String, (Vec<u8>, Vec<u8>)>>>,
-    ca_cert: Vec<u8>,
-    ca_key: Vec<u8>,
+    ca_cert: Arc<Certificate>,
+    ca_key: Arc<KeyPair>,
 }
 
 impl CertCache {
-    fn new(ca_cert: Vec<u8>, ca_key: Vec<u8>) -> Self {
+    fn new(ca_cert_pem: Vec<u8>, ca_key_pem: Vec<u8>) -> Self {
+        // Парсинг CA-ключа и CA-сертификата
+        let ca_key = Arc::new(KeyPair::from_pem(&String::from_utf8_lossy(&ca_key_pem))
+            .expect("CA key parse failed"));
+
+        // Минимальные параметры CA (важно для rcgen/подписи)
+        let mut ca_params = CertificateParams::from_ca_cert_der(&pem::parse(&ca_cert_pem).expect("CA PEM parse fail").contents)
+            .expect("from_ca_cert_der failed");
+        ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        ca_params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::DigitalSignature];
+        ca_params.distinguished_name = DistinguishedName::new();
+        let ca_cert = Arc::new(Certificate::from_params(ca_params).expect("CA cert instance failed"));
+
         Self {
             certs: Arc::new(RwLock::new(HashMap::new())),
             ca_cert,
@@ -41,31 +53,23 @@ impl CertCache {
                 return Ok(cert.clone());
             }
         }
-
-        let (cert_pem, key_pem) = self.generate_cert(domain)?;
+        let (cert_pem, key_pem) = self.generate_ca_signed_cert(domain)?;
         let mut cache = self.certs.write().await;
         cache.insert(domain.to_string(), (cert_pem.clone(), key_pem.clone()));
         Ok((cert_pem, key_pem))
     }
 
-    // Упрощённая генерация self-signed сертификата для домена
-    fn generate_cert(&self, domain: &str) -> PingoraResult<(Vec<u8>, Vec<u8>)> {
+    fn generate_ca_signed_cert(&self, domain: &str) -> PingoraResult<(Vec<u8>, Vec<u8>)> {
         let mut params = CertificateParams::new(vec![domain.to_string()]);
         params.distinguished_name = DistinguishedName::new();
         params.distinguished_name.push(DnType::CommonName, domain);
-        params
-            .distinguished_name
-            .push(DnType::OrganizationName, "BSDM Proxy");
-
-        let cert = rcgen::Certificate::from_params(params)
+        params.distinguished_name.push(DnType::OrganizationName, "BSDM Proxy");
+        let cert = Certificate::from_params(params)
             .map_err(|e| Error::because(ErrorType::InternalError, "Cert generation failed", e))?;
-
         let cert_pem = cert
-            .serialize_pem()
-            .map_err(|e| Error::because(ErrorType::InternalError, "Cert serialization failed", e))?;
-
+            .serialize_pem_with_signer(&self.ca_cert)
+            .map_err(|e| Error::because(ErrorType::InternalError, "CA cert signing failed", e))?;
         let key_pem = cert.serialize_private_key_pem();
-
         Ok((cert_pem.into_bytes(), key_pem.into_bytes()))
     }
 }
@@ -95,7 +99,6 @@ impl ProxyService {
                 .create()
                 .ok()
         });
-
         Self {
             cert_cache,
             kafka_producer,
@@ -124,9 +127,7 @@ impl ProxyService {
 #[async_trait]
 impl ProxyHttp for ProxyService {
     type CTX = ();
-
     fn new_ctx(&self) -> Self::CTX {}
-
     async fn upstream_peer(
         &self,
         session: &mut Session,
@@ -142,7 +143,6 @@ impl ProxyHttp for ProxyService {
         let peer = Box::new(HttpPeer::new((host, port), true, host.to_string()));
         Ok(peer)
     }
-
     async fn upstream_request_filter(
         &self,
         _session: &mut Session,
@@ -154,7 +154,6 @@ impl ProxyHttp for ProxyService {
             .unwrap();
         Ok(())
     }
-
     async fn response_filter(
         &self,
         session: &mut Session,
@@ -191,7 +190,6 @@ impl ProxyHttp for ProxyService {
         }
         Ok(())
     }
-
     fn should_serve_stale(
         &self,
         _session: &mut Session,
@@ -200,7 +198,6 @@ impl ProxyHttp for ProxyService {
     ) -> bool {
         true
     }
-
     fn cache_key_callback(
         &self,
         session: &Session,
