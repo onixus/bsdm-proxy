@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use bytes::Bytes;
 use pingora::prelude::*;
-use pingora_cache::{CacheKey, CacheMeta, CachePhase, HttpCache, MemCache};
+use pingora_cache::{CacheKey, CachePhase, HttpCache, MemCache};
 use pingora_core::upstreams::peer::HttpPeer;
 use pingora_core::Result as PingoraResult;
 use pingora_proxy::{ProxyHttp, Session};
@@ -72,10 +72,12 @@ impl CertCache {
         let cert = params.self_signed(&self.ca_key)
             .map_err(|e| Error::because(ErrorType::InternalError, "Cert generation failed", e))?;
         
-        let cert_pem = cert.serialize_pem_with_signer(&self.ca_cert)
-            .map_err(|e| Error::because(ErrorType::InternalError, "CA cert signing failed", e))?;
+        // Сериализация сертификата в PEM формат
+        let cert_pem = cert.pem();
         
-        let key_pem = cert.serialize_private_key_pem();
+        // Сериализация приватного ключа в PEM формат
+        let key_pem = cert.get_key_pair().serialize_pem();
+        
         Ok((cert_pem.into_bytes(), key_pem.into_bytes()))
     }
 }
