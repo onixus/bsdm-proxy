@@ -184,18 +184,25 @@ impl Indexer {
             return Ok(());
         }
 
-        // Явное указание типа Vec<serde_json::Value>
-        let mut body: Vec<serde_json::Value> = Vec::new();
+        // Формируем NDJSON строку для bulk API
+        let mut body_lines: Vec<String> = Vec::new();
 
         for event in events {
-            body.push(json!({
+            // Строка действия (action line)
+            let action = json!({
                 "index": {
                     "_index": &self.index_name,
                     "_id": &event.cache_key
                 }
-            }));
-            body.push(serde_json::to_value(event)?);
+            });
+            body_lines.push(serde_json::to_string(&action)?);
+            
+            // Строка данных (document line)
+            body_lines.push(serde_json::to_string(&event)?);
         }
+
+        // Соединяем все строки с \n и добавляем завершающий \n
+        let body = body_lines.join("\n") + "\n";
 
         match self
             .opensearch
