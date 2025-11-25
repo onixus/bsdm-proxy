@@ -2,6 +2,12 @@
 name = "bsdm-proxy"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+authors = ["BSDM-Proxy Contributors"]
+description = "HTTPS caching proxy with certificate substitution based on Pingora"
+repository = "https://github.com/onixus/bsdm-proxy"
+keywords = ["proxy", "https", "cache", "mitm", "pingora"]
+categories = ["network-programming", "web-programming"]
 
 [[bin]]
 name = "proxy"

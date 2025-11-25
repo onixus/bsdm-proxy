@@ -1,0 +1,116 @@
+BSDM-Proxy
+Copyright (c) 2025 BSDM-Proxy Contributors
+
+This project is licensed under the MIT License.
+See the LICENSE file for details.
+
+================================================================================
+THIRD-PARTY COMPONENTS
+================================================================================
+
+This project uses the following third-party components:
+
+--------------------------------------------------------------------------------
+Apache-2.0 Licensed Components
+--------------------------------------------------------------------------------
+
+1. Pingora (CloudFlare, Inc.)
+   Copyright (c) 2024 CloudFlare, Inc.
+   Licensed under the Apache License, Version 2.0
+   https://github.com/cloudflare/pingora
+
+2. OpenSearch Rust Client
+   Copyright OpenSearch Contributors
+   Licensed under the Apache License, Version 2.0
+   https://github.com/opensearch-project/opensearch-rs
+
+--------------------------------------------------------------------------------
+Dual Licensed Components (Apache-2.0 OR MIT)
+--------------------------------------------------------------------------------
+
+3. rdkafka - Rust Kafka Client
+   Copyright (c) 2017-2024 Federico Giraud and contributors
+   Licensed under Apache-2.0 OR MIT
+   https://github.com/fede1024/rust-rdkafka
+
+4. serde - Serialization framework
+   Copyright (c) 2014-2024 Erick Tryzelaar and David Tolnay
+   Licensed under Apache-2.0 OR MIT
+   https://github.com/serde-rs/serde
+
+5. RustCrypto Libraries (sha2, hex)
+   Copyright RustCrypto Developers
+   Licensed under Apache-2.0 OR MIT
+   https://github.com/RustCrypto
+
+6. rcgen - Certificate Generation
+   Copyright (c) 2018-2024 est31 and contributors
+   Licensed under Apache-2.0 OR MIT
+   https://github.com/est31/rcgen
+
+7. async-trait
+   Copyright (c) 2019-2024 David Tolnay
+   Licensed under Apache-2.0 OR MIT
+   https://github.com/dtolnay/async-trait
+
+8. time - Date and time library
+   Copyright (c) 2019-2024 Time Contributors
+   Licensed under Apache-2.0 OR MIT
+   https://github.com/time-rs/time
+
+9. pem - PEM encoding/decoding
+   Copyright (c) 2016-2024 Jonathan Creekmore
+   Licensed under Apache-2.0 OR MIT
+   https://github.com/jcreekmore/pem
+
+--------------------------------------------------------------------------------
+MIT Licensed Components
+--------------------------------------------------------------------------------
+
+10. Tokio - Asynchronous runtime
+    Copyright (c) 2024 Tokio Contributors
+    Licensed under the MIT License
+    https://github.com/tokio-rs/tokio
+
+11. tracing - Application-level tracing
+    Copyright (c) 2019-2024 Tokio Contributors
+    Licensed under the MIT License
+    https://github.com/tokio-rs/tracing
+
+12. bytes - Byte buffer utilities
+    Copyright (c) 2018-2024 Carl Lerche and contributors
+    Licensed under the MIT License
+    https://github.com/tokio-rs/bytes
+
+================================================================================
+APACHE LICENSE 2.0 NOTICE
+================================================================================
+
+For components licensed under Apache-2.0:
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+================================================================================
+PATENT GRANTS
+================================================================================
+
+Components licensed under Apache-2.0 include patent grants.
+Refer to each component's license for specific patent grant terms.
+
+================================================================================
+FULL LICENSE TEXTS
+================================================================================
+
+For full license texts, see:
+- MIT License: ./LICENSE
+- Apache License 2.0: https://www.apache.org/licenses/LICENSE-2.0.txt
