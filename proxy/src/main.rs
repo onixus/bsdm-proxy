@@ -36,7 +36,7 @@ let mut ca_params = CertificateParams::new(vec!["BSDM Proxy CA".to_string()]);
             ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
             ca_params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::DigitalSignature];
             ca_params.distinguished_name = DistinguishedName::new();
-            ca_params.distinguished_name.push(DnType::CommonName, "BSDM Proxy CA")
+            ca_params.distinguished_name.push(DnType::CommonName, "BSDM Proxy CA");
                     let ca_cert = Arc::new(ca_params.self_signed(&ca_key).expect("CA cert instance failed"));
 
         Self {
