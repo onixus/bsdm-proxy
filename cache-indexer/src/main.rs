@@ -204,8 +204,8 @@ impl Indexer {
         // Соединяем все строки с \n и добавляем завершающий \n
         let body_str = body_lines.join("\n") + "\n";
         
-        // Преобразуем строку в байты
-        let body = body_str.into_bytes();
+        // Передаем как Vec<Vec<u8>> с одним элементом
+        let body = vec![body_str.into_bytes()];
 
         match self
             .opensearch
