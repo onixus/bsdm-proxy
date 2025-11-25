@@ -20,7 +20,17 @@ use tracing::{error, info, warn};
 
 #[derive(Clone)]
 struct CertCache { /* ...как ранее... */ }
-// -- остальные структуры CacheEvent и ProxyService без изменений --
+
+#[derive(Serialize)]
+struct CacheEvent { /* ...как ранее... */ }
+
+// Чётко объявляем ProxyService ДО всех impl и main()
+struct ProxyService {
+    cert_cache: CertCache,
+    kafka_producer: Option<FutureProducer>,
+}
+
+// Остальные блоки impl ProxyService, impl ProxyHttp и main — без изменений!
 
 #[async_trait]
 impl ProxyHttp for ProxyService {
@@ -43,10 +53,8 @@ async fn main() {
     let mut server = Server::new(Some(Opt::default())).unwrap();
     server.bootstrap();
 
-    // Pingora 0.6: HttpCache::new() без set_cache_lock_timeout()
     let cache = HttpCache::new();
     cache.set_max_file_size_bytes(10 * 1024 * 1024);
-    // cache.set_cache_lock_timeout(..) удалён, больше не используется
 
     let cache_backend = Arc::new(MemCache::new());
     cache.enable(cache_backend, None);
