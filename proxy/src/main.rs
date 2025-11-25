@@ -39,7 +39,7 @@ impl CertCache {
         ca_params.distinguished_name = DistinguishedName::new();
         ca_params.distinguished_name.push(DnType::CommonName, "BSDM Proxy CA");
 
-        let ca_cert = Arc::new(ca_params.self_signed_cert(&ca_key)
+        let ca_cert = Arc::new(ca_params.self_signed(&ca_key)
             .expect("CA cert instance failed"));
 
         Self {
@@ -69,7 +69,7 @@ impl CertCache {
         params.distinguished_name.push(DnType::CommonName, domain);
         params.distinguished_name.push(DnType::OrganizationName, "BSDM Proxy");
         
-        let cert = params.self_signed_cert(&self.ca_key)
+        let cert = params.self_signed(&self.ca_key)
             .map_err(|e| Error::because(ErrorType::InternalError, "Cert generation failed", e))?;
         
         let cert_pem = cert.serialize_pem_with_signer(&self.ca_cert)
@@ -167,31 +167,33 @@ impl ProxyHttp for ProxyService {
         _ctx: &mut Self::CTX,
     ) -> PingoraResult<()> {
         let cache_phase = session.cache.phase();
-        if matches!(cache_phase, Some(CachePhase::Hit) | Some(CachePhase::Stale)) {
-            let req_header = session.req_header();
-            let url = req_header.uri.to_string();
-            let method = req_header.method.to_string();
-            if let Some(resp_header) = session.response_written() {
-                let status = resp_header.status.as_u16();
-                let mut hasher = Sha256::new();
-                hasher.update(url.as_bytes());
-                let cache_key = hex::encode(hasher.finalize());
-                let mut headers = HashMap::new();
-                for (name, value) in resp_header.headers.iter() {
-                    if let Ok(v) = value.to_str() {
-                        headers.insert(name.to_string(), v.to_string());
+        if let Some(phase) = cache_phase {
+            if matches!(phase, CachePhase::Hit | CachePhase::Stale) {
+                let req_header = session.req_header();
+                let url = req_header.uri.to_string();
+                let method = req_header.method.to_string();
+                if let Some(resp_header) = session.response_written() {
+                    let status = resp_header.status.as_u16();
+                    let mut hasher = Sha256::new();
+                    hasher.update(url.as_bytes());
+                    let cache_key = hex::encode(hasher.finalize());
+                    let mut headers = HashMap::new();
+                    for (name, value) in resp_header.headers.iter() {
+                        if let Ok(v) = value.to_str() {
+                            headers.insert(name.to_string(), v.to_string());
+                        }
                     }
+                    let event = CacheEvent {
+                        url,
+                        method,
+                        status,
+                        cache_key,
+                        timestamp: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs(),
+                        headers,
+                        body: String::new(),
+                    };
+                    self.send_to_kafka(event).await;
                 }
-                let event = CacheEvent {
-                    url,
-                    method,
-                    status,
-                    cache_key,
-                    timestamp: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs(),
-                    headers,
-                    body: String::new(),
-                };
-                self.send_to_kafka(event).await;
             }
         }
         Ok(())
