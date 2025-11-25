@@ -1,0 +1,26 @@
+[package]
+name = "bsdm-proxy"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "proxy"
+path = "src/main.rs"
+
+[dependencies]
+pingora = { workspace = true }
+pingora-core = { workspace = true }
+pingora-proxy = { workspace = true }
+pingora-cache = { workspace = true }
+tokio = { workspace = true }
+rdkafka = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+rcgen = { workspace = true }
+time = { workspace = true }
