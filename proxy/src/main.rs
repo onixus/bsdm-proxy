@@ -107,7 +107,6 @@ impl CertCache {
         let key_pem = cert.serialize_private_key_pem();
         Ok((cert_pem.into_bytes(), key_pem.into_bytes()))
     }
-}
 
 #[derive(Serialize)]
 struct CacheEvent {
