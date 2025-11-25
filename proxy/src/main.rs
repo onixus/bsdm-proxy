@@ -20,13 +20,18 @@ use std::time::{Duration, SystemTime};
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
+type CertPair = (Vec<u8>, Vec<u8>);
+type CertMap = Arc<RwLock<HashMap<String, CertPair>>>;
+
+#[allow(dead_code)]
 #[derive(Clone)]
 struct CertCache {
-    certs: Arc<RwLock<HashMap<String, (Vec<u8>, Vec<u8>)>>>,
+    certs: CertMap,
     ca_cert: Arc<Certificate>,
     ca_key: Arc<KeyPair>,
 }
 
+#[allow(dead_code)]
 impl CertCache {
     fn new(_ca_cert_pem: Vec<u8>, ca_key_pem: Vec<u8>) -> Self {
         let ca_key = Arc::new(
@@ -58,7 +63,7 @@ impl CertCache {
         }
     }
 
-    async fn get_or_generate(&self, domain: &str) -> PingoraResult<(Vec<u8>, Vec<u8>)> {
+    async fn get_or_generate(&self, domain: &str) -> PingoraResult<CertPair> {
         {
             let cache = self.certs.read().await;
             if let Some(cert) = cache.get(domain) {
@@ -71,7 +76,7 @@ impl CertCache {
         Ok((cert_pem, key_pem))
     }
 
-    fn generate_ca_signed_cert(&self, domain: &str) -> PingoraResult<(Vec<u8>, Vec<u8>)> {
+    fn generate_ca_signed_cert(&self, domain: &str) -> PingoraResult<CertPair> {
         let key_pair = KeyPair::generate()
             .map_err(|e| Error::because(ErrorType::InternalError, "Key generation failed", e))?;
 
@@ -107,6 +112,7 @@ struct CacheEvent {
 }
 
 struct ProxyService {
+    #[allow(dead_code)]
     cert_cache: CertCache,
     kafka_producer: Option<FutureProducer>,
 }
