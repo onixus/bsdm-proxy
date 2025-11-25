@@ -26,7 +26,7 @@ struct CertCache {
 }
 
 impl CertCache {
-    fn new(ca_cert_pem: Vec<u8>, ca_key_pem: Vec<u8>) -> Self {
+    fn new(_ca_cert_pem: Vec<u8>, ca_key_pem: Vec<u8>) -> Self {
         // Парсинг CA-ключа
         let ca_key = Arc::new(KeyPair::from_pem(&String::from_utf8_lossy(&ca_key_pem))
             .expect("CA key parse failed"));
@@ -234,18 +234,17 @@ async fn main() {
     let ca_key = std::fs::read("/certs/ca.key").expect("Failed to read CA private key");
     let cert_cache = CertCache::new(ca_cert, ca_key);
     let kafka_brokers = std::env::var("KAFKA_BROKERS").ok();
+    
     let mut server = Server::new(Some(Opt::default())).unwrap();
     server.bootstrap();
-    let cache = HttpCache::new();
-    cache.set_max_file_size_bytes(10 * 1024 * 1024);
-    let cache_backend = Arc::new(MemCache::new());
-    cache.enable(cache_backend, None);
-    let mut proxy_service = http_proxy_service(
+    
+    let proxy_service = http_proxy_service(
         &server.configuration,
         ProxyService::new(cert_cache.clone(), kafka_brokers),
-                )
-                .add_tls("0.0.0.0:1488", "/certs/server.crt", "/certs/server.key")
-        .expect("Failed to add TLS listener");
+    )
+    .add_tls("0.0.0.0:1488", "/certs/server.crt", "/certs/server.key")
+    .unwrap();
+    
     server.add_service(proxy_service);
     info!("BSDM-Proxy starting on port 1488");
     server.run_forever();
