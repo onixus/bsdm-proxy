@@ -32,7 +32,7 @@ impl CertCache {
             .expect("CA key parse failed"));
 
         // Параметры CA - используем ? оператор или unwrap Result
-        let mut ca_params = CertificateParams::new(vec!["BSDM Proxy CA".to_string()])
+        let mut ca_params = CertificateParams::new(vec!["BSDM Proxy CA".to_string(.expect("Failed to create CA params"))])
             .expect("Failed to create CA params");
         ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
         ca_params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::DigitalSignature];
@@ -63,7 +63,7 @@ impl CertCache {
     }
     
     fn generate_ca_signed_cert(&self, domain: &str) -> PingoraResult<(Vec<u8>, Vec<u8>)> {
-        let mut params = CertificateParams::new(vec![domain.to_string()])
+        let mut params = CertificateParams::new(vec![domain.to_string(.expect("Failed to create cert params"))])
             .expect("Failed to create cert params");
         params.distinguished_name = DistinguishedName::new();
         params.distinguished_name.push(DnType::CommonName, domain);
