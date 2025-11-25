@@ -32,9 +32,11 @@ impl CertCache {
             .expect("CA key parse failed"));
 
         // Минимальные параметры CA (важно для rcgen/подписи)
-        let mut ca_params = CertificateParams::from_ca_cert_der(&pem::parse(&ca_cert_pem).expect("CA PEM parse fail").contents)
-            .expect("from_ca_cert_der failed");
-        ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+let mut ca_params = CertificateParams::new(vec!["BSDM Proxy CA".to_string()]);
+            ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+            ca_params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::DigitalSignature];
+            ca_params.distinguished_name = DistinguishedName::new();
+            ca_params.distinguished_name.push(DnType::CommonName, "BSDM Proxy CA")
         ca_params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::DigitalSignature];
         ca_params.distinguished_name = DistinguishedName::new();
         let ca_cert = Arc::new(Certificate::from_params(ca_params).expect("CA cert instance failed"));
