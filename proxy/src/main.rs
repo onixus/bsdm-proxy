@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use bytes::Bytes;
 use pingora::prelude::*;
 use pingora_cache::{CacheKey, CachePhase};
 use pingora_core::upstreams::peer::HttpPeer;
@@ -73,8 +72,8 @@ impl CertCache {
         params.distinguished_name.push(DnType::CommonName, domain);
         params.distinguished_name.push(DnType::OrganizationName, "BSDM Proxy");
         
-        // Создаем сертификат с указанным ключом
-        let cert = Certificate::from_params(params)
+        // Создаем самоподписанный сертификат
+        let cert = params.self_signed(&key_pair)
             .map_err(|e| Error::because(ErrorType::InternalError, "Cert generation failed", e))?;
         
         // Сериализация сертификата в PEM формат
@@ -243,7 +242,7 @@ async fn main() {
         ProxyService::new(cert_cache.clone(), kafka_brokers),
     )
     .add_tls("0.0.0.0:1488", "/certs/server.crt", "/certs/server.key")
-    .unwrap();
+    .expect("Failed to add TLS listener");
     
     server.add_service(proxy_service);
     info!("BSDM-Proxy starting on port 1488");
