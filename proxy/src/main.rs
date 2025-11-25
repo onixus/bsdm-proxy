@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use bytes::Bytes;
 use pingora::prelude::*;
-use pingora_cache::{CacheKey, CachePhase, HttpCache, MemCache};
+use pingora_cache::{CacheKey, CachePhase};
 use pingora_core::upstreams::peer::HttpPeer;
 use pingora_core::Result as PingoraResult;
 use pingora_proxy::{ProxyHttp, Session};
@@ -72,16 +72,16 @@ impl CertCache {
         params.distinguished_name = DistinguishedName::new();
         params.distinguished_name.push(DnType::CommonName, domain);
         params.distinguished_name.push(DnType::OrganizationName, "BSDM Proxy");
-        params.key_pair = Some(key_pair);
         
-        let cert = params.self_signed(&self.ca_key)
+        // Создаем сертификат с указанным ключом
+        let cert = Certificate::from_params(params)
             .map_err(|e| Error::because(ErrorType::InternalError, "Cert generation failed", e))?;
         
         // Сериализация сертификата в PEM формат
         let cert_pem = cert.pem();
         
         // Сериализация приватного ключа в PEM формат
-        let key_pem = params.key_pair.as_ref().unwrap().serialize_pem();
+        let key_pem = key_pair.serialize_pem();
         
         Ok((cert_pem.into_bytes(), key_pem.into_bytes()))
     }
