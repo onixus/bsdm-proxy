@@ -1,7 +1,4 @@
-use opensearch::{
-    http::transport::TransportBuilder,
-    BulkParts, OpenSearch,
-};
+use opensearch::{http::transport::TransportBuilder, BulkParts, OpenSearch};
 use rdkafka::{
     config::ClientConfig,
     consumer::{CommitMode, Consumer, StreamConsumer},
@@ -50,9 +47,7 @@ impl Indexer {
         info!("Subscribed to Kafka topic: {}", kafka_topic);
 
         let transport = TransportBuilder::new(
-            opensearch::http::transport::SingleNodeConnectionPool::new(
-                opensearch_url.parse()?,
-            ),
+            opensearch::http::transport::SingleNodeConnectionPool::new(opensearch_url.parse()?),
         )
         .build()?;
 
@@ -96,7 +91,7 @@ impl Indexer {
             .opensearch
             .indices()
             .exists(opensearch::indices::IndicesExistsParts::Index(&[
-                &self.index_name,
+                &self.index_name
             ]))
             .send()
             .await
@@ -184,11 +179,9 @@ impl Indexer {
             return Ok(());
         }
 
-        // Формируем NDJSON строку для bulk API
         let mut body_lines: Vec<String> = Vec::new();
 
         for event in events {
-            // Строка действия (action line)
             let action = json!({
                 "index": {
                     "_index": &self.index_name,
@@ -196,15 +189,12 @@ impl Indexer {
                 }
             });
             body_lines.push(serde_json::to_string(&action)?);
-            
-            // Строка данных (document line)
+
             body_lines.push(serde_json::to_string(&event)?);
         }
 
-        // Соединяем все строки с \n и добавляем завершающий \n
         let body_str = body_lines.join("\n") + "\n";
-        
-        // Передаем как Vec<Vec<u8>> с одним элементом
+
         let body = vec![body_str.into_bytes()];
 
         match self
@@ -243,9 +233,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
     let kafka_brokers = std::env::var("KAFKA_BROKERS").unwrap_or_else(|_| "kafka:9092".to_string());
-    let opensearch_url = std::env::var("OPENSEARCH_URL").unwrap_or_else(|_| "http://opensearch:9200".to_string());
+    let opensearch_url =
+        std::env::var("OPENSEARCH_URL").unwrap_or_else(|_| "http://opensearch:9200".to_string());
     let kafka_topic = std::env::var("KAFKA_TOPIC").unwrap_or_else(|_| "cache-events".to_string());
-    let kafka_group = std::env::var("KAFKA_GROUP_ID").unwrap_or_else(|_| "cache-indexer-group".to_string());
+    let kafka_group =
+        std::env::var("KAFKA_GROUP_ID").unwrap_or_else(|_| "cache-indexer-group".to_string());
     let index_name = "http-cache";
 
     info!("Starting cache-indexer");
@@ -260,7 +252,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &kafka_topic,
         &kafka_group,
         index_name,
-    ).await?;
+    )
+    .await?;
 
     indexer.run().await
 }

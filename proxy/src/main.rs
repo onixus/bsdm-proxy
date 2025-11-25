@@ -1,12 +1,15 @@
 use async_trait::async_trait;
+use pingora::http::ResponseHeader;
 use pingora::prelude::*;
 use pingora_cache::{CacheKey, CachePhase};
 use pingora_core::upstreams::peer::HttpPeer;
 use pingora_core::Result as PingoraResult;
-use pingora_proxy::{ProxyHttp, Session};
 use pingora_proxy::http_proxy_service;
-use pingora::http::ResponseHeader;
-use rcgen::{Certificate, CertificateParams, DistinguishedName, DnType, KeyPair, IsCa, BasicConstraints, KeyUsagePurpose};
+use pingora_proxy::{ProxyHttp, Session};
+use rcgen::{
+    BasicConstraints, Certificate, CertificateParams, DistinguishedName, DnType, IsCa, KeyPair,
+    KeyUsagePurpose,
+};
 use rdkafka::config::ClientConfig;
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use serde::Serialize;
@@ -26,20 +29,27 @@ struct CertCache {
 
 impl CertCache {
     fn new(_ca_cert_pem: Vec<u8>, ca_key_pem: Vec<u8>) -> Self {
-        // Парсинг CA-ключа
-        let ca_key = Arc::new(KeyPair::from_pem(&String::from_utf8_lossy(&ca_key_pem))
-            .expect("CA key parse failed"));
+        let ca_key = Arc::new(
+            KeyPair::from_pem(&String::from_utf8_lossy(&ca_key_pem)).expect("CA key parse failed"),
+        );
 
-        // Параметры CA
         let mut ca_params = CertificateParams::new(vec!["BSDM Proxy CA".to_string()])
             .expect("Failed to create CA params");
         ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
-        ca_params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::DigitalSignature];
+        ca_params.key_usages = vec![
+            KeyUsagePurpose::KeyCertSign,
+            KeyUsagePurpose::DigitalSignature,
+        ];
         ca_params.distinguished_name = DistinguishedName::new();
-        ca_params.distinguished_name.push(DnType::CommonName, "BSDM Proxy CA");
+        ca_params
+            .distinguished_name
+            .push(DnType::CommonName, "BSDM Proxy CA");
 
-        let ca_cert = Arc::new(ca_params.self_signed(&ca_key)
-            .expect("CA cert instance failed"));
+        let ca_cert = Arc::new(
+            ca_params
+                .self_signed(&ca_key)
+                .expect("CA cert instance failed"),
+        );
 
         Self {
             certs: Arc::new(RwLock::new(HashMap::new())),
@@ -47,7 +57,7 @@ impl CertCache {
             ca_key,
         }
     }
-    
+
     async fn get_or_generate(&self, domain: &str) -> PingoraResult<(Vec<u8>, Vec<u8>)> {
         {
             let cache = self.certs.read().await;
@@ -60,28 +70,27 @@ impl CertCache {
         cache.insert(domain.to_string(), (cert_pem.clone(), key_pem.clone()));
         Ok((cert_pem, key_pem))
     }
-    
+
     fn generate_ca_signed_cert(&self, domain: &str) -> PingoraResult<(Vec<u8>, Vec<u8>)> {
-        // Создаем новый ключ для сертификата
         let key_pair = KeyPair::generate()
             .map_err(|e| Error::because(ErrorType::InternalError, "Key generation failed", e))?;
-        
-        let mut params = CertificateParams::new(vec![domain.to_string()])
-            .expect("Failed to create cert params");
+
+        let mut params =
+            CertificateParams::new(vec![domain.to_string()]).expect("Failed to create cert params");
         params.distinguished_name = DistinguishedName::new();
         params.distinguished_name.push(DnType::CommonName, domain);
-        params.distinguished_name.push(DnType::OrganizationName, "BSDM Proxy");
-        
-        // Создаем самоподписанный сертификат
-        let cert = params.self_signed(&key_pair)
+        params
+            .distinguished_name
+            .push(DnType::OrganizationName, "BSDM Proxy");
+
+        let cert = params
+            .self_signed(&key_pair)
             .map_err(|e| Error::because(ErrorType::InternalError, "Cert generation failed", e))?;
-        
-        // Сериализация сертификата в PEM формат
+
         let cert_pem = cert.pem();
-        
-        // Сериализация приватного ключа в PEM формат
+
         let key_pem = key_pair.serialize_pem();
-        
+
         Ok((cert_pem.into_bytes(), key_pem.into_bytes()))
     }
 }
@@ -193,7 +202,10 @@ impl ProxyHttp for ProxyService {
                     method,
                     status,
                     cache_key,
-                    timestamp: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs(),
+                    timestamp: SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs(),
                     headers,
                     body: String::new(),
                 };
@@ -233,19 +245,19 @@ async fn main() {
     let ca_key = std::fs::read("/certs/ca.key").expect("Failed to read CA private key");
     let cert_cache = CertCache::new(ca_cert, ca_key);
     let kafka_brokers = std::env::var("KAFKA_BROKERS").ok();
-    
+
     let mut server = Server::new(Some(Opt::default())).unwrap();
     server.bootstrap();
-    
+
     let mut proxy_service = http_proxy_service(
         &server.configuration,
         ProxyService::new(cert_cache.clone(), kafka_brokers),
     );
-    
+
     proxy_service
         .add_tls("0.0.0.0:1488", "/certs/server.crt", "/certs/server.key")
         .expect("Failed to add TLS listener");
-    
+
     server.add_service(proxy_service);
     info!("BSDM-Proxy starting on port 1488");
     server.run_forever();
