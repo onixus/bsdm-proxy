@@ -237,12 +237,14 @@ async fn main() {
     let mut server = Server::new(Some(Opt::default())).unwrap();
     server.bootstrap();
     
-    let proxy_service = http_proxy_service(
+    let mut proxy_service = http_proxy_service(
         &server.configuration,
         ProxyService::new(cert_cache.clone(), kafka_brokers),
-    )
-    .add_tls("0.0.0.0:1488", "/certs/server.crt", "/certs/server.key")
-    .expect("Failed to add TLS listener");
+    );
+    
+    proxy_service
+        .add_tls("0.0.0.0:1488", "/certs/server.crt", "/certs/server.key")
+        .expect("Failed to add TLS listener");
     
     server.add_service(proxy_service);
     info!("BSDM-Proxy starting on port 1488");
