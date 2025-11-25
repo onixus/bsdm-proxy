@@ -27,17 +27,20 @@ struct CertCache {
 
 impl CertCache {
     fn new(ca_cert_pem: Vec<u8>, ca_key_pem: Vec<u8>) -> Self {
-        // Парсинг CA-ключа и CA-сертификата
+        // Парсинг CA-ключа
         let ca_key = Arc::new(KeyPair::from_pem(&String::from_utf8_lossy(&ca_key_pem))
             .expect("CA key parse failed"));
 
-        // Минимальные параметры CA (важно для rcgen/подписи)
-let mut ca_params = CertificateParams::new(vec!["BSDM Proxy CA".to_string()]);
-            ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
-            ca_params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::DigitalSignature];
-            ca_params.distinguished_name = DistinguishedName::new();
-            ca_params.distinguished_name.push(DnType::CommonName, "BSDM Proxy CA");
-                    let ca_cert = Arc::new(ca_params.self_signed_cert(&ca_key).expect("CA cert instance failed"));
+        // Параметры CA - используем ? оператор или unwrap Result
+        let mut ca_params = CertificateParams::new(vec!["BSDM Proxy CA".to_string()])
+            .expect("Failed to create CA params");
+        ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        ca_params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::DigitalSignature];
+        ca_params.distinguished_name = DistinguishedName::new();
+        ca_params.distinguished_name.push(DnType::CommonName, "BSDM Proxy CA");
+
+        let ca_cert = Arc::new(ca_params.self_signed_cert(&ca_key)
+            .expect("CA cert instance failed"));
 
         Self {
             certs: Arc::new(RwLock::new(HashMap::new())),
@@ -45,6 +48,38 @@ let mut ca_params = CertificateParams::new(vec!["BSDM Proxy CA".to_string()]);
             ca_key,
         }
     }
+    
+    async fn get_or_generate(&self, domain: &str) -> PingoraResult<(Vec<u8>, Vec<u8>)> {
+        {
+            let cache = self.certs.read().await;
+            if let Some(cert) = cache.get(domain) {
+                return Ok(cert.clone());
+            }
+        }
+        let (cert_pem, key_pem) = self.generate_ca_signed_cert(domain)?;
+        let mut cache = self.certs.write().await;
+        cache.insert(domain.to_string(), (cert_pem.clone(), key_pem.clone()));
+        Ok((cert_pem, key_pem))
+    }
+    
+    fn generate_ca_signed_cert(&self, domain: &str) -> PingoraResult<(Vec<u8>, Vec<u8>)> {
+        let mut params = CertificateParams::new(vec![domain.to_string()])
+            .expect("Failed to create cert params");
+        params.distinguished_name = DistinguishedName::new();
+        params.distinguished_name.push(DnType::CommonName, domain);
+        params.distinguished_name.push(DnType::OrganizationName, "BSDM Proxy");
+        
+        let cert = params.self_signed_cert(&self.ca_key)
+            .map_err(|e| Error::because(ErrorType::InternalError, "Cert generation failed", e))?;
+        
+        let cert_pem = cert.serialize_pem_with_signer(&self.ca_cert)
+            .map_err(|e| Error::because(ErrorType::InternalError, "CA cert signing failed", e))?;
+        
+        let key_pem = cert.serialize_private_key_pem();
+        Ok((cert_pem.into_bytes(), key_pem.into_bytes()))
+    }
+}
+
 
     async fn get_or_generate(&self, domain: &str) -> PingoraResult<(Vec<u8>, Vec<u8>)> {
         {
