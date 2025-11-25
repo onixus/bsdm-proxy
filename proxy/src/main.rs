@@ -37,7 +37,7 @@ let mut ca_params = CertificateParams::new(vec!["BSDM Proxy CA".to_string()]);
             ca_params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::DigitalSignature];
             ca_params.distinguished_name = DistinguishedName::new();
             ca_params.distinguished_name.push(DnType::CommonName, "BSDM Proxy CA");
-                    let ca_cert = Arc::new(ca_params.self_signed(&ca_key).expect("CA cert instance failed"));
+                    let ca_cert = Arc::new(ca_params.self_signed_cert(&ca_key).expect("CA cert instance failed"));
 
         Self {
             certs: Arc::new(RwLock::new(HashMap::new())),
@@ -64,7 +64,7 @@ let mut ca_params = CertificateParams::new(vec!["BSDM Proxy CA".to_string()]);
         params.distinguished_name = DistinguishedName::new();
         params.distinguished_name.push(DnType::CommonName, domain);
         params.distinguished_name.push(DnType::OrganizationName, "BSDM Proxy");
-                    let cert = params.self_signed(&self.ca_key)
+                    let cert = params.self_signed_cert(&self.ca_key)
             .map_err(|e| Error::because(ErrorType::InternalError, "Cert generation failed", e))?;
         let cert_pem = cert
             .serialize_pem_with_signer(&self.ca_cert)
