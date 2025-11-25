@@ -20,8 +20,5 @@ sha2 = "0.10"
 hex = "0.4"
 rcgen = "0.13"
 time = "0.3"
-
-# Fix sfv compatibility issue with Pingora 0.4
-# See: https://github.com/cloudflare/pingora/issues/568
-[patch.crates-io]
-sfv = { version = "0.10" }
+# Pin sfv to 0.10 for Pingora 0.4 compatibility
+sfv = "=0.10.0"
