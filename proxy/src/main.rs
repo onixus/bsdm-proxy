@@ -233,8 +233,7 @@ async fn main() {
         &server.configuration,
         ProxyService::new(cert_cache.clone(), kafka_brokers),
     );
-    proxy_service.add_tcp("0.0.0.0:1488");
-    proxy_service
+
         .add_tls("0.0.0.0:1488", "/certs/server.crt", "/certs/server.key")
         .expect("Failed to add TLS listener");
     server.add_service(proxy_service);
