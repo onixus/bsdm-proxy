@@ -2,9 +2,9 @@
 members = ["proxy", "cache-indexer"]
 resolver = "2"
 
-# Критические обновления для устранения уязвимостей
+# Критическое обновление для устранения уязвимости RUSTSEC-2024-0437
 # - rdkafka 0.36 -> 0.38: обновляет protobuf до безопасной версии
-# - rcgen 0.13 -> 0.14: последняя стабильная версия
+# - rcgen остается на 0.13: стабильная версия без breaking changes
 [workspace.dependencies]
 pingora = "0.6"
 pingora-core = "0.6"
@@ -21,6 +21,6 @@ async-trait = "0.1"
 bytes = "1.0"
 sha2 = "0.10"
 hex = "0.4"
-rcgen = "0.14"  # Было 0.13, обновлено до последней версии
+rcgen = "0.13"  # Остается на 0.13 для избежания breaking changes в API
 pem = "3.0"
 time = "0.3"

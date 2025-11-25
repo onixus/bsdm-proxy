@@ -50,10 +50,9 @@ impl CertCache {
             .distinguished_name
             .push(DnType::CommonName, "BSDM Proxy CA");
 
-        // rcgen 0.14: self_signed требует &impl SigningKey, используем &*ca_key для разыменования Arc
         let ca_cert = Arc::new(
             ca_params
-                .self_signed(&*ca_key)
+                .self_signed(&ca_key)
                 .expect("CA cert instance failed"),
         );
 
