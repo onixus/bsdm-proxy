@@ -5,6 +5,9 @@ use pingora_cache::{CacheKey, CacheMeta, CachePhase, HttpCache, MemCache};
 use pingora_core::upstreams::peer::HttpPeer;
 use pingora_core::Result as PingoraResult;
 use pingora_proxy::{ProxyHttp, Session};
+use pingora_proxy::http_proxy_service;
+use pingora::http::ResponseHeader;
+use pingora::listeners::TlsSettings;
 use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair};
 use rdkafka::config::ClientConfig;
 use rdkafka::producer::{FutureProducer, FutureRecord};
@@ -227,11 +230,11 @@ impl ProxyHttp for ProxyService {
         true
     }
 
-    fn request_cache_key_callback(
+    fn cache_key_callback(
         &self,
-        session: &mut Session,
+        session: &Session,
         _ctx: &mut Self::CTX,
-    ) -> PingoraResult<CacheKey> {
+    ) -> Result<CacheKey, Box<Error>> {
         let req_header = session.req_header();
         let uri = req_header.uri.to_string();
         let method = req_header.method.as_str();
