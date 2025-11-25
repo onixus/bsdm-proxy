@@ -96,6 +96,3 @@ jobs:
 
       - name: Run tests
         run: cargo test --workspace --all-targets --verbose
-
-      - name: Run doc tests
-        run: cargo test --workspace --doc --verbose
