@@ -48,27 +48,21 @@ impl CertCache {
         Ok((cert_pem, key_pem))
     }
 
+    // Упрощённая генерация self-signed сертификата для домена
     fn generate_cert(&self, domain: &str) -> PingoraResult<(Vec<u8>, Vec<u8>)> {
-        let ca_key_pair = KeyPair::from_pem(&String::from_utf8_lossy(&self.ca_key))
-            .map_err(|e| Error::because(ErrorType::InternalError, "CA key parse failed", e))?;
-
-        let ca_params = CertificateParams::from_ca_cert_pem(
-            &String::from_utf8_lossy(&self.ca_cert),
-            ca_key_pair.clone(),
-        )
-        .map_err(|e| Error::because(ErrorType::InternalError, "CA cert parse failed", e))?;
-
         let mut params = CertificateParams::new(vec![domain.to_string()]);
         params.distinguished_name = DistinguishedName::new();
         params.distinguished_name.push(DnType::CommonName, domain);
-        params.distinguished_name.push(DnType::OrganizationName, "BSDM Proxy");
+        params
+            .distinguished_name
+            .push(DnType::OrganizationName, "BSDM Proxy");
 
         let cert = rcgen::Certificate::from_params(params)
             .map_err(|e| Error::because(ErrorType::InternalError, "Cert generation failed", e))?;
 
         let cert_pem = cert
-            .serialize_pem_with_signer(&ca_params.self_signed(&ca_key_pair).unwrap())
-            .map_err(|e| Error::because(ErrorType::InternalError, "Cert signing failed", e))?;
+            .serialize_pem()
+            .map_err(|e| Error::because(ErrorType::InternalError, "Cert serialization failed", e))?;
 
         let key_pem = cert.serialize_private_key_pem();
 
@@ -155,7 +149,9 @@ impl ProxyHttp for ProxyService {
         upstream_request: &mut RequestHeader,
         _ctx: &mut Self::CTX,
     ) -> PingoraResult<()> {
-        upstream_request.insert_header("X-Forwarded-Proto", "https").unwrap();
+        upstream_request
+            .insert_header("X-Forwarded-Proto", "https")
+            .unwrap();
         Ok(())
     }
 
@@ -239,7 +235,9 @@ async fn main() {
         ProxyService::new(cert_cache.clone(), kafka_brokers),
     );
     proxy_service.add_tcp("0.0.0.0:1488");
-    proxy_service.add_tls("0.0.0.0:1488", "/certs/server.crt", "/certs/server.key").expect("Failed to add TLS listener");
+    proxy_service
+        .add_tls("0.0.0.0:1488", "/certs/server.crt", "/certs/server.key")
+        .expect("Failed to add TLS listener");
     server.add_service(proxy_service);
     info!("BSDM-Proxy starting on port 1488");
     server.run_forever();
