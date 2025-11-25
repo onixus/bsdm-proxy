@@ -8,28 +8,52 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
 
 jobs:
   build-and-test:
+    name: Build and Test
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
 
-      - name: Install system dependencies (OpenSSL, pkg-config)
+      - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libssl-dev pkg-config
+          sudo apt-get install -y libssl-dev pkg-config cmake
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
-      - name: Cache Cargo registry + target
+      - name: Cache Cargo registry and target
         uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Build workspace
         run: cargo build --workspace --all-targets --verbose
 
-      - name: Run tests
+      - name: Run unit and integration tests
         run: cargo test --workspace --all-targets --verbose
+
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Run cargo-audit
+        uses: rustsec/audit-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
