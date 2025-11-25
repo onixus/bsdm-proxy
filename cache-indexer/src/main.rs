@@ -184,6 +184,7 @@ impl Indexer {
             return Ok(());
         }
 
+        // Явное указание типа Vec<serde_json::Value>
         let mut body: Vec<serde_json::Value> = Vec::new();
 
         for event in events {
