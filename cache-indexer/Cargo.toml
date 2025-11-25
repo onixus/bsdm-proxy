@@ -2,6 +2,12 @@
 name = "cache-indexer"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+authors = ["BSDM-Proxy Contributors"]
+description = "Kafka to OpenSearch indexer for HTTP cache events"
+repository = "https://github.com/onixus/bsdm-proxy"
+keywords = ["kafka", "opensearch", "indexer", "cache"]
+categories = ["database", "network-programming"]
 
 [[bin]]
 name = "cache-indexer"
