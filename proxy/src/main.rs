@@ -19,19 +19,13 @@ use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
 #[derive(Clone)]
-struct CertCache { /* ...без изменений... */ }
-// -- остальной код структуры CertCache и реализация без изменений --
-
-#[derive(Serialize)]
-struct CacheEvent { /* ...без изменений... */ }
-
-struct ProxyService { /* ...без изменений... */ }
-// -- реализация ProxyService без изменений --
+struct CertCache { /* ...как ранее... */ }
+// -- остальные структуры CacheEvent и ProxyService без изменений --
 
 #[async_trait]
 impl ProxyHttp for ProxyService {
     type CTX = ();
-    // ...все методы как ранее, cache_key_callback и т.д...
+    // ... методы без изменений ...
 }
 
 #[tokio::main]
@@ -49,9 +43,10 @@ async fn main() {
     let mut server = Server::new(Some(Opt::default())).unwrap();
     server.bootstrap();
 
-    let cache = HttpCache::new()
-        .set_max_file_size_bytes(10 * 1024 * 1024)
-        .set_cache_lock_timeout(Duration::from_secs(2));
+    // Pingora 0.6: HttpCache::new() без set_cache_lock_timeout()
+    let cache = HttpCache::new();
+    cache.set_max_file_size_bytes(10 * 1024 * 1024);
+    // cache.set_cache_lock_timeout(..) удалён, больше не используется
 
     let cache_backend = Arc::new(MemCache::new());
     cache.enable(cache_backend, None);
@@ -62,8 +57,6 @@ async fn main() {
     );
 
     proxy_service.add_tcp("0.0.0.0:1488");
-
-    // Новый публичный API — add_tls вместо private TlsSettings
     proxy_service
         .add_tls("0.0.0.0:1488", "/certs/server.crt", "/certs/server.key")
         .expect("Failed to add TLS listener");
