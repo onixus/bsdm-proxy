@@ -170,16 +170,16 @@ mod tests {
         let server_error_codes = vec![500, 502, 503];
 
         for code in success_codes {
-            assert!(code >= 200 && code < 300);
+            assert!((200..300).contains(&code));
         }
         for code in redirect_codes {
-            assert!(code >= 300 && code < 400);
+            assert!((300..400).contains(&code));
         }
         for code in client_error_codes {
-            assert!(code >= 400 && code < 500);
+            assert!((400..500).contains(&code));
         }
         for code in server_error_codes {
-            assert!(code >= 500 && code < 600);
+            assert!((500..600).contains(&code));
         }
     }
 }
