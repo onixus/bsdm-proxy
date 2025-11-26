@@ -1,0 +1,48 @@
+[package]
+name = "proxy"
+version = "0.3.0"
+edition = "2021"
+
+[dependencies]
+pingora = { workspace = true }
+pingora-core = { workspace = true }
+pingora-proxy = { workspace = true }
+pingora-cache = { workspace = true }
+tokio = { workspace = true }
+rdkafka = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+rcgen = { workspace = true }
+pem = { workspace = true }
+time = { workspace = true }
+base64 = { workspace = true }
+url = { workspace = true }
+
+# Phase 1
+dashmap = "6.0"
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+tikv-jemallocator = "0.5"
+
+# Phase 3: Advanced optimizations
+tokio-uring = "0.4"          # io_uring support (Linux 5.10+)
+simd-json = "0.13"           # SIMD-accelerated JSON
+mimalloc = "0.1"             # Alternative allocator (faster than jemalloc for some workloads)
+
+[target.'cfg(target_os = "linux")'.dependencies]
+redbpf = "2.3"               # eBPF support
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+opt-level = 3
+strip = true
+panic = "abort"
+
+[profile.release.package."*"]
+opt-level = 3

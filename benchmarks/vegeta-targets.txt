@@ -1,0 +1,13 @@
+GET https://httpbin.org/get
+X-Test: Phase1
+
+GET https://api.github.com/users/octocat
+X-Test: Phase1
+
+POST https://httpbin.org/post
+Content-Type: application/json
+X-Test: Phase1
+{"test": "data"}
+
+GET https://jsonplaceholder.typicode.com/posts/1
+X-Test: Phase2
