@@ -214,9 +214,10 @@ impl ProxyHttp for ProxyService {
         session: &mut Session,
         ctx: &mut Self::CTX,
     ) -> PingoraResult<()> {
-        // Extract client IP from session
+        // Extract client IP from Pingora's SocketAddr enum
         ctx.client_ip = session.client_addr()
-            .map(|addr| addr.ip().to_string())
+            .and_then(|addr| addr.as_inet())  // Get std::net::SocketAddr from enum
+            .map(|std_addr| std_addr.ip().to_string())
             .unwrap_or_else(|| "unknown".to_string());
         Ok(())
     }
