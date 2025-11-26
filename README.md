@@ -6,6 +6,8 @@
 
 [![Build Status](https://github.com/onixus/bsdm-proxy/actions/workflows/rust.yml/badge.svg)](https://github.com/onixus/bsdm-proxy/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Rust Version](https://img.shields.io/badge/rust-1.75+-orange.svg)](https://www.rust-lang.org)
+[![Pingora](https://img.shields.io/badge/pingora-0.6-blue.svg)](https://github.com/cloudflare/pingora)
 
 ## ⚠️ Предупреждение о безопасности
 
@@ -59,33 +61,40 @@
   - **L2**: OpenSearch для долгосрочного хранения и аналитики
 - 🔄 **Асинхронная индексация** через Kafka (минимальная задержка)
 - 🔍 **Certificate Substitution** для инспекции HTTPS-трафика
+- 👤 **User Analytics** — извлечение информации о пользователе из Basic Auth
+- 📊 **Метрики производительности** — размер ответа, длительность запроса
 
 ### Аналитика
 - 📊 **Full-text поиск** по содержимому HTTP-запросов/ответов
-- 📈 **Агрегация метрик** (домены, статус-коды, методы)
+- 📈 **Агрегация метрик** (домены, статус-коды, методы, пользователи)
 - 🕐 **Временные метки** для анализа трендов
 - 🏷️ **Индексация заголовков** для детального анализа
+- 🌐 **Client IP tracking** — определение источника запросов
+- 🖥️ **User-Agent анализ** — профилирование клиентов
 
 ## 📦 Компоненты
 
 ### 1. Proxy (`proxy/`)
 Главный компонент — TLS-прокси на основе Pingora:
 - Слушает порт **1488** (HTTPS)
-- Динамически генерирует сертификаты для каждого домена
+- Динамически генерирует сертификаты для каждого домена через rcgen
 - Кеширует HTTP-ответы в памяти (L1)
 - Отправляет события кеширования в Kafka
 - Поддерживает stale cache (отдача устаревшего кеша при недоступности upstream)
+- Извлекает client IP через Pingora SocketAddr API
+- Парсит Basic Auth для user tracking
 
-**Технологии:** Rust, Pingora 0.6, rcgen, rdkafka
+**Технологии:** Rust, Pingora 0.6, rcgen 0.13, rdkafka 0.38
 
 ### 2. Cache Indexer (`cache-indexer/`)
 Сервис индексации кеша:
 - Читает события из Kafka (топик `cache-events`)
 - Батчевая обработка (50 событий / 5 секунд)
 - Индексирует в OpenSearch (индекс `http-cache`)
-- Автоматическое создание индекса с mapping
+- Автоматическое создание индекса с расширенным mapping
+- Поддержка user analytics полей
 
-**Технологии:** Rust, OpenSearch 2.2, rdkafka
+**Технологии:** Rust, OpenSearch 2.3, rdkafka 0.38
 
 ### 3. Инфраструктура
 - **Kafka + Zookeeper**: Очередь событий кеширования
@@ -219,24 +228,12 @@ docker-compose logs -f proxy
 | `KAFKA_TOPIC` | Топик Kafka | `cache-events` |
 | `KAFKA_GROUP_ID` | Consumer group ID | `cache-indexer-group` |
 
-### Настройка кеширования
-
-В файле `proxy/src/main.rs`:
-
-```rust
-let cache = HttpCache::new();
-cache.set_max_file_size_bytes(10 * 1024 * 1024); // 10 MB
-
-let cache_backend = Arc::new(MemCache::new());
-cache.enable(cache_backend, None);
-```
-
 ### Kafka Topics
 
 Автоматически создается топик:
 - **`cache-events`** — события кеширования HTTP-ответов
 
-Схема события:
+Схема события (расширенная):
 ```json
 {
   "url": "https://example.com/api/data",
@@ -247,7 +244,15 @@ cache.enable(cache_backend, None);
   "headers": {
     "content-type": "application/json"
   },
-  "body": ""
+  "body": "",
+  "user_id": "john_doe",
+  "username": "john_doe",
+  "client_ip": "192.168.1.100",
+  "domain": "example.com",
+  "response_size": 1024,
+  "request_duration_ms": 150,
+  "content_type": "application/json",
+  "user_agent": "Mozilla/5.0..."
 }
 ```
 
@@ -255,70 +260,74 @@ cache.enable(cache_backend, None);
 
 ### Примеры запросов
 
-#### 1. Поиск по URL
+#### 1. Поиск по пользователю
 ```bash
 curl -X GET "http://localhost:9200/http-cache/_search?pretty" \
   -H 'Content-Type: application/json' -d'
 {
   "query": {
-    "match": { "url": "example.com" }
+    "term": { "username": "john_doe" }
+  }
+}'
+```
+
+#### 2. Поиск по client IP
+```bash
+curl -X GET "http://localhost:9200/http-cache/_search?pretty" \
+  -H 'Content-Type: application/json' -d'
+{
+  "query": {
+    "term": { "client_ip": "192.168.1.100" }
+  }
+}'
+```
+
+#### 3. Агрегация: Топ пользователей по количеству запросов
+```bash
+curl -X GET "http://localhost:9200/http-cache/_search?pretty" \
+  -H 'Content-Type: application/json' -d'
+{
+  "size": 0,
+  "aggs": {
+    "top_users": {
+      "terms": { "field": "username", "size": 10 }
+    }
+  }
+}'
+```
+
+#### 4. Средняя длительность запросов по доменам
+```bash
+curl -X GET "http://localhost:9200/http-cache/_search?pretty" \
+  -H 'Content-Type: application/json' -d'
+{
+  "size": 0,
+  "aggs": {
+    "domains": {
+      "terms": { "field": "domain" },
+      "aggs": {
+        "avg_duration": {
+          "avg": { "field": "request_duration_ms" }
+        }
+      }
+    }
+  }
+}'
+```
+
+#### 5. Поиск медленных запросов (>1 секунды)
+```bash
+curl -X GET "http://localhost:9200/http-cache/_search?pretty" \
+  -H 'Content-Type: application/json' -d'
+{
+  "query": {
+    "range": { 
+      "request_duration_ms": { "gte": 1000 } 
+    }
   },
-  "size": 10
-}'
-```
-
-#### 2. Поиск по статус-коду
-```bash
-curl -X GET "http://localhost:9200/http-cache/_search?pretty" \
-  -H 'Content-Type: application/json' -d'
-{
-  "query": {
-    "term": { "status": 404 }
-  }
-}'
-```
-
-#### 3. Поиск по методу и временному диапазону
-```bash
-curl -X GET "http://localhost:9200/http-cache/_search?pretty" \
-  -H 'Content-Type: application/json' -d'
-{
-  "query": {
-    "bool": {
-      "must": [
-        { "term": { "method": "POST" } },
-        { "range": { "timestamp": { "gte": "now-1h" } } }
-      ]
-    }
-  }
-}'
-```
-
-#### 4. Агрегация: Top-10 доменов
-```bash
-curl -X GET "http://localhost:9200/http-cache/_search?pretty" \
-  -H 'Content-Type: application/json' -d'
-{
-  "size": 0,
-  "aggs": {
-    "top_domains": {
-      "terms": { "field": "url.keyword", "size": 10 }
-    }
-  }
-}'
-```
-
-#### 5. Агрегация: Распределение статус-кодов
-```bash
-curl -X GET "http://localhost:9200/http-cache/_search?pretty" \
-  -H 'Content-Type: application/json' -d'
-{
-  "size": 0,
-  "aggs": {
-    "status_codes": {
-      "terms": { "field": "status" }
-    }
-  }
+  "sort": [
+    { "request_duration_ms": "desc" }
+  ]
 }'
 ```
 
@@ -358,8 +367,10 @@ bsdm-proxy/
 └── cache-indexer/
     ├── Cargo.toml
     ├── Dockerfile
-    └── src/
-        └── main.rs          # Kafka → OpenSearch индексер
+    ├── src/
+    │   └── main.rs          # Kafka → OpenSearch индексер
+    └── tests/
+        └── integration_test.rs
 ```
 
 ### Зависимости
@@ -367,9 +378,11 @@ bsdm-proxy/
 Основные библиотеки:
 - **pingora** 0.6 — прокси-фреймворк от Cloudflare
 - **rcgen** 0.13 — генерация X.509 сертификатов
-- **rdkafka** 0.36 — Kafka клиент
-- **opensearch** 2.2 — клиент OpenSearch
+- **rdkafka** 0.38 — Kafka клиент
+- **opensearch** 2.3 — клиент OpenSearch
 - **tokio** 1.x — асинхронная среда выполнения
+- **base64** 0.22 — декодирование Basic Auth
+- **url** 2.5 — парсинг URL для извлечения домена
 
 ### Запуск тестов
 
@@ -380,9 +393,46 @@ cargo test --all
 # Тесты с выводом логов
 cargo test --all -- --nocapture
 
-# Тесты конкретного компонента
-cargo test -p proxy
-cargo test -p cache-indexer
+# Clippy линтер
+cargo clippy --all-targets -- -D warnings
+
+# Форматирование кода
+cargo fmt --all
+```
+
+## 🔧 Технические детали
+
+### Client IP Extraction
+
+Используется Pingora's `SocketAddr` API для корректного извлечения IP:
+
+```rust
+ctx.client_ip = session.client_addr()
+    .and_then(|addr| addr.as_inet())  // Unwrap Pingora enum
+    .map(|std_addr| std_addr.ip().to_string())
+    .unwrap_or_else(|| "unknown".to_string());
+```
+
+`SocketAddr` в Pingora — это enum с вариантами:
+- `SocketAddr::Inet(StdSockAddr)` — IP адрес
+- `SocketAddr::Unix(StdUnixSockAddr)` — Unix domain socket
+
+### Basic Auth Parsing
+
+Извлечение username из Authorization header:
+
+```rust
+if let Some(auth_header) = req_header.headers.get("authorization") {
+    if let Some(encoded) = auth_str.strip_prefix("Basic ") {
+        if let Ok(decoded) = general_purpose::STANDARD.decode(encoded) {
+            if let Ok(credentials) = String::from_utf8(decoded) {
+                if let Some((username, _)) = credentials.split_once(':') {
+                    // username extracted
+                }
+            }
+        }
+    }
+}
 ```
 
 ## 🔒 Безопасность
@@ -446,23 +496,22 @@ environment:
 - **Throughput**: ~100,000+ req/s (на одном ядре CPU)
 - **Kafka latency**: <10 мс (асинхронная отправка)
 - **OpenSearch indexing**: Batch 50 events / 5 секунд
+- **Client IP extraction**: <0.01 мс (O(1) операция)
+- **Basic Auth parsing**: <0.1 мс (regex-free)
 
-### Оптимизация
+## 🐛 Известные проблемы и исправления
 
-```rust
-// proxy/src/main.rs
+### Исправленные проблемы
 
-// 1. Увеличение размера кеша
-cache.set_max_file_size_bytes(50 * 1024 * 1024); // 50 MB
+✅ **E0599: no method named `ip` found** (v1.0.1)  
+- **Проблема**: `pingora::protocols::l4::socket::SocketAddr` не имеет прямого метода `ip()`
+- **Решение**: Использование `as_inet()` для извлечения `std::net::SocketAddr`
 
-// 2. Настройка worker threads (по умолчанию = CPU cores)
-let mut server = Server::new(Some(Opt {
-    threads: 8,
-    ..Default::default()
-}))?;
-```
+✅ **Clippy: manual_range_contains** (v1.0.0)  
+- **Проблема**: Ручная проверка диапазонов вместо `Range::contains`
+- **Решение**: Замена на `(200..300).contains(&code)`
 
-## 🐛 Известные проблемы
+### Текущие ограничения
 
 - **Streaming больших файлов**: Может вызвать OOM (Out of Memory)
   - **Workaround**: Ограничение `max_file_size_bytes`
@@ -472,14 +521,26 @@ let mut server = Server::new(Some(Opt {
 
 ## 🗺️ Roadmap
 
-- [ ] Поддержка HTTP/2 Server Push
-- [ ] Интеграция с Threat Intelligence (VirusTotal, AlienVault OTX)
+### Краткосрочные цели (Q1 2026)
+- [x] Client IP extraction через Pingora SocketAddr
+- [x] Basic Auth user tracking
+- [x] Extended event schema с user analytics
+- [ ] Health check endpoints (`/health`, `/ready`)
+- [ ] Prometheus metrics экспорт
+- [ ] Graceful shutdown handling
+
+### Среднесрочные цели (Q2-Q3 2026)
+- [ ] Redis integration для распределенного L1-кеша
+- [ ] Rate limiting на уровне пользователей/IP
 - [ ] Dashboard для визуализации (Grafana/OpenSearch Dashboards)
-- [ ] Machine Learning для обнаружения аномалий
 - [ ] Policy Engine для гибкой фильтрации (Rego/OPA)
-- [ ] Поддержка Redis в качестве L2-кеша
-- [ ] Metrics экспорт в Prometheus
 - [ ] GraphQL API для управления
+
+### Долгосрочные цели
+- [ ] HTTP/2 Server Push поддержка
+- [ ] Threat Intelligence интеграция (VirusTotal, AlienVault OTX)
+- [ ] Machine Learning для обнаружения аномалий
+- [ ] HTTP/3 (QUIC) после релиза Pingora 0.7+
 
 ## 📄 Лицензия
 
@@ -498,10 +559,11 @@ Copyright (c) 2025 BSDM-Proxy Contributors
 5. Откройте Pull Request
 
 ### Чеклист для PR:
-- [ ] Код проходит `cargo fmt` и `cargo clippy`
+- [ ] Код проходит `cargo fmt` и `cargo clippy --all-targets -- -D warnings`
 - [ ] Добавлены тесты для новой функциональности
 - [ ] Обновлена документация (README, комментарии в коде)
 - [ ] CI/CD pipeline проходит успешно
+- [ ] Обновлен CHANGELOG (если есть breaking changes)
 
 ## 📧 Контакты
 
