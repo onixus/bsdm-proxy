@@ -1,0 +1,479 @@
+name: Sync Wiki
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'README.md'
+      - '.github/workflows/wiki-sync.yml'
+  workflow_dispatch:
+
+jobs:
+  sync-wiki:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Checkout Wiki
+        id: checkout-wiki
+        continue-on-error: true
+        run: |
+          git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.wiki.git wiki
+          if [ ! -d "wiki/.git" ]; then
+            echo "wiki_exists=false" >> $GITHUB_OUTPUT
+          else
+            echo "wiki_exists=true" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Create Installation Guide
+        if: steps.checkout-wiki.outputs.wiki_exists == 'true'
+        run: |
+          cat > wiki/Installation-Guide.md << 'EOF'
+# Руководство по установке BSDM-Proxy
+
+## Системные требования
+
+**Минимальные:**
+- CPU: 2 ядра
+- RAM: 4 GB
+- Диск: 10 GB свободного места
+- OS: Linux (Ubuntu 20.04+, Debian 11+), macOS 11+, Windows 10/11 с WSL2
+
+**Рекомендуемые для production:**
+- CPU: 4+ ядра
+- RAM: 8+ GB
+- Диск: 50+ GB (SSD)
+- Network: 1 Gbps+
+
+## Установка зависимостей
+
+### Docker и Docker Compose
+
+#### Ubuntu/Debian
+```bash
+# Удаление старых версий
+sudo apt-get remove docker docker-engine docker.io containerd runc
+
+# Установка Docker
+curl -fsSL https://get.docker.com -o get-docker.sh
+sudo sh get-docker.sh
+
+# Добавление пользователя в группу docker
+sudo usermod -aG docker $USER
+newgrp docker
+
+# Установка Docker Compose
+sudo apt-get update
+sudo apt-get install docker-compose-plugin
+
+# Проверка версий
+docker --version
+docker compose version
+```
+
+#### macOS
+```bash
+# Через Homebrew
+brew install --cask docker
+```
+
+#### Windows (WSL2)
+1. Установите [Docker Desktop для Windows](https://www.docker.com/products/docker-desktop)
+2. Включите интеграцию с WSL2 в настройках Docker Desktop
+3. В WSL2 терминале проверьте: `docker --version`
+
+### Rust (опционально, для локальной разработки)
+
+```bash
+# Установка rustup
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Перезагрузка shell
+source $HOME/.cargo/env
+
+# Проверка версии
+rustc --version
+cargo --version
+
+# Установка необходимых компонентов
+rustup component add clippy rustfmt
+```
+
+### OpenSSL
+
+#### Ubuntu/Debian
+```bash
+sudo apt-get update
+sudo apt-get install openssl libssl-dev pkg-config
+```
+
+#### macOS
+```bash
+brew install openssl@3
+```
+
+#### Windows (WSL2)
+```bash
+sudo apt-get install openssl libssl-dev
+```
+
+## 🚀 Быстрый старт
+
+### Шаг 1: Клонирование репозитория
+
+```bash
+git clone https://github.com/onixus/bsdm-proxy.git
+cd bsdm-proxy
+```
+
+### Шаг 2: Генерация сертификатов
+
+```bash
+# Создание директории для сертификатов
+mkdir -p certs
+cd certs
+
+# 1. Генерация корневого CA (Certificate Authority)
+openssl genrsa -out ca.key 4096
+openssl req -new -x509 -days 3650 -key ca.key -out ca.crt \
+  -subj "/C=RU/ST=Moscow/L=Moscow/O=BSDM/CN=BSDM Root CA"
+
+# 2. Генерация серверного сертификата для прокси
+openssl genrsa -out server.key 2048
+openssl req -new -key server.key -out server.csr \
+  -subj "/C=RU/ST=Moscow/L=Moscow/O=BSDM/CN=*.bsdm.local"
+openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key \
+  -CAcreateserial -out server.crt -days 365 -sha256
+
+cd ..
+```
+
+### Шаг 3: Запуск инфраструктуры
+
+```bash
+# Запуск всех сервисов
+docker-compose up -d
+
+# Проверка статуса
+docker-compose ps
+
+# Просмотр логов
+docker-compose logs -f proxy
+```
+
+Запустятся следующие сервисы:
+- **Zookeeper** — координация Kafka
+- **Kafka** (порт 9092) — очередь событий
+- **OpenSearch** (порт 9200) — поисковый движок
+- **BSDM-Proxy** (порт 1488) — TLS-прокси
+- **Cache-Indexer** — индексатор событий
+
+### Шаг 4: Установка CA-сертификата
+
+Для работы MITM-прокси необходимо установить корневой сертификат `certs/ca.crt` в доверенные на клиентских устройствах.
+
+#### Linux (Ubuntu/Debian)
+```bash
+sudo cp certs/ca.crt /usr/local/share/ca-certificates/bsdm-ca.crt
+sudo update-ca-certificates
+```
+
+#### macOS
+```bash
+sudo security add-trusted-cert -d -r trustRoot \
+  -k /Library/Keychains/System.keychain certs/ca.crt
+```
+
+#### Windows
+1. Откройте `certmgr.msc`
+2. Перейдите в **Доверенные корневые центры сертификации → Сертификаты**
+3. Импортируйте `certs/ca.crt`
+
+#### Firefox (отдельное хранилище)
+1. Настройки → Приватность и защита → Сертификаты → Просмотреть сертификаты
+2. Центры сертификации → Импортировать → выбрать `certs/ca.crt`
+3. Отметить «Доверять при идентификации веб-сайтов»
+
+### Шаг 5: Проверка работы
+
+```bash
+# 1. Тестовый запрос через прокси
+curl -x https://localhost:1488 https://httpbin.org/get
+
+# 2. Проверка индекса в OpenSearch
+curl "http://localhost:9200/http-cache/_search?pretty&size=5"
+
+# 3. Статистика индекса
+curl "http://localhost:9200/http-cache/_count?pretty"
+```
+
+## ❌ Устранение типичных проблем
+
+### Docker контейнеры не запускаются
+
+```bash
+# Проверка логов конкретного сервиса
+docker-compose logs kafka
+docker-compose logs opensearch
+
+# Очистка и перезапуск
+docker-compose down -v
+docker-compose up -d
+```
+
+### OpenSearch падает с OOM (Out of Memory)
+
+Увеличьте лимит памяти в `docker-compose.yml`:
+```yaml
+opensearch:
+  environment:
+    - "OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g"  # Было 512m
+```
+
+### Kafka не может подключиться к Zookeeper
+
+```bash
+# Проверка, что Zookeeper запущен
+docker-compose ps zookeeper
+
+# Рестарт Kafka
+docker-compose restart kafka
+
+# Проверка подключения
+docker-compose exec kafka kafka-broker-api-versions --bootstrap-server kafka:9092
+```
+
+### Proxy не видит Kafka
+
+```bash
+# Проверка сетевой связности
+docker-compose exec proxy ping -c 3 kafka
+
+# Проверка переменных окружения
+docker-compose exec proxy env | grep KAFKA
+```
+
+### Сертификаты не работают
+
+```bash
+# Проверка валидности сертификата
+openssl x509 -in certs/ca.crt -text -noout
+
+# Пересоздание сертификатов
+rm -rf certs/*
+# Повторите Шаг 2 из инструкции
+```
+
+### curl выдает "certificate verify failed"
+
+```bash
+# Проверка, установлен ли CA-сертификат
+# Linux
+ls /etc/ssl/certs | grep bsdm
+
+# macOS
+security find-certificate -c "BSDM Root CA" -a
+
+# Альтернатива для тестирования (небезопасно!)
+curl -k -x https://localhost:1488 https://example.com
+```
+
+### Высокая задержка (latency)
+
+1. Проверьте загрузку CPU: `docker stats`
+2. Увеличьте размер батча Kafka в cache-indexer
+3. Настройте L1-cache в Pingora для более агрессивного кеширования
+
+### Ошибка "cannot build" при запуске Docker
+
+```bash
+# Убедитесь, что находитесь в корне проекта
+pwd  # Должно быть .../bsdm-proxy
+
+# Пересоберите образы
+docker-compose build --no-cache
+```
+
+## 🧪 Smoke-test
+
+Автоматическая проверка всех компонентов:
+
+```bash
+#!/bin/bash
+# save as test-bsdm.sh
+
+echo "🧪 BSDM-Proxy Smoke Test"
+echo "========================"
+
+# 1. Проверка Docker сервисов
+echo -n "✓ Docker services... "
+if docker-compose ps | grep -q "Up"; then
+    echo "OK"
+else
+    echo "FAIL"
+    exit 1
+fi
+
+# 2. Проверка OpenSearch
+echo -n "✓ OpenSearch... "
+if curl -s http://localhost:9200 | grep -q "opensearch"; then
+    echo "OK"
+else
+    echo "FAIL"
+    exit 1
+fi
+
+# 3. Проверка Kafka
+echo -n "✓ Kafka... "
+if docker-compose exec -T kafka kafka-topics --list --bootstrap-server kafka:9092 &>/dev/null; then
+    echo "OK"
+else
+    echo "FAIL"
+    exit 1
+fi
+
+# 4. Тестовый запрос через прокси
+echo -n "✓ Proxy... "
+if curl -s -x https://localhost:1488 https://httpbin.org/get | grep -q "origin"; then
+    echo "OK"
+else
+    echo "FAIL (проверьте CA-сертификат)"
+    exit 1
+fi
+
+# 5. Проверка индексации в OpenSearch (подождать 10 сек)
+echo -n "✓ Indexing... "
+sleep 10
+COUNT=$(curl -s "http://localhost:9200/http-cache/_count" | jq -r '.count')
+if [ "$COUNT" -gt 0 ]; then
+    echo "OK ($COUNT events)"
+else
+    echo "WARN (no events yet, check cache-indexer logs)"
+fi
+
+echo ""
+echo "✅ All tests passed!"
+```
+
+Запуск:
+```bash
+chmod +x test-bsdm.sh
+./test-bsdm.sh
+```
+
+## 📖 Примеры использования
+
+### Базовое использование с curl
+
+```bash
+# GET запрос
+curl -x https://localhost:1488 https://api.github.com/users/octocat
+
+# POST запрос
+curl -x https://localhost:1488 -X POST https://httpbin.org/post \
+  -H "Content-Type: application/json" \
+  -d '{"key":"value"}'
+
+# С Basic Authentication
+curl -x https://localhost:1488 -u user:password \
+  https://example.com/api/data
+```
+
+### Python
+
+```python
+import requests
+
+proxies = {
+    'http': 'https://localhost:1488',
+    'https': 'https://localhost:1488',
+}
+
+response = requests.get(
+    'https://api.github.com/users/octocat',
+    proxies=proxies,
+    verify='certs/ca.crt'
+)
+
+print(response.json())
+```
+
+### Node.js
+
+```javascript
+const https = require('https');
+const fs = require('fs');
+
+const options = {
+  hostname: 'api.github.com',
+  path: '/users/octocat',
+  method: 'GET',
+  agent: new https.Agent({
+    host: 'localhost',
+    port: 1488,
+    ca: fs.readFileSync('certs/ca.crt')
+  })
+};
+
+https.request(options, (res) => {
+  console.log('Status:', res.statusCode);
+  res.on('data', (d) => process.stdout.write(d));
+}).end();
+```
+
+### Системные переменные (Linux)
+
+```bash
+# Добавить в ~/.bashrc или ~/.zshrc
+export HTTP_PROXY=https://localhost:1488
+export HTTPS_PROXY=https://localhost:1488
+export NO_PROXY=localhost,127.0.0.1
+
+# Для приложений, требующих CA bundle
+export REQUESTS_CA_BUNDLE=/usr/local/share/ca-certificates/bsdm-ca.crt
+export SSL_CERT_FILE=/usr/local/share/ca-certificates/bsdm-ca.crt
+```
+
+---
+
+[← Вернуться на главную](Home) | [Архитектура проекта](Architecture) | [API документация](API)
+EOF
+      
+      - name: Commit and push to Wiki
+        if: steps.checkout-wiki.outputs.wiki_exists == 'true'
+        working-directory: wiki
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git add Installation-Guide.md
+          
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "docs: автоматическая синхронизация инструкции по установке
+            
+Источник: main branch README.md
+Сгенерировано: GitHub Actions"
+            git push origin master
+            echo "✅ Wiki успешно обновлена: https://github.com/${{ github.repository }}/wiki/Installation-Guide"
+          fi
+      
+      - name: Wiki not initialized
+        if: steps.checkout-wiki.outputs.wiki_exists == 'false'
+        run: |
+          echo "⚠️ Wiki не инициализирована!"
+          echo "Создайте первую страницу вручную:"
+          echo "1. Откройте: https://github.com/${{ github.repository }}/wiki"
+          echo "2. Нажмите 'Create the first page'"
+          echo "3. Сохраните любую страницу (можно пустую)"
+          echo "4. Повторно запустите этот workflow"
+          exit 1
