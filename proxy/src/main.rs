@@ -215,12 +215,9 @@ impl ProxyHttp for ProxyService {
         ctx: &mut Self::CTX,
     ) -> PingoraResult<()> {
         // Extract client IP from session
-        if let Some(addr) = session.client_addr() {
-            ctx.client_ip = session.client_addr()
-    .map(|sa| sa.ip().to_string())
-    .unwrap_or_else(|| "unknown".to_string());
-
-        }
+        ctx.client_ip = session.client_addr()
+            .map(|addr| addr.ip().to_string())
+            .unwrap_or_else(|| "unknown".to_string());
         Ok(())
     }
     
