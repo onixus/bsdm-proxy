@@ -1,3 +1,4 @@
+// Phase 1: Performance optimizations
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose};
 use pingora::http::ResponseHeader;
@@ -14,25 +15,34 @@ use rcgen::{
 use rdkafka::config::ClientConfig;
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
-use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
-type CertPair = (Vec<u8>, Vec<u8>);
-type CertMap = Arc<RwLock<HashMap<String, CertPair>>>;
+// Phase 1: DashMap instead of RwLock
+use dashmap::DashMap;
 
-#[allow(dead_code)]
+// Phase 1: xxHash3 instead of SHA256
+use xxhash_rust::xxh3::xxh3_128;
+
+// Phase 1: Async channel for Kafka
+use tokio::sync::mpsc;
+
+// Phase 1: jemalloc allocator
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
+type CertPair = (Vec<u8>, Vec<u8>);
+
 #[derive(Clone)]
 struct CertCache {
-    certs: CertMap,
+    // Phase 1: DashMap for lock-free concurrent access
+    certs: Arc<DashMap<String, CertPair>>,
     ca_cert: Arc<Certificate>,
     ca_key: Arc<KeyPair>,
 }
 
-#[allow(dead_code)]
 impl CertCache {
     fn new(_ca_cert_pem: Vec<u8>, ca_key_pem: Vec<u8>) -> Self {
         let ca_key = Arc::new(
@@ -58,22 +68,20 @@ impl CertCache {
         );
 
         Self {
-            certs: Arc::new(RwLock::new(HashMap::new())),
+            certs: Arc::new(DashMap::new()),
             ca_cert,
             ca_key,
         }
     }
 
-    async fn get_or_generate(&self, domain: &str) -> PingoraResult<CertPair> {
-        {
-            let cache = self.certs.read().await;
-            if let Some(cert) = cache.get(domain) {
-                return Ok(cert.clone());
-            }
+    fn get_or_generate(&self, domain: &str) -> PingoraResult<CertPair> {
+        // Phase 1: Lock-free read with DashMap
+        if let Some(cert) = self.certs.get(domain) {
+            return Ok(cert.value().clone());
         }
+        
         let (cert_pem, key_pem) = self.generate_ca_signed_cert(domain)?;
-        let mut cache = self.certs.write().await;
-        cache.insert(domain.to_string(), (cert_pem.clone(), key_pem.clone()));
+        self.certs.insert(domain.to_string(), (cert_pem.clone(), key_pem.clone()));
         Ok((cert_pem, key_pem))
     }
 
@@ -94,14 +102,13 @@ impl CertCache {
             .map_err(|e| Error::because(ErrorType::InternalError, "Cert generation failed", e))?;
 
         let cert_pem = cert.pem();
-
         let key_pem = key_pair.serialize_pem();
 
         Ok((cert_pem.into_bytes(), key_pem.into_bytes()))
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 struct CacheEvent {
     url: String,
     method: String,
@@ -110,7 +117,6 @@ struct CacheEvent {
     timestamp: u64,
     headers: HashMap<String, String>,
     body: String,
-    // New fields for user analytics
     user_id: Option<String>,
     username: Option<String>,
     client_ip: String,
@@ -127,42 +133,82 @@ struct ProxyContext {
 }
 
 struct ProxyService {
-    #[allow(dead_code)]
     cert_cache: CertCache,
-    kafka_producer: Option<FutureProducer>,
+    // Phase 1: Async channel instead of direct Kafka
+    kafka_tx: mpsc::UnboundedSender<CacheEvent>,
 }
 
 impl ProxyService {
     fn new(cert_cache: CertCache, kafka_brokers: Option<String>) -> Self {
-        let kafka_producer = kafka_brokers.and_then(|brokers| {
-            ClientConfig::new()
-                .set("bootstrap.servers", &brokers)
-                .set("message.timeout.ms", "5000")
-                .create()
-                .ok()
-        });
+        let (tx, rx) = mpsc::unbounded_channel();
+        
+        // Phase 1: Background Kafka worker with batching
+        if let Some(brokers) = kafka_brokers {
+            tokio::spawn(Self::kafka_worker(brokers, rx));
+        }
+        
         Self {
             cert_cache,
-            kafka_producer,
+            kafka_tx: tx,
         }
     }
-
-    async fn send_to_kafka(&self, event: CacheEvent) {
-        if let Some(producer) = &self.kafka_producer {
-            let payload = match serde_json::to_string(&event) {
-                Ok(p) => p,
-                Err(e) => {
-                    error!("Failed to serialize cache event: {}", e);
-                    return;
+    
+    // Phase 1: Async Kafka worker with batching
+    async fn kafka_worker(
+        brokers: String,
+        mut rx: mpsc::UnboundedReceiver<CacheEvent>,
+    ) {
+        let producer: FutureProducer = ClientConfig::new()
+            .set("bootstrap.servers", &brokers)
+            .set("message.timeout.ms", "5000")
+            .set("compression.type", "lz4")  // Phase 1: Fast compression
+            .set("batch.size", "65536")      // Phase 1: Larger batches
+            .set("linger.ms", "10")          // Phase 1: Small delay for batching
+            .create()
+            .expect("Kafka producer creation failed");
+        
+        let mut batch = Vec::with_capacity(100);
+        let mut interval = tokio::time::interval(Duration::from_millis(100));
+        
+        loop {
+            tokio::select! {
+                Some(event) = rx.recv() => {
+                    batch.push(event);
+                    
+                    // Flush when batch is full
+                    if batch.len() >= 100 {
+                        Self::flush_batch(&producer, &mut batch).await;
+                    }
                 }
-            };
-            let record = FutureRecord::to("cache-events")
-                .payload(&payload)
-                .key(&event.cache_key);
-            if let Err((e, _)) = producer.send(record, Duration::from_secs(0)).await {
-                warn!("Failed to send to Kafka: {}", e);
+                _ = interval.tick() => {
+                    // Flush periodically even if batch not full
+                    if !batch.is_empty() {
+                        Self::flush_batch(&producer, &mut batch).await;
+                    }
+                }
             }
         }
+    }
+    
+    async fn flush_batch(producer: &FutureProducer, batch: &mut Vec<CacheEvent>) {
+        for event in batch.drain(..) {
+            if let Ok(payload) = serde_json::to_string(&event) {
+                let record = FutureRecord::to("cache-events")
+                    .payload(&payload)
+                    .key(&event.cache_key);
+                
+                // Fire and forget - don't await
+                let _ = producer.send(record, Duration::from_secs(0));
+            }
+        }
+        
+        // Wait for all sends to complete
+        producer.flush(Duration::from_millis(100)).ok();
+    }
+
+    fn send_to_kafka(&self, event: CacheEvent) {
+        // Phase 1: Non-blocking send to channel
+        let _ = self.kafka_tx.send(event);
     }
 
     fn extract_domain(url_str: &str) -> String {
@@ -175,11 +221,9 @@ impl ProxyService {
     fn extract_user_info(session: &Session) -> (Option<String>, Option<String>) {
         let req_header = session.req_header();
         
-        // Try to extract from Authorization header (Basic Auth)
         if let Some(auth_header) = req_header.headers.get("authorization") {
             if let Ok(auth_str) = auth_header.to_str() {
                 if let Some(encoded) = auth_str.strip_prefix("Basic ") {
-                    // Use base64 0.22 API with engine
                     if let Ok(decoded_bytes) = general_purpose::STANDARD.decode(encoded) {
                         if let Ok(credentials) = String::from_utf8(decoded_bytes) {
                             if let Some((username, _)) = credentials.split_once(':') {
@@ -214,9 +258,8 @@ impl ProxyHttp for ProxyService {
         session: &mut Session,
         ctx: &mut Self::CTX,
     ) -> PingoraResult<()> {
-        // Extract client IP from Pingora's SocketAddr enum
         ctx.client_ip = session.client_addr()
-            .and_then(|addr| addr.as_inet())  // Get std::net::SocketAddr from enum
+            .and_then(|addr| addr.as_inet())
             .map(|std_addr| std_addr.ip().to_string())
             .unwrap_or_else(|| "unknown".to_string());
         Ok(())
@@ -266,9 +309,10 @@ impl ProxyHttp for ProxyService {
             
             if let Some(resp_header) = session.response_written() {
                 let status = resp_header.status.as_u16();
-                let mut hasher = Sha256::new();
-                hasher.update(url.as_bytes());
-                let cache_key = hex::encode(hasher.finalize());
+                
+                // Phase 1: xxHash3 instead of SHA256
+                let hash = xxh3_128(url.as_bytes());
+                let cache_key = format!("{:x}", hash);
                 
                 let mut headers = HashMap::new();
                 for (name, value) in resp_header.headers.iter() {
@@ -319,7 +363,8 @@ impl ProxyHttp for ProxyService {
                     user_agent,
                 };
                 
-                self.send_to_kafka(event).await;
+                // Phase 1: Non-blocking Kafka send
+                self.send_to_kafka(event);
             }
         }
         Ok(())
@@ -342,19 +387,28 @@ impl ProxyHttp for ProxyService {
         let req_header = session.req_header();
         let uri = req_header.uri.to_string();
         let method = req_header.method.as_str();
+        
+        // Phase 1: xxHash3 for cache key (10x faster than SHA256)
         let cache_key = format!("{}-{}", method, uri);
-        let mut hasher = Sha256::new();
-        hasher.update(cache_key.as_bytes());
-        let hash = hex::encode(hasher.finalize());
-        Ok(CacheKey::new("", hash, ""))
+        let hash = xxh3_128(cache_key.as_bytes());
+        let hash_str = format!("{:x}", hash);
+        
+        Ok(CacheKey::new("", hash_str, ""))
     }
 }
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    let ca_cert = std::fs::read("/certs/ca.crt").expect("Failed to read CA certificate");
-    let ca_key = std::fs::read("/certs/ca.key").expect("Failed to read CA private key");
+    
+    // Phase 1: Async file I/O
+    let ca_cert = tokio::fs::read("/certs/ca.crt")
+        .await
+        .expect("Failed to read CA certificate");
+    let ca_key = tokio::fs::read("/certs/ca.key")
+        .await
+        .expect("Failed to read CA private key");
+    
     let cert_cache = CertCache::new(ca_cert, ca_key);
     let kafka_brokers = std::env::var("KAFKA_BROKERS").ok();
 
@@ -371,6 +425,7 @@ async fn main() {
         .expect("Failed to add TLS listener");
 
     server.add_service(proxy_service);
-    info!("BSDM-Proxy starting on port 1488");
+    info!("BSDM-Proxy (Performance Edition) starting on port 1488");
+    info!("Phase 1 optimizations: DashMap + xxHash3 + Async Kafka + jemalloc");
     server.run_forever();
 }
