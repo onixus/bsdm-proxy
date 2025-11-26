@@ -16,7 +16,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
@@ -109,6 +109,20 @@ struct CacheEvent {
     timestamp: u64,
     headers: HashMap<String, String>,
     body: String,
+    // New fields for user analytics
+    user_id: Option<String>,
+    username: Option<String>,
+    client_ip: String,
+    domain: String,
+    response_size: u64,
+    request_duration_ms: u64,
+    content_type: Option<String>,
+    user_agent: Option<String>,
+}
+
+struct ProxyContext {
+    request_start: Instant,
+    client_ip: String,
 }
 
 struct ProxyService {
@@ -149,12 +163,62 @@ impl ProxyService {
             }
         }
     }
+
+    fn extract_domain(url: &str) -> String {
+        url::Url::parse(url)
+            .ok()
+            .and_then(|u| u.host_str().map(|h| h.to_string()))
+            .unwrap_or_else(|| "unknown".to_string())
+    }
+
+    fn extract_user_info(session: &Session) -> (Option<String>, Option<String>) {
+        let req_header = session.req_header();
+        
+        // Try to extract from Authorization header (Basic Auth)
+        if let Some(auth_header) = req_header.headers.get("authorization") {
+            if let Ok(auth_str) = auth_header.to_str() {
+                if auth_str.starts_with("Basic ") {
+                    if let Ok(decoded) = base64::decode(&auth_str[6..]) {
+                        if let Ok(credentials) = String::from_utf8(decoded) {
+                            if let Some((username, _)) = credentials.split_once(':') {
+                                return (
+                                    Some(username.to_string()),
+                                    Some(username.to_string()),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        (None, None)
+    }
 }
 
 #[async_trait]
 impl ProxyHttp for ProxyService {
-    type CTX = ();
-    fn new_ctx(&self) -> Self::CTX {}
+    type CTX = ProxyContext;
+    
+    fn new_ctx(&self) -> Self::CTX {
+        ProxyContext {
+            request_start: Instant::now(),
+            client_ip: "unknown".to_string(),
+        }
+    }
+    
+    async fn early_request_filter(
+        &self,
+        session: &mut Session,
+        ctx: &mut Self::CTX,
+    ) -> PingoraResult<()> {
+        // Extract client IP from session
+        if let Some(addr) = session.client_addr() {
+            ctx.client_ip = addr.ip().to_string();
+        }
+        Ok(())
+    }
+    
     async fn upstream_peer(
         &self,
         session: &mut Session,
@@ -170,6 +234,7 @@ impl ProxyHttp for ProxyService {
         let peer = Box::new(HttpPeer::new((host, port), true, host.to_string()));
         Ok(peer)
     }
+    
     async fn upstream_request_filter(
         &self,
         _session: &mut Session,
@@ -181,28 +246,55 @@ impl ProxyHttp for ProxyService {
             .unwrap();
         Ok(())
     }
+    
     async fn response_filter(
         &self,
         session: &mut Session,
-        _upstream_response: &mut ResponseHeader,
-        _ctx: &mut Self::CTX,
+        upstream_response: &mut ResponseHeader,
+        ctx: &mut Self::CTX,
     ) -> PingoraResult<()> {
         let cache_phase = session.cache.phase();
         if matches!(cache_phase, CachePhase::Hit | CachePhase::Stale) {
             let req_header = session.req_header();
             let url = req_header.uri.to_string();
             let method = req_header.method.to_string();
+            let domain = Self::extract_domain(&url);
+            let (user_id, username) = Self::extract_user_info(session);
+            
             if let Some(resp_header) = session.response_written() {
                 let status = resp_header.status.as_u16();
                 let mut hasher = Sha256::new();
                 hasher.update(url.as_bytes());
                 let cache_key = hex::encode(hasher.finalize());
+                
                 let mut headers = HashMap::new();
                 for (name, value) in resp_header.headers.iter() {
                     if let Ok(v) = value.to_str() {
                         headers.insert(name.to_string(), v.to_string());
                     }
                 }
+                
+                let content_type = resp_header
+                    .headers
+                    .get("content-type")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string());
+                
+                let user_agent = req_header
+                    .headers
+                    .get("user-agent")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string());
+                
+                let response_size = resp_header
+                    .headers
+                    .get("content-length")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(0);
+                
+                let request_duration_ms = ctx.request_start.elapsed().as_millis() as u64;
+                
                 let event = CacheEvent {
                     url,
                     method,
@@ -214,12 +306,22 @@ impl ProxyHttp for ProxyService {
                         .as_secs(),
                     headers,
                     body: String::new(),
+                    user_id,
+                    username,
+                    client_ip: ctx.client_ip.clone(),
+                    domain,
+                    response_size,
+                    request_duration_ms,
+                    content_type,
+                    user_agent,
                 };
+                
                 self.send_to_kafka(event).await;
             }
         }
         Ok(())
     }
+    
     fn should_serve_stale(
         &self,
         _session: &mut Session,
@@ -228,6 +330,7 @@ impl ProxyHttp for ProxyService {
     ) -> bool {
         true
     }
+    
     fn cache_key_callback(
         &self,
         session: &Session,

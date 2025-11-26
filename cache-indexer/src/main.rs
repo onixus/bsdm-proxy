@@ -19,6 +19,15 @@ struct CacheEvent {
     timestamp: u64,
     headers: HashMap<String, String>,
     body: String,
+    // New fields for user analytics
+    user_id: Option<String>,
+    username: Option<String>,
+    client_ip: String,
+    domain: String,
+    response_size: u64,
+    request_duration_ms: u64,
+    content_type: Option<String>,
+    user_agent: Option<String>,
 }
 
 struct Indexer {
@@ -78,7 +87,24 @@ impl Indexer {
                     "cache_key": { "type": "keyword" },
                     "timestamp": { "type": "date", "format": "epoch_second" },
                     "headers": { "type": "object" },
-                    "body": { "type": "text" }
+                    "body": { "type": "text" },
+                    // New fields for user analytics
+                    "user_id": { "type": "keyword" },
+                    "username": { "type": "keyword" },
+                    "client_ip": { "type": "ip" },
+                    "domain": { "type": "keyword" },
+                    "response_size": { "type": "long" },
+                    "request_duration_ms": { "type": "long" },
+                    "content_type": { "type": "keyword" },
+                    "user_agent": {
+                        "type": "text",
+                        "fields": {
+                            "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                            }
+                        }
+                    }
                 }
             },
             "settings": {
