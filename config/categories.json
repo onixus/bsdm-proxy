@@ -1,0 +1,75 @@
+{
+  "default_action": "Allow",
+  "cache_ttl": 86400,
+  "rules": [
+    {
+      "domain": "facebook.com",
+      "category": "Social",
+      "action": "Block"
+    },
+    {
+      "domain": "*.tiktok.com",
+      "category": "Social",
+      "action": "Block"
+    },
+    {
+      "domain": "twitter.com",
+      "category": "Social",
+      "action": "Warn"
+    },
+    {
+      "domain": "*.instagram.com",
+      "category": "Social",
+      "action": "Block"
+    },
+    {
+      "domain": "*.pornhub.com",
+      "category": "Adult",
+      "action": "Block"
+    },
+    {
+      "domain": "*.xvideos.com",
+      "category": "Adult",
+      "action": "Block"
+    },
+    {
+      "domain": "*.1xbet.com",
+      "category": "Gambling",
+      "action": "Block"
+    },
+    {
+      "domain": "*.betway.com",
+      "category": "Gambling",
+      "action": "Block"
+    },
+    {
+      "domain": "github.com",
+      "category": "Productivity",
+      "action": "Allow"
+    },
+    {
+      "domain": "*.stackoverflow.com",
+      "category": "Education",
+      "action": "Allow"
+    },
+    {
+      "domain": "*.wikipedia.org",
+      "category": "Education",
+      "action": "Allow"
+    },
+    {
+      "domain": "youtube.com",
+      "category": "Entertainment",
+      "action": "Warn"
+    },
+    {
+      "domain": "amazon.com",
+      "category": "Shopping",
+      "action": "Log"
+    }
+  ],
+  "redis_url": "redis://redis:6379",
+  "external_apis": {
+    "urlhaus": true
+  }
+}
