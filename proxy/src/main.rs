@@ -164,8 +164,8 @@ impl ProxyService {
         }
     }
 
-    fn extract_domain(url: &str) -> String {
-        url::Url::parse(url)
+    fn extract_domain(url_str: &str) -> String {
+        url::Url::parse(url_str)
             .ok()
             .and_then(|u| u.host_str().map(|h| h.to_string()))
             .unwrap_or_else(|| "unknown".to_string())
@@ -177,9 +177,9 @@ impl ProxyService {
         // Try to extract from Authorization header (Basic Auth)
         if let Some(auth_header) = req_header.headers.get("authorization") {
             if let Ok(auth_str) = auth_header.to_str() {
-                if auth_str.starts_with("Basic ") {
-                    if let Ok(decoded) = base64::decode(&auth_str[6..]) {
-                        if let Ok(credentials) = String::from_utf8(decoded) {
+                if let Some(encoded) = auth_str.strip_prefix("Basic ") {
+                    if let Ok(decoded_bytes) = base64::decode(encoded) {
+                        if let Ok(credentials) = String::from_utf8(decoded_bytes) {
                             if let Some((username, _)) = credentials.split_once(':') {
                                 return (
                                     Some(username.to_string()),
@@ -250,7 +250,7 @@ impl ProxyHttp for ProxyService {
     async fn response_filter(
         &self,
         session: &mut Session,
-        upstream_response: &mut ResponseHeader,
+        _upstream_response: &mut ResponseHeader,
         ctx: &mut Self::CTX,
     ) -> PingoraResult<()> {
         let cache_phase = session.cache.phase();
