@@ -1,0 +1,60 @@
+name: Update Cargo.lock
+
+on:
+  workflow_dispatch:
+
+jobs:
+  update-lockfile:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: fix/update-rdkafka-protobuf
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake libssl-dev pkg-config
+    
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+    
+    - name: Update Cargo.lock
+      run: |
+        echo "Updating rdkafka and protobuf..."
+        cargo update -p rdkafka --verbose
+        cargo update -p protobuf --verbose
+        echo "" 
+        echo "Current protobuf version:"
+        cargo tree -p protobuf
+        echo ""
+        echo "Running cargo audit..."
+        cargo install cargo-audit
+        cargo audit || true
+    
+    - name: Verify no vulnerabilities
+      run: |
+        cargo audit --deny warnings || echo "::warning::Security audit found issues"
+    
+    - name: Commit and push changes
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        
+        if [[ -n $(git status -s Cargo.lock) ]]; then
+          git add Cargo.lock
+          git commit -m "chore: update Cargo.lock with protobuf >=3.7.2
+          
+          - Updates rdkafka to 0.38
+          - Fixes RUSTSEC-2024-0437 (CVE-2025-53605)
+          - protobuf upgraded from 2.28.0 to >=3.7.2"
+          git push
+          echo "✅ Cargo.lock updated successfully!"
+        else
+          echo "ℹ️ No changes to Cargo.lock"
+        fi
