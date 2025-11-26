@@ -168,7 +168,7 @@ impl ProxyService {
     fn extract_domain(url_str: &str) -> String {
         url::Url::parse(url_str)
             .ok()
-            .and_then(|u| u.host_str().map(|h| h.to_string()))
+            .and_then(|u| u.host().map(|h| h.to_string()))
             .unwrap_or_else(|| "unknown".to_string())
     }
 
