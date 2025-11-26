@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use base64::{Engine as _, engine::general_purpose};
 use pingora::http::ResponseHeader;
 use pingora::prelude::*;
 use pingora_cache::{CacheKey, CachePhase};
@@ -178,7 +179,8 @@ impl ProxyService {
         if let Some(auth_header) = req_header.headers.get("authorization") {
             if let Ok(auth_str) = auth_header.to_str() {
                 if let Some(encoded) = auth_str.strip_prefix("Basic ") {
-                    if let Ok(decoded_bytes) = base64::decode(encoded) {
+                    // Use base64 0.22 API with engine
+                    if let Ok(decoded_bytes) = general_purpose::STANDARD.decode(encoded) {
                         if let Ok(credentials) = String::from_utf8(decoded_bytes) {
                             if let Some((username, _)) = credentials.split_once(':') {
                                 return (
