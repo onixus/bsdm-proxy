@@ -45,13 +45,17 @@ services:
       - "1488:1488"
     environment:
       - KAFKA_BROKERS=kafka:9092
-      - RUST_LOG=info
+      - RUST_LOG=debug
+      - RUST_BACKTRACE=1
     depends_on:
       - kafka
     networks:
       - bsdm-net
     volumes:
       - ./certs:/certs:ro
+    tty: true
+    stdin_open: true
+    restart: unless-stopped
 
   cache-indexer:
     build:
@@ -67,6 +71,7 @@ services:
       - opensearch
     networks:
       - bsdm-net
+    restart: unless-stopped
 
 networks:
   bsdm-net:
