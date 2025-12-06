@@ -1,3 +1,7 @@
+# Use legacy builder instead of Bake
+x-bake:
+  no-cache: false
+
 services:
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
