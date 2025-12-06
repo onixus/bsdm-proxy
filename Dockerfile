@@ -15,26 +15,21 @@ RUN apk add --no-cache \
     openssl-libs-static \
     pkgconfig \
     librdkafka-dev \
-    librdkafka-static \
     cyrus-sasl-dev \
-    cyrus-sasl-static \
     lz4-dev \
-    lz4-static \
     zlib-dev \
     zlib-static \
-    zstd-dev \
-    zstd-static
+    zstd-dev
 
 # Копируем workspace целиком
 COPY Cargo.toml Cargo.lock ./
 COPY proxy ./proxy
 COPY cache-indexer ./cache-indexer
 
-# Собираем со статической линковкой, но без static-pie
+# Собираем со статической линковкой OpenSSL
 ENV OPENSSL_STATIC=1 \
     OPENSSL_LIB_DIR=/usr/lib \
-    OPENSSL_INCLUDE_DIR=/usr/include \
-    RUSTFLAGS="-C target-feature=+crt-static -C link-arg=-static"
+    OPENSSL_INCLUDE_DIR=/usr/include
 
 RUN cargo build --release --target x86_64-unknown-linux-musl
 
@@ -42,7 +37,14 @@ RUN cargo build --release --target x86_64-unknown-linux-musl
 # Proxy runtime
 # ============================================================
 FROM alpine:3.21 AS proxy
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache \
+    ca-certificates \
+    libgcc \
+    librdkafka \
+    cyrus-sasl \
+    lz4-libs \
+    zlib \
+    zstd-libs
 
 # Копируем скомпилированный бинарник
 COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/proxy /usr/local/bin/proxy
@@ -54,7 +56,14 @@ CMD ["proxy"]
 # Cache-indexer runtime
 # ============================================================
 FROM alpine:3.21 AS cache-indexer
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache \
+    ca-certificates \
+    libgcc \
+    librdkafka \
+    cyrus-sasl \
+    lz4-libs \
+    zlib \
+    zstd-libs
 
 # Копируем скомпилированный бинарник
 COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/cache-indexer /usr/local/bin/cache-indexer
