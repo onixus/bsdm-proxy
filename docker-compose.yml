@@ -37,7 +37,7 @@ services:
   proxy:
     build:
       context: .
-dockerfile: Dockerfile
+    dockerfile: Dockerfile
       target: proxy
       ports:
       - "1488:1488"
@@ -54,7 +54,7 @@ dockerfile: Dockerfile
   cache-indexer:
     build:
       context: .
-dockerfile: Dockerfile
+    dockerfile: Dockerfile
       target: cache-indexer
       environment:
       - KAFKA_BROKERS=kafka:9092
