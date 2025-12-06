@@ -30,13 +30,13 @@ COPY Cargo.toml Cargo.lock ./
 COPY proxy ./proxy
 COPY cache-indexer ./cache-indexer
 
-# Собираем оба бинарника в release режиме со статической линковкой всех библиотек
+# Собираем со статической линковкой, но без static-pie
 ENV OPENSSL_STATIC=1 \
     OPENSSL_LIB_DIR=/usr/lib \
     OPENSSL_INCLUDE_DIR=/usr/include \
-    RUSTFLAGS="-C target-feature=+crt-static"
+    RUSTFLAGS="-C target-feature=+crt-static -C link-arg=-static"
 
-RUN cargo build --release
+RUN cargo build --release --target x86_64-unknown-linux-musl
 
 # ============================================================
 # Proxy runtime
@@ -45,7 +45,7 @@ FROM alpine:3.21 AS proxy
 RUN apk add --no-cache ca-certificates
 
 # Копируем скомпилированный бинарник
-COPY --from=builder /build/target/release/proxy /usr/local/bin/proxy
+COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/proxy /usr/local/bin/proxy
 
 EXPOSE 1488
 CMD ["proxy"]
@@ -57,7 +57,7 @@ FROM alpine:3.21 AS cache-indexer
 RUN apk add --no-cache ca-certificates
 
 # Копируем скомпилированный бинарник
-COPY --from=builder /build/target/release/cache-indexer /usr/local/bin/cache-indexer
+COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/cache-indexer /usr/local/bin/cache-indexer
 
 EXPOSE 8080
 CMD ["cache-indexer"]
