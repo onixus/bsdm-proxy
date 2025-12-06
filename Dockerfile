@@ -4,7 +4,7 @@
 FROM rust:1.83-alpine AS builder
 WORKDIR /build
 
-# Установка зависимостей
+# Установка зависимостей для сборки
 RUN apk add --no-cache \
     musl-dev \
     protoc \
@@ -12,21 +12,38 @@ RUN apk add --no-cache \
     cmake \
     make \
     openssl-dev \
-    pkgconfig
+    openssl-libs-static \
+    pkgconfig \
+    librdkafka-dev \
+    cyrus-sasl-dev \
+    lz4-dev \
+    zlib-dev \
+    zstd-dev
 
 # Копируем workspace целиком
 COPY Cargo.toml Cargo.lock ./
 COPY proxy ./proxy
 COPY cache-indexer ./cache-indexer
 
-# Собираем оба бинарника в release режиме
+# Собираем оба бинарника в release режиме со статической линковкой OpenSSL
+ENV OPENSSL_STATIC=1 \
+    OPENSSL_LIB_DIR=/usr/lib \
+    OPENSSL_INCLUDE_DIR=/usr/include
+
 RUN cargo build --release
 
 # ============================================================
 # Proxy runtime
 # ============================================================
 FROM alpine:3.21 AS proxy
-RUN apk add --no-cache ca-certificates libgcc
+RUN apk add --no-cache \
+    ca-certificates \
+    libgcc \
+    librdkafka \
+    cyrus-sasl \
+    lz4-libs \
+    zlib \
+    zstd-libs
 
 # Копируем скомпилированный бинарник
 COPY --from=builder /build/target/release/proxy /usr/local/bin/proxy
@@ -38,7 +55,14 @@ CMD ["proxy"]
 # Cache-indexer runtime
 # ============================================================
 FROM alpine:3.21 AS cache-indexer
-RUN apk add --no-cache ca-certificates libgcc
+RUN apk add --no-cache \
+    ca-certificates \
+    libgcc \
+    librdkafka \
+    cyrus-sasl \
+    lz4-libs \
+    zlib \
+    zstd-libs
 
 # Копируем скомпилированный бинарник
 COPY --from=builder /build/target/release/cache-indexer /usr/local/bin/cache-indexer
