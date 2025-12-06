@@ -37,9 +37,9 @@ services:
   proxy:
     build:
       context: .
-    dockerfile: Dockerfile
+      dockerfile: Dockerfile
       target: proxy
-      ports:
+    ports:
       - "1488:1488"
     environment:
       - KAFKA_BROKERS=kafka:9092
@@ -54,9 +54,9 @@ services:
   cache-indexer:
     build:
       context: .
-    dockerfile: Dockerfile
+      dockerfile: Dockerfile
       target: cache-indexer
-      environment:
+    environment:
       - KAFKA_BROKERS=kafka:9092
       - OPENSEARCH_URL=http://opensearch:9200
       - RUST_LOG=info
