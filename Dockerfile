@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1
+
 # ============================================================
 # Unified builder stage - собирает оба бинарника
 # ============================================================
@@ -21,17 +23,37 @@ RUN apk add --no-cache \
     zlib-static \
     zstd-dev
 
-# Копируем workspace целиком
+# Копируем только Cargo.toml и Cargo.lock сначала для кеширования зависимостей
 COPY Cargo.toml Cargo.lock ./
-COPY proxy ./proxy
-COPY cache-indexer ./cache-indexer
+COPY proxy/Cargo.toml ./proxy/
+COPY cache-indexer/Cargo.toml ./cache-indexer/
 
-# Собираем со статической линковкой OpenSSL
+# Создаем пустые src директории для сборки зависимостей
+RUN mkdir -p proxy/src cache-indexer/src && \
+    echo 'fn main() {}' > proxy/src/main.rs && \
+    echo 'fn main() {}' > cache-indexer/src/main.rs
+
+# Настройка окружения
 ENV OPENSSL_STATIC=1 \
     OPENSSL_LIB_DIR=/usr/lib \
     OPENSSL_INCLUDE_DIR=/usr/include
 
-RUN cargo build --release --target x86_64-unknown-linux-musl
+# Собираем зависимости (этот слой будет кешироваться)
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/build/target \
+    cargo build --release --target x86_64-unknown-linux-musl && \
+    rm -rf proxy/src cache-indexer/src
+
+# Копируем реальный исходный код
+COPY proxy/src ./proxy/src
+COPY cache-indexer/src ./cache-indexer/src
+
+# Собираем финальные бинарники
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/build/target \
+    cargo build --release --target x86_64-unknown-linux-musl && \
+    cp target/x86_64-unknown-linux-musl/release/proxy /tmp/proxy && \
+    cp target/x86_64-unknown-linux-musl/release/cache-indexer /tmp/cache-indexer
 
 # ============================================================
 # Proxy runtime
@@ -46,8 +68,7 @@ RUN apk add --no-cache \
     zlib \
     zstd-libs
 
-# Копируем скомпилированный бинарник
-COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/proxy /usr/local/bin/proxy
+COPY --from=builder /tmp/proxy /usr/local/bin/proxy
 
 EXPOSE 1488
 CMD ["proxy"]
@@ -65,8 +86,7 @@ RUN apk add --no-cache \
     zlib \
     zstd-libs
 
-# Копируем скомпилированный бинарник
-COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/cache-indexer /usr/local/bin/cache-indexer
+COPY --from=builder /tmp/cache-indexer /usr/local/bin/cache-indexer
 
 EXPOSE 8080
 CMD ["cache-indexer"]
