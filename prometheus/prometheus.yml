@@ -1,0 +1,20 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'bsdm-proxy'
+    environment: 'production'
+
+scrape_configs:
+  - job_name: 'bsdm-proxy'
+    static_configs:
+      - targets: ['proxy:9090']
+        labels:
+          service: 'proxy'
+          component: 'bsdm-proxy'
+    
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          service: 'prometheus'
