@@ -33,7 +33,8 @@ services:
     environment:
       - discovery.type=single-node
       - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
-      - "DISABLE_SECURITY_PLUGIN=true"
+      - "DISABLE_SECURITY_PLUGIN=false"  # Включена аутентификация
+      - "OPENSEARCH_INITIAL_ADMIN_PASSWORD=BsdmProxy2025!Secure"
       - "bootstrap.memory_lock=true"
     ulimits:
       memlock:
@@ -56,9 +57,12 @@ services:
     ports:
       - "5601:5601"
     environment:
-      - OPENSEARCH_HOSTS=["http://opensearch:9200"]
-      - DISABLE_SECURITY_PLUGIN=true
+      - OPENSEARCH_HOSTS=["https://opensearch:9200"]
+      - OPENSEARCH_USERNAME=admin
+      - OPENSEARCH_PASSWORD=BsdmProxy2025!Secure
+      - DISABLE_SECURITY_PLUGIN=false  # Включена аутентификация
       - "SERVER_HOST=0.0.0.0"
+      - OPENSEARCH_SSL_VERIFICATIONMODE=none  # Отключаем проверку SSL для self-signed сертификатов
     depends_on:
       - opensearch
     networks:
@@ -104,7 +108,10 @@ services:
       target: cache-indexer
     environment:
       - KAFKA_BROKERS=kafka:9092
-      - OPENSEARCH_URL=http://opensearch:9200
+      - OPENSEARCH_URL=https://opensearch:9200
+      - OPENSEARCH_USERNAME=admin
+      - OPENSEARCH_PASSWORD=BsdmProxy2025!Secure
+      - OPENSEARCH_SSL_VERIFY=false  # Отключаем проверку SSL
       - KAFKA_TOPIC=cache-events
       - KAFKA_GROUP_ID=cache-indexer-group
       - RUST_LOG=info,cache_indexer=debug
