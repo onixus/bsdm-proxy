@@ -216,7 +216,7 @@ impl ProxyService {
 
         let http_cache = Arc::new(Cache::new(cache_config.capacity));
         
-        // Переисользуемый HTTP клиент с connection pooling
+        // Переиспользуемый HTTP клиент с connection pooling
         let http_client = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
             .pool_idle_timeout(Duration::from_secs(90))
             .pool_max_idle_per_host(32)
@@ -289,49 +289,6 @@ impl ProxyService {
                 }
             });
         }
-    }
-
-    async fn handle_connect(
-        &self,
-        authority: String,
-        mut client_stream: TcpStream,
-        client_ip: String,
-        request_start: Instant,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        info!("CONNECT tunnel to: {}", authority);
-        
-        let mut upstream = TcpStream::connect(&authority).await?;
-        client_stream.write_all(CONNECT_RESPONSE).await?;
-
-        // Оптимизация: copy_bidirectional вместо двух copy
-        let (bytes_c2u, bytes_u2c) = copy_bidirectional(&mut client_stream, &mut upstream).await?;
-
-        let duration_ms = request_start.elapsed().as_millis() as u64;
-        let domain = authority.split(':').next().unwrap_or("unknown").to_string();
-        
-        let event = CacheEvent {
-            url: format!("https://{}", authority),
-            method: "CONNECT".to_string(),
-            status: 200,
-            cache_key: self.generate_cache_key("CONNECT", &authority).to_string(),
-            cache_status: "BYPASS",
-            timestamp: SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)?
-                .as_secs(),
-            headers: HashMap::new(),
-            user_id: None,
-            username: None,
-            client_ip,
-            domain,
-            response_size: bytes_u2c,
-            request_duration_ms: duration_ms,
-            content_type: None,
-            user_agent: None,
-        };
-        
-        self.send_to_kafka_async(event);
-        debug!("CONNECT closed: {}↑ {}↓", bytes_c2u, bytes_u2c);
-        Ok(())
     }
 
     async fn handle_request(
@@ -543,12 +500,46 @@ async fn handle_connection(
                     async move {
                         match hyper::upgrade::on(req).await {
                             Ok(upgraded) => {
-                                // Преобразуем Upgraded в TcpStream через TokioIo
-                                let io = TokioIo::new(upgraded);
-                                let tcp_stream = TokioIo::into_inner(io);
-                                // Теперь нам нужен сырой TcpStream, но upgraded это не TcpStream
-                                // Используем upgraded напрямую с copy_bidirectional
-                                let _ = handle_connect_tunnel(service, authority, upgraded, client_ip, request_start).await;
+                                // Оборачиваем Upgraded в TokioIo для AsyncRead/AsyncWrite
+                                let mut client_io = TokioIo::new(upgraded);
+                                
+                                match TcpStream::connect(&authority).await {
+                                    Ok(mut upstream) => {
+                                        // Bidirectional copy между клиентом и upstream
+                                        match copy_bidirectional(&mut client_io, &mut upstream).await {
+                                            Ok((bytes_c2u, bytes_u2c)) => {
+                                                let duration_ms = request_start.elapsed().as_millis() as u64;
+                                                let domain = authority.split(':').next().unwrap_or("unknown").to_string();
+                                                
+                                                let event = CacheEvent {
+                                                    url: format!("https://{}", authority),
+                                                    method: "CONNECT".to_string(),
+                                                    status: 200,
+                                                    cache_key: service.generate_cache_key("CONNECT", &authority).to_string(),
+                                                    cache_status: "BYPASS",
+                                                    timestamp: SystemTime::now()
+                                                        .duration_since(SystemTime::UNIX_EPOCH)
+                                                        .unwrap_or_default()
+                                                        .as_secs(),
+                                                    headers: HashMap::new(),
+                                                    user_id: None,
+                                                    username: None,
+                                                    client_ip,
+                                                    domain,
+                                                    response_size: bytes_u2c,
+                                                    request_duration_ms: duration_ms,
+                                                    content_type: None,
+                                                    user_agent: None,
+                                                };
+                                                
+                                                service.send_to_kafka_async(event);
+                                                debug!("CONNECT closed: {}↑ {}↓", bytes_c2u, bytes_u2c);
+                                            }
+                                            Err(e) => error!("CONNECT copy failed: {}", e),
+                                        }
+                                    }
+                                    Err(e) => error!("CONNECT upstream failed: {}", e),
+                                }
                             }
                             Err(e) => error!("Upgrade failed: {}", e),
                         }
@@ -573,48 +564,5 @@ async fn handle_connection(
     {
         error!("Connection error from {}: {}", addr, e);
     }
-    Ok(())
-}
-
-// Отдельная функция для CONNECT туннеля с Upgraded
-async fn handle_connect_tunnel(
-    service: Arc<ProxyService>,
-    authority: String,
-    mut client_upgraded: hyper::upgrade::Upgraded,
-    client_ip: String,
-    request_start: Instant,
-) -> Result<(), Box<dyn std::error::Error>> {
-    info!("CONNECT tunnel to: {}", authority);
-    
-    let mut upstream = TcpStream::connect(&authority).await?;
-    
-    // Используем copy_bidirectional с Upgraded (он реализует AsyncRead + AsyncWrite)
-    let (bytes_c2u, bytes_u2c) = copy_bidirectional(&mut client_upgraded, &mut upstream).await?;
-
-    let duration_ms = request_start.elapsed().as_millis() as u64;
-    let domain = authority.split(':').next().unwrap_or("unknown").to_string();
-    
-    let event = CacheEvent {
-        url: format!("https://{}", authority),
-        method: "CONNECT".to_string(),
-        status: 200,
-        cache_key: service.generate_cache_key("CONNECT", &authority).to_string(),
-        cache_status: "BYPASS",
-        timestamp: SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)?
-            .as_secs(),
-        headers: HashMap::new(),
-        user_id: None,
-        username: None,
-        client_ip,
-        domain,
-        response_size: bytes_u2c,
-        request_duration_ms: duration_ms,
-        content_type: None,
-        user_agent: None,
-    };
-    
-    service.send_to_kafka_async(event);
-    debug!("CONNECT closed: {}↑ {}↓", bytes_c2u, bytes_u2c);
     Ok(())
 }
