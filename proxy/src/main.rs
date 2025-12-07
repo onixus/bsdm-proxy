@@ -17,6 +17,7 @@ use rdkafka::producer::{FutureProducer, FutureRecord};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
@@ -171,7 +172,7 @@ struct CacheEvent {
 struct CacheConfig {
     capacity: usize,
     default_ttl: Duration,
-    max_body_size: usize,  // Новое: лимит размера body для кеширования
+    max_body_size: usize,
 }
 
 impl Default for CacheConfig {
@@ -179,7 +180,7 @@ impl Default for CacheConfig {
         Self {
             capacity: 10_000,
             default_ttl: Duration::from_secs(3600),
-            max_body_size: 10 * 1024 * 1024,  // 10MB
+            max_body_size: 10 * 1024 * 1024,
         }
     }
 }
@@ -205,9 +206,9 @@ impl ProxyService {
                 .set("bootstrap.servers", &brokers)
                 .set("message.timeout.ms", "5000")
                 .set("compression.type", "snappy")
-                .set("batch.size", "32768")  // Увеличен для лучшего batching
-                .set("linger.ms", "5")  // Уменьшен для меньшей задержки
-                .set("acks", "0")  // Fire-and-forget для максимальной скорости
+                .set("batch.size", "32768")
+                .set("linger.ms", "5")
+                .set("acks", "0")
                 .create()
                 .ok()
                 .map(Arc::new)
@@ -215,7 +216,6 @@ impl ProxyService {
 
         let http_cache = Arc::new(Cache::new(cache_config.capacity));
         
-        // Переиспользуемый HTTP клиент с connection pooling
         let http_client = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
             .pool_idle_timeout(Duration::from_secs(90))
             .pool_max_idle_per_host(32)
@@ -271,7 +271,6 @@ impl ProxyService {
         (None, None)
     }
 
-    // Асинхронная отправка в Kafka без блокировки
     fn send_to_kafka_async(&self, event: CacheEvent) {
         if let Some(producer) = self.kafka_producer.clone() {
             tokio::spawn(async move {
@@ -294,7 +293,7 @@ impl ProxyService {
         &self,
         req: Request<Incoming>,
         client_ip: String,
-    ) -> Result<Response<Body>, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Response<Body> {
         let request_start = Instant::now();
         let method = req.method().to_string();
         let uri = req.uri().clone();
@@ -307,39 +306,48 @@ impl ProxyService {
             if !cached.is_expired() {
                 info!("Cache HIT: {} {}", method, url);
                 
-                let event = CacheEvent {
-                    url: url.clone(),
-                    method: method.clone(),
-                    status: cached.status,
-                    cache_key: cache_key.to_string(),
-                    cache_status: "HIT",
-                    timestamp: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs(),
-                    headers: HashMap::new(),  // Пустой для экономии памяти
-                    user_id: user_id.clone(),
-                    username: username.clone(),
-                    client_ip: client_ip.clone(),
-                    domain: Self::extract_domain(&url),
-                    response_size: cached.body.len() as u64,
-                    request_duration_ms: request_start.elapsed().as_millis() as u64,
-                    content_type: cached.headers.iter()
-                        .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
-                        .map(|(_, v)| v.to_string()),
-                    user_agent: None,
-                };
-                
-                self.send_to_kafka_async(event);
-                return Ok(cached.to_response());
+                if let Ok(timestamp) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
+                    let event = CacheEvent {
+                        url: url.clone(),
+                        method: method.clone(),
+                        status: cached.status,
+                        cache_key: cache_key.to_string(),
+                        cache_status: "HIT",
+                        timestamp: timestamp.as_secs(),
+                        headers: HashMap::new(),
+                        user_id: user_id.clone(),
+                        username: username.clone(),
+                        client_ip: client_ip.clone(),
+                        domain: Self::extract_domain(&url),
+                        response_size: cached.body.len() as u64,
+                        request_duration_ms: request_start.elapsed().as_millis() as u64,
+                        content_type: cached.headers.iter()
+                            .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+                            .map(|(_, v)| v.to_string()),
+                        user_agent: None,
+                    };
+                    self.send_to_kafka_async(event);
+                }
+                return cached.to_response();
             }
         }
 
         info!("Cache MISS: {} {}", method, url);
         
-        // Преобразование Incoming в Body для клиента
+        // Преобразование Incoming в Body
         let (parts, body) = req.into_parts();
-        let body_bytes = http_body_util::BodyExt::collect(body).await?.to_bytes();
+        let body_bytes = match http_body_util::BodyExt::collect(body).await {
+            Ok(collected) => collected.to_bytes(),
+            Err(e) => {
+                error!("Body collection failed: {}", e);
+                let mut resp = Response::new(Body::new(Bytes::from_static(b"400 Bad Request")));
+                *resp.status_mut() = StatusCode::BAD_REQUEST;
+                return resp;
+            }
+        };
         let req = Request::from_parts(parts, Body::new(body_bytes));
         
-        // Запрос к upstream с переиспользуемым клиентом
+        // Запрос к upstream
         match self.http_client.request(req).await {
             Ok(response) => {
                 let status = response.status();
@@ -349,13 +357,18 @@ impl ProxyService {
                     .filter_map(|(k, v)| v.to_str().ok().map(|v| (k.as_str().to_string(), v.to_string())))
                     .collect();
 
-                let body_bytes = http_body_util::BodyExt::collect(response.into_body())
-                    .await?
-                    .to_bytes();
+                let body_bytes = match http_body_util::BodyExt::collect(response.into_body()).await {
+                    Ok(collected) => collected.to_bytes(),
+                    Err(e) => {
+                        error!("Response body collection failed: {}", e);
+                        let mut resp = Response::new(Body::new(Bytes::from_static(b"502 Bad Gateway")));
+                        *resp.status_mut() = StatusCode::BAD_GATEWAY;
+                        return resp;
+                    }
+                };
                 let body_size = body_bytes.len();
                 
                 let cache_status = if self.is_cacheable(&method, status.as_u16(), body_size) {
-                    // Оптимизация: Arc для заголовков
                     let headers_arc: Arc<[(Arc<str>, Arc<str>)]> = headers_map
                         .iter()
                         .map(|(k, v)| (Arc::from(k.as_str()), Arc::from(v.as_str())))
@@ -374,25 +387,26 @@ impl ProxyService {
                     "BYPASS"
                 };
 
-                let event = CacheEvent {
-                    url: url.clone(),
-                    method: method.clone(),
-                    status: status.as_u16(),
-                    cache_key: cache_key.to_string(),
-                    cache_status,
-                    timestamp: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs(),
-                    headers: headers_map.clone(),
-                    user_id,
-                    username,
-                    client_ip,
-                    domain: Self::extract_domain(&url),
-                    response_size: body_size as u64,
-                    request_duration_ms: request_start.elapsed().as_millis() as u64,
-                    content_type: headers_map.get("content-type").cloned(),
-                    user_agent: headers_map.get("user-agent").cloned(),
-                };
-                
-                self.send_to_kafka_async(event);
+                if let Ok(timestamp) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
+                    let event = CacheEvent {
+                        url: url.clone(),
+                        method: method.clone(),
+                        status: status.as_u16(),
+                        cache_key: cache_key.to_string(),
+                        cache_status,
+                        timestamp: timestamp.as_secs(),
+                        headers: headers_map.clone(),
+                        user_id,
+                        username,
+                        client_ip,
+                        domain: Self::extract_domain(&url),
+                        response_size: body_size as u64,
+                        request_duration_ms: request_start.elapsed().as_millis() as u64,
+                        content_type: headers_map.get("content-type").cloned(),
+                        user_agent: headers_map.get("user-agent").cloned(),
+                    };
+                    self.send_to_kafka_async(event);
+                }
 
                 let mut resp = Response::new(Body::new(body_bytes));
                 *resp.status_mut() = status;
@@ -404,13 +418,13 @@ impl ProxyService {
                         resp.headers_mut().insert(name, val);
                     }
                 }
-                Ok(resp)
+                resp
             }
             Err(e) => {
                 error!("Upstream error: {}", e);
                 let mut response = Response::new(Body::new(Bytes::from_static(b"502 Bad Gateway")));
                 *response.status_mut() = StatusCode::BAD_GATEWAY;
-                Ok(response)
+                response
             }
         }
     }
@@ -439,7 +453,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let max_body_size = std::env::var("MAX_CACHE_BODY_SIZE")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(10 * 1024 * 1024);  // 10MB default
+        .unwrap_or(10 * 1024 * 1024);
 
     let cache_config = CacheConfig {
         capacity: cache_capacity,
@@ -466,7 +480,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let service_clone = service.clone();
         let client_ip = addr.ip().to_string();
         
-        // Обработка подключения в spawned task БЕЗ await
         tokio::task::spawn(async move {
             handle_connection(stream, addr, service_clone, client_ip).await;
         });
@@ -480,6 +493,8 @@ async fn handle_connection(
     client_ip: String,
 ) {
     let io = TokioIo::new(stream);
+    
+    // КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: service_fn теперь возвращает Result<Response, Infallible>
     let svc = service_fn(move |req: Request<Incoming>| {
         let service = service.clone();
         let client_ip = client_ip.clone();
@@ -487,14 +502,13 @@ async fn handle_connection(
         
         async move {
             if req.method() == Method::CONNECT {
-                // Получаем authority без ? оператора
                 let authority = match req.uri().authority() {
                     Some(auth) => auth.as_str().to_string(),
                     None => {
                         error!("CONNECT without authority");
                         let mut resp = Response::new(Body::new(Bytes::from_static(b"400 Bad Request")));
                         *resp.status_mut() = StatusCode::BAD_REQUEST;
-                        return Ok::<_, Box<dyn std::error::Error + Send + Sync>>(resp);
+                        return Ok::<_, Infallible>(resp);
                     }
                 };
                 
@@ -504,39 +518,35 @@ async fn handle_connection(
                     async move {
                         match hyper::upgrade::on(req).await {
                             Ok(upgraded) => {
-                                // Оборачиваем Upgraded в TokioIo для AsyncRead/AsyncWrite
                                 let mut client_io = TokioIo::new(upgraded);
                                 
                                 match TcpStream::connect(&authority).await {
                                     Ok(mut upstream) => {
-                                        // Bidirectional copy между клиентом и upstream
                                         match copy_bidirectional(&mut client_io, &mut upstream).await {
                                             Ok((bytes_c2u, bytes_u2c)) => {
                                                 let duration_ms = request_start.elapsed().as_millis() as u64;
                                                 let domain = authority.split(':').next().unwrap_or("unknown").to_string();
                                                 
-                                                let event = CacheEvent {
-                                                    url: format!("https://{}", authority),
-                                                    method: "CONNECT".to_string(),
-                                                    status: 200,
-                                                    cache_key: service.generate_cache_key("CONNECT", &authority).to_string(),
-                                                    cache_status: "BYPASS",
-                                                    timestamp: SystemTime::now()
-                                                        .duration_since(SystemTime::UNIX_EPOCH)
-                                                        .unwrap_or_default()
-                                                        .as_secs(),
-                                                    headers: HashMap::new(),
-                                                    user_id: None,
-                                                    username: None,
-                                                    client_ip,
-                                                    domain,
-                                                    response_size: bytes_u2c,
-                                                    request_duration_ms: duration_ms,
-                                                    content_type: None,
-                                                    user_agent: None,
-                                                };
-                                                
-                                                service.send_to_kafka_async(event);
+                                                if let Ok(timestamp) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
+                                                    let event = CacheEvent {
+                                                        url: format!("https://{}", authority),
+                                                        method: "CONNECT".to_string(),
+                                                        status: 200,
+                                                        cache_key: service.generate_cache_key("CONNECT", &authority).to_string(),
+                                                        cache_status: "BYPASS",
+                                                        timestamp: timestamp.as_secs(),
+                                                        headers: HashMap::new(),
+                                                        user_id: None,
+                                                        username: None,
+                                                        client_ip,
+                                                        domain,
+                                                        response_size: bytes_u2c,
+                                                        request_duration_ms: duration_ms,
+                                                        content_type: None,
+                                                        user_agent: None,
+                                                    };
+                                                    service.send_to_kafka_async(event);
+                                                }
                                                 debug!("CONNECT closed: {}↑ {}↓", bytes_c2u, bytes_u2c);
                                             }
                                             Err(e) => error!("CONNECT copy failed: {}", e),
@@ -550,7 +560,6 @@ async fn handle_connection(
                     }
                 });
                 
-                // Создаём ответ без ? оператора
                 let response = Response::builder()
                     .status(StatusCode::OK)
                     .body(Body::new(Bytes::new()))
@@ -560,19 +569,11 @@ async fn handle_connection(
                         *resp.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
                         resp
                     });
-                return Ok::<_, Box<dyn std::error::Error + Send + Sync>>(response);
+                return Ok::<_, Infallible>(response);
             }
             
-            // Оборачиваем handle_request для обработки Result
-            match service.handle_request(req, client_ip).await {
-                Ok(resp) => Ok(resp),
-                Err(e) => {
-                    error!("Request handling failed: {}", e);
-                    let mut resp = Response::new(Body::new(Bytes::from_static(b"500 Internal Server Error")));
-                    *resp.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-                    Ok(resp)
-                }
-            }
+            // handle_request теперь возвращает Response напрямую
+            Ok::<_, Infallible>(service.handle_request(req, client_ip).await)
         }
     });
 
