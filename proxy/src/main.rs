@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
-use tokio::io::{copy_bidirectional, AsyncWriteExt};
+use tokio::io::copy_bidirectional;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
@@ -31,7 +31,6 @@ type Body = http_body_util::Full<Bytes>;
 
 const CACHEABLE_METHODS: &[&str] = &["GET", "HEAD"];
 const CACHEABLE_STATUS_CODES: &[u16] = &[200, 203, 204, 206, 300, 301, 404, 405, 410, 414, 501];
-const CONNECT_RESPONSE: &[u8] = b"HTTP/1.1 200 Connection Established\r\n\r\n";
 
 /// Кешированный HTTP ответ (оптимизирован для быстрого клонирования)
 #[derive(Clone, Debug)]
@@ -468,9 +467,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let client_ip = addr.ip().to_string();
         
         tokio::spawn(async move {
-            if let Err(e) = handle_connection(stream, addr, service_clone, client_ip).await {
-                error!("Connection error from {}: {}", addr, e);
-            }
+            let _ = handle_connection(stream, addr, service_clone, client_ip).await;
         });
     }
 }
