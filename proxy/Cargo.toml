@@ -4,9 +4,9 @@ version = "0.2.0"
 edition = "2021"
 license = "MIT"
 authors = ["BSDM-Proxy Contributors"]
-description = "High-performance HTTPS caching forward proxy with Rama and quick_cache"
+description = "High-performance HTTPS caching forward proxy with Hyper and quick_cache"
 repository = "https://github.com/onixus/bsdm-proxy"
-keywords = ["proxy", "https", "cache", "mitm", "rama"]
+keywords = ["proxy", "https", "cache", "mitm", "hyper"]
 categories = ["network-programming", "web-programming"]
 
 [[bin]]
@@ -34,6 +34,9 @@ rdkafka = { workspace = true }
 # Data
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+# Metrics
+prometheus = { workspace = true }
 
 # Utils
 async-trait = { workspace = true }
