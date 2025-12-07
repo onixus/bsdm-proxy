@@ -674,21 +674,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut interval = tokio::time::interval(Duration::from_secs(10));
         loop {
             interval.tick().await;
-            // quick_cache 0.6 API: len(), weight(), hits(), misses()
+            // quick_cache API: len() and weight() only
             let entries = cache_clone.len();
             let weight = cache_clone.weight();
-            let hits = cache_clone.hits();
-            let misses = cache_clone.misses();
             
             metrics_clone.cache_entries.set(entries as f64);
             metrics_clone.cache_size_bytes.set(weight as f64);
             
             debug!(
-                "Cache stats: entries={}, weight={}KB, hits={}, misses={}",
+                "Cache stats: entries={}, weight={}KB",
                 entries,
-                weight / 1024,
-                hits,
-                misses
+                weight / 1024
             );
         }
     });
@@ -798,7 +794,7 @@ async fn handle_connection(
                                     }
                                 }
                             }
-                            Err(e) => error!("Upgrade failed: {}", e);
+                            Err(e) => error!("Upgrade failed: {}", e),
                         }
                     }
                 });
