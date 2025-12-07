@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BSDM-Proxy Configuration</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔧 BSDM-Proxy Configuration</h1>
+            <p class="subtitle">Configure your proxy deployment</p>
+        </header>
+
+        <nav class="tabs">
+            <button class="tab active" data-tab="general">General</button>
+            <button class="tab" data-tab="cache">Cache</button>
+            <button class="tab" data-tab="kafka">Kafka</button>
+            <button class="tab" data-tab="auth">Authentication</button>
+            <button class="tab" data-tab="monitoring">Monitoring</button>
+        </nav>
+
+        <main>
+            <!-- General Settings -->
+            <section id="general" class="tab-content active">
+                <h2>⚙️ General Settings</h2>
+                
+                <div class="form-group">
+                    <label for="http_port">Proxy Port</label>
+                    <input type="number" id="http_port" value="1488" min="1" max="65535">
+                    <span class="help">Port for HTTP/HTTPS proxy</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="metrics_port">Metrics Port</label>
+                    <input type="number" id="metrics_port" value="9090" min="1" max="65535">
+                    <span class="help">Port for Prometheus metrics endpoint</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="log_level">Log Level</label>
+                    <select id="log_level">
+                        <option value="error">Error</option>
+                        <option value="warn">Warning</option>
+                        <option value="info" selected>Info</option>
+                        <option value="debug">Debug</option>
+                        <option value="trace">Trace</option>
+                    </select>
+                    <span class="help">Logging verbosity level</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="max_body_size">Max Body Size (MB)</label>
+                    <input type="number" id="max_body_size" value="10" min="1" max="1000">
+                    <span class="help">Maximum cacheable response body size</span>
+                </div>
+            </section>
+
+            <!-- Cache Settings -->
+            <section id="cache" class="tab-content">
+                <h2>💾 Cache Settings</h2>
+                
+                <div class="form-group">
+                    <label for="cache_capacity">Cache Capacity (entries)</label>
+                    <input type="number" id="cache_capacity" value="10000" min="100" max="1000000">
+                    <span class="help">Maximum number of cached entries (L1)</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="cache_ttl">Cache TTL (seconds)</label>
+                    <input type="number" id="cache_ttl" value="3600" min="60" max="86400">
+                    <span class="help">Time to live for cached entries</span>
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="cache_enable_l2" checked>
+                        Enable L2 Cache (OpenSearch)
+                    </label>
+                    <span class="help">Use OpenSearch for long-term storage</span>
+                </div>
+
+                <div class="info-box">
+                    <strong>Performance Estimates:</strong><br>
+                    <span id="cache_stats">10,000 entries ≈ 1.2 MB memory</span>
+                </div>
+            </section>
+
+            <!-- Kafka Settings -->
+            <section id="kafka" class="tab-content">
+                <h2>📨 Kafka Settings</h2>
+                
+                <div class="form-group">
+                    <label for="kafka_brokers">Kafka Brokers</label>
+                    <input type="text" id="kafka_brokers" value="kafka:9092" placeholder="kafka1:9092,kafka2:9092">
+                    <span class="help">Comma-separated list of Kafka brokers</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="kafka_topic">Kafka Topic</label>
+                    <input type="text" id="kafka_topic" value="cache-events">
+                    <span class="help">Topic for cache events</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="kafka_batch_size">Batch Size</label>
+                    <input type="number" id="kafka_batch_size" value="50" min="1" max="1000">
+                    <span class="help">Events per batch for indexing</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="kafka_batch_timeout">Batch Timeout (seconds)</label>
+                    <input type="number" id="kafka_batch_timeout" value="5" min="1" max="60">
+                    <span class="help">Maximum wait time for batch</span>
+                </div>
+            </section>
+
+            <!-- Authentication Settings -->
+            <section id="auth" class="tab-content">
+                <h2>🔐 Authentication</h2>
+                
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="auth_enabled">
+                        Enable Authentication
+                    </label>
+                </div>
+
+                <div id="auth_options" style="display: none;">
+                    <div class="form-group">
+                        <label for="auth_backend">Authentication Backend</label>
+                        <select id="auth_backend">
+                            <option value="basic">Basic Auth</option>
+                            <option value="ldap">LDAP / Active Directory</option>
+                            <option value="ntlm">NTLM (Windows)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="auth_realm">Authentication Realm</label>
+                        <input type="text" id="auth_realm" value="BSDM-Proxy">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="auth_cache_ttl">Cache TTL (seconds)</label>
+                        <input type="number" id="auth_cache_ttl" value="300" min="60" max="3600">
+                    </div>
+
+                    <!-- LDAP Settings -->
+                    <div id="ldap_settings" style="display: none;">
+                        <h3>LDAP Configuration</h3>
+                        
+                        <div class="form-group">
+                            <label for="ldap_servers">LDAP Servers</label>
+                            <input type="text" id="ldap_servers" placeholder="ldap://dc1.example.com:389,ldap://dc2.example.com:389">
+                            <span class="help">Comma-separated list</span>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="ldap_base_dn">Base DN</label>
+                            <input type="text" id="ldap_base_dn" placeholder="dc=example,dc=com">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="ldap_bind_dn">Bind DN</label>
+                            <input type="text" id="ldap_bind_dn" placeholder="cn=proxy-service,ou=services,dc=example,dc=com">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="ldap_bind_password">Bind Password</label>
+                            <input type="password" id="ldap_bind_password">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="ldap_user_filter">User Filter</label>
+                            <input type="text" id="ldap_user_filter" value="(sAMAccountName={username})">
+                        </div>
+
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="ldap_use_tls">
+                                Use TLS/SSL
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- NTLM Settings -->
+                    <div id="ntlm_settings" style="display: none;">
+                        <h3>NTLM Configuration</h3>
+                        
+                        <div class="form-group">
+                            <label for="ntlm_domain">Domain</label>
+                            <input type="text" id="ntlm_domain" value="WORKGROUP">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="ntlm_workstation">Workstation</label>
+                            <input type="text" id="ntlm_workstation" placeholder="PROXY01">
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Monitoring Settings -->
+            <section id="monitoring" class="tab-content">
+                <h2>📈 Monitoring</h2>
+                
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="prometheus_enabled" checked>
+                        Enable Prometheus Metrics
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="grafana_enabled" checked>
+                        Enable Grafana Dashboard
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label for="opensearch_url">OpenSearch URL</label>
+                    <input type="text" id="opensearch_url" value="http://opensearch:9200">
+                </div>
+
+                <div class="info-box">
+                    <strong>Access URLs:</strong><br>
+                    Prometheus: http://localhost:9091<br>
+                    Grafana: http://localhost:3000 (admin/admin)<br>
+                    OpenSearch: http://localhost:9200
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <button class="btn btn-primary" onclick="generateConfig()">Generate Configuration</button>
+            <button class="btn btn-secondary" onclick="exportEnv()">Export .env</button>
+            <button class="btn btn-secondary" onclick="exportDockerCompose()">Export docker-compose.yml</button>
+        </footer>
+
+        <!-- Output Modal -->
+        <div id="output-modal" class="modal">
+            <div class="modal-content">
+                <span class="close" onclick="closeModal()">&times;</span>
+                <h2 id="modal-title">Configuration</h2>
+                <pre id="modal-output"></pre>
+                <button class="btn btn-primary" onclick="copyToClipboard()">Copy to Clipboard</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
