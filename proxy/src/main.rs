@@ -467,7 +467,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let client_ip = addr.ip().to_string();
         
         tokio::spawn(async move {
-            let _ = handle_connection(stream, addr, service_clone, client_ip).await;
+            handle_connection(stream, addr, service_clone, client_ip).await;
         });
     }
 }
@@ -477,7 +477,7 @@ async fn handle_connection(
     addr: SocketAddr,
     service: Arc<ProxyService>,
     client_ip: String,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) {
     let io = TokioIo::new(stream);
     let svc = service_fn(move |req: Request<Incoming>| {
         let service = service.clone();
@@ -561,5 +561,4 @@ async fn handle_connection(
     {
         error!("Connection error from {}: {}", addr, e);
     }
-    Ok(())
 }
