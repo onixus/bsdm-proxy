@@ -6,13 +6,16 @@
 FROM rust:1.83-alpine AS builder
 WORKDIR /build
 
-# Установка зависимостей для сборки
+# Установка зависимостей для сборки (включая bash для rdkafka)
 RUN apk add --no-cache \
     musl-dev \
     protoc \
     g++ \
     cmake \
     make \
+    bash \
+    perl \
+    git \
     openssl-dev \
     openssl-libs-static \
     pkgconfig \
@@ -23,15 +26,19 @@ RUN apk add --no-cache \
     zlib-static \
     zstd-dev
 
+# Добавляем musl target
+RUN rustup target add x86_64-unknown-linux-musl
+
 # Копируем весь workspace
 COPY Cargo.toml Cargo.lock ./
 COPY proxy ./proxy
 COPY cache-indexer ./cache-indexer
 
-# Настройка окружения для статической линковки OpenSSL
+# Настройка окружения для статической линковки
 ENV OPENSSL_STATIC=1 \
     OPENSSL_LIB_DIR=/usr/lib \
-    OPENSSL_INCLUDE_DIR=/usr/include
+    OPENSSL_INCLUDE_DIR=/usr/include \
+    RUSTFLAGS="-C target-feature=+crt-static"
 
 # Собираем оба бинарника в release режиме
 RUN cargo build --release --target x86_64-unknown-linux-musl
@@ -42,12 +49,7 @@ RUN cargo build --release --target x86_64-unknown-linux-musl
 FROM alpine:3.21 AS proxy
 RUN apk add --no-cache \
     ca-certificates \
-    libgcc \
-    librdkafka \
-    cyrus-sasl \
-    lz4-libs \
-    zlib \
-    zstd-libs
+    libgcc
 
 # Копируем скомпилированный бинарник
 COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/proxy /usr/local/bin/proxy
@@ -61,12 +63,7 @@ CMD ["proxy"]
 FROM alpine:3.21 AS cache-indexer
 RUN apk add --no-cache \
     ca-certificates \
-    libgcc \
-    librdkafka \
-    cyrus-sasl \
-    lz4-libs \
-    zlib \
-    zstd-libs
+    libgcc
 
 # Копируем скомпилированный бинарник
 COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/cache-indexer /usr/local/bin/cache-indexer
