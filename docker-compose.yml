@@ -10,6 +10,7 @@ services:
       ZOOKEEPER_TICK_TIME: 2000
     networks:
       - bsdm-net
+    restart: unless-stopped
 
   kafka:
     image: confluentinc/cp-kafka:7.5.0
@@ -22,8 +23,10 @@ services:
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
     networks:
       - bsdm-net
+    restart: unless-stopped
 
   opensearch:
     image: opensearchproject/opensearch:2.11.0
@@ -31,10 +34,36 @@ services:
       - discovery.type=single-node
       - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
       - "DISABLE_SECURITY_PLUGIN=true"
+      - "bootstrap.memory_lock=true"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
     ports:
       - "9200:9200"
+      - "9600:9600"  # Performance analyzer
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
     networks:
       - bsdm-net
+    restart: unless-stopped
+
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:2.11.0
+    ports:
+      - "5601:5601"
+    environment:
+      - OPENSEARCH_HOSTS=["http://opensearch:9200"]
+      - DISABLE_SECURITY_PLUGIN=true
+      - "SERVER_HOST=0.0.0.0"
+    depends_on:
+      - opensearch
+    networks:
+      - bsdm-net
+    restart: unless-stopped
 
   proxy:
     build:
@@ -46,7 +75,11 @@ services:
       - "1489:1489"  # HTTPS TLS interception
     environment:
       - KAFKA_BROKERS=kafka:9092
-      - RUST_LOG=info
+      - CACHE_CAPACITY=10000
+      - CACHE_TTL_SECONDS=3600
+      - MAX_CACHE_BODY_SIZE=10485760  # 10MB
+      - HTTP_PORT=1488
+      - RUST_LOG=info,bsdm_proxy=debug
       - RUST_BACKTRACE=1
     depends_on:
       - kafka
@@ -57,6 +90,12 @@ services:
     tty: true
     stdin_open: true
     restart: unless-stopped
+    # Resource limits (опционально)
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '2'
+    #       memory: 2G
 
   cache-indexer:
     build:
@@ -66,7 +105,10 @@ services:
     environment:
       - KAFKA_BROKERS=kafka:9092
       - OPENSEARCH_URL=http://opensearch:9200
-      - RUST_LOG=info
+      - KAFKA_TOPIC=cache-events
+      - KAFKA_GROUP_ID=cache-indexer-group
+      - RUST_LOG=info,cache_indexer=debug
+      - RUST_BACKTRACE=1
     depends_on:
       - kafka
       - opensearch
@@ -77,3 +119,7 @@ services:
 networks:
   bsdm-net:
     driver: bridge
+
+volumes:
+  opensearch-data:
+    driver: local
