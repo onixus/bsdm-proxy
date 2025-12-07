@@ -3,23 +3,40 @@ members = ["proxy", "cache-indexer"]
 resolver = "2"
 
 [workspace.dependencies]
-pingora = "0.6"
-pingora-core = "0.6"
-pingora-proxy = "0.6"
-pingora-cache = "0.6"
+# HTTP/Async runtime
 tokio = { version = "1", features = ["full"] }
+hyper = { version = "1", features = ["full"] }
+hyper-util = { version = "0.1", features = ["full", "tokio"] }
+http-body-util = "0.1"
+
+# Caching
+quick_cache = "0.6"
+
+# TLS
+rustls = "0.23"
+rcgen = "0.13"
+tokio-rustls = "0.26"
+pem = "3.0"
+
+# Kafka
 rdkafka = { version = "0.38", features = ["cmake-build"] }
+
+# Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+
+# Search
 opensearch = "2.3"
+
+# Logging
 tracing = "0.1"
-tracing-subscriber = "0.3"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Utils
 async-trait = "0.1"
 bytes = "1.0"
 sha2 = "0.10"
 hex = "0.4"
-rcgen = "0.13"
-pem = "3.0"
 time = "0.3"
 base64 = "0.22"
 url = "2.5"
