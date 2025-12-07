@@ -30,6 +30,22 @@ authBackend.addEventListener('change', () => {
     ntlmSettings.style.display = authBackend.value === 'ntlm' ? 'block' : 'none';
 });
 
+// ACL toggle
+const aclEnabled = document.getElementById('acl_enabled');
+const aclOptions = document.getElementById('acl_options');
+
+aclEnabled.addEventListener('change', () => {
+    aclOptions.style.display = aclEnabled.checked ? 'block' : 'none';
+});
+
+// Categorization toggle
+const categorizationEnabled = document.getElementById('categorization_enabled');
+const categorizationOptions = document.getElementById('categorization_options');
+
+categorizationEnabled.addEventListener('change', () => {
+    categorizationOptions.style.display = categorizationEnabled.checked ? 'block' : 'none';
+});
+
 // Cache statistics
 const cacheCapacity = document.getElementById('cache_capacity');
 const cacheStats = document.getElementById('cache_stats');
@@ -49,7 +65,7 @@ function generateConfig() {
 
 // Collect configuration from form
 function collectConfig() {
-    return {
+    const config = {
         // General
         HTTP_PORT: document.getElementById('http_port').value,
         METRICS_PORT: document.getElementById('metrics_port').value,
@@ -88,18 +104,109 @@ function collectConfig() {
             NTLM_WORKSTATION: document.getElementById('ntlm_workstation').value,
         } : {}),
         
+        // ACL
+        ACL_ENABLED: document.getElementById('acl_enabled').checked.toString(),
+        ...(document.getElementById('acl_enabled').checked ? {
+            ACL_DEFAULT_ACTION: document.getElementById('acl_default_action').value,
+            ACL_RULES_PATH: document.getElementById('acl_rules_path').value,
+        } : {}),
+        
+        // Categorization
+        CATEGORIZATION_ENABLED: document.getElementById('categorization_enabled').checked.toString(),
+        ...(document.getElementById('categorization_enabled').checked ? {
+            CATEGORIZATION_CACHE_TTL: document.getElementById('categorization_cache_ttl').value,
+            SHALLALIST_ENABLED: document.getElementById('shallalist_enabled').checked.toString(),
+            SHALLALIST_PATH: document.getElementById('shallalist_path').value,
+            URLHAUS_ENABLED: document.getElementById('urlhaus_enabled').checked.toString(),
+            URLHAUS_API: document.getElementById('urlhaus_api').value,
+            PHISHTANK_ENABLED: document.getElementById('phishtank_enabled').checked.toString(),
+            PHISHTANK_API: document.getElementById('phishtank_api').value,
+            CUSTOM_DB_ENABLED: document.getElementById('custom_db_enabled').checked.toString(),
+            CUSTOM_DB_PATH: document.getElementById('custom_db_path').value,
+        } : {}),
+        
         // Monitoring
         PROMETHEUS_ENABLED: document.getElementById('prometheus_enabled').checked.toString(),
         GRAFANA_ENABLED: document.getElementById('grafana_enabled').checked.toString(),
         OPENSEARCH_URL: document.getElementById('opensearch_url').value,
     };
+    
+    return config;
+}
+
+// Generate ACL rules JSON
+function generateAclRules() {
+    if (!document.getElementById('acl_enabled').checked) {
+        return null;
+    }
+    
+    const rules = [];
+    let priority = 100;
+    
+    if (document.getElementById('acl_block_malware').checked) {
+        rules.push({
+            id: 'block-malware',
+            name: 'Block malware URLs',
+            enabled: true,
+            priority: priority++,
+            action: 'deny',
+            rule_type: { Category: 'malware' }
+        });
+    }
+    
+    if (document.getElementById('acl_block_phishing').checked) {
+        rules.push({
+            id: 'block-phishing',
+            name: 'Block phishing URLs',
+            enabled: true,
+            priority: priority++,
+            action: 'deny',
+            rule_type: { Category: 'phishing' }
+        });
+    }
+    
+    if (document.getElementById('acl_block_adult').checked) {
+        rules.push({
+            id: 'block-adult',
+            name: 'Block adult content',
+            enabled: true,
+            priority: priority++,
+            action: 'deny',
+            rule_type: { Category: 'adult' }
+        });
+    }
+    
+    if (document.getElementById('acl_block_gambling').checked) {
+        rules.push({
+            id: 'block-gambling',
+            name: 'Block gambling sites',
+            enabled: true,
+            priority: priority++,
+            action: 'deny',
+            rule_type: { Category: 'gambling' }
+        });
+    }
+    
+    return {
+        default_action: document.getElementById('acl_default_action').value,
+        rules: rules
+    };
 }
 
 // Format configuration as environment variables
 function formatConfig(config) {
-    return Object.entries(config)
+    let output = Object.entries(config)
         .map(([key, value]) => `${key}=${value}`)
         .join('\n');
+    
+    // Add ACL rules if enabled
+    const aclRules = generateAclRules();
+    if (aclRules) {
+        output += '\n\n# ACL Rules (save to ' + config.ACL_RULES_PATH + '):\n';
+        output += '# ' + JSON.stringify(aclRules, null, 2).split('\n').join('\n# ');
+    }
+    
+    return output;
 }
 
 // Export .env file
@@ -151,7 +258,7 @@ services:
       - "9200:9200"
     networks:
       - bsdm-network
-
+${config.PROMETHEUS_ENABLED === 'true' ? `
   prometheus:
     image: prom/prometheus:latest
     volumes:
@@ -160,7 +267,8 @@ services:
       - "9091:9090"
     networks:
       - bsdm-network
-
+` : ''}
+${config.GRAFANA_ENABLED === 'true' ? `
   grafana:
     image: grafana/grafana:latest
     environment:
@@ -175,7 +283,7 @@ services:
       - prometheus
     networks:
       - bsdm-network
-
+` : ''}
   proxy:
     build: ./proxy
     ports:
@@ -201,7 +309,24 @@ ${config.LDAP_SERVERS ? `      - LDAP_SERVERS=${config.LDAP_SERVERS}
       - LDAP_USE_TLS=${config.LDAP_USE_TLS}` : ''}
 ${config.NTLM_DOMAIN ? `      - NTLM_DOMAIN=${config.NTLM_DOMAIN}
       - NTLM_WORKSTATION=${config.NTLM_WORKSTATION}` : ''}
-    depends_on:
+${config.ACL_ENABLED === 'true' ? `      - ACL_ENABLED=${config.ACL_ENABLED}
+      - ACL_DEFAULT_ACTION=${config.ACL_DEFAULT_ACTION}
+      - ACL_RULES_PATH=${config.ACL_RULES_PATH}` : ''}
+${config.CATEGORIZATION_ENABLED === 'true' ? `      - CATEGORIZATION_ENABLED=${config.CATEGORIZATION_ENABLED}
+      - CATEGORIZATION_CACHE_TTL=${config.CATEGORIZATION_CACHE_TTL}
+      - SHALLALIST_ENABLED=${config.SHALLALIST_ENABLED}
+      - SHALLALIST_PATH=${config.SHALLALIST_PATH}
+      - URLHAUS_ENABLED=${config.URLHAUS_ENABLED}
+      - URLHAUS_API=${config.URLHAUS_API}
+      - PHISHTANK_ENABLED=${config.PHISHTANK_ENABLED}
+      - PHISHTANK_API=${config.PHISHTANK_API}
+      - CUSTOM_DB_ENABLED=${config.CUSTOM_DB_ENABLED}
+      - CUSTOM_DB_PATH=${config.CUSTOM_DB_PATH}` : ''}
+    volumes:
+${config.SHALLALIST_ENABLED === 'true' ? `      - ${config.SHALLALIST_PATH}:${config.SHALLALIST_PATH}:ro
+` : ''}${config.ACL_ENABLED === 'true' ? `      - ./acl-rules.json:${config.ACL_RULES_PATH}:ro
+` : ''}${config.CUSTOM_DB_ENABLED === 'true' ? `      - ./custom-categories.json:${config.CUSTOM_DB_PATH}:ro
+` : ''}    depends_on:
       - kafka
     networks:
       - bsdm-network
