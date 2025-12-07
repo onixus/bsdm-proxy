@@ -22,6 +22,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::SocketAddr;
+use std::panic;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 use tokio::io::copy_bidirectional;
@@ -500,7 +501,7 @@ async fn metrics_server(metrics: Arc<Metrics>) {
     info!("📊 Metrics server started on 0.0.0.0:9090");
 
     loop {
-        let (stream, _) = match listener.accept().await {
+        let (stream, addr) = match listener.accept().await {
             Ok(conn) => conn,
             Err(e) => {
                 error!("Failed to accept metrics connection: {}", e);
@@ -515,19 +516,30 @@ async fn metrics_server(metrics: Arc<Metrics>) {
                 let metrics = metrics.clone();
                 async move {
                     let path = req.uri().path();
+                    debug!("Metrics request from {}: {}", addr, path);
+                    
                     let response = match path {
                         "/metrics" => {
-                            match metrics.export() {
-                                Ok(body) => {
+                            debug!("Exporting metrics...");
+                            // Wrap in catch_unwind to catch panics
+                            let export_result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+                                metrics.export()
+                            }));
+                            
+                            match export_result {
+                                Ok(Ok(body)) => {
+                                    debug!("Metrics exported successfully: {} bytes", body.len());
                                     Response::builder()
                                         .status(StatusCode::OK)
                                         .header("Content-Type", "text/plain; version=0.0.4")
+                                        .header("Content-Length", body.len().to_string())
                                         .body(Body::new(Bytes::from(body)))
-                                        .unwrap_or_else(|_| {
+                                        .unwrap_or_else(|e| {
+                                            error!("Failed to build metrics response: {}", e);
                                             Response::new(Body::new(Bytes::from_static(b"500 Internal Server Error")))
                                         })
                                 }
-                                Err(e) => {
+                                Ok(Err(e)) => {
                                     error!("Failed to export metrics: {}", e);
                                     Response::builder()
                                         .status(StatusCode::INTERNAL_SERVER_ERROR)
@@ -536,9 +548,19 @@ async fn metrics_server(metrics: Arc<Metrics>) {
                                             Response::new(Body::new(Bytes::from_static(b"500 Internal Server Error")))
                                         })
                                 }
+                                Err(panic_info) => {
+                                    error!("Metrics export panicked: {:?}", panic_info);
+                                    Response::builder()
+                                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                        .body(Body::new(Bytes::from_static(b"500 Panic in metrics export")))
+                                        .unwrap_or_else(|_| {
+                                            Response::new(Body::new(Bytes::from_static(b"500 Internal Server Error")))
+                                        })
+                                }
                             }
                         }
                         "/health" => {
+                            debug!("Health check OK");
                             Response::builder()
                                 .status(StatusCode::OK)
                                 .header("Content-Type", "application/json")
@@ -548,6 +570,7 @@ async fn metrics_server(metrics: Arc<Metrics>) {
                                 })
                         }
                         "/ready" => {
+                            debug!("Readiness check OK");
                             Response::builder()
                                 .status(StatusCode::OK)
                                 .header("Content-Type", "application/json")
@@ -557,6 +580,7 @@ async fn metrics_server(metrics: Arc<Metrics>) {
                                 })
                         }
                         _ => {
+                            warn!("Unknown metrics endpoint: {}", path);
                             Response::builder()
                                 .status(StatusCode::NOT_FOUND)
                                 .body(Body::new(Bytes::from_static(b"404 Not Found")))
@@ -573,7 +597,7 @@ async fn metrics_server(metrics: Arc<Metrics>) {
                 .serve_connection(io, service)
                 .await
             {
-                error!("Metrics server connection error: {}", e);
+                error!("Metrics server connection error from {}: {}", addr, e);
             }
         });
     }
@@ -774,7 +798,7 @@ async fn handle_connection(
                                     }
                                 }
                             }
-                            Err(e) => error!("Upgrade failed: {}", e),
+                            Err(e) => error!("Upgrade failed: {}", e);
                         }
                     }
                 });
