@@ -242,9 +242,10 @@ impl ProxyHttp for ProxyService {
             let port = parts[1].parse::<u16>()
                 .map_err(|_| Error::new(ErrorType::InvalidHTTPHeader))?;
             
-            let use_tls = port == 443;
-            let peer = Box::new(HttpPeer::new((host, port), use_tls, host.to_string()));
-            info!("Created peer for {}:{} (TLS: {})", host, port, use_tls);
+            // For CONNECT, don't use TLS from proxy to upstream
+            // The client will establish TLS through the tunnel
+            let peer = Box::new(HttpPeer::new((host, port), false, host.to_string()));
+            info!("Created TCP tunnel peer for {}:{}", host, port);
             return Ok(peer);
         }
         
@@ -264,13 +265,32 @@ impl ProxyHttp for ProxyService {
         Ok(peer)
     }
     
+    async fn connected_to_upstream(
+        &self,
+        session: &mut Session,
+        _reused: bool,
+        _peer: &HttpPeer,
+        _fd: std::os::unix::io::RawFd,
+        _digest: Option<&pingora_core::protocols::Digest>,
+        _ctx: &mut Self::CTX,
+    ) -> PingoraResult<()> {
+        // For CONNECT requests, send 200 Connection Established
+        if session.req_header().method == Method::CONNECT {
+            info!("CONNECT tunnel established, sending 200 response");
+            let mut response = ResponseHeader::build(200, None)?;
+            response.insert_header("Connection", "keep-alive")?;
+            session.write_response_header(Box::new(response), false).await?;
+        }
+        Ok(())
+    }
+    
     async fn upstream_request_filter(
         &self,
         session: &mut Session,
         upstream_request: &mut RequestHeader,
         _ctx: &mut Self::CTX,
     ) -> PingoraResult<()> {
-        // Don't modify CONNECT requests
+        // Don't send CONNECT request to upstream
         if session.req_header().method == Method::CONNECT {
             return Ok(());
         }
