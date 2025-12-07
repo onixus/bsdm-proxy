@@ -22,16 +22,22 @@ struct CacheEvent {
     status: u16,
     cache_key: String,
     timestamp: u64,
+    #[serde(default)]  // ИСПРАВЛЕНИЕ: делаем поле опциональным
     headers: HashMap<String, String>,
-    body: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    cache_status: Option<String>,
     // New fields for user analytics
+    #[serde(skip_serializing_if = "Option::is_none")]
     user_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     username: Option<String>,
     client_ip: String,
     domain: String,
     response_size: u64,
     request_duration_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
     content_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     user_agent: Option<String>,
 }
 
@@ -108,9 +114,9 @@ impl Indexer {
                     "method": { "type": "keyword" },
                     "status": { "type": "short" },
                     "cache_key": { "type": "keyword" },
+                    "cache_status": { "type": "keyword" },
                     "timestamp": { "type": "date", "format": "epoch_second" },
                     "headers": { "type": "object" },
-                    "body": { "type": "text" },
                     // New fields for user analytics
                     "user_id": { "type": "keyword" },
                     "username": { "type": "keyword" },
@@ -181,7 +187,7 @@ impl Indexer {
         let mut batch: Vec<CacheEvent> = Vec::new();
         let batch_size = 50;
         let batch_timeout = Duration::from_secs(5);
-        let last_commit = tokio::time::Instant::now();
+        let mut last_commit = tokio::time::Instant::now();
 
         loop {
             match tokio::time::timeout(batch_timeout, self.consumer.recv()).await {
@@ -195,10 +201,11 @@ impl Indexer {
                                     self.index_batch(&batch).await?;
                                     batch.clear();
                                     self.consumer.commit_consumer_state(CommitMode::Async)?;
+                                    last_commit = tokio::time::Instant::now();
                                 }
                             }
                             Err(e) => {
-                                warn!("Failed to parse event: {}", e);
+                                warn!("Failed to parse event: {} - Payload: {}", e, String::from_utf8_lossy(payload));
                             }
                         }
                     }
@@ -211,6 +218,7 @@ impl Indexer {
                         self.index_batch(&batch).await?;
                         batch.clear();
                         self.consumer.commit_consumer_state(CommitMode::Async)?;
+                        last_commit = tokio::time::Instant::now();
                     }
                 }
             }
@@ -219,6 +227,7 @@ impl Indexer {
                 self.index_batch(&batch).await?;
                 batch.clear();
                 self.consumer.commit_consumer_state(CommitMode::Async)?;
+                last_commit = tokio::time::Instant::now();
             }
         }
     }
@@ -255,7 +264,7 @@ impl Indexer {
         {
             Ok(response) => {
                 if response.status_code().is_success() {
-                    info!("Indexed {} events to OpenSearch", events.len());
+                    info!("✅ Indexed {} events to OpenSearch", events.len());
                 } else {
                     warn!(
                         "Bulk index returned non-success status: {}",
@@ -295,12 +304,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::var("KAFKA_GROUP_ID").unwrap_or_else(|_| "cache-indexer-group".to_string());
     let index_name = "http-cache";
 
-    info!("Starting cache-indexer");
-    info!("Kafka brokers: {}", kafka_brokers);
-    info!("OpenSearch URL: {}", opensearch_url);
-    info!("SSL verification: {}", ssl_verify);
-    info!("Kafka topic: {}", kafka_topic);
-    info!("Kafka group: {}", kafka_group);
+    info!("🚀 Starting cache-indexer");
+    info!("📡 Kafka brokers: {}", kafka_brokers);
+    info!("🔍 OpenSearch URL: {}", opensearch_url);
+    info!("🔐 SSL verification: {}", ssl_verify);
+    info!("📨 Kafka topic: {}", kafka_topic);
+    info!("👥 Kafka group: {}", kafka_group);
 
     let indexer = Indexer::new(
         &kafka_brokers,
