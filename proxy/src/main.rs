@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose};
-use pingora::http::ResponseHeader;
+use pingora::http::{ResponseHeader, Method};
 use pingora::prelude::*;
 use pingora_cache::{CacheKey, CachePhase};
 use pingora_core::upstreams::peer::HttpPeer;
@@ -226,7 +226,7 @@ impl ProxyHttp for ProxyService {
         let req_header = session.req_header();
         
         // Handle CONNECT method for forward proxy
-        if req_header.method == http::Method::CONNECT {
+        if req_header.method == Method::CONNECT {
             // For CONNECT, the URI is in format "host:port"
             let uri_str = req_header.uri.to_string();
             info!("CONNECT request to: {}", uri_str);
@@ -271,7 +271,7 @@ impl ProxyHttp for ProxyService {
         _ctx: &mut Self::CTX,
     ) -> PingoraResult<()> {
         // Don't modify CONNECT requests
-        if session.req_header().method == http::Method::CONNECT {
+        if session.req_header().method == Method::CONNECT {
             return Ok(());
         }
         
@@ -397,14 +397,10 @@ fn main() {
     );
 
     // Add HTTP listener for forward proxy (CONNECT support)
-    proxy_service
-        .add_tcp("0.0.0.0:1488")
-        .expect("Failed to add HTTP listener");
+    proxy_service.add_tcp("0.0.0.0:1488");
     
     // Add HTTPS listener for TLS interception
-    proxy_service
-        .add_tls("0.0.0.0:1489", "/certs/server.crt", "/certs/server.key")
-        .expect("Failed to add TLS listener");
+    proxy_service.add_tls("0.0.0.0:1489", "/certs/server.crt", "/certs/server.key");
 
     server.add_service(proxy_service);
     info!("BSDM-Proxy starting on ports 1488 (HTTP) and 1489 (HTTPS)");
