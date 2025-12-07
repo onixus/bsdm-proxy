@@ -515,7 +515,7 @@ async fn metrics_server(metrics: Arc<Metrics>) {
                 let metrics = metrics.clone();
                 async move {
                     let path = req.uri().path();
-                    match path {
+                    let response = match path {
                         "/metrics" => {
                             match metrics.export() {
                                 Ok(body) => {
@@ -523,29 +523,49 @@ async fn metrics_server(metrics: Arc<Metrics>) {
                                         .status(StatusCode::OK)
                                         .header("Content-Type", "text/plain; version=0.0.4")
                                         .body(Body::new(Bytes::from(body)))
+                                        .unwrap_or_else(|_| {
+                                            Response::new(Body::new(Bytes::from_static(b"500 Internal Server Error")))
+                                        })
                                 }
                                 Err(e) => {
                                     error!("Failed to export metrics: {}", e);
                                     Response::builder()
                                         .status(StatusCode::INTERNAL_SERVER_ERROR)
                                         .body(Body::new(Bytes::from_static(b"500 Internal Server Error")))
+                                        .unwrap_or_else(|_| {
+                                            Response::new(Body::new(Bytes::from_static(b"500 Internal Server Error")))
+                                        })
                                 }
                             }
                         }
-                        "/health" => Response::builder()
-                            .status(StatusCode::OK)
-                            .body(Body::new(Bytes::from_static(b"{\"status\":\"ok\"}"))),
-                        "/ready" => Response::builder()
-                            .status(StatusCode::OK)
-                            .body(Body::new(Bytes::from_static(b"{\"status\":\"ready\"}"))),
-                        _ => Response::builder()
-                            .status(StatusCode::NOT_FOUND)
-                            .body(Body::new(Bytes::from_static(b"404 Not Found"))),
-                    }
-                    .map_err(|e| {
-                        error!("Failed to build response: {}", e);
-                        e
-                    })
+                        "/health" => {
+                            Response::builder()
+                                .status(StatusCode::OK)
+                                .header("Content-Type", "application/json")
+                                .body(Body::new(Bytes::from_static(b"{\"status\":\"ok\"}")))  
+                                .unwrap_or_else(|_| {
+                                    Response::new(Body::new(Bytes::from_static(b"{\"status\":\"ok\"}")))  
+                                })
+                        }
+                        "/ready" => {
+                            Response::builder()
+                                .status(StatusCode::OK)
+                                .header("Content-Type", "application/json")
+                                .body(Body::new(Bytes::from_static(b"{\"status\":\"ready\"}")))  
+                                .unwrap_or_else(|_| {
+                                    Response::new(Body::new(Bytes::from_static(b"{\"status\":\"ready\"}")))  
+                                })
+                        }
+                        _ => {
+                            Response::builder()
+                                .status(StatusCode::NOT_FOUND)
+                                .body(Body::new(Bytes::from_static(b"404 Not Found")))
+                                .unwrap_or_else(|_| {
+                                    Response::new(Body::new(Bytes::from_static(b"404 Not Found")))
+                                })
+                        }
+                    };
+                    Ok::<_, Infallible>(response)
                 }
             });
 
@@ -553,7 +573,7 @@ async fn metrics_server(metrics: Arc<Metrics>) {
                 .serve_connection(io, service)
                 .await
             {
-                error!("Metrics server error: {}", e);
+                error!("Metrics server connection error: {}", e);
             }
         });
     }
