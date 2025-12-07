@@ -1,51 +1,40 @@
 [package]
 name = "bsdm-proxy"
-version = "0.2.0"
+version = "2.0.0"
 edition = "2021"
-license = "MIT"
-authors = ["BSDM-Proxy Contributors"]
-description = "High-performance HTTPS caching forward proxy with Hyper and quick_cache"
-repository = "https://github.com/onixus/bsdm-proxy"
-keywords = ["proxy", "https", "cache", "mitm", "hyper"]
-categories = ["network-programming", "web-programming"]
-
-[[bin]]
-name = "proxy"
-path = "src/main.rs"
 
 [dependencies]
-# HTTP/Async
-tokio = { workspace = true }
-hyper = { workspace = true }
-hyper-util = { workspace = true }
-http-body-util = { workspace = true }
+hyper = { version = "1.0", features = ["full"] }
+hyper-util = { version = "0.1", features = ["full"] }
+tokio = { version = "1", features = ["full"] }
+http-body-util = "0.1"
+quick_cache = "0.6"
+rcgen = "0.13"
+rdkafka = "0.38"
+prometheus = { version = "0.13", features = ["process"] }
+tokio-rustls = { version = "0.26", features = ["ring"] }
+rustls = "0.23"
+rustls-pemfile = "2.1"
+sha2 = "0.10"
+base64 = "0.22"
+url = "2.5"
+bytes = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# Caching
-quick_cache = { workspace = true }
+# Authentication
+ldap3 = { version = "0.11", optional = true }
+ntlm = { version = "0.5", optional = true }
+hex = "0.4"
 
-# TLS
-rustls = { workspace = true }
-rcgen = { workspace = true }
-tokio-rustls = { workspace = true }
+[features]
+default = ["auth-basic"]
+auth-basic = []
+auth-ldap = ["ldap3"]
+auth-ntlm = ["ntlm"]
+auth-all = ["auth-ldap", "auth-ntlm"]
 
-# Kafka
-rdkafka = { workspace = true }
-
-# Data
-serde = { workspace = true }
-serde_json = { workspace = true }
-
-# Metrics
-prometheus = { workspace = true }
-
-# Utils
-async-trait = { workspace = true }
-bytes = { workspace = true }
-sha2 = { workspace = true }
-hex = { workspace = true }
-time = { workspace = true }
-base64 = { workspace = true }
-url = { workspace = true }
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
-rand = "0.8"
+[dev-dependencies]
+tokio-test = "0.4"
