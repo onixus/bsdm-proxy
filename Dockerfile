@@ -23,37 +23,18 @@ RUN apk add --no-cache \
     zlib-static \
     zstd-dev
 
-# Копируем только Cargo.toml и Cargo.lock сначала для кеширования зависимостей
+# Копируем весь workspace
 COPY Cargo.toml Cargo.lock ./
-COPY proxy/Cargo.toml ./proxy/
-COPY cache-indexer/Cargo.toml ./cache-indexer/
+COPY proxy ./proxy
+COPY cache-indexer ./cache-indexer
 
-# Создаем пустые src директории для сборки зависимостей
-RUN mkdir -p proxy/src cache-indexer/src && \
-    echo 'fn main() {}' > proxy/src/main.rs && \
-    echo 'fn main() {}' > cache-indexer/src/main.rs
-
-# Настройка окружения
+# Настройка окружения для статической линковки OpenSSL
 ENV OPENSSL_STATIC=1 \
     OPENSSL_LIB_DIR=/usr/lib \
     OPENSSL_INCLUDE_DIR=/usr/include
 
-# Собираем зависимости (этот слой будет кешироваться)
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/build/target \
-    cargo build --release --target x86_64-unknown-linux-musl && \
-    rm -rf proxy/src cache-indexer/src
-
-# Копируем реальный исходный код
-COPY proxy/src ./proxy/src
-COPY cache-indexer/src ./cache-indexer/src
-
-# Собираем финальные бинарники
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/build/target \
-    cargo build --release --target x86_64-unknown-linux-musl && \
-    cp target/x86_64-unknown-linux-musl/release/proxy /tmp/proxy && \
-    cp target/x86_64-unknown-linux-musl/release/cache-indexer /tmp/cache-indexer
+# Собираем оба бинарника в release режиме
+RUN cargo build --release --target x86_64-unknown-linux-musl
 
 # ============================================================
 # Proxy runtime
@@ -68,7 +49,8 @@ RUN apk add --no-cache \
     zlib \
     zstd-libs
 
-COPY --from=builder /tmp/proxy /usr/local/bin/proxy
+# Копируем скомпилированный бинарник
+COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/proxy /usr/local/bin/proxy
 
 EXPOSE 1488
 CMD ["proxy"]
@@ -86,7 +68,8 @@ RUN apk add --no-cache \
     zlib \
     zstd-libs
 
-COPY --from=builder /tmp/cache-indexer /usr/local/bin/cache-indexer
+# Копируем скомпилированный бинарник
+COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/cache-indexer /usr/local/bin/cache-indexer
 
 EXPOSE 8080
 CMD ["cache-indexer"]
