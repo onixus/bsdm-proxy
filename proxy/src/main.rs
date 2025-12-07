@@ -350,8 +350,7 @@ impl ProxyHttp for ProxyService {
     }
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
     tracing_subscriber::fmt::init();
     let ca_cert = std::fs::read("/certs/ca.crt").expect("Failed to read CA certificate");
     let ca_key = std::fs::read("/certs/ca.key").expect("Failed to read CA private key");
