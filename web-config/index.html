@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BSDM-Proxy Configuration</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔧 BSDM-Proxy Configuration</h1>
+            <p class="subtitle">Configure your proxy deployment</p>
+        </header>
+
+        <nav class="tabs">
+            <button class="tab active" data-tab="general">General</button>
+            <button class="tab" data-tab="cache">Cache</button>
+            <button class="tab" data-tab="kafka">Kafka</button>
+            <button class="tab" data-tab="auth">Auth</button>
+            <button class="tab" data-tab="acl">ACL</button>
+            <button class="tab" data-tab="categorization">Categories</button>
+            <button class="tab" data-tab="monitoring">Monitoring</button>
+        </nav>
+
+        <main>
+            <!-- General, Cache, Kafka, Auth tabs remain the same -->
+            <!-- ACL Tab -->
+            <section id="acl" class="tab-content">
+                <h2>🔐 Access Control Lists</h2>
+                
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="acl_enabled">
+                        Enable ACL
+                    </label>
+                    <span class="help">Control access by domain, category, user, time</span>
+                </div>
+
+                <div id="acl_options" style="display: none;">
+                    <div class="form-group">
+                        <label for="acl_default_action">Default Action</label>
+                        <select id="acl_default_action">
+                            <option value="allow">Allow</option>
+                            <option value="deny" selected>Deny</option>
+                        </select>
+                        <span class="help">Action when no rules match</span>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="acl_rules_path">Rules File Path</label>
+                        <input type="text" id="acl_rules_path" value="/etc/bsdm-proxy/acl-rules.json">
+                        <span class="help">Path to JSON rules file</span>
+                    </div>
+
+                    <h3>Quick Rules</h3>
+                    
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="acl_block_adult">
+                            Block Adult Content
+                        </label>
+                    </div>
+
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="acl_block_gambling">
+                            Block Gambling
+                        </label>
+                    </div>
+
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="acl_block_malware" checked>
+                            Block Malware
+                        </label>
+                    </div>
+
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="acl_block_phishing" checked>
+                            Block Phishing
+                        </label>
+                    </div>
+
+                    <div class="info-box">
+                        <strong>💡 Rule Types Available:</strong><br>
+                        • Domain (*.example.com)<br>
+                        • URL Prefix (/admin/*)<br>
+                        • Regex (\.exe$)<br>
+                        • Category (adult, malware)<br>
+                        • Time Window (9AM-5PM)<br>
+                        • User/Group<br>
+                        • IP Range
+                    </div>
+                </div>
+            </section>
+
+            <!-- Categorization Tab -->
+            <section id="categorization" class="tab-content">
+                <h2>🌐 URL Categorization</h2>
+                
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="categorization_enabled">
+                        Enable Categorization
+                    </label>
+                    <span class="help">Automatic URL category detection</span>
+                </div>
+
+                <div id="categorization_options" style="display: none;">
+                    <div class="form-group">
+                        <label for="categorization_cache_ttl">Cache TTL (seconds)</label>
+                        <input type="number" id="categorization_cache_ttl" value="3600" min="300" max="86400">
+                        <span class="help">How long to cache categories</span>
+                    </div>
+
+                    <h3>Shallalist (Open-Source DB)</h3>
+                    
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="shallalist_enabled" checked>
+                            Enable Shallalist
+                        </label>
+                        <span class="help">60+ categories, millions of domains</span>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="shallalist_path">Shallalist Path</label>
+                        <input type="text" id="shallalist_path" value="/var/lib/shallalist">
+                        <span class="help">Path to extracted Shallalist database</span>
+                    </div>
+
+                    <h3>URLhaus (Malware Detection)</h3>
+                    
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="urlhaus_enabled" checked>
+                            Enable URLhaus
+                        </label>
+                        <span class="help">Real-time malware URL detection</span>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="urlhaus_api">URLhaus API</label>
+                        <input type="text" id="urlhaus_api" value="https://urlhaus-api.abuse.ch/v1/url/">
+                    </div>
+
+                    <h3>PhishTank (Phishing Detection)</h3>
+                    
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="phishtank_enabled" checked>
+                            Enable PhishTank
+                        </label>
+                        <span class="help">Community phishing database</span>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="phishtank_api">PhishTank API</label>
+                        <input type="text" id="phishtank_api" value="https://checkurl.phishtank.com/checkurl/">
+                    </div>
+
+                    <h3>Custom Database</h3>
+                    
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="custom_db_enabled">
+                            Enable Custom DB
+                        </label>
+                        <span class="help">Your own category database (JSON)</span>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="custom_db_path">Custom DB Path</label>
+                        <input type="text" id="custom_db_path" value="/etc/bsdm-proxy/custom-categories.json">
+                    </div>
+
+                    <div class="info-box">
+                        <strong>📚 Categories Available:</strong><br>
+                        <strong>Threats:</strong> malware, phishing, spyware<br>
+                        <strong>Inappropriate:</strong> adult, gambling, violence, weapons, drugs<br>
+                        <strong>Tracking:</strong> adv, tracker, redirector<br>
+                        <strong>Safe:</strong> education, news, business, health<br>
+                        <br>
+                        <strong>Setup:</strong><br>
+                        <code>wget http://www.shallalist.de/Downloads/shallalist.tar.gz</code><br>
+                        <code>tar -xzf shallalist.tar.gz -C /var/lib/</code>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <button class="btn btn-primary" onclick="generateConfig()">Generate Configuration</button>
+            <button class="btn btn-secondary" onclick="exportEnv()">Export .env</button>
+            <button class="btn btn-secondary" onclick="exportDockerCompose()">Export docker-compose.yml</button>
+        </footer>
+
+        <!-- Output Modal -->
+        <div id="output-modal" class="modal">
+            <div class="modal-content">
+                <span class="close" onclick="closeModal()">&times;</span>
+                <h2 id="modal-title">Configuration</h2>
+                <pre id="modal-output"></pre>
+                <button class="btn btn-primary" onclick="copyToClipboard()">Copy to Clipboard</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
