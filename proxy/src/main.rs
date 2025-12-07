@@ -1,7 +1,7 @@
 use base64::engine::general_purpose;
 use bytes::Bytes;
 use hyper::body::Incoming;
-use hyper::header::{HeaderName, HeaderValue, AUTHORIZATION, CONTENT_TYPE, USER_AGENT};
+use hyper::header::{HeaderName, HeaderValue, AUTHORIZATION};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
@@ -144,26 +144,26 @@ impl CertCache {
 /// Событие для Kafka (оптимизировано для сериализации)
 #[derive(Serialize, Clone, Debug)]
 struct CacheEvent {
-    url: Arc<str>,
-    method: Arc<str>,
+    url: String,
+    method: String,
     status: u16,
-    cache_key: Arc<str>,
+    cache_key: String,
     cache_status: &'static str,
     timestamp: u64,
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     headers: HashMap<String, String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    user_id: Option<Arc<str>>,
+    user_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    username: Option<Arc<str>>,
-    client_ip: Arc<str>,
-    domain: Arc<str>,
+    username: Option<String>,
+    client_ip: String,
+    domain: String,
     response_size: u64,
     request_duration_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    content_type: Option<Arc<str>>,
+    content_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    user_agent: Option<Arc<str>>,
+    user_agent: Option<String>,
 }
 
 /// Конфигурация кеша
@@ -247,23 +247,28 @@ impl ProxyService {
     }
 
     #[inline]
-    fn extract_domain(url_str: &str) -> Arc<str> {
+    fn extract_domain(url_str: &str) -> String {
         url::Url::parse(url_str)
             .ok()
             .and_then(|u| u.host().map(|h| h.to_string()))
             .unwrap_or_else(|| "unknown".to_string())
-            .into()
     }
 
-    fn extract_user_info(req: &Request<Incoming>) -> (Option<Arc<str>>, Option<Arc<str>>) {
-        let auth_header = req.headers().get(AUTHORIZATION)?;
-        let auth_str = auth_header.to_str().ok()?;
-        let encoded = auth_str.strip_prefix("Basic ")?;
-        let decoded_bytes = general_purpose::STANDARD.decode(encoded).ok()?;
-        let credentials = String::from_utf8(decoded_bytes).ok()?;
-        let (username, _) = credentials.split_once(':')?;
-        let username_arc: Arc<str> = username.into();
-        Some((Some(username_arc.clone()), Some(username_arc)))
+    fn extract_user_info(req: &Request<Incoming>) -> (Option<String>, Option<String>) {
+        if let Some(auth_header) = req.headers().get(AUTHORIZATION) {
+            if let Ok(auth_str) = auth_header.to_str() {
+                if let Some(encoded) = auth_str.strip_prefix("Basic ") {
+                    if let Ok(decoded_bytes) = general_purpose::STANDARD.decode(encoded) {
+                        if let Ok(credentials) = String::from_utf8(decoded_bytes) {
+                            if let Some((username, _)) = credentials.split_once(':') {
+                                return (Some(username.to_string()), Some(username.to_string()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        (None, None)
     }
 
     // Асинхронная отправка в Kafka без блокировки
@@ -274,7 +279,7 @@ impl ProxyService {
                     Ok(payload) => {
                         let record = FutureRecord::to("cache-events")
                             .payload(&payload)
-                            .key(event.cache_key.as_ref());
+                            .key(&event.cache_key);
                         if let Err((e, _)) = producer.send(record, Duration::ZERO).await {
                             warn!("Kafka send failed: {}", e);
                         }
@@ -289,7 +294,7 @@ impl ProxyService {
         &self,
         authority: String,
         mut client_stream: TcpStream,
-        client_ip: Arc<str>,
+        client_ip: String,
         request_start: Instant,
     ) -> Result<(), Box<dyn std::error::Error>> {
         info!("CONNECT tunnel to: {}", authority);
@@ -301,13 +306,13 @@ impl ProxyService {
         let (bytes_c2u, bytes_u2c) = copy_bidirectional(&mut client_stream, &mut upstream).await?;
 
         let duration_ms = request_start.elapsed().as_millis() as u64;
-        let domain: Arc<str> = authority.split(':').next().unwrap_or("unknown").into();
+        let domain = authority.split(':').next().unwrap_or("unknown").to_string();
         
         let event = CacheEvent {
-            url: format!("https://{}", authority).into(),
-            method: "CONNECT".into(),
+            url: format!("https://{}", authority),
+            method: "CONNECT".to_string(),
             status: 200,
-            cache_key: self.generate_cache_key("CONNECT", &authority),
+            cache_key: self.generate_cache_key("CONNECT", &authority).to_string(),
             cache_status: "BYPASS",
             timestamp: SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)?
@@ -331,13 +336,13 @@ impl ProxyService {
     async fn handle_request(
         &self,
         req: Request<Incoming>,
-        client_ip: Arc<str>,
+        client_ip: String,
     ) -> Result<Response<Body>, Box<dyn std::error::Error + Send + Sync>> {
         let request_start = Instant::now();
-        let method: Arc<str> = req.method().as_str().into();
+        let method = req.method().to_string();
         let uri = req.uri().clone();
-        let url: Arc<str> = uri.to_string().into();
-        let (user_id, username) = Self::extract_user_info(&req).unwrap_or((None, None));
+        let url = uri.to_string();
+        let (user_id, username) = Self::extract_user_info(&req);
         let cache_key = self.generate_cache_key(&method, &url);
 
         // Проверка кеша
@@ -349,7 +354,7 @@ impl ProxyService {
                     url: url.clone(),
                     method: method.clone(),
                     status: cached.status,
-                    cache_key: cache_key.clone(),
+                    cache_key: cache_key.to_string(),
                     cache_status: "HIT",
                     timestamp: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs(),
                     headers: HashMap::new(),  // Пустой для экономии памяти
@@ -361,7 +366,7 @@ impl ProxyService {
                     request_duration_ms: request_start.elapsed().as_millis() as u64,
                     content_type: cached.headers.iter()
                         .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
-                        .map(|(_, v)| v.clone()),
+                        .map(|(_, v)| v.to_string()),
                     user_agent: None,
                 };
                 
@@ -371,6 +376,11 @@ impl ProxyService {
         }
 
         info!("Cache MISS: {} {}", method, url);
+        
+        // Преобразование Incoming в Body для клиента
+        let (parts, body) = req.into_parts();
+        let body_bytes = http_body_util::BodyExt::collect(body).await?.to_bytes();
+        let req = Request::from_parts(parts, Body::new(body_bytes));
         
         // Запрос к upstream с переиспользуемым клиентом
         match self.http_client.request(req).await {
@@ -382,7 +392,9 @@ impl ProxyService {
                     .filter_map(|(k, v)| v.to_str().ok().map(|v| (k.as_str().to_string(), v.to_string())))
                     .collect();
 
-                let body_bytes = hyper::body::to_bytes(response.into_body()).await?;
+                let body_bytes = http_body_util::BodyExt::collect(response.into_body())
+                    .await?
+                    .to_bytes();
                 let body_size = body_bytes.len();
                 
                 let cache_status = if self.is_cacheable(&method, status.as_u16(), body_size) {
@@ -409,7 +421,7 @@ impl ProxyService {
                     url: url.clone(),
                     method: method.clone(),
                     status: status.as_u16(),
-                    cache_key,
+                    cache_key: cache_key.to_string(),
                     cache_status,
                     timestamp: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs(),
                     headers: headers_map.clone(),
@@ -419,8 +431,8 @@ impl ProxyService {
                     domain: Self::extract_domain(&url),
                     response_size: body_size as u64,
                     request_duration_ms: request_start.elapsed().as_millis() as u64,
-                    content_type: headers_map.get("content-type").map(|s| Arc::from(s.as_str())),
-                    user_agent: headers_map.get("user-agent").map(|s| Arc::from(s.as_str())),
+                    content_type: headers_map.get("content-type").cloned(),
+                    user_agent: headers_map.get("user-agent").cloned(),
                 };
                 
                 self.send_to_kafka_async(event);
@@ -496,7 +508,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         let (stream, addr) = listener.accept().await?;
         let service_clone = service.clone();
-        let client_ip: Arc<str> = addr.ip().to_string().into();
+        let client_ip = addr.ip().to_string();
         
         tokio::spawn(async move {
             if let Err(e) = handle_connection(stream, addr, service_clone, client_ip).await {
@@ -510,7 +522,7 @@ async fn handle_connection(
     stream: TcpStream,
     addr: SocketAddr,
     service: Arc<ProxyService>,
-    client_ip: Arc<str>,
+    client_ip: String,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let io = TokioIo::new(stream);
     let svc = service_fn(move |req: Request<Incoming>| {
@@ -531,7 +543,8 @@ async fn handle_connection(
                     async move {
                         match hyper::upgrade::on(req).await {
                             Ok(upgraded) => {
-                                let stream = TokioIo::into_inner(upgraded);
+                                let stream = TokioIo::new(upgraded);
+                                let stream = TokioIo::into_inner(stream);
                                 let _ = service.handle_connect(authority, stream, client_ip, request_start).await;
                             }
                             Err(e) => error!("Upgrade failed: {}", e),
