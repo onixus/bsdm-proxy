@@ -1,4 +1,9 @@
-use opensearch::{http::transport::TransportBuilder, BulkParts, OpenSearch};
+use opensearch::{
+    auth::Credentials,
+    cert::CertificateValidation,
+    http::transport::{SingleNodeConnectionPool, TransportBuilder},
+    BulkParts, OpenSearch,
+};
 use rdkafka::{
     config::ClientConfig,
     consumer::{CommitMode, Consumer, StreamConsumer},
@@ -40,6 +45,9 @@ impl Indexer {
     async fn new(
         kafka_brokers: &str,
         opensearch_url: &str,
+        opensearch_username: Option<String>,
+        opensearch_password: Option<String>,
+        ssl_verify: bool,
         kafka_topic: &str,
         kafka_group: &str,
         index_name: &str,
@@ -55,11 +63,26 @@ impl Indexer {
         consumer.subscribe(&[kafka_topic])?;
         info!("Subscribed to Kafka topic: {}", kafka_topic);
 
-        let transport = TransportBuilder::new(
-            opensearch::http::transport::SingleNodeConnectionPool::new(opensearch_url.parse()?),
-        )
-        .build()?;
+        // Создаём транспорт с аутентификацией
+        let mut transport_builder = TransportBuilder::new(
+            SingleNodeConnectionPool::new(opensearch_url.parse()?),
+        );
 
+        // Добавляем credentials если указаны
+        if let (Some(username), Some(password)) = (opensearch_username, opensearch_password) {
+            info!("Using authentication for OpenSearch: {}", username);
+            transport_builder = transport_builder
+                .auth(Credentials::Basic(username, password));
+        }
+
+        // Отключаем проверку SSL если нужно
+        if !ssl_verify {
+            warn!("SSL certificate verification is disabled!");
+            transport_builder = transport_builder
+                .cert_validation(CertificateValidation::None);
+        }
+
+        let transport = transport_builder.build()?;
         let opensearch = OpenSearch::new(transport);
 
         Ok(Self {
@@ -261,6 +284,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let kafka_brokers = std::env::var("KAFKA_BROKERS").unwrap_or_else(|_| "kafka:9092".to_string());
     let opensearch_url =
         std::env::var("OPENSEARCH_URL").unwrap_or_else(|_| "http://opensearch:9200".to_string());
+    let opensearch_username = std::env::var("OPENSEARCH_USERNAME").ok();
+    let opensearch_password = std::env::var("OPENSEARCH_PASSWORD").ok();
+    let ssl_verify = std::env::var("OPENSEARCH_SSL_VERIFY")
+        .unwrap_or_else(|_| "true".to_string())
+        .parse::<bool>()
+        .unwrap_or(true);
     let kafka_topic = std::env::var("KAFKA_TOPIC").unwrap_or_else(|_| "cache-events".to_string());
     let kafka_group =
         std::env::var("KAFKA_GROUP_ID").unwrap_or_else(|_| "cache-indexer-group".to_string());
@@ -269,12 +298,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Starting cache-indexer");
     info!("Kafka brokers: {}", kafka_brokers);
     info!("OpenSearch URL: {}", opensearch_url);
+    info!("SSL verification: {}", ssl_verify);
     info!("Kafka topic: {}", kafka_topic);
     info!("Kafka group: {}", kafka_group);
 
     let indexer = Indexer::new(
         &kafka_brokers,
         &opensearch_url,
+        opensearch_username,
+        opensearch_password,
+        ssl_verify,
         &kafka_topic,
         &kafka_group,
         index_name,
