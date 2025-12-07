@@ -35,7 +35,8 @@ services:
       - node.name=opensearch-node1
       - discovery.type=single-node
       - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
-      - "DISABLE_SECURITY_PLUGIN=true"  # Отключено для упрощения
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+      - DISABLE_SECURITY_PLUGIN=true
       - "bootstrap.memory_lock=true"
     ulimits:
       memlock:
@@ -63,8 +64,8 @@ services:
     ports:
       - "5601:5601"
     environment:
-      - OPENSEARCH_HOSTS=["http://opensearch:9200"]  # HTTP без SSL
-      - DISABLE_SECURITY_PLUGIN=true  # Отключено
+      - OPENSEARCH_HOSTS=["http://opensearch:9200"]
+      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true  # КЛЮЧЕВАЯ ПЕРЕМЕННАЯ!
       - "SERVER_HOST=0.0.0.0"
     depends_on:
       opensearch:
@@ -111,7 +112,7 @@ services:
       target: cache-indexer
     environment:
       - KAFKA_BROKERS=kafka:9092
-      - OPENSEARCH_URL=http://opensearch:9200  # HTTP без auth
+      - OPENSEARCH_URL=http://opensearch:9200
       - KAFKA_TOPIC=cache-events
       - KAFKA_GROUP_ID=cache-indexer-group
       - RUST_LOG=info,cache_indexer=debug
