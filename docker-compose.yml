@@ -31,11 +31,24 @@ services:
   opensearch:
     image: opensearchproject/opensearch:2.11.0
     environment:
+      - cluster.name=opensearch-cluster
+      - node.name=opensearch-node1
       - discovery.type=single-node
       - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
-      - "DISABLE_SECURITY_PLUGIN=false"  # Включена аутентификация
+      - "DISABLE_SECURITY_PLUGIN=false"
       - "OPENSEARCH_INITIAL_ADMIN_PASSWORD=BsdmProxy2025!Secure"
       - "bootstrap.memory_lock=true"
+      # Настройки для работы с Dashboards
+      - plugins.security.ssl.http.enabled=true
+      - plugins.security.ssl.http.pemcert_filepath=esnode.pem
+      - plugins.security.ssl.http.pemkey_filepath=esnode-key.pem
+      - plugins.security.ssl.http.pemtrustedcas_filepath=root-ca.pem
+      - plugins.security.ssl.transport.pemcert_filepath=esnode.pem
+      - plugins.security.ssl.transport.pemkey_filepath=esnode-key.pem
+      - plugins.security.ssl.transport.pemtrustedcas_filepath=root-ca.pem
+      - plugins.security.ssl.transport.enforce_hostname_verification=false
+      - plugins.security.allow_unsafe_democertificates=true
+      - plugins.security.allow_default_init_securityindex=true
     ulimits:
       memlock:
         soft: -1
@@ -45,12 +58,17 @@ services:
         hard: 65536
     ports:
       - "9200:9200"
-      - "9600:9600"  # Performance analyzer
+      - "9600:9600"
     volumes:
       - opensearch-data:/usr/share/opensearch/data
     networks:
       - bsdm-net
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -k -u admin:BsdmProxy2025!Secure https://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   opensearch-dashboards:
     image: opensearchproject/opensearch-dashboards:2.11.0
@@ -60,14 +78,20 @@ services:
       - OPENSEARCH_HOSTS=["https://opensearch:9200"]
       - OPENSEARCH_USERNAME=admin
       - OPENSEARCH_PASSWORD=BsdmProxy2025!Secure
-      - DISABLE_SECURITY_PLUGIN=false  # Включена аутентификация
+      - DISABLE_SECURITY_PLUGIN=false
       - "SERVER_HOST=0.0.0.0"
-      - OPENSEARCH_SSL_VERIFICATIONMODE=none  # Отключаем проверку SSL для self-signed сертификатов
+      - OPENSEARCH_SSL_VERIFICATIONMODE=none
     depends_on:
-      - opensearch
+      opensearch:
+        condition: service_healthy
     networks:
       - bsdm-net
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5601/api/status || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
 
   proxy:
     build:
@@ -75,13 +99,13 @@ services:
       dockerfile: Dockerfile
       target: proxy
     ports:
-      - "1488:1488"  # HTTP forward proxy (CONNECT support)
-      - "1489:1489"  # HTTPS TLS interception
+      - "1488:1488"
+      - "1489:1489"
     environment:
       - KAFKA_BROKERS=kafka:9092
       - CACHE_CAPACITY=10000
       - CACHE_TTL_SECONDS=3600
-      - MAX_CACHE_BODY_SIZE=10485760  # 10MB
+      - MAX_CACHE_BODY_SIZE=10485760
       - HTTP_PORT=1488
       - RUST_LOG=info,bsdm_proxy=debug
       - RUST_BACKTRACE=1
@@ -94,12 +118,6 @@ services:
     tty: true
     stdin_open: true
     restart: unless-stopped
-    # Resource limits (опционально)
-    # deploy:
-    #   resources:
-    #     limits:
-    #       cpus: '2'
-    #       memory: 2G
 
   cache-indexer:
     build:
@@ -111,14 +129,14 @@ services:
       - OPENSEARCH_URL=https://opensearch:9200
       - OPENSEARCH_USERNAME=admin
       - OPENSEARCH_PASSWORD=BsdmProxy2025!Secure
-      - OPENSEARCH_SSL_VERIFY=false  # Отключаем проверку SSL
+      - OPENSEARCH_SSL_VERIFY=false
       - KAFKA_TOPIC=cache-events
       - KAFKA_GROUP_ID=cache-indexer-group
       - RUST_LOG=info,cache_indexer=debug
       - RUST_BACKTRACE=1
     depends_on:
-      - kafka
-      - opensearch
+      opensearch:
+        condition: service_healthy
     networks:
       - bsdm-net
     restart: unless-stopped
