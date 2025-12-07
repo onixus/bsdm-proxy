@@ -2,22 +2,23 @@
 //!
 //! Supports multiple authentication backends:
 //! - Basic Auth (username:password in base64)
-//! - LDAP (Active Directory, OpenLDAP)
-//! - NTLM (Windows Integrated Authentication)
+//! - LDAP (Active Directory, OpenLDAP) - optional feature
+//! - NTLM (Windows Integrated Authentication) - TODO
 
 use base64::engine::general_purpose;
 use base64::Engine;
-use hyper::header::{HeaderValue, PROXY_AUTHENTICATE, PROXY_AUTHORIZATION};
+use hyper::header::{PROXY_AUTHENTICATE, PROXY_AUTHORIZATION};
 use hyper::{Request, Response, StatusCode};
-use ldap3::{LdapConn, LdapConnSettings, Scope, SearchEntry};
-use ntlm::Ntlm;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
+
+#[cfg(feature = "auth-ldap")]
+use ldap3::{LdapConn, LdapConnSettings, Scope, SearchEntry};
 
 /// Authentication backend type
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -25,8 +26,10 @@ pub enum AuthBackend {
     /// Basic authentication only (no external validation)
     Basic,
     /// LDAP/Active Directory
+    #[cfg(feature = "auth-ldap")]
     Ldap,
     /// NTLM (Windows Integrated)
+    #[cfg(feature = "auth-ntlm")]
     Ntlm,
 }
 
@@ -34,14 +37,16 @@ impl std::fmt::Display for AuthBackend {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             AuthBackend::Basic => write!(f, "basic"),
+            #[cfg(feature = "auth-ldap")]
             AuthBackend::Ldap => write!(f, "ldap"),
+            #[cfg(feature = "auth-ntlm")]
             AuthBackend::Ntlm => write!(f, "ntlm"),
         }
     }
 }
 
 /// User information
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct UserInfo {
     pub username: String,
     pub display_name: Option<String>,
@@ -77,6 +82,7 @@ impl CachedUser {
 }
 
 /// LDAP configuration
+#[cfg(feature = "auth-ldap")]
 #[derive(Debug, Clone)]
 pub struct LdapConfig {
     pub servers: Vec<String>,
@@ -89,6 +95,7 @@ pub struct LdapConfig {
     pub use_tls: bool,
 }
 
+#[cfg(feature = "auth-ldap")]
 impl Default for LdapConfig {
     fn default() -> Self {
         Self {
@@ -105,12 +112,14 @@ impl Default for LdapConfig {
 }
 
 /// NTLM configuration
+#[cfg(feature = "auth-ntlm")]
 #[derive(Debug, Clone)]
 pub struct NtlmConfig {
     pub domain: String,
     pub workstation: Option<String>,
 }
 
+#[cfg(feature = "auth-ntlm")]
 impl Default for NtlmConfig {
     fn default() -> Self {
         Self {
@@ -127,7 +136,9 @@ pub struct AuthConfig {
     pub backend: AuthBackend,
     pub realm: String,
     pub cache_ttl: Duration,
+    #[cfg(feature = "auth-ldap")]
     pub ldap: Option<LdapConfig>,
+    #[cfg(feature = "auth-ntlm")]
     pub ntlm: Option<NtlmConfig>,
 }
 
@@ -138,7 +149,9 @@ impl Default for AuthConfig {
             backend: AuthBackend::Basic,
             realm: "BSDM-Proxy".to_string(),
             cache_ttl: Duration::from_secs(300),
+            #[cfg(feature = "auth-ldap")]
             ldap: None,
+            #[cfg(feature = "auth-ntlm")]
             ntlm: None,
         }
     }
@@ -148,7 +161,6 @@ impl Default for AuthConfig {
 pub struct AuthManager {
     config: AuthConfig,
     user_cache: Arc<RwLock<HashMap<String, CachedUser>>>,
-    ntlm_challenges: Arc<RwLock<HashMap<String, Vec<u8>>>>,
 }
 
 impl AuthManager {
@@ -157,7 +169,6 @@ impl AuthManager {
         Self {
             config,
             user_cache: Arc::new(RwLock::new(HashMap::new())),
-            ntlm_challenges: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -172,7 +183,7 @@ impl AuthManager {
         let auth_str = auth_header.to_str().ok()?;
 
         match self.config.backend {
-            AuthBackend::Basic | AuthBackend::Ldap => {
+            AuthBackend::Basic => {
                 // Basic authentication
                 let encoded = auth_str.strip_prefix("Basic ")?;
                 let decoded = general_purpose::STANDARD.decode(encoded).ok()?;
@@ -180,10 +191,16 @@ impl AuthManager {
                 let (username, password) = credentials.split_once(':')?;
                 Some((username.to_string(), password.to_string()))
             }
-            AuthBackend::Ntlm => {
-                // NTLM authentication (handled separately)
-                None
+            #[cfg(feature = "auth-ldap")]
+            AuthBackend::Ldap => {
+                let encoded = auth_str.strip_prefix("Basic ")?;
+                let decoded = general_purpose::STANDARD.decode(encoded).ok()?;
+                let credentials = String::from_utf8(decoded).ok()?;
+                let (username, password) = credentials.split_once(':')?;
+                Some((username.to_string(), password.to_string()))
             }
+            #[cfg(feature = "auth-ntlm")]
+            AuthBackend::Ntlm => None,
         }
     }
 
@@ -202,9 +219,11 @@ impl AuthManager {
         // Authenticate based on backend
         let user_info = match self.config.backend {
             AuthBackend::Basic => self.authenticate_basic(username, password).await?,
+            #[cfg(feature = "auth-ldap")]
             AuthBackend::Ldap => self.authenticate_ldap(username, password).await?,
+            #[cfg(feature = "auth-ntlm")]
             AuthBackend::Ntlm => {
-                return Err("NTLM requires challenge-response flow".to_string())
+                return Err("NTLM not implemented yet".to_string())
             }
         };
 
@@ -227,6 +246,7 @@ impl AuthManager {
     }
 
     /// LDAP authentication
+    #[cfg(feature = "auth-ldap")]
     async fn authenticate_ldap(&self, username: &str, password: &str) -> Result<UserInfo, String> {
         let ldap_config = self.config.ldap.as_ref()
             .ok_or_else(|| "LDAP not configured".to_string())?;
@@ -246,6 +266,7 @@ impl AuthManager {
     }
 
     /// Try authenticating against a specific LDAP server
+    #[cfg(feature = "auth-ldap")]
     async fn try_ldap_server(
         &self,
         server: &str,
@@ -331,9 +352,14 @@ impl AuthManager {
         T: Default,
     {
         let auth_header = match self.config.backend {
-            AuthBackend::Basic | AuthBackend::Ldap => {
+            AuthBackend::Basic => {
                 format!("Basic realm=\"{}\"", self.config.realm)
             }
+            #[cfg(feature = "auth-ldap")]
+            AuthBackend::Ldap => {
+                format!("Basic realm=\"{}\"", self.config.realm)
+            }
+            #[cfg(feature = "auth-ntlm")]
             AuthBackend::Ntlm => {
                 "NTLM".to_string()
             }
