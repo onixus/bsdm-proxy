@@ -466,7 +466,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let service_clone = service.clone();
         let client_ip = addr.ip().to_string();
         
-        tokio::spawn(async move {
+        // Обработка подключения в spawned task БЕЗ await
+        tokio::task::spawn(async move {
             handle_connection(stream, addr, service_clone, client_ip).await;
         });
     }
