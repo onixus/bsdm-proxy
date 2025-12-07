@@ -1,4 +1,5 @@
 use base64::engine::general_purpose;
+use base64::Engine;  // Трейт для decode
 use bytes::Bytes;
 use hyper::body::Incoming;
 use hyper::header::{HeaderName, HeaderValue, AUTHORIZATION};
@@ -215,7 +216,7 @@ impl ProxyService {
 
         let http_cache = Arc::new(Cache::new(cache_config.capacity));
         
-        // Переиспользуемый HTTP клиент с connection pooling
+        // Переисользуемый HTTP клиент с connection pooling
         let http_client = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
             .pool_idle_timeout(Duration::from_secs(90))
             .pool_max_idle_per_host(32)
@@ -475,11 +476,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(10_000);
-    let cache_ttl = std::env::var("CACHE_TTL_SECONDS")
+    let cache_ttl_secs = std::env::var("CACHE_TTL_SECONDS")
         .ok()
         .and_then(|s| s.parse().ok())
-        .map(Duration::from_secs)
-        .unwrap_or(Duration::from_secs(3600));
+        .unwrap_or(3600);
     let max_body_size = std::env::var("MAX_CACHE_BODY_SIZE")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -487,11 +487,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let cache_config = CacheConfig {
         capacity: cache_capacity,
-        default_ttl: cache_ttl,
+        default_ttl: Duration::from_secs(cache_ttl_secs),
         max_body_size,
     };
 
-    let service = Arc::new(ProxyService::new(cert_cache, cache_config, kafka_brokers));
+    let service = Arc::new(ProxyService::new(cert_cache, cache_config.clone(), kafka_brokers));
     let http_port = std::env::var("HTTP_PORT")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -543,9 +543,12 @@ async fn handle_connection(
                     async move {
                         match hyper::upgrade::on(req).await {
                             Ok(upgraded) => {
-                                let stream = TokioIo::new(upgraded);
-                                let stream = TokioIo::into_inner(stream);
-                                let _ = service.handle_connect(authority, stream, client_ip, request_start).await;
+                                // Преобразуем Upgraded в TcpStream через TokioIo
+                                let io = TokioIo::new(upgraded);
+                                let tcp_stream = TokioIo::into_inner(io);
+                                // Теперь нам нужен сырой TcpStream, но upgraded это не TcpStream
+                                // Используем upgraded напрямую с copy_bidirectional
+                                let _ = handle_connect_tunnel(service, authority, upgraded, client_ip, request_start).await;
                             }
                             Err(e) => error!("Upgrade failed: {}", e),
                         }
@@ -570,5 +573,48 @@ async fn handle_connection(
     {
         error!("Connection error from {}: {}", addr, e);
     }
+    Ok(())
+}
+
+// Отдельная функция для CONNECT туннеля с Upgraded
+async fn handle_connect_tunnel(
+    service: Arc<ProxyService>,
+    authority: String,
+    mut client_upgraded: hyper::upgrade::Upgraded,
+    client_ip: String,
+    request_start: Instant,
+) -> Result<(), Box<dyn std::error::Error>> {
+    info!("CONNECT tunnel to: {}", authority);
+    
+    let mut upstream = TcpStream::connect(&authority).await?;
+    
+    // Используем copy_bidirectional с Upgraded (он реализует AsyncRead + AsyncWrite)
+    let (bytes_c2u, bytes_u2c) = copy_bidirectional(&mut client_upgraded, &mut upstream).await?;
+
+    let duration_ms = request_start.elapsed().as_millis() as u64;
+    let domain = authority.split(':').next().unwrap_or("unknown").to_string();
+    
+    let event = CacheEvent {
+        url: format!("https://{}", authority),
+        method: "CONNECT".to_string(),
+        status: 200,
+        cache_key: service.generate_cache_key("CONNECT", &authority).to_string(),
+        cache_status: "BYPASS",
+        timestamp: SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)?
+            .as_secs(),
+        headers: HashMap::new(),
+        user_id: None,
+        username: None,
+        client_ip,
+        domain,
+        response_size: bytes_u2c,
+        request_duration_ms: duration_ms,
+        content_type: None,
+        user_agent: None,
+    };
+    
+    service.send_to_kafka_async(event);
+    debug!("CONNECT closed: {}↑ {}↓", bytes_c2u, bytes_u2c);
     Ok(())
 }
