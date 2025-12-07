@@ -110,7 +110,6 @@ struct CacheEvent {
     timestamp: u64,
     headers: HashMap<String, String>,
     body: String,
-    // New fields for user analytics
     user_id: Option<String>,
     username: Option<String>,
     client_ip: String,
@@ -175,11 +174,9 @@ impl ProxyService {
     fn extract_user_info(session: &Session) -> (Option<String>, Option<String>) {
         let req_header = session.req_header();
         
-        // Try to extract from Authorization header (Basic Auth)
         if let Some(auth_header) = req_header.headers.get("authorization") {
             if let Ok(auth_str) = auth_header.to_str() {
                 if let Some(encoded) = auth_str.strip_prefix("Basic ") {
-                    // Use base64 0.22 API with engine
                     if let Ok(decoded_bytes) = general_purpose::STANDARD.decode(encoded) {
                         if let Ok(credentials) = String::from_utf8(decoded_bytes) {
                             if let Some((username, _)) = credentials.split_once(':') {
@@ -214,9 +211,8 @@ impl ProxyHttp for ProxyService {
         session: &mut Session,
         ctx: &mut Self::CTX,
     ) -> PingoraResult<()> {
-        // Extract client IP from Pingora's SocketAddr enum
         ctx.client_ip = session.client_addr()
-            .and_then(|addr| addr.as_inet())  // Get std::net::SocketAddr from enum
+            .and_then(|addr| addr.as_inet())
             .map(|std_addr| std_addr.ip().to_string())
             .unwrap_or_else(|| "unknown".to_string());
         Ok(())
@@ -228,22 +224,57 @@ impl ProxyHttp for ProxyService {
         _ctx: &mut Self::CTX,
     ) -> PingoraResult<Box<HttpPeer>> {
         let req_header = session.req_header();
+        
+        // Handle CONNECT method for forward proxy
+        if req_header.method == http::Method::CONNECT {
+            // For CONNECT, the URI is in format "host:port"
+            let uri_str = req_header.uri.to_string();
+            info!("CONNECT request to: {}", uri_str);
+            
+            // Parse host:port from CONNECT URI
+            let parts: Vec<&str> = uri_str.split(':').collect();
+            if parts.len() != 2 {
+                error!("Invalid CONNECT URI: {}", uri_str);
+                return Err(Error::new(ErrorType::InvalidHTTPHeader));
+            }
+            
+            let host = parts[0];
+            let port = parts[1].parse::<u16>()
+                .map_err(|_| Error::new(ErrorType::InvalidHTTPHeader))?;
+            
+            let use_tls = port == 443;
+            let peer = Box::new(HttpPeer::new((host, port), use_tls, host.to_string()));
+            info!("Created peer for {}:{} (TLS: {})", host, port, use_tls);
+            return Ok(peer);
+        }
+        
+        // Regular HTTP/HTTPS proxy mode
         let host = req_header
             .uri
             .host()
             .or_else(|| req_header.headers.get("host")?.to_str().ok())
             .ok_or_else(|| Error::new(ErrorType::InvalidHTTPHeader))?;
-        let port = req_header.uri.port_u16().unwrap_or(443);
-        let peer = Box::new(HttpPeer::new((host, port), true, host.to_string()));
+        
+        let port = req_header.uri.port_u16().unwrap_or_else(|| {
+            if req_header.uri.scheme_str() == Some("https") { 443 } else { 80 }
+        });
+        
+        let use_tls = req_header.uri.scheme_str() == Some("https") || port == 443;
+        let peer = Box::new(HttpPeer::new((host, port), use_tls, host.to_string()));
         Ok(peer)
     }
     
     async fn upstream_request_filter(
         &self,
-        _session: &mut Session,
+        session: &mut Session,
         upstream_request: &mut RequestHeader,
         _ctx: &mut Self::CTX,
     ) -> PingoraResult<()> {
+        // Don't modify CONNECT requests
+        if session.req_header().method == http::Method::CONNECT {
+            return Ok(());
+        }
+        
         upstream_request
             .insert_header("X-Forwarded-Proto", "https")
             .unwrap();
@@ -365,11 +396,17 @@ fn main() {
         ProxyService::new(cert_cache.clone(), kafka_brokers),
     );
 
+    // Add HTTP listener for forward proxy (CONNECT support)
     proxy_service
-        .add_tls("0.0.0.0:1488", "/certs/server.crt", "/certs/server.key")
+        .add_tcp("0.0.0.0:1488")
+        .expect("Failed to add HTTP listener");
+    
+    // Add HTTPS listener for TLS interception
+    proxy_service
+        .add_tls("0.0.0.0:1489", "/certs/server.crt", "/certs/server.key")
         .expect("Failed to add TLS listener");
 
     server.add_service(proxy_service);
-    info!("BSDM-Proxy starting on port 1488");
+    info!("BSDM-Proxy starting on ports 1488 (HTTP) and 1489 (HTTPS)");
     server.run_forever();
 }
