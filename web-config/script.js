@@ -14,6 +14,15 @@ tabs.forEach(tab => {
     });
 });
 
+// Auto-save on any input change
+const allInputs = document.querySelectorAll('input, select');
+allInputs.forEach(input => {
+    input.addEventListener('change', () => {
+        saveConfigToLocalStorage();
+        showToast('✅ Configuration auto-saved');
+    });
+});
+
 // Authentication toggle
 const authEnabled = document.getElementById('auth_enabled');
 const authOptions = document.getElementById('auth_options');
@@ -55,6 +64,67 @@ cacheCapacity.addEventListener('input', () => {
     const memoryMB = (entries * 120 / 1024 / 1024).toFixed(2);
     cacheStats.textContent = `${entries.toLocaleString()} entries ≈ ${memoryMB} MB memory`;
 });
+
+// Load saved configuration on page load
+window.addEventListener('DOMContentLoaded', () => {
+    loadConfigFromLocalStorage();
+    // Update visibility of conditional sections
+    authEnabled.dispatchEvent(new Event('change'));
+    authBackend.dispatchEvent(new Event('change'));
+    aclEnabled.dispatchEvent(new Event('change'));
+    categorizationEnabled.dispatchEvent(new Event('change'));
+    cacheCapacity.dispatchEvent(new Event('input'));
+});
+
+// Save configuration to localStorage
+function saveConfigToLocalStorage() {
+    const config = collectFormData();
+    localStorage.setItem('bsdm-proxy-config', JSON.stringify(config));
+}
+
+// Load configuration from localStorage
+function loadConfigFromLocalStorage() {
+    const saved = localStorage.getItem('bsdm-proxy-config');
+    if (saved) {
+        try {
+            const config = JSON.parse(saved);
+            applyConfigToForm(config);
+            console.log('✅ Configuration loaded from localStorage');
+        } catch (e) {
+            console.error('❌ Failed to load config:', e);
+        }
+    }
+}
+
+// Collect all form data
+function collectFormData() {
+    const data = {};
+    const inputs = document.querySelectorAll('input, select');
+    
+    inputs.forEach(input => {
+        if (input.type === 'checkbox') {
+            data[input.id] = input.checked;
+        } else {
+            data[input.id] = input.value;
+        }
+    });
+    
+    return data;
+}
+
+// Apply configuration to form
+function applyConfigToForm(config) {
+    Object.entries(config).forEach(([key, value]) => {
+        const element = document.getElementById(key);
+        if (element) {
+            if (element.type === 'checkbox') {
+                element.checked = value;
+            } else {
+                element.value = value;
+            }
+        }
+    });
+}
 
 // Generate configuration
 function generateConfig() {
@@ -132,6 +202,58 @@ function collectConfig() {
     };
     
     return config;
+}
+
+// Save configuration to file
+function saveConfig() {
+    const config = collectFormData();
+    const json = JSON.stringify(config, null, 2);
+    downloadFile('bsdm-proxy-config.json', json);
+    showToast('✅ Configuration saved to file');
+}
+
+// Load configuration from file
+function loadConfig() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    
+    input.onchange = (e) => {
+        const file = e.target.files[0];
+        const reader = new FileReader();
+        
+        reader.onload = (event) => {
+            try {
+                const config = JSON.parse(event.target.result);
+                applyConfigToForm(config);
+                saveConfigToLocalStorage();
+                
+                // Update visibility
+                authEnabled.dispatchEvent(new Event('change'));
+                authBackend.dispatchEvent(new Event('change'));
+                aclEnabled.dispatchEvent(new Event('change'));
+                categorizationEnabled.dispatchEvent(new Event('change'));
+                cacheCapacity.dispatchEvent(new Event('input'));
+                
+                showToast('✅ Configuration loaded from file');
+            } catch (err) {
+                showToast('❌ Invalid configuration file', 'error');
+                console.error('Load error:', err);
+            }
+        };
+        
+        reader.readAsText(file);
+    };
+    
+    input.click();
+}
+
+// Reset configuration to defaults
+function resetConfig() {
+    if (confirm('⚠️ Reset all settings to defaults?')) {
+        localStorage.removeItem('bsdm-proxy-config');
+        location.reload();
+    }
 }
 
 // Generate ACL rules JSON
@@ -214,6 +336,7 @@ function exportEnv() {
     const config = collectConfig();
     const content = formatConfig(config);
     downloadFile('.env', content);
+    showToast('✅ .env file exported');
 }
 
 // Export docker-compose.yml
@@ -221,6 +344,7 @@ function exportDockerCompose() {
     const config = collectConfig();
     const compose = generateDockerCompose(config);
     downloadFile('docker-compose.yml', compose);
+    showToast('✅ docker-compose.yml exported');
 }
 
 // Generate docker-compose.yml content
@@ -351,6 +475,23 @@ networks:
 `;
 }
 
+// Toast notification
+function showToast(message, type = 'success') {
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    
+    setTimeout(() => {
+        toast.classList.add('show');
+    }, 10);
+    
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 300);
+    }, 2000);
+}
+
 // Modal functions
 function showModal(title, content) {
     document.getElementById('modal-title').textContent = title;
@@ -365,7 +506,7 @@ function closeModal() {
 function copyToClipboard() {
     const output = document.getElementById('modal-output').textContent;
     navigator.clipboard.writeText(output).then(() => {
-        alert('Copied to clipboard!');
+        showToast('✅ Copied to clipboard!');
     });
 }
 
