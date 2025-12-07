@@ -1,5 +1,7 @@
+mod metrics;
+
 use base64::engine::general_purpose;
-use base64::Engine;  // Трейт для decode
+use base64::Engine;
 use bytes::Bytes;
 use hyper::body::Incoming;
 use hyper::header::{HeaderName, HeaderValue, AUTHORIZATION};
@@ -7,6 +9,7 @@ use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
+use metrics::{Metrics, RequestMetricsGuard};
 use quick_cache::sync::Cache;
 use rcgen::{
     BasicConstraints, Certificate, CertificateParams, DistinguishedName, DnType, IsCa, KeyPair,
@@ -19,6 +22,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::SocketAddr;
+use std::panic;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 use tokio::io::copy_bidirectional;
@@ -33,12 +37,11 @@ type Body = http_body_util::Full<Bytes>;
 const CACHEABLE_METHODS: &[&str] = &["GET", "HEAD"];
 const CACHEABLE_STATUS_CODES: &[u16] = &[200, 203, 204, 206, 300, 301, 404, 405, 410, 414, 501];
 
-/// Кешированный HTTP ответ (оптимизирован для быстрого клонирования)
 #[derive(Clone, Debug)]
 struct CachedResponse {
     status: u16,
-    headers: Arc<[(Arc<str>, Arc<str>)]>,  // Arc для zero-copy clone
-    body: Bytes,  // Bytes уже использует Arc внутри
+    headers: Arc<[(Arc<str>, Arc<str>)]>,
+    body: Bytes,
     cached_at: SystemTime,
     ttl: Duration,
 }
@@ -70,7 +73,6 @@ impl CachedResponse {
     }
 }
 
-/// Менеджер сертификатов (оптимизирован с Arc<str> ключами)
 #[derive(Clone)]
 struct CertCache {
     certs: CertMap,
@@ -112,8 +114,7 @@ impl CertCache {
 
     async fn get_or_generate(&self, domain: &str) -> Result<CertPair, Box<dyn std::error::Error>> {
         let domain_arc: Arc<str> = domain.into();
-        
-        // Оптимизация: быстрая проверка с read lock
+
         {
             let cache = self.certs.read().await;
             if let Some(cert) = cache.get(&domain_arc) {
@@ -142,7 +143,6 @@ impl CertCache {
     }
 }
 
-/// Событие для Kafka (оптимизировано для сериализации)
 #[derive(Serialize, Clone, Debug)]
 struct CacheEvent {
     url: String,
@@ -167,7 +167,6 @@ struct CacheEvent {
     user_agent: Option<String>,
 }
 
-/// Конфигурация кеша
 #[derive(Clone)]
 struct CacheConfig {
     capacity: usize,
@@ -185,14 +184,15 @@ impl Default for CacheConfig {
     }
 }
 
-/// Главный прокси сервис
 #[derive(Clone)]
 struct ProxyService {
     cert_cache: CertCache,
     http_cache: Arc<Cache<Arc<str>, CachedResponse>>,
     cache_config: CacheConfig,
     kafka_producer: Option<Arc<FutureProducer>>,
-    http_client: hyper_util::client::legacy::Client<hyper_util::client::legacy::connect::HttpConnector, Body>,
+    http_client:
+        hyper_util::client::legacy::Client<hyper_util::client::legacy::connect::HttpConnector, Body>,
+    metrics: Arc<Metrics>,
 }
 
 impl ProxyService {
@@ -200,6 +200,7 @@ impl ProxyService {
         cert_cache: CertCache,
         cache_config: CacheConfig,
         kafka_brokers: Option<String>,
+        metrics: Arc<Metrics>,
     ) -> Self {
         let kafka_producer = kafka_brokers.and_then(|brokers| {
             ClientConfig::new()
@@ -215,11 +216,13 @@ impl ProxyService {
         });
 
         let http_cache = Arc::new(Cache::new(cache_config.capacity));
-        
-        let http_client = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
-            .pool_idle_timeout(Duration::from_secs(90))
-            .pool_max_idle_per_host(32)
-            .build_http();
+
+        let http_client = hyper_util::client::legacy::Client::builder(
+            hyper_util::rt::TokioExecutor::new(),
+        )
+        .pool_idle_timeout(Duration::from_secs(90))
+        .pool_max_idle_per_host(32)
+        .build_http();
 
         Self {
             cert_cache,
@@ -227,6 +230,7 @@ impl ProxyService {
             cache_config,
             kafka_producer,
             http_client,
+            metrics,
         }
     }
 
@@ -273,27 +277,32 @@ impl ProxyService {
 
     fn send_to_kafka_async(&self, event: CacheEvent) {
         if let Some(producer) = self.kafka_producer.clone() {
+            let metrics = self.metrics.clone();
             tokio::spawn(async move {
                 match serde_json::to_string(&event) {
                     Ok(payload) => {
                         let record = FutureRecord::to("cache-events")
                             .payload(&payload)
                             .key(&event.cache_key);
-                        if let Err((e, _)) = producer.send(record, Duration::ZERO).await {
-                            warn!("Kafka send failed: {}", e);
+                        match producer.send(record, Duration::ZERO).await {
+                            Ok(_) => metrics.kafka_events_sent.inc(),
+                            Err((e, _)) => {
+                                warn!("Kafka send failed: {}", e);
+                                metrics.kafka_send_errors.inc();
+                            }
                         }
                     }
-                    Err(e) => error!("Event serialization failed: {}", e),
+                    Err(e) => {
+                        error!("Event serialization failed: {}", e);
+                        metrics.kafka_send_errors.inc();
+                    }
                 }
             });
         }
     }
 
-    async fn handle_request(
-        &self,
-        req: Request<Incoming>,
-        client_ip: String,
-    ) -> Response<Body> {
+    async fn handle_request(&self, req: Request<Incoming>, client_ip: String) -> Response<Body> {
+        let mut guard = RequestMetricsGuard::new(self.metrics.clone(), req.method().to_string());
         let request_start = Instant::now();
         let method = req.method().to_string();
         let uri = req.uri().clone();
@@ -301,11 +310,18 @@ impl ProxyService {
         let (user_id, username) = Self::extract_user_info(&req);
         let cache_key = self.generate_cache_key(&method, &url);
 
-        // Проверка кеша
+        // Cache lookup with timing
+        let cache_lookup_start = Instant::now();
         if let Some(cached) = self.http_cache.get(&cache_key) {
+            self.metrics
+                .cache_lookup_duration_seconds
+                .observe(cache_lookup_start.elapsed().as_secs_f64());
+
             if !cached.is_expired() {
                 info!("Cache HIT: {} {}", method, url);
-                
+                self.metrics.cache_hits_total.inc();
+                guard.set_cache_status("HIT");
+
                 if let Ok(timestamp) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
                     let event = CacheEvent {
                         url: url.clone(),
@@ -321,20 +337,29 @@ impl ProxyService {
                         domain: Self::extract_domain(&url),
                         response_size: cached.body.len() as u64,
                         request_duration_ms: request_start.elapsed().as_millis() as u64,
-                        content_type: cached.headers.iter()
+                        content_type: cached
+                            .headers
+                            .iter()
                             .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
                             .map(|(_, v)| v.to_string()),
                         user_agent: None,
                     };
                     self.send_to_kafka_async(event);
                 }
-                return cached.to_response();
+                let response = cached.to_response();
+                let body_size = cached.body.len();
+                guard.finish(cached.status, body_size);
+                return response;
             }
         }
+        self.metrics
+            .cache_lookup_duration_seconds
+            .observe(cache_lookup_start.elapsed().as_secs_f64());
 
         info!("Cache MISS: {} {}", method, url);
-        
-        // Преобразование Incoming в Body
+        self.metrics.cache_misses_total.inc();
+
+        // Request to upstream
         let (parts, body) = req.into_parts();
         let body_bytes = match http_body_util::BodyExt::collect(body).await {
             Ok(collected) => collected.to_bytes(),
@@ -342,38 +367,63 @@ impl ProxyService {
                 error!("Body collection failed: {}", e);
                 let mut resp = Response::new(Body::new(Bytes::from_static(b"400 Bad Request")));
                 *resp.status_mut() = StatusCode::BAD_REQUEST;
+                guard.finish(400, 15);
                 return resp;
             }
         };
         let req = Request::from_parts(parts, Body::new(body_bytes));
-        
-        // Запрос к upstream
+
+        let domain = Self::extract_domain(&url);
+        let upstream_start = Instant::now();
+
         match self.http_client.request(req).await {
             Ok(response) => {
+                let upstream_duration = upstream_start.elapsed().as_secs_f64();
                 let status = response.status();
+
+                self.metrics
+                    .upstream_requests_total
+                    .with_label_values(&[&domain, &status.as_u16().to_string()])
+                    .inc();
+                self.metrics
+                    .upstream_duration_seconds
+                    .with_label_values(&[&domain])
+                    .observe(upstream_duration);
+
                 let headers_map: HashMap<String, String> = response
                     .headers()
                     .iter()
-                    .filter_map(|(k, v)| v.to_str().ok().map(|v| (k.as_str().to_string(), v.to_string())))
+                    .filter_map(|(k, v)| {
+                        v.to_str()
+                            .ok()
+                            .map(|v| (k.as_str().to_string(), v.to_string()))
+                    })
                     .collect();
 
-                let body_bytes = match http_body_util::BodyExt::collect(response.into_body()).await {
+                let body_bytes = match http_body_util::BodyExt::collect(response.into_body()).await
+                {
                     Ok(collected) => collected.to_bytes(),
                     Err(e) => {
                         error!("Response body collection failed: {}", e);
-                        let mut resp = Response::new(Body::new(Bytes::from_static(b"502 Bad Gateway")));
+                        self.metrics
+                            .upstream_errors_total
+                            .with_label_values(&[&domain, "body_read"])
+                            .inc();
+                        let mut resp =
+                            Response::new(Body::new(Bytes::from_static(b"502 Bad Gateway")));
                         *resp.status_mut() = StatusCode::BAD_GATEWAY;
+                        guard.finish(502, 15);
                         return resp;
                     }
                 };
                 let body_size = body_bytes.len();
-                
+
                 let cache_status = if self.is_cacheable(&method, status.as_u16(), body_size) {
                     let headers_arc: Arc<[(Arc<str>, Arc<str>)]> = headers_map
                         .iter()
                         .map(|(k, v)| (Arc::from(k.as_str()), Arc::from(v.as_str())))
                         .collect();
-                    
+
                     let cached_response = CachedResponse {
                         status: status.as_u16(),
                         headers: headers_arc,
@@ -382,8 +432,11 @@ impl ProxyService {
                         ttl: self.cache_config.default_ttl,
                     };
                     self.http_cache.insert(cache_key.clone(), cached_response);
+                    guard.set_cache_status("MISS");
                     "MISS"
                 } else {
+                    self.metrics.cache_bypasses_total.inc();
+                    guard.set_cache_status("BYPASS");
                     "BYPASS"
                 };
 
@@ -399,7 +452,7 @@ impl ProxyService {
                         user_id,
                         username,
                         client_ip,
-                        domain: Self::extract_domain(&url),
+                        domain,
                         response_size: body_size as u64,
                         request_duration_ms: request_start.elapsed().as_millis() as u64,
                         content_type: headers_map.get("content-type").cloned(),
@@ -418,15 +471,135 @@ impl ProxyService {
                         resp.headers_mut().insert(name, val);
                     }
                 }
+                guard.finish(status.as_u16(), body_size);
                 resp
             }
             Err(e) => {
                 error!("Upstream error: {}", e);
+                self.metrics
+                    .upstream_errors_total
+                    .with_label_values(&[&domain, "connection"])
+                    .inc();
                 let mut response = Response::new(Body::new(Bytes::from_static(b"502 Bad Gateway")));
                 *response.status_mut() = StatusCode::BAD_GATEWAY;
+                guard.finish(502, 15);
                 response
             }
         }
+    }
+}
+
+async fn metrics_server(metrics: Arc<Metrics>) {
+    let listener = match TcpListener::bind("0.0.0.0:9090").await {
+        Ok(l) => l,
+        Err(e) => {
+            error!("Failed to bind metrics server: {}", e);
+            return;
+        }
+    };
+    
+    info!("📊 Metrics server started on 0.0.0.0:9090");
+
+    loop {
+        let (stream, addr) = match listener.accept().await {
+            Ok(conn) => conn,
+            Err(e) => {
+                error!("Failed to accept metrics connection: {}", e);
+                continue;
+            }
+        };
+
+        let metrics = metrics.clone();
+        tokio::spawn(async move {
+            let io = TokioIo::new(stream);
+            let service = service_fn(move |req: Request<Incoming>| {
+                let metrics = metrics.clone();
+                async move {
+                    let path = req.uri().path();
+                    debug!("Metrics request from {}: {}", addr, path);
+                    
+                    let response = match path {
+                        "/metrics" => {
+                            debug!("Exporting metrics...");
+                            // Wrap in catch_unwind to catch panics
+                            let export_result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+                                metrics.export()
+                            }));
+                            
+                            match export_result {
+                                Ok(Ok(body)) => {
+                                    debug!("Metrics exported successfully: {} bytes", body.len());
+                                    Response::builder()
+                                        .status(StatusCode::OK)
+                                        .header("Content-Type", "text/plain; version=0.0.4")
+                                        .header("Content-Length", body.len().to_string())
+                                        .body(Body::new(Bytes::from(body)))
+                                        .unwrap_or_else(|e| {
+                                            error!("Failed to build metrics response: {}", e);
+                                            Response::new(Body::new(Bytes::from_static(b"500 Internal Server Error")))
+                                        })
+                                }
+                                Ok(Err(e)) => {
+                                    error!("Failed to export metrics: {}", e);
+                                    Response::builder()
+                                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                        .body(Body::new(Bytes::from_static(b"500 Internal Server Error")))
+                                        .unwrap_or_else(|_| {
+                                            Response::new(Body::new(Bytes::from_static(b"500 Internal Server Error")))
+                                        })
+                                }
+                                Err(panic_info) => {
+                                    error!("Metrics export panicked: {:?}", panic_info);
+                                    Response::builder()
+                                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                        .body(Body::new(Bytes::from_static(b"500 Panic in metrics export")))
+                                        .unwrap_or_else(|_| {
+                                            Response::new(Body::new(Bytes::from_static(b"500 Internal Server Error")))
+                                        })
+                                }
+                            }
+                        }
+                        "/health" => {
+                            debug!("Health check OK");
+                            Response::builder()
+                                .status(StatusCode::OK)
+                                .header("Content-Type", "application/json")
+                                .body(Body::new(Bytes::from_static(b"{\"status\":\"ok\"}")))  
+                                .unwrap_or_else(|_| {
+                                    Response::new(Body::new(Bytes::from_static(b"{\"status\":\"ok\"}")))  
+                                })
+                        }
+                        "/ready" => {
+                            debug!("Readiness check OK");
+                            Response::builder()
+                                .status(StatusCode::OK)
+                                .header("Content-Type", "application/json")
+                                .body(Body::new(Bytes::from_static(b"{\"status\":\"ready\"}")))  
+                                .unwrap_or_else(|_| {
+                                    Response::new(Body::new(Bytes::from_static(b"{\"status\":\"ready\"}")))  
+                                })
+                        }
+                        _ => {
+                            warn!("Unknown metrics endpoint: {}", path);
+                            Response::builder()
+                                .status(StatusCode::NOT_FOUND)
+                                .body(Body::new(Bytes::from_static(b"404 Not Found")))
+                                .unwrap_or_else(|_| {
+                                    Response::new(Body::new(Bytes::from_static(b"404 Not Found")))
+                                })
+                        }
+                    };
+                    Ok::<_, Infallible>(response)
+                }
+            });
+
+            if let Err(e) = http1::Builder::new()
+                .serve_connection(io, service)
+                .await
+            {
+                error!("Metrics server connection error from {}: {}", addr, e);
+            }
+        });
     }
 }
 
@@ -439,7 +612,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .init();
 
-    let ca_key = tokio::fs::read("/certs/ca.key").await?;
+    let metrics = Arc::new(Metrics::new()?);
+
+    // Start metrics server
+    let metrics_clone = metrics.clone();
+    tokio::spawn(async move {
+        metrics_server(metrics_clone).await;
+    });
+
+    let ca_key = tokio::fs::read("/certs/ca.key").await.or_else(|_| {
+        warn!("Failed to read /certs/ca.key, trying ./certs/ca.key");
+        std::fs::read("./certs/ca.key")
+    })?;
+    
     let cert_cache = CertCache::new(ca_key);
     let kafka_brokers = std::env::var("KAFKA_BROKERS").ok();
     let cache_capacity = std::env::var("CACHE_CAPACITY")
@@ -461,7 +646,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         max_body_size,
     };
 
-    let service = Arc::new(ProxyService::new(cert_cache, cache_config.clone(), kafka_brokers));
+    let service = Arc::new(ProxyService::new(
+        cert_cache,
+        cache_config.clone(),
+        kafka_brokers,
+        metrics.clone(),
+    ));
+    
     let http_port = std::env::var("HTTP_PORT")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -469,17 +660,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let listener = TcpListener::bind(format!("0.0.0.0:{}", http_port)).await?;
     info!("🚀 BSDM-Proxy v2.0 (optimized) on 0.0.0.0:{}", http_port);
-    info!("📦 Cache: {} entries, TTL: {:?}, max body: {}MB", 
-        service.http_cache.capacity(), 
+    info!(
+        "📦 Cache: {} entries, TTL: {:?}, max body: {}MB",
+        service.http_cache.capacity(),
         cache_config.default_ttl,
         max_body_size / 1024 / 1024
     );
+
+    // Update cache metrics periodically
+    let metrics_clone = metrics.clone();
+    let cache_clone = service.http_cache.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(10));
+        loop {
+            interval.tick().await;
+            // quick_cache API: len() and weight() only
+            let entries = cache_clone.len();
+            let weight = cache_clone.weight();
+            
+            metrics_clone.cache_entries.set(entries as f64);
+            metrics_clone.cache_size_bytes.set(weight as f64);
+            
+            debug!(
+                "Cache stats: entries={}, weight={}KB",
+                entries,
+                weight / 1024
+            );
+        }
+    });
 
     loop {
         let (stream, addr) = listener.accept().await?;
         let service_clone = service.clone();
         let client_ip = addr.ip().to_string();
-        
+
         tokio::task::spawn(async move {
             handle_connection(stream, addr, service_clone, client_ip).await;
         });
@@ -493,25 +707,25 @@ async fn handle_connection(
     client_ip: String,
 ) {
     let io = TokioIo::new(stream);
-    
-    // КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: service_fn теперь возвращает Result<Response, Infallible>
+
     let svc = service_fn(move |req: Request<Incoming>| {
         let service = service.clone();
         let client_ip = client_ip.clone();
         let request_start = Instant::now();
-        
+
         async move {
             if req.method() == Method::CONNECT {
                 let authority = match req.uri().authority() {
                     Some(auth) => auth.as_str().to_string(),
                     None => {
                         error!("CONNECT without authority");
-                        let mut resp = Response::new(Body::new(Bytes::from_static(b"400 Bad Request")));
+                        let mut resp =
+                            Response::new(Body::new(Bytes::from_static(b"400 Bad Request")));
                         *resp.status_mut() = StatusCode::BAD_REQUEST;
                         return Ok::<_, Infallible>(resp);
                     }
                 };
-                
+
                 tokio::spawn({
                     let service = service.clone();
                     let client_ip = client_ip.clone();
@@ -519,20 +733,35 @@ async fn handle_connection(
                         match hyper::upgrade::on(req).await {
                             Ok(upgraded) => {
                                 let mut client_io = TokioIo::new(upgraded);
-                                
+
                                 match TcpStream::connect(&authority).await {
                                     Ok(mut upstream) => {
-                                        match copy_bidirectional(&mut client_io, &mut upstream).await {
+                                        service.metrics.upstream_connections_created.inc();
+                                        service.metrics.upstream_connections_active.inc();
+
+                                        match copy_bidirectional(&mut client_io, &mut upstream)
+                                            .await
+                                        {
                                             Ok((bytes_c2u, bytes_u2c)) => {
-                                                let duration_ms = request_start.elapsed().as_millis() as u64;
-                                                let domain = authority.split(':').next().unwrap_or("unknown").to_string();
-                                                
-                                                if let Ok(timestamp) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
+                                                service.metrics.upstream_connections_active.dec();
+                                                let duration_ms =
+                                                    request_start.elapsed().as_millis() as u64;
+                                                let domain = authority
+                                                    .split(':')
+                                                    .next()
+                                                    .unwrap_or("unknown")
+                                                    .to_string();
+
+                                                if let Ok(timestamp) = SystemTime::now()
+                                                    .duration_since(SystemTime::UNIX_EPOCH)
+                                                {
                                                     let event = CacheEvent {
                                                         url: format!("https://{}", authority),
                                                         method: "CONNECT".to_string(),
                                                         status: 200,
-                                                        cache_key: service.generate_cache_key("CONNECT", &authority).to_string(),
+                                                        cache_key: service
+                                                            .generate_cache_key("CONNECT", &authority)
+                                                            .to_string(),
                                                         cache_status: "BYPASS",
                                                         timestamp: timestamp.as_secs(),
                                                         headers: HashMap::new(),
@@ -549,17 +778,27 @@ async fn handle_connection(
                                                 }
                                                 debug!("CONNECT closed: {}↑ {}↓", bytes_c2u, bytes_u2c);
                                             }
-                                            Err(e) => error!("CONNECT copy failed: {}", e),
+                                            Err(e) => {
+                                                error!("CONNECT copy failed: {}", e);
+                                                service.metrics.upstream_connections_active.dec();
+                                            }
                                         }
                                     }
-                                    Err(e) => error!("CONNECT upstream failed: {}", e),
+                                    Err(e) => {
+                                        error!("CONNECT upstream failed: {}", e);
+                                        service
+                                            .metrics
+                                            .upstream_errors_total
+                                            .with_label_values(&[&authority, "connect"])
+                                            .inc();
+                                    }
                                 }
                             }
                             Err(e) => error!("Upgrade failed: {}", e),
                         }
                     }
                 });
-                
+
                 let response = Response::builder()
                     .status(StatusCode::OK)
                     .body(Body::new(Bytes::new()))
@@ -571,8 +810,7 @@ async fn handle_connection(
                     });
                 return Ok::<_, Infallible>(response);
             }
-            
-            // handle_request теперь возвращает Response напрямую
+
             Ok::<_, Infallible>(service.handle_request(req, client_ip).await)
         }
     });
