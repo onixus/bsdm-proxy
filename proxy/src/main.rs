@@ -650,13 +650,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut interval = tokio::time::interval(Duration::from_secs(10));
         loop {
             interval.tick().await;
-            let (hits, misses, entries, memory) = cache_clone.get_stats();
+            // quick_cache 0.6 API: len(), weight(), hits(), misses()
+            let entries = cache_clone.len();
+            let weight = cache_clone.weight();
+            let hits = cache_clone.hits();
+            let misses = cache_clone.misses();
+            
             metrics_clone.cache_entries.set(entries as f64);
-            metrics_clone.cache_size_bytes.set(memory as f64);
+            metrics_clone.cache_size_bytes.set(weight as f64);
+            
             debug!(
-                "Cache stats: entries={}, memory={}MB, hits={}, misses={}",
+                "Cache stats: entries={}, weight={}KB, hits={}, misses={}",
                 entries,
-                memory / 1024 / 1024,
+                weight / 1024,
                 hits,
                 misses
             );
