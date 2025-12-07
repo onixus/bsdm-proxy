@@ -35,20 +35,8 @@ services:
       - node.name=opensearch-node1
       - discovery.type=single-node
       - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
-      - "DISABLE_SECURITY_PLUGIN=false"
-      - "OPENSEARCH_INITIAL_ADMIN_PASSWORD=BsdmProxy2025!Secure"
+      - "DISABLE_SECURITY_PLUGIN=true"  # Отключено для упрощения
       - "bootstrap.memory_lock=true"
-      # Настройки для работы с Dashboards
-      - plugins.security.ssl.http.enabled=true
-      - plugins.security.ssl.http.pemcert_filepath=esnode.pem
-      - plugins.security.ssl.http.pemkey_filepath=esnode-key.pem
-      - plugins.security.ssl.http.pemtrustedcas_filepath=root-ca.pem
-      - plugins.security.ssl.transport.pemcert_filepath=esnode.pem
-      - plugins.security.ssl.transport.pemkey_filepath=esnode-key.pem
-      - plugins.security.ssl.transport.pemtrustedcas_filepath=root-ca.pem
-      - plugins.security.ssl.transport.enforce_hostname_verification=false
-      - plugins.security.allow_unsafe_democertificates=true
-      - plugins.security.allow_default_init_securityindex=true
     ulimits:
       memlock:
         soft: -1
@@ -65,7 +53,7 @@ services:
       - bsdm-net
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -k -u admin:BsdmProxy2025!Secure https://localhost:9200/_cluster/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -75,12 +63,9 @@ services:
     ports:
       - "5601:5601"
     environment:
-      - OPENSEARCH_HOSTS=["https://opensearch:9200"]
-      - OPENSEARCH_USERNAME=admin
-      - OPENSEARCH_PASSWORD=BsdmProxy2025!Secure
-      - DISABLE_SECURITY_PLUGIN=false
+      - OPENSEARCH_HOSTS=["http://opensearch:9200"]  # HTTP без SSL
+      - DISABLE_SECURITY_PLUGIN=true  # Отключено
       - "SERVER_HOST=0.0.0.0"
-      - OPENSEARCH_SSL_VERIFICATIONMODE=none
     depends_on:
       opensearch:
         condition: service_healthy
@@ -126,10 +111,7 @@ services:
       target: cache-indexer
     environment:
       - KAFKA_BROKERS=kafka:9092
-      - OPENSEARCH_URL=https://opensearch:9200
-      - OPENSEARCH_USERNAME=admin
-      - OPENSEARCH_PASSWORD=BsdmProxy2025!Secure
-      - OPENSEARCH_SSL_VERIFY=false
+      - OPENSEARCH_URL=http://opensearch:9200  # HTTP без auth
       - KAFKA_TOPIC=cache-events
       - KAFKA_GROUP_ID=cache-indexer-group
       - RUST_LOG=info,cache_indexer=debug
