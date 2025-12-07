@@ -1,8 +1,6 @@
-//! BSDM-Proxy Library
-//!
-//! Hierarchical caching proxy modules
+//! BSDM-Proxy library
 
-pub mod peers;
-pub mod icp;
-pub mod selection;
-pub mod hierarchy;
+pub mod auth;
+
+// Re-export commonly used types
+pub use auth::{AuthBackend, AuthConfig, AuthManager, LdapConfig, NtlmConfig, UserInfo};
