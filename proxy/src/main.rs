@@ -561,7 +561,17 @@ async fn handle_connection(
                     });
                 return Ok::<_, Box<dyn std::error::Error + Send + Sync>>(response);
             }
-            service.handle_request(req, client_ip).await
+            
+            // Оборачиваем handle_request для обработки Result
+            match service.handle_request(req, client_ip).await {
+                Ok(resp) => Ok(resp),
+                Err(e) => {
+                    error!("Request handling failed: {}", e);
+                    let mut resp = Response::new(Body::new(Bytes::from_static(b"500 Internal Server Error")));
+                    *resp.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                    Ok(resp)
+                }
+            }
         }
     });
 
