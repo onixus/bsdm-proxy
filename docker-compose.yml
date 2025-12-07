@@ -62,15 +62,13 @@ services:
       retries: 10
 
   opensearch-dashboards:
-    image: opensearchproject/opensearch-dashboards:3.3.2
+    image: opensearchproject/opensearch-dashboards:3.3.0  # ИСПРАВЛЕНО: 3.3.2 -> 3.3.0 (актуальная версия)
     ports:
       - "5601:5601"
     environment:
       - OPENSEARCH_HOSTS=["http://opensearch:9200"]
       - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
       - "SERVER_HOST=0.0.0.0"
-      - "SERVER_BASEPATH=/opensearch"
-      - SERVER_REWRITEBASEPATH=true
     depends_on:
       opensearch:
         condition: service_healthy
