@@ -48,3 +48,4 @@ base64 = { workspace = true }
 url = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+rand = "0.8"
