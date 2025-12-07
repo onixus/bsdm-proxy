@@ -486,10 +486,16 @@ async fn handle_connection(
         
         async move {
             if req.method() == Method::CONNECT {
-                let authority = req.uri().authority()
-                    .ok_or("Missing authority")?
-                    .as_str()
-                    .to_string();
+                // Получаем authority без ? оператора
+                let authority = match req.uri().authority() {
+                    Some(auth) => auth.as_str().to_string(),
+                    None => {
+                        error!("CONNECT without authority");
+                        let mut resp = Response::new(Body::new(Bytes::from_static(b"400 Bad Request")));
+                        *resp.status_mut() = StatusCode::BAD_REQUEST;
+                        return Ok::<_, Box<dyn std::error::Error + Send + Sync>>(resp);
+                    }
+                };
                 
                 tokio::spawn({
                     let service = service.clone();
@@ -543,9 +549,16 @@ async fn handle_connection(
                     }
                 });
                 
+                // Создаём ответ без ? оператора
                 let response = Response::builder()
                     .status(StatusCode::OK)
-                    .body(Body::new(Bytes::new()))?;
+                    .body(Body::new(Bytes::new()))
+                    .unwrap_or_else(|e| {
+                        error!("Failed to build response: {}", e);
+                        let mut resp = Response::new(Body::new(Bytes::new()));
+                        *resp.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                        resp
+                    });
                 return Ok::<_, Box<dyn std::error::Error + Send + Sync>>(response);
             }
             service.handle_request(req, client_ip).await
