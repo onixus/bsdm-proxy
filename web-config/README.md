@@ -1,298 +1,195 @@
 # BSDM-Proxy Web Configurator
 
-🌐 Modern web-based configuration interface for BSDM-Proxy.
+🌐 **Visual configuration tool for BSDM-Proxy**
 
-## Features
+## 🚀 Quick Start
 
-- ✨ **Modern UI** - Dark theme, responsive design
-- 🛠️ **5 Configuration Sections**
-  - General (ports, logging, limits)
-  - Cache (capacity, TTL, L2)
-  - Kafka (brokers, topics, batching)
-  - Authentication (Basic, LDAP, NTLM)
-  - Monitoring (Prometheus, Grafana, OpenSearch)
-- 📊 **Real-time Validation** - Live feedback
-- 📥 **Export Options**
-  - `.env` file
-  - `docker-compose.yml`
-  - Environment variables
-- 📋 **Copy to Clipboard** - One-click copy
-- 📦 **Zero Dependencies** - Pure HTML/CSS/JS
-
-## Quick Start
-
-### Option 1: Open Locally
+### Option 1: Using Python HTTP Server (Recommended)
 
 ```bash
 cd web-config
+python3 serve.py
+```
+
+Then open: http://localhost:8000
+
+### Option 2: Using Python Built-in Server
+
+```bash
+cd web-config
+python3 -m http.server 8000
+```
+
+Then open: http://localhost:8000
+
+### Option 3: Direct File Opening
+
+Simply open `index.html` in your browser:
+```bash
 open index.html  # macOS
-# or
 xdg-open index.html  # Linux
-# or
 start index.html  # Windows
 ```
 
-### Option 2: Simple HTTP Server
+**Note:** Some browsers may restrict certain features when opening files directly.
+
+## ⚙️ Features
+
+### 7 Configuration Sections:
+
+1. **General** - Basic proxy settings (ports, logging)
+2. **Cache** - L1/L2 cache configuration
+3. **Kafka** - Event streaming setup
+4. **Auth** - Authentication (Basic, LDAP, NTLM)
+5. **ACL** - Access control rules
+6. **Categories** - URL categorization (Shallalist, URLhaus, PhishTank)
+7. **Monitoring** - Prometheus, Grafana, OpenSearch
+
+### Export Options:
+
+- ✅ **Generate Configuration** - View all settings
+- ✅ **Export .env** - Download environment variables file
+- ✅ **Export docker-compose.yml** - Generate complete deployment
+- ✅ **Copy to Clipboard** - Quick copy functionality
+
+## 📝 Usage
+
+1. **Navigate tabs** to configure each section
+2. **Fill in values** or use defaults
+3. **Enable features** with checkboxes
+4. **Generate** configuration when ready
+5. **Export** files for deployment
+
+### Example Workflow:
 
 ```bash
-cd web-config
-python3 -m http.server 8080
-# Open http://localhost:8080
+# 1. Configure via web UI
+cd web-config && python3 serve.py
+# Open http://localhost:8000 and configure
+
+# 2. Export files
+# Click "Export .env" and "Export docker-compose.yml"
+
+# 3. Deploy
+mv ~/Downloads/.env ../
+mv ~/Downloads/docker-compose.yml ../
+cd .. && docker-compose up -d
 ```
 
-### Option 3: Docker
+## 🔧 Configuration Details
 
-```bash
-docker run -d -p 8080:80 -v $(pwd)/web-config:/usr/share/nginx/html:ro nginx:alpine
-# Open http://localhost:8080
-```
+### Authentication
 
-## Usage
+**Basic Auth:**
+- No external dependencies
+- Username/password only
+- Fast and simple
 
-### 1. Configure Settings
+**LDAP/Active Directory:**
+- Enterprise authentication
+- Group membership support
+- Requires LDAP server
 
-**General Tab:**
-- Proxy port (default: 1488)
-- Metrics port (default: 9090)
-- Log level (error/warn/info/debug/trace)
-- Max body size (MB)
+**NTLM:**
+- Windows Integrated Auth
+- Domain authentication
+- TODO: Implementation pending
 
-**Cache Tab:**
-- Cache capacity (entries)
-- TTL (seconds)
-- L2 cache toggle
-- Memory estimates
+### ACL Rules
 
-**Kafka Tab:**
-- Broker list (comma-separated)
-- Topic name
-- Batch size & timeout
+Quick presets available:
+- ❌ Block Adult Content
+- ❌ Block Gambling
+- ✅ Block Malware (enabled by default)
+- ✅ Block Phishing (enabled by default)
 
-**Authentication Tab:**
-- Enable/disable
-- Backend selection (Basic/LDAP/NTLM)
-- LDAP configuration
-  - Servers, Base DN, Bind DN
-  - User filter, TLS
-- NTLM configuration
-  - Domain, Workstation
-
-**Monitoring Tab:**
-- Prometheus toggle
-- Grafana toggle
-- OpenSearch URL
-- Access URLs reference
-
-### 2. Generate Configuration
-
-Click **"Generate Configuration"** to:
-- Preview environment variables
-- Validate settings
-- Copy to clipboard
-
-### 3. Export Files
-
-**Export .env:**
-```bash
-HTTP_PORT=1488
-METRICS_PORT=9090
-RUST_LOG=info
-CACHE_CAPACITY=10000
-...
-```
-
-**Export docker-compose.yml:**
-- Complete docker-compose.yml with all services
-- Includes: Zookeeper, Kafka, OpenSearch, Prometheus, Grafana, Proxy, Cache-Indexer
-- Pre-configured with your settings
-
-### 4. Deploy
-
-```bash
-# Save exported docker-compose.yml
-vi docker-compose.yml
-
-# Start services
-docker-compose up -d
-
-# Verify
-docker-compose ps
-```
-
-## Configuration Presets
-
-### Development
-```javascript
+Custom rules via JSON file:
+```json
 {
-  CACHE_CAPACITY: 1000,
-  CACHE_TTL_SECONDS: 300,
-  RUST_LOG: "debug",
-  AUTH_ENABLED: false
+  "default_action": "deny",
+  "rules": [
+    {
+      "id": "allow-work",
+      "action": "allow",
+      "rule_type": {
+        "Domain": "*.company.com"
+      }
+    }
+  ]
 }
 ```
 
-### Production (High Traffic)
-```javascript
-{
-  CACHE_CAPACITY: 100000,
-  CACHE_TTL_SECONDS: 1800,
-  MAX_CACHE_BODY_SIZE: 1048576, // 1MB
-  RUST_LOG: "info",
-  AUTH_ENABLED: true,
-  AUTH_BACKEND: "ldap"
-}
-```
+### URL Categorization
 
-### Corporate (AD Integration)
-```javascript
-{
-  AUTH_ENABLED: true,
-  AUTH_BACKEND: "ldap",
-  LDAP_SERVERS: "ldaps://dc1.corp.local:636,ldaps://dc2.corp.local:636",
-  LDAP_BASE_DN: "dc=corp,dc=local",
-  LDAP_USE_TLS: true
-}
-```
-
-## Screenshots
-
-### General Settings
-![General](_screenshots/general.png)
-
-### Authentication (LDAP)
-![Auth](_screenshots/auth-ldap.png)
-
-### Export Modal
-![Export](_screenshots/export.png)
-
-## Advanced Features
-
-### Memory Estimation
-
-Cache tab shows real-time memory estimates:
-```
-10,000 entries ≈ 1.2 MB memory
-100,000 entries ≈ 12 MB memory
-```
-
-### Validation
-
-- Port ranges (1-65535)
-- Number limits (capacity, TTL, etc.)
-- Required fields highlighted
-- Backend-specific settings
-
-### Conditional Inputs
-
-- LDAP settings appear only when LDAP backend selected
-- NTLM settings appear only when NTLM backend selected
-- Auth options hidden when authentication disabled
-
-## Keyboard Shortcuts
-
-- `Ctrl/Cmd + S` - Generate Configuration
-- `Ctrl/Cmd + E` - Export .env
-- `Ctrl/Cmd + D` - Export docker-compose.yml
-- `Esc` - Close modal
-
-## Browser Support
-
-- Chrome 90+
-- Firefox 88+
-- Safari 14+
-- Edge 90+
-
-## Development
-
-### File Structure
-
-```
-web-config/
-├── index.html       # Main HTML
-├── styles.css       # Dark theme CSS
-├── script.js        # Configuration logic
-└── README.md        # This file
-```
-
-### Customization
-
-**Change Theme Colors:**
-
-Edit `styles.css`:
-```css
-:root {
-    --bg-primary: #1a1a2e;    /* Main background */
-    --accent: #e94560;         /* Accent color */
-    --success: #4ecca3;        /* Success color */
-}
-```
-
-**Add New Settings:**
-
-1. Add HTML input in `index.html`
-2. Add to `collectConfig()` in `script.js`
-3. Update `generateDockerCompose()` if needed
-
-## Troubleshooting
-
-### Configuration Not Saving
-
-- Check browser console for errors
-- Ensure all required fields filled
-- Try different export method
-
-### Modal Not Opening
-
-- Check JavaScript enabled
-- Clear browser cache
-- Try different browser
-
-### Docker Compose Export Issues
-
-- Verify all paths correct
-- Check environment variable format
-- Ensure proper YAML indentation
-
-## Security Notes
-
-⚠️ **Important:**
-
-- Passwords visible in generated config
-- Do NOT commit `.env` with secrets
-- Use environment variable substitution for production
-- Restrict access to config UI in production
-
-## Integration
-
-### With CI/CD
-
-```yaml
-# .github/workflows/deploy.yml
-- name: Generate Config
-  run: |
-    # Use headless browser or curl to generate config
-    curl -X POST http://config-ui:8080/api/generate \
-      -d @config.json > .env
-```
-
-### With Kubernetes
-
-Export as ConfigMap:
+**Shallalist** (Open-Source):
 ```bash
-kubectl create configmap bsdm-config --from-env-file=.env
+wget http://www.shallalist.de/Downloads/shallalist.tar.gz
+tar -xzf shallalist.tar.gz -C /var/lib/
 ```
 
-## License
+**URLhaus** (Malware):
+- Real-time API
+- No setup required
+- Rate limited
 
-MIT - Same as BSDM-Proxy main project
+**PhishTank** (Phishing):
+- Community database
+- API key recommended
+- Free tier available
 
-## Contributing
+**Custom Database:**
+JSON format:
+```json
+{
+  "example.com": ["adult", "gambling"],
+  "malicious-site.net": ["malware", "phishing"]
+}
+```
 
-1. Fork repository
-2. Create feature branch
-3. Test in multiple browsers
-4. Submit PR with screenshots
+## 🐛 Troubleshooting
 
----
+### UI Not Loading?
 
-**Made with ♥️ for BSDM-Proxy**
+1. **Check browser console** (F12)
+2. **Use HTTP server** instead of file://
+3. **Clear browser cache** (Ctrl+Shift+R)
+4. **Check file permissions**
+
+### Configuration Not Generating?
+
+1. **Fill required fields** (highlighted in red)
+2. **Check browser console** for errors
+3. **Try exporting .env** first (simpler output)
+
+### Files Not Downloading?
+
+1. **Check download folder** permissions
+2. **Allow popup/downloads** in browser settings
+3. **Use "Copy to Clipboard"** as alternative
+
+### Styling Issues?
+
+1. Ensure `styles.css` is in same directory
+2. Check browser DevTools Network tab
+3. Hard refresh (Ctrl+Shift+R)
+
+## 📚 Resources
+
+- [BSDM-Proxy Documentation](../README.md)
+- [Shallalist Database](http://www.shallalist.de/)
+- [URLhaus API](https://urlhaus.abuse.ch/)
+- [PhishTank API](https://www.phishtank.com/)
+- [OpenSearch Docs](https://opensearch.org/docs/)
+
+## 🤝 Contributing
+
+Contributions welcome!
+
+- Add new configuration options
+- Improve validation
+- Add export formats
+- Enhance UI/UX
+
+## 📝 License
+
+MIT License - See [LICENSE](../LICENSE)
