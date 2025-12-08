@@ -20,7 +20,13 @@ echo "✅ Config directory exists: /config"
 echo "📂 Contents of /config before:"
 ls -la /config/ || echo "  (empty or no access)"
 
-# If .env doesn't exist but .env.example exists in volume, copy it
+# Fix .env if it's accidentally a directory
+if [ -d /config/.env ]; then
+    echo "⚠️  .env is a directory! Removing..."
+    rm -rf /config/.env
+fi
+
+# Create .env file if it doesn't exist
 if [ ! -f /config/.env ]; then
     if [ -f /config/.env.example ]; then
         echo "✅ Creating .env from /config/.env.example (volume)"
@@ -49,7 +55,15 @@ EOF
         echo "✅ Created default .env"
     fi
 else
-    echo "ℹ️  .env already exists in /config"
+    echo "ℹ️  .env already exists as a file"
+fi
+
+# Verify .env is a file
+if [ -f /config/.env ]; then
+    echo "✅ .env is a valid file"
+else
+    echo "❌ .env is not a file!"
+    ls -la /config/.env || true
 fi
 
 # List contents after for debugging
