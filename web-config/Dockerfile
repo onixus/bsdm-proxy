@@ -31,11 +31,18 @@ COPY api.py /app/
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY supervisord.conf /etc/supervisord.conf
 
-# Copy default config template to /config inside container
-COPY ../config/.env.example /config/.env.example
+# Copy .env.example template from web-config directory
+COPY .env.example /config/.env.example
+
+# Copy entrypoint script
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 # Expose ports
 EXPOSE 80 8000
+
+# Use entrypoint to setup permissions
+ENTRYPOINT ["/entrypoint.sh"]
 
 # Start supervisor (manages nginx + FastAPI)
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]
