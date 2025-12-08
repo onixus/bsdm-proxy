@@ -7,17 +7,16 @@
 
 use base64::engine::general_purpose;
 use base64::Engine;
-use hyper::header::{HeaderValue, PROXY_AUTHENTICATE, PROXY_AUTHORIZATION};
+use hyper::header::{PROXY_AUTHENTICATE, PROXY_AUTHORIZATION};
 use hyper::{Request, Response, StatusCode};
 use ldap3::{LdapConn, LdapConnSettings, Scope, SearchEntry};
-use ntlm::Ntlm;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 /// Authentication backend type
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -47,7 +46,17 @@ pub struct UserInfo {
     pub display_name: Option<String>,
     pub email: Option<String>,
     pub groups: Vec<String>,
-    pub authenticated_at: Instant,
+    /// Unix timestamp in seconds
+    pub authenticated_at: u64,
+}
+
+impl UserInfo {
+    fn now() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    }
 }
 
 /// Cached user credentials
@@ -222,7 +231,7 @@ impl AuthManager {
             display_name: Some(username.to_string()),
             email: None,
             groups: vec![],
-            authenticated_at: Instant::now(),
+            authenticated_at: UserInfo::now(),
         })
     }
 
@@ -304,7 +313,7 @@ impl AuthManager {
             display_name,
             email,
             groups,
-            authenticated_at: Instant::now(),
+            authenticated_at: UserInfo::now(),
         })
     }
 
