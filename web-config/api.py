@@ -3,6 +3,8 @@
 
 import json
 import os
+import time
+import psutil
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -47,6 +49,110 @@ async def health():
         "docker_available": DOCKER_AVAILABLE,
         "config_dir_exists": CONFIG_DIR.exists()
     }
+
+
+@app.get("/api/monitoring/stats")
+async def get_monitoring_stats():
+    """Get system and container monitoring stats."""
+    try:
+        # System stats
+        cpu_percent = psutil.cpu_percent(interval=0.1, percpu=False)
+        cpu_count = psutil.cpu_count()
+        
+        memory = psutil.virtual_memory()
+        disk = psutil.disk_usage('/')
+        
+        net_io = psutil.net_io_counters()
+        
+        # System info
+        boot_time = psutil.boot_time()
+        uptime_seconds = int(time.time() - boot_time)
+        
+        system_stats = {
+            "cpu": {
+                "percent": round(cpu_percent, 1),
+                "count": cpu_count,
+            },
+            "memory": {
+                "total": memory.total,
+                "available": memory.available,
+                "used": memory.used,
+                "percent": round(memory.percent, 1),
+            },
+            "disk": {
+                "total": disk.total,
+                "used": disk.used,
+                "free": disk.free,
+                "percent": round(disk.percent, 1),
+            },
+            "network": {
+                "bytes_sent": net_io.bytes_sent,
+                "bytes_recv": net_io.bytes_recv,
+                "packets_sent": net_io.packets_sent,
+                "packets_recv": net_io.packets_recv,
+            },
+            "system": {
+                "hostname": os.uname().nodename,
+                "uptime": uptime_seconds,
+                "platform": os.uname().sysname,
+            }
+        }
+        
+        # Container stats
+        containers_stats = []
+        if DOCKER_AVAILABLE:
+            try:
+                containers = docker_client.containers.list(all=True)
+                for container in containers:
+                    try:
+                        stats = container.stats(stream=False)
+                        
+                        # Calculate CPU percentage
+                        cpu_delta = stats['cpu_stats']['cpu_usage']['total_usage'] - \
+                                    stats['precpu_stats']['cpu_usage']['total_usage']
+                        system_delta = stats['cpu_stats']['system_cpu_usage'] - \
+                                       stats['precpu_stats']['system_cpu_usage']
+                        cpu_percent = 0.0
+                        if system_delta > 0:
+                            cpu_percent = (cpu_delta / system_delta) * len(stats['cpu_stats']['cpu_usage'].get('percpu_usage', [1])) * 100
+                        
+                        # Memory stats
+                        mem_usage = stats['memory_stats'].get('usage', 0)
+                        mem_limit = stats['memory_stats'].get('limit', 1)
+                        mem_percent = (mem_usage / mem_limit) * 100 if mem_limit > 0 else 0
+                        
+                        containers_stats.append({
+                            "id": container.id[:12],
+                            "name": container.name,
+                            "status": container.status,
+                            "image": container.image.tags[0] if container.image.tags else "unknown",
+                            "cpu_percent": round(cpu_percent, 1),
+                            "memory_usage": mem_usage,
+                            "memory_limit": mem_limit,
+                            "memory_percent": round(mem_percent, 1),
+                        })
+                    except Exception as e:
+                        # Container might not have stats (stopped)
+                        containers_stats.append({
+                            "id": container.id[:12],
+                            "name": container.name,
+                            "status": container.status,
+                            "image": container.image.tags[0] if container.image.tags else "unknown",
+                            "cpu_percent": 0,
+                            "memory_usage": 0,
+                            "memory_limit": 0,
+                            "memory_percent": 0,
+                        })
+            except Exception as e:
+                print(f"Error getting container stats: {e}")
+        
+        return {
+            "system": system_stats,
+            "containers": containers_stats,
+            "timestamp": int(time.time())
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/config/env")
