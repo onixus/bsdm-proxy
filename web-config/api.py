@@ -3,6 +3,7 @@
 
 import json
 import os
+import sys
 import time
 import psutil
 from pathlib import Path
@@ -36,11 +37,28 @@ CUSTOM_CATEGORIES_FILE = CONFIG_DIR / "custom-categories.json"
 # Ensure config directory exists
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 print(f"✅ Config directory: {CONFIG_DIR} (exists: {CONFIG_DIR.exists()})")
+print(f"   - Writeable: {os.access(CONFIG_DIR, os.W_OK)}")
+print(f"   - Contents: {list(CONFIG_DIR.iterdir()) if CONFIG_DIR.exists() else 'N/A'}")
 
-# Create default .env if missing
-if not ENV_FILE.exists() and ENV_EXAMPLE_FILE.exists():
-    ENV_FILE.write_text(ENV_EXAMPLE_FILE.read_text())
-    print(f"✅ Created default .env from .env.example")
+# Default configuration
+DEFAULT_ENV = """# BSDM-Proxy Default Configuration
+HTTP_PORT=1488
+METRICS_PORT=9090
+RUST_LOG=info
+MAX_CACHE_BODY_SIZE=10485760
+CACHE_CAPACITY=10000
+CACHE_TTL_SECONDS=3600
+KAFKA_BROKERS=kafka:9092
+KAFKA_TOPIC=cache-events
+KAFKA_BATCH_SIZE=50
+KAFKA_BATCH_TIMEOUT=5
+AUTH_ENABLED=false
+ACL_ENABLED=false
+CATEGORIZATION_ENABLED=false
+PROMETHEUS_ENABLED=true
+GRAFANA_ENABLED=true
+OPENSEARCH_URL=http://opensearch:9200
+"""
 
 # Docker client (requires mounted socket)
 try:
@@ -48,7 +66,7 @@ try:
     DOCKER_AVAILABLE = True
     print("✅ Docker client connected")
 except Exception as e:
-    print(f"⚠️  Docker not available: {e}")
+    print(f"⚠️  Docker not available: {e}", file=sys.stderr)
     DOCKER_AVAILABLE = False
 
 
@@ -59,7 +77,8 @@ async def health():
         "status": "healthy",
         "docker_available": DOCKER_AVAILABLE,
         "config_dir_exists": CONFIG_DIR.exists(),
-        "env_file_exists": ENV_FILE.exists()
+        "env_file_exists": ENV_FILE.exists(),
+        "config_dir_writable": os.access(CONFIG_DIR, os.W_OK) if CONFIG_DIR.exists() else False
     }
 
 
@@ -156,7 +175,7 @@ async def get_monitoring_stats():
                             "memory_percent": 0,
                         })
             except Exception as e:
-                print(f"Error getting container stats: {e}")
+                print(f"Error getting container stats: {e}", file=sys.stderr)
         
         return {
             "system": system_stats,
@@ -164,24 +183,27 @@ async def get_monitoring_stats():
             "timestamp": int(time.time())
         }
     except Exception as e:
+        print(f"Error in monitoring stats: {e}", file=sys.stderr)
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/config/env")
 async def get_env_config():
     """Get current .env configuration."""
-    if not ENV_FILE.exists():
-        # Try to load from example
-        if ENV_EXAMPLE_FILE.exists():
+    try:
+        if ENV_FILE.exists():
+            content = ENV_FILE.read_text()
+            return {"exists": True, "content": content, "source": "file"}
+        elif ENV_EXAMPLE_FILE.exists():
             content = ENV_EXAMPLE_FILE.read_text()
             return {"exists": False, "content": content, "source": "example"}
-        return {"exists": False, "content": "", "source": "none"}
-    
-    try:
-        content = ENV_FILE.read_text()
-        return {"exists": True, "content": content, "source": "file"}
+        else:
+            # Return default config
+            return {"exists": False, "content": DEFAULT_ENV, "source": "default"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error reading .env: {e}", file=sys.stderr)
+        # Return default on any error
+        return {"exists": False, "content": DEFAULT_ENV, "source": "default", "error": str(e)}
 
 
 @app.post("/api/config/env")
@@ -196,15 +218,22 @@ async def update_env_config(config: Dict[str, Any]):
         
         # Backup existing
         if ENV_FILE.exists():
-            backup = CONFIG_DIR / ".env.backup"
-            ENV_FILE.write_text(ENV_FILE.read_text())  # Copy content
-            backup.write_text(ENV_FILE.read_text())
+            try:
+                backup = CONFIG_DIR / ".env.backup"
+                backup.write_text(ENV_FILE.read_text())
+            except Exception as e:
+                print(f"Warning: Could not create backup: {e}", file=sys.stderr)
         
         # Write new config
         ENV_FILE.write_text(env_content)
+        print(f"✅ Configuration written to {ENV_FILE}")
         
         return {"success": True, "message": "Configuration updated"}
+    except PermissionError as e:
+        print(f"❌ Permission error writing .env: {e}", file=sys.stderr)
+        raise HTTPException(status_code=500, detail=f"Permission denied: {e}")
     except Exception as e:
+        print(f"❌ Error writing .env: {e}", file=sys.stderr)
         raise HTTPException(status_code=500, detail=str(e))
 
 
