@@ -111,7 +111,6 @@ services:
       - bsdm-net
     volumes:
       - ./certs:/certs:ro
-      - ./config/.env:/app/.env:ro
     tty: true
     stdin_open: true
     restart: unless-stopped
@@ -207,8 +206,8 @@ services:
     volumes:
       # Config directory for reading/writing configs
       - ./config:/config
-      # Docker socket for container management
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Docker socket for container management (read-write for restarts)
+      - /var/run/docker.sock:/var/run/docker.sock:rw
     networks:
       - bsdm-net
     restart: unless-stopped
