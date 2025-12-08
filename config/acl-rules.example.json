@@ -1,0 +1,50 @@
+{
+  "default_action": "allow",
+  "rules": [
+    {
+      "id": "block-malware",
+      "name": "Block malware URLs",
+      "enabled": true,
+      "priority": 100,
+      "action": "deny",
+      "rule_type": {
+        "Category": "malware"
+      }
+    },
+    {
+      "id": "block-phishing",
+      "name": "Block phishing URLs",
+      "enabled": true,
+      "priority": 101,
+      "action": "deny",
+      "rule_type": {
+        "Category": "phishing"
+      }
+    },
+    {
+      "id": "block-adult-workhours",
+      "name": "Block adult content during work hours",
+      "enabled": true,
+      "priority": 102,
+      "action": "deny",
+      "rule_type": {
+        "TimeWindow": {
+          "start": "09:00",
+          "end": "17:00",
+          "days": ["mon", "tue", "wed", "thu", "fri"],
+          "category": "adult"
+        }
+      }
+    },
+    {
+      "id": "allow-company-domains",
+      "name": "Always allow company domains",
+      "enabled": true,
+      "priority": 1,
+      "action": "allow",
+      "rule_type": {
+        "Domain": "*.company.com"
+      }
+    }
+  ]
+}

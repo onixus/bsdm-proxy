@@ -1,0 +1,13 @@
+# Ignore actual configs
+.env
+docker-compose.yml
+acl-rules.json
+custom-categories.json
+
+# Ignore backups
+*.backup
+
+# Keep examples
+!.env.example
+!docker-compose.example.yml
+!acl-rules.example.json
