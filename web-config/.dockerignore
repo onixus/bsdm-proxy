@@ -1,0 +1,11 @@
+# Don't copy these to Docker image
+*.md
+.git
+.gitignore
+*.backup
+*.log
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
