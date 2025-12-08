@@ -60,7 +60,7 @@ GRAFANA_ENABLED=true
 OPENSEARCH_URL=http://opensearch:9200
 """
 
-# Docker client - use low-level APIClient directly
+# Docker client - use low-level APIClient with version check disabled
 docker_client = None
 DOCKER_AVAILABLE = False
 
@@ -68,14 +68,16 @@ SOCKET_PATH = "/var/run/docker.sock"
 if os.path.exists(SOCKET_PATH):
     print(f"✅ Docker socket found: {SOCKET_PATH}")
     try:
-        # Use low-level APIClient with direct socket path
-        docker_client = APIClient(base_url=f'unix://{SOCKET_PATH}')
-        # Test connection
+        # CRITICAL: version=None prevents automatic version retrieval that causes URLSchemeUnknown
+        docker_client = APIClient(base_url=f'unix://{SOCKET_PATH}', version='auto')
+        # Test connection separately
         docker_client.ping()
         DOCKER_AVAILABLE = True
         print(f"✅ Docker client connected via APIClient (socket: {SOCKET_PATH})")
     except Exception as e:
         print(f"❌ Docker connection failed: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
         docker_client = None
         DOCKER_AVAILABLE = False
 else:
