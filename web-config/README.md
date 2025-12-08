@@ -1,194 +1,279 @@
-# BSDM-Proxy Web Configurator
+# BSDM-Proxy Web UI (Docker)
 
-🌐 **Visual configuration tool for BSDM-Proxy**
+🌐 **Web-based configuration interface in Docker container**
 
 ## 🚀 Quick Start
 
-### Option 1: Using Python HTTP Server (Recommended)
+### Deploy with Docker Compose
 
 ```bash
-cd web-config
-python3 serve.py
+# Clone and checkout
+git checkout feature/web-config-ui
+
+# Create config directory
+mkdir -p config
+
+# Start all services
+docker-compose up -d
+
+# Access web UI
+open http://localhost:8080
 ```
 
-Then open: http://localhost:8000
+## 📦 Architecture
 
-### Option 2: Using Python Built-in Server
-
-```bash
-cd web-config
-python3 -m http.server 8000
 ```
-
-Then open: http://localhost:8000
-
-### Option 3: Direct File Opening
-
-Simply open `index.html` in your browser:
-```bash
-open index.html  # macOS
-xdg-open index.html  # Linux
-start index.html  # Windows
+web-ui container:
+├── nginx (port 80)          # Serves static files
+├── FastAPI (port 8000)      # Backend API
+├── /config volume           # Shared configs
+└── /var/run/docker.sock     # Docker control
 ```
-
-**Note:** Some browsers may restrict certain features when opening files directly.
 
 ## ⚙️ Features
 
-### 7 Configuration Sections:
+### Configuration Management
+- ✅ Edit configs via web interface
+- ✅ Save to `/config` directory (shared volume)
+- ✅ Generate `.env`, `docker-compose.yml`
+- ✅ Upload/download config files
+- ✅ Auto-backup on changes
 
-1. **General** - Basic proxy settings (ports, logging)
-2. **Cache** - L1/L2 cache configuration
-3. **Kafka** - Event streaming setup
-4. **Auth** - Authentication (Basic, LDAP, NTLM)
-5. **ACL** - Access control rules
-6. **Categories** - URL categorization (Shallalist, URLhaus, PhishTank)
-7. **Monitoring** - Prometheus, Grafana, OpenSearch
+### Container Control
+- ✅ View running containers
+- ✅ Restart individual containers
+- ✅ Apply config changes (restart proxy)
+- ✅ Health status monitoring
 
-### Export Options:
+### API Endpoints
 
-- ✅ **Generate Configuration** - View all settings
-- ✅ **Export .env** - Download environment variables file
-- ✅ **Export docker-compose.yml** - Generate complete deployment
-- ✅ **Copy to Clipboard** - Quick copy functionality
+```
+GET  /api/health                    # Health check
+GET  /api/config/env                # Get .env
+POST /api/config/env                # Update .env
+GET  /api/config/docker-compose     # Get docker-compose.yml
+POST /api/config/docker-compose     # Update docker-compose.yml
+GET  /api/config/acl-rules          # Get ACL rules
+POST /api/config/acl-rules          # Update ACL rules
+GET  /api/docker/containers         # List containers
+POST /api/docker/restart/{name}     # Restart container
+POST /api/docker/restart-all        # Restart all
+POST /api/config/upload             # Upload file
+GET  /api/config/download/{type}    # Download file
+```
 
-## 📝 Usage
+## 📁 Volume Mounts
 
-1. **Navigate tabs** to configure each section
-2. **Fill in values** or use defaults
-3. **Enable features** with checkboxes
-4. **Generate** configuration when ready
-5. **Export** files for deployment
+### `/config` - Configuration Files
+```
+config/
+├── .env                          # Environment variables
+├── docker-compose.yml            # Docker Compose config
+├── acl-rules.json                # ACL rules
+├── custom-categories.json        # Custom URL categories
+├── *.backup                      # Auto-backups
+```
 
-### Example Workflow:
+### `/var/run/docker.sock` - Docker Control
+- Read-only mount
+- Allows container restart
+- Container status monitoring
 
+## 🔧 Usage
+
+### 1. Configure via Web UI
 ```bash
-# 1. Configure via web UI
-cd web-config && python3 serve.py
-# Open http://localhost:8000 and configure
+# Open browser
+open http://localhost:8080
 
-# 2. Export files
-# Click "Export .env" and "Export docker-compose.yml"
+# Edit settings in tabs:
+# - General, Cache, Kafka, Auth, ACL, Categories, Monitoring
 
-# 3. Deploy
-mv ~/Downloads/.env ../
-mv ~/Downloads/docker-compose.yml ../
-cd .. && docker-compose up -d
+# Click "Generate Configuration"
+# Click "Save & Apply"
 ```
 
-## 🔧 Configuration Details
-
-### Authentication
-
-**Basic Auth:**
-- No external dependencies
-- Username/password only
-- Fast and simple
-
-**LDAP/Active Directory:**
-- Enterprise authentication
-- Group membership support
-- Requires LDAP server
-
-**NTLM:**
-- Windows Integrated Auth
-- Domain authentication
-- TODO: Implementation pending
-
-### ACL Rules
-
-Quick presets available:
-- ❌ Block Adult Content
-- ❌ Block Gambling
-- ✅ Block Malware (enabled by default)
-- ✅ Block Phishing (enabled by default)
-
-Custom rules via JSON file:
-```json
-{
-  "default_action": "deny",
-  "rules": [
-    {
-      "id": "allow-work",
-      "action": "allow",
-      "rule_type": {
-        "Domain": "*.company.com"
-      }
-    }
-  ]
-}
-```
-
-### URL Categorization
-
-**Shallalist** (Open-Source):
+### 2. Configs Saved to Volume
 ```bash
-wget http://www.shallalist.de/Downloads/shallalist.tar.gz
-tar -xzf shallalist.tar.gz -C /var/lib/
+# Check generated configs
+cat config/.env
+cat config/docker-compose.yml
+cat config/acl-rules.json
 ```
 
-**URLhaus** (Malware):
-- Real-time API
-- No setup required
-- Rate limited
+### 3. Apply Changes
+```bash
+# Option 1: Via Web UI
+# Click "Restart Containers" button
 
-**PhishTank** (Phishing):
-- Community database
-- API key recommended
-- Free tier available
+# Option 2: Manually
+docker-compose restart proxy cache-indexer
 
-**Custom Database:**
-JSON format:
-```json
-{
-  "example.com": ["adult", "gambling"],
-  "malicious-site.net": ["malware", "phishing"]
-}
+# Option 3: Full redeploy
+docker-compose up -d --force-recreate
+```
+
+## 🔄 Workflow
+
+```
+1. Edit config in Web UI (localhost:8080)
+   ↓
+2. Save → /config volume
+   ↓
+3. Apply → Restart containers
+   ↓
+4. Services read new config from /config
+```
+
+## 🛡️ Security
+
+### Docker Socket Access
+Web UI has **read-only** access to Docker socket:
+- Can list containers
+- Can restart containers
+- **Cannot** delete/modify containers
+- **Cannot** access host system
+
+### Production Recommendations
+```yaml
+web-ui:
+  # Add authentication
+  environment:
+    - BASIC_AUTH_USER=admin
+    - BASIC_AUTH_PASS=secure_password
+  
+  # Limit to internal network
+  networks:
+    - internal
+  
+  # Remove external port
+  ports: []
+  
+  # Access via reverse proxy
+  labels:
+    - "traefik.enable=true"
+    - "traefik.http.routers.web-ui.rule=Host(`config.example.com`)"
 ```
 
 ## 🐛 Troubleshooting
 
-### UI Not Loading?
+### Web UI not accessible
+```bash
+# Check container status
+docker-compose ps web-ui
 
-1. **Check browser console** (F12)
-2. **Use HTTP server** instead of file://
-3. **Clear browser cache** (Ctrl+Shift+R)
-4. **Check file permissions**
+# Check logs
+docker-compose logs web-ui
 
-### Configuration Not Generating?
+# Verify port
+curl http://localhost:8080/health
+```
 
-1. **Fill required fields** (highlighted in red)
-2. **Check browser console** for errors
-3. **Try exporting .env** first (simpler output)
+### Cannot restart containers
+```bash
+# Check Docker socket mount
+docker-compose exec web-ui ls -la /var/run/docker.sock
 
-### Files Not Downloading?
+# Test API
+curl http://localhost:8080/api/docker/containers
+```
 
-1. **Check download folder** permissions
-2. **Allow popup/downloads** in browser settings
-3. **Use "Copy to Clipboard"** as alternative
+### Config changes not applied
+```bash
+# Check volume mount
+docker-compose exec web-ui ls -la /config
 
-### Styling Issues?
+# Verify config files
+docker-compose exec proxy cat /app/.env
 
-1. Ensure `styles.css` is in same directory
-2. Check browser DevTools Network tab
-3. Hard refresh (Ctrl+Shift+R)
+# Manual restart
+docker-compose restart proxy
+```
 
-## 📚 Resources
+### API errors
+```bash
+# Check API logs
+docker-compose logs web-ui | grep api
 
-- [BSDM-Proxy Documentation](../README.md)
-- [Shallalist Database](http://www.shallalist.de/)
-- [URLhaus API](https://urlhaus.abuse.ch/)
-- [PhishTank API](https://www.phishtank.com/)
-- [OpenSearch Docs](https://opensearch.org/docs/)
+# Test API directly
+curl http://localhost:8080/api/health
+```
+
+## 📊 Monitoring
+
+### Access Points
+- Web UI: http://localhost:8080
+- Prometheus: http://localhost:9091
+- Grafana: http://localhost:3000 (admin/admin)
+- OpenSearch: http://localhost:9200
+- OpenSearch Dashboards: http://localhost:5601
+
+### Health Checks
+```bash
+# Web UI
+curl http://localhost:8080/health
+
+# API
+curl http://localhost:8080/api/health
+
+# Proxy
+curl http://localhost:9090/health
+```
+
+## 🔐 Environment Variables
+
+```env
+# Web UI Configuration
+API_HOST=0.0.0.0
+API_PORT=8000
+CONFIG_DIR=/config
+
+# Optional: Authentication
+BASIC_AUTH_ENABLED=false
+BASIC_AUTH_USER=admin
+BASIC_AUTH_PASS=changeme
+
+# Optional: HTTPS
+SSL_CERT=/certs/cert.pem
+SSL_KEY=/certs/key.pem
+```
+
+## 📚 Development
+
+### Local Development
+```bash
+cd web-config
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Run API locally
+python api.py
+
+# Run frontend
+python -m http.server 8080
+
+# Access
+open http://localhost:8080
+```
+
+### Build Container
+```bash
+cd web-config
+docker build -t bsdm-proxy-web-ui .
+docker run -p 8080:80 \
+  -v ./config:/config \
+  -v /var/run/docker.sock:/var/run/docker.sock:ro \
+  bsdm-proxy-web-ui
+```
 
 ## 🤝 Contributing
 
-Contributions welcome!
-
 - Add new configuration options
-- Improve validation
-- Add export formats
+- Improve API endpoints
 - Enhance UI/UX
+- Add authentication methods
+- Improve error handling
 
 ## 📝 License
 
