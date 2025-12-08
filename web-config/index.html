@@ -12,10 +12,11 @@
             <div class="header-content">
                 <div>
                     <h1>🔧 BSDM-Proxy Configuration</h1>
-                    <p class="subtitle">Configure your proxy deployment <span class="auto-save-indicator">• Auto-saves to browser</span></p>
+                    <p class="subtitle">Configure your proxy deployment <span class="auto-save-indicator">• Auto-saves locally</span></p>
                 </div>
                 <div class="header-actions">
-                    <button class="btn btn-small btn-secondary" onclick="saveConfig()" title="Save configuration to file">💾 Save</button>
+                    <button class="btn btn-small btn-primary" onclick="applyConfig()" title="Save config to server and restart containers">✅ Apply Configuration</button>
+                    <button class="btn btn-small btn-secondary" onclick="saveConfig()" title="Save configuration to server">💾 Save</button>
                     <button class="btn btn-small btn-secondary" onclick="loadConfig()" title="Load configuration from file">📂 Load</button>
                     <button class="btn btn-small btn-warning" onclick="resetConfig()" title="Reset to defaults">🔄 Reset</button>
                 </div>
