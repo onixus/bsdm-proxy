@@ -1,10 +1,14 @@
 FROM python:3.11-alpine
 
-# Install nginx and dependencies
+# Install nginx, supervisor and build dependencies for psutil
 RUN apk add --no-cache \
     nginx \
     supervisor \
-    curl
+    curl \
+    gcc \
+    python3-dev \
+    musl-dev \
+    linux-headers
 
 # Create directories
 RUN mkdir -p /app /var/log/supervisor /run/nginx
@@ -13,10 +17,15 @@ WORKDIR /app
 
 # Copy requirements
 COPY requirements.txt .
+
+# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Clean up build dependencies to reduce image size
+RUN apk del gcc python3-dev musl-dev linux-headers
+
 # Copy application files
-COPY index.html styles.css script.js /usr/share/nginx/html/
+COPY index.html styles.css script.js monitoring.js /usr/share/nginx/html/
 COPY api.py /app/
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY supervisord.conf /etc/supervisord.conf
