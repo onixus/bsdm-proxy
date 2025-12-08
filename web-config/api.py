@@ -6,20 +6,17 @@ import os
 import sys
 import time
 import psutil
+import socket
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 import requests
-import requests_unixsocket
-import docker
-from docker import APIClient
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.util.connection import create_connection
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 import yaml
-
-# CRITICAL: Register Unix socket adapter for requests BEFORE any docker-py usage
-requests_unixsocket.monkeypatch()
 
 app = FastAPI(title="BSDM-Proxy Config API")
 
@@ -65,7 +62,80 @@ GRAFANA_ENABLED=true
 OPENSEARCH_URL=http://opensearch:9200
 """
 
-# Docker client - use low-level APIClient
+
+class UnixSocketAdapter(HTTPAdapter):
+    """HTTP adapter that uses Unix socket."""
+    
+    def __init__(self, socket_path: str):
+        self.socket_path = socket_path
+        super().__init__()
+    
+    def get_connection(self, url, proxies=None):
+        conn = super().get_connection(url, proxies)
+        # Monkey patch the connection to use Unix socket
+        original_connect = conn.connect
+        
+        def unix_connect():
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.connect(self.socket_path)
+            conn.sock = sock
+        
+        conn.connect = unix_connect
+        return conn
+
+
+class DockerClient:
+    """Simple Docker client using direct HTTP API over Unix socket."""
+    
+    def __init__(self, socket_path: str = "/var/run/docker.sock"):
+        self.socket_path = socket_path
+        self.session = requests.Session()
+        self.session.mount('http+docker://', UnixSocketAdapter(socket_path))
+        self.base_url = 'http+docker://localhost'
+    
+    def ping(self) -> bool:
+        """Ping Docker daemon."""
+        try:
+            resp = self.session.get(f'{self.base_url}/_ping', timeout=2)
+            return resp.status_code == 200
+        except Exception as e:
+            print(f"Ping failed: {e}", file=sys.stderr)
+            return False
+    
+    def list_containers(self, all: bool = True) -> List[Dict[str, Any]]:
+        """List containers."""
+        params = {'all': 1 if all else 0}
+        resp = self.session.get(f'{self.base_url}/containers/json', params=params, timeout=5)
+        resp.raise_for_status()
+        return resp.json()
+    
+    def inspect_container(self, container_id: str) -> Dict[str, Any]:
+        """Inspect container."""
+        resp = self.session.get(f'{self.base_url}/containers/{container_id}/json', timeout=5)
+        resp.raise_for_status()
+        return resp.json()
+    
+    def container_stats(self, container_id: str) -> Dict[str, Any]:
+        """Get container stats (one-shot, no stream)."""
+        resp = self.session.get(
+            f'{self.base_url}/containers/{container_id}/stats',
+            params={'stream': 0},
+            timeout=10
+        )
+        resp.raise_for_status()
+        return resp.json()
+    
+    def restart_container(self, container_id: str, timeout: int = 10) -> None:
+        """Restart container."""
+        resp = self.session.post(
+            f'{self.base_url}/containers/{container_id}/restart',
+            params={'t': timeout},
+            timeout=timeout + 5
+        )
+        resp.raise_for_status()
+
+
+# Docker client - use custom Unix socket client
 docker_client = None
 DOCKER_AVAILABLE = False
 
@@ -73,12 +143,14 @@ SOCKET_PATH = "/var/run/docker.sock"
 if os.path.exists(SOCKET_PATH):
     print(f"✅ Docker socket found: {SOCKET_PATH}")
     try:
-        # Now unix:// URLs will work thanks to requests_unixsocket.monkeypatch()
-        docker_client = APIClient(base_url=f'unix://{SOCKET_PATH}', version='auto')
-        # Test connection
-        docker_client.ping()
-        DOCKER_AVAILABLE = True
-        print(f"✅ Docker client connected via APIClient (socket: {SOCKET_PATH})")
+        docker_client = DockerClient(SOCKET_PATH)
+        if docker_client.ping():
+            DOCKER_AVAILABLE = True
+            print(f"✅ Docker client connected via Unix socket: {SOCKET_PATH}")
+        else:
+            print(f"❌ Docker ping failed", file=sys.stderr)
+            docker_client = None
+            DOCKER_AVAILABLE = False
     except Exception as e:
         print(f"❌ Docker connection failed: {e}", file=sys.stderr)
         import traceback
@@ -153,11 +225,10 @@ async def get_monitoring_stats():
         containers_stats = []
         if DOCKER_AVAILABLE and docker_client:
             try:
-                # Use APIClient methods
-                containers = docker_client.containers(all=True)
+                containers = docker_client.list_containers(all=True)
                 for container in containers:
                     try:
-                        stats = docker_client.stats(container['Id'], stream=False)
+                        stats = docker_client.container_stats(container['Id'])
                         
                         # Calculate CPU percentage
                         cpu_delta = stats['cpu_stats']['cpu_usage']['total_usage'] - \
@@ -331,7 +402,7 @@ async def list_containers():
         raise HTTPException(status_code=503, detail="Docker not available")
     
     try:
-        containers = docker_client.containers(all=True)
+        containers = docker_client.list_containers(all=True)
         return {
             "containers": [
                 {
@@ -355,7 +426,7 @@ async def restart_container(container_name: str):
     
     try:
         # Find container by name
-        containers = docker_client.containers(all=True)
+        containers = docker_client.list_containers(all=True)
         container_id = None
         for c in containers:
             if container_name in c['Names'][0]:
@@ -365,7 +436,7 @@ async def restart_container(container_name: str):
         if not container_id:
             raise HTTPException(status_code=404, detail=f"Container {container_name} not found")
         
-        docker_client.restart(container_id, timeout=10)
+        docker_client.restart_container(container_id, timeout=10)
         return {"success": True, "message": f"Container {container_name} restarted"}
     except HTTPException:
         raise
@@ -380,16 +451,14 @@ async def restart_all_containers():
         raise HTTPException(status_code=503, detail="Docker not available")
     
     try:
-        containers = docker_client.containers(
-            all=True,
-            filters={'label': 'com.docker.compose.project=bsdm-proxy'}
-        )
+        containers = docker_client.list_containers(all=True)
         
         restarted = []
         for container in containers:
             name = container['Names'][0].lstrip('/')
-            if "web-ui" not in name:  # Don't restart ourselves
-                docker_client.restart(container['Id'], timeout=10)
+            # Filter by label or name pattern
+            if "bsdm-proxy" in name.lower() and "web-ui" not in name:
+                docker_client.restart_container(container['Id'], timeout=10)
                 restarted.append(name)
         
         return {
