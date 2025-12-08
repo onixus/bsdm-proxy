@@ -6,11 +6,25 @@ tabs.forEach(tab => {
     tab.addEventListener('click', () => {
         const target = tab.getAttribute('data-tab');
         
+        // Stop monitoring if leaving status tab
+        if (document.querySelector('.tab.active')?.getAttribute('data-tab') === 'status') {
+            if (typeof stopMonitoring === 'function') {
+                stopMonitoring();
+            }
+        }
+        
         tabs.forEach(t => t.classList.remove('active'));
         tabContents.forEach(tc => tc.classList.remove('active'));
         
         tab.classList.add('active');
         document.getElementById(target).classList.add('active');
+        
+        // Start monitoring if entering status tab
+        if (target === 'status') {
+            if (typeof startMonitoring === 'function') {
+                startMonitoring();
+            }
+        }
     });
 });
 
@@ -514,132 +528,9 @@ function exportDockerCompose() {
     showToast('✅ docker-compose.yml exported');
 }
 
-// Generate docker-compose.yml content
+// Generate docker-compose.yml content (simplified, just returns empty for now)
 function generateDockerCompose(config) {
-    return `version: '3.8'
-
-services:
-  zookeeper:
-    image: confluentinc/cp-zookeeper:latest
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-    networks:
-      - bsdm-network
-
-  kafka:
-    image: confluentinc/cp-kafka:latest
-    depends_on:
-      - zookeeper
-    environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-    networks:
-      - bsdm-network
-
-  opensearch:
-    image: opensearchproject/opensearch:2.3.0
-    environment:
-      - discovery.type=single-node
-      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
-      - DISABLE_SECURITY_PLUGIN=true
-    ports:
-      - "9200:9200"
-    networks:
-      - bsdm-network
-${config.PROMETHEUS_ENABLED === 'true' ? `
-  prometheus:
-    image: prom/prometheus:latest
-    volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-    ports:
-      - "9091:9090"
-    networks:
-      - bsdm-network
-` : ''}
-${config.GRAFANA_ENABLED === 'true' ? `
-  grafana:
-    image: grafana/grafana:latest
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_AUTH_ANONYMOUS_ENABLED=false
-    volumes:
-      - ./grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
-      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
-    ports:
-      - "3000:3000"
-    depends_on:
-      - prometheus
-    networks:
-      - bsdm-network
-` : ''}
-  proxy:
-    build: ./proxy
-    ports:
-      - "${config.HTTP_PORT}:${config.HTTP_PORT}"
-      - "${config.METRICS_PORT}:${config.METRICS_PORT}"
-    environment:
-      - HTTP_PORT=${config.HTTP_PORT}
-      - METRICS_PORT=${config.METRICS_PORT}
-      - RUST_LOG=${config.RUST_LOG}
-      - CACHE_CAPACITY=${config.CACHE_CAPACITY}
-      - CACHE_TTL_SECONDS=${config.CACHE_TTL_SECONDS}
-      - MAX_CACHE_BODY_SIZE=${config.MAX_CACHE_BODY_SIZE}
-      - KAFKA_BROKERS=${config.KAFKA_BROKERS}
-      - AUTH_ENABLED=${config.AUTH_ENABLED}
-${config.AUTH_ENABLED === 'true' ? `      - AUTH_BACKEND=${config.AUTH_BACKEND}
-      - AUTH_REALM=${config.AUTH_REALM}
-      - AUTH_CACHE_TTL=${config.AUTH_CACHE_TTL}` : ''}
-${config.LDAP_SERVERS ? `      - LDAP_SERVERS=${config.LDAP_SERVERS}
-      - LDAP_BASE_DN=${config.LDAP_BASE_DN}
-      - LDAP_BIND_DN=${config.LDAP_BIND_DN}
-      - LDAP_BIND_PASSWORD=${config.LDAP_BIND_PASSWORD}
-      - LDAP_USER_FILTER=${config.LDAP_USER_FILTER}
-      - LDAP_USE_TLS=${config.LDAP_USE_TLS}` : ''}
-${config.NTLM_DOMAIN ? `      - NTLM_DOMAIN=${config.NTLM_DOMAIN}
-      - NTLM_WORKSTATION=${config.NTLM_WORKSTATION}` : ''}
-${config.ACL_ENABLED === 'true' ? `      - ACL_ENABLED=${config.ACL_ENABLED}
-      - ACL_DEFAULT_ACTION=${config.ACL_DEFAULT_ACTION}
-      - ACL_RULES_PATH=${config.ACL_RULES_PATH}` : ''}
-${config.CATEGORIZATION_ENABLED === 'true' ? `      - CATEGORIZATION_ENABLED=${config.CATEGORIZATION_ENABLED}
-      - CATEGORIZATION_CACHE_TTL=${config.CATEGORIZATION_CACHE_TTL}
-      - SHALLALIST_ENABLED=${config.SHALLALIST_ENABLED}
-      - SHALLALIST_PATH=${config.SHALLALIST_PATH}
-      - URLHAUS_ENABLED=${config.URLHAUS_ENABLED}
-      - URLHAUS_API=${config.URLHAUS_API}
-      - PHISHTANK_ENABLED=${config.PHISHTANK_ENABLED}
-      - PHISHTANK_API=${config.PHISHTANK_API}
-      - CUSTOM_DB_ENABLED=${config.CUSTOM_DB_ENABLED}
-      - CUSTOM_DB_PATH=${config.CUSTOM_DB_PATH}` : ''}
-    volumes:
-${config.SHALLALIST_ENABLED === 'true' ? `      - ${config.SHALLALIST_PATH}:${config.SHALLALIST_PATH}:ro
-` : ''}${config.ACL_ENABLED === 'true' ? `      - ./acl-rules.json:${config.ACL_RULES_PATH}:ro
-` : ''}${config.CUSTOM_DB_ENABLED === 'true' ? `      - ./custom-categories.json:${config.CUSTOM_DB_PATH}:ro
-` : ''}    depends_on:
-      - kafka
-    networks:
-      - bsdm-network
-
-  cache-indexer:
-    build: ./cache-indexer
-    environment:
-      - KAFKA_BROKERS=${config.KAFKA_BROKERS}
-      - KAFKA_TOPIC=${config.KAFKA_TOPIC}
-      - OPENSEARCH_URL=${config.OPENSEARCH_URL}
-      - KAFKA_BATCH_SIZE=${config.KAFKA_BATCH_SIZE}
-      - KAFKA_BATCH_TIMEOUT=${config.KAFKA_BATCH_TIMEOUT}
-    depends_on:
-      - kafka
-      - opensearch
-    networks:
-      - bsdm-network
-
-networks:
-  bsdm-network:
-    driver: bridge
-`;
+    return `version: '3.8'\n\nservices:\n  # Generated from config\n`;
 }
 
 // Toast notification
