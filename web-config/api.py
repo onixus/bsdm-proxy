@@ -60,18 +60,39 @@ GRAFANA_ENABLED=true
 OPENSEARCH_URL=http://opensearch:9200
 """
 
-# Docker client - use explicit unix socket
+# Docker client - try multiple connection methods
+docker_client = None
+DOCKER_AVAILABLE = False
+
+# Try different connection methods
 try:
-    # Try to connect using unix socket directly
-    docker_client = docker.DockerClient(base_url='unix://var/run/docker.sock')
-    # Test connection
+    # Method 1: Use unix socket with 3 slashes (correct format)
+    docker_client = docker.DockerClient(base_url='unix:///var/run/docker.sock')
     docker_client.ping()
     DOCKER_AVAILABLE = True
-    print("✅ Docker client connected via unix socket")
-except Exception as e:
-    print(f"⚠️  Docker not available: {e}", file=sys.stderr)
-    docker_client = None
-    DOCKER_AVAILABLE = False
+    print("✅ Docker client connected via unix:///var/run/docker.sock")
+except Exception as e1:
+    print(f"⚠️  Method 1 failed: {e1}")
+    try:
+        # Method 2: Use from_env() which tries to auto-detect
+        docker_client = docker.from_env()
+        docker_client.ping()
+        DOCKER_AVAILABLE = True
+        print("✅ Docker client connected via from_env()")
+    except Exception as e2:
+        print(f"⚠️  Method 2 failed: {e2}")
+        try:
+            # Method 3: Use APIClient directly
+            from docker import APIClient
+            api_client = APIClient(base_url='unix:///var/run/docker.sock')
+            api_client.ping()
+            docker_client = docker.DockerClient(base_url='unix:///var/run/docker.sock')
+            DOCKER_AVAILABLE = True
+            print("✅ Docker client connected via APIClient")
+        except Exception as e3:
+            print(f"❌ Docker not available: {e3}", file=sys.stderr)
+            docker_client = None
+            DOCKER_AVAILABLE = False
 
 
 @app.get("/api/health")
