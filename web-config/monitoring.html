@@ -1,0 +1,116 @@
+<!-- Monitoring Tab Content -->
+<section id="monitoring-status" class="tab-content">
+    <h2>📊 System Monitoring</h2>
+    
+    <!-- System Info Card -->
+    <div class="monitoring-card">
+        <h3>🖥️ System Information</h3>
+        <div class="info-grid">
+            <div class="info-item">
+                <span class="info-label">Hostname:</span>
+                <span class="info-value" id="sys-hostname">-</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Platform:</span>
+                <span class="info-value" id="sys-platform">-</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Uptime:</span>
+                <span class="info-value" id="sys-uptime">-</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">CPU Cores:</span>
+                <span class="info-value" id="sys-cpu-count">-</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Resource Cards Grid -->
+    <div class="metrics-grid">
+        <!-- CPU Card -->
+        <div class="metric-card">
+            <div class="metric-header">
+                <span class="metric-icon">⚡</span>
+                <h4>CPU Usage</h4>
+            </div>
+            <div class="metric-value" id="cpu-percent">0%</div>
+            <div class="metric-bar">
+                <div class="metric-bar-fill" id="cpu-bar" style="width: 0%"></div>
+            </div>
+        </div>
+
+        <!-- Memory Card -->
+        <div class="metric-card">
+            <div class="metric-header">
+                <span class="metric-icon">💾</span>
+                <h4>Memory Usage</h4>
+            </div>
+            <div class="metric-value" id="mem-percent">0%</div>
+            <div class="metric-bar">
+                <div class="metric-bar-fill" id="mem-bar" style="width: 0%"></div>
+            </div>
+            <div class="metric-detail" id="mem-detail">0 / 0 GB</div>
+        </div>
+
+        <!-- Disk Card -->
+        <div class="metric-card">
+            <div class="metric-header">
+                <span class="metric-icon">💿</span>
+                <h4>Disk Usage</h4>
+            </div>
+            <div class="metric-value" id="disk-percent">0%</div>
+            <div class="metric-bar">
+                <div class="metric-bar-fill" id="disk-bar" style="width: 0%"></div>
+            </div>
+            <div class="metric-detail" id="disk-detail">0 / 0 GB</div>
+        </div>
+
+        <!-- Network Card -->
+        <div class="metric-card">
+            <div class="metric-header">
+                <span class="metric-icon">🌐</span>
+                <h4>Network I/O</h4>
+            </div>
+            <div class="metric-network">
+                <div>
+                    <span>↑</span>
+                    <span id="net-sent">0 MB</span>
+                </div>
+                <div>
+                    <span>↓</span>
+                    <span id="net-recv">0 MB</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Containers Table -->
+    <div class="monitoring-card">
+        <h3>🐳 Container Status</h3>
+        <div class="table-container">
+            <table class="containers-table" id="containers-table">
+                <thead>
+                    <tr>
+                        <th>Container</th>
+                        <th>Status</th>
+                        <th>Image</th>
+                        <th>CPU %</th>
+                        <th>Memory</th>
+                        <th>Memory %</th>
+                    </tr>
+                </thead>
+                <tbody id="containers-tbody">
+                    <tr>
+                        <td colspan="6" class="loading">Loading...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Auto-refresh indicator -->
+    <div class="info-box">
+        <strong>🔄 Auto-refresh:</strong> Updates every 5 seconds<br>
+        Last update: <span id="last-update">Never</span>
+    </div>
+</section>
