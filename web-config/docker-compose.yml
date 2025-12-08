@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  web-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bsdm-proxy-web-ui
+    ports:
+      - "8080:80"
+    volumes:
+      # Config directory for reading/writing configs
+      - ../config:/config
+      # Docker socket for container management (read-write for restarts)
+      - /var/run/docker.sock:/var/run/docker.sock:rw
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - web-ui-net
+
+networks:
+  web-ui-net:
+    driver: bridge
