@@ -9,12 +9,17 @@ import psutil
 from pathlib import Path
 from typing import Dict, Any, Optional
 
+import requests
+import requests_unixsocket
 import docker
 from docker import APIClient
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 import yaml
+
+# CRITICAL: Register Unix socket adapter for requests BEFORE any docker-py usage
+requests_unixsocket.monkeypatch()
 
 app = FastAPI(title="BSDM-Proxy Config API")
 
@@ -60,7 +65,7 @@ GRAFANA_ENABLED=true
 OPENSEARCH_URL=http://opensearch:9200
 """
 
-# Docker client - use low-level APIClient with version check disabled
+# Docker client - use low-level APIClient
 docker_client = None
 DOCKER_AVAILABLE = False
 
@@ -68,9 +73,9 @@ SOCKET_PATH = "/var/run/docker.sock"
 if os.path.exists(SOCKET_PATH):
     print(f"✅ Docker socket found: {SOCKET_PATH}")
     try:
-        # CRITICAL: version=None prevents automatic version retrieval that causes URLSchemeUnknown
+        # Now unix:// URLs will work thanks to requests_unixsocket.monkeypatch()
         docker_client = APIClient(base_url=f'unix://{SOCKET_PATH}', version='auto')
-        # Test connection separately
+        # Test connection
         docker_client.ping()
         DOCKER_AVAILABLE = True
         print(f"✅ Docker client connected via APIClient (socket: {SOCKET_PATH})")
