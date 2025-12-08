@@ -28,16 +28,27 @@ app.add_middleware(
 # Config paths (mounted volumes)
 CONFIG_DIR = Path("/config")
 ENV_FILE = CONFIG_DIR / ".env"
+ENV_EXAMPLE_FILE = CONFIG_DIR / ".env.example"
 DOCKER_COMPOSE_FILE = CONFIG_DIR / "docker-compose.yml"
 ACL_RULES_FILE = CONFIG_DIR / "acl-rules.json"
 CUSTOM_CATEGORIES_FILE = CONFIG_DIR / "custom-categories.json"
+
+# Ensure config directory exists
+CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+print(f"✅ Config directory: {CONFIG_DIR} (exists: {CONFIG_DIR.exists()})")
+
+# Create default .env if missing
+if not ENV_FILE.exists() and ENV_EXAMPLE_FILE.exists():
+    ENV_FILE.write_text(ENV_EXAMPLE_FILE.read_text())
+    print(f"✅ Created default .env from .env.example")
 
 # Docker client (requires mounted socket)
 try:
     docker_client = docker.from_env()
     DOCKER_AVAILABLE = True
+    print("✅ Docker client connected")
 except Exception as e:
-    print(f"Warning: Docker not available: {e}")
+    print(f"⚠️  Docker not available: {e}")
     DOCKER_AVAILABLE = False
 
 
@@ -47,7 +58,8 @@ async def health():
     return {
         "status": "healthy",
         "docker_available": DOCKER_AVAILABLE,
-        "config_dir_exists": CONFIG_DIR.exists()
+        "config_dir_exists": CONFIG_DIR.exists(),
+        "env_file_exists": ENV_FILE.exists()
     }
 
 
@@ -159,11 +171,15 @@ async def get_monitoring_stats():
 async def get_env_config():
     """Get current .env configuration."""
     if not ENV_FILE.exists():
-        return {"exists": False, "content": ""}
+        # Try to load from example
+        if ENV_EXAMPLE_FILE.exists():
+            content = ENV_EXAMPLE_FILE.read_text()
+            return {"exists": False, "content": content, "source": "example"}
+        return {"exists": False, "content": "", "source": "none"}
     
     try:
         content = ENV_FILE.read_text()
-        return {"exists": True, "content": content}
+        return {"exists": True, "content": content, "source": "file"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -172,13 +188,17 @@ async def get_env_config():
 async def update_env_config(config: Dict[str, Any]):
     """Update .env configuration."""
     try:
+        # Ensure directory exists
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        
         # Convert dict to .env format
         env_content = "\n".join([f"{k}={v}" for k, v in config.items()])
         
         # Backup existing
         if ENV_FILE.exists():
             backup = CONFIG_DIR / ".env.backup"
-            ENV_FILE.rename(backup)
+            ENV_FILE.write_text(ENV_FILE.read_text())  # Copy content
+            backup.write_text(ENV_FILE.read_text())
         
         # Write new config
         ENV_FILE.write_text(env_content)
@@ -216,7 +236,7 @@ async def update_docker_compose(content: Dict[str, str]):
         # Backup existing
         if DOCKER_COMPOSE_FILE.exists():
             backup = CONFIG_DIR / "docker-compose.yml.backup"
-            DOCKER_COMPOSE_FILE.rename(backup)
+            backup.write_text(DOCKER_COMPOSE_FILE.read_text())
         
         # Write new config
         DOCKER_COMPOSE_FILE.write_text(yaml_content)
@@ -246,10 +266,13 @@ async def get_acl_rules():
 async def update_acl_rules(rules: Dict[str, Any]):
     """Update ACL rules."""
     try:
+        # Ensure directory exists
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        
         # Backup existing
         if ACL_RULES_FILE.exists():
             backup = CONFIG_DIR / "acl-rules.json.backup"
-            ACL_RULES_FILE.rename(backup)
+            backup.write_text(ACL_RULES_FILE.read_text())
         
         # Write new rules
         ACL_RULES_FILE.write_text(json.dumps(rules, indent=2))
@@ -328,6 +351,9 @@ async def restart_all_containers():
 async def upload_config(file: UploadFile = File(...)):
     """Upload configuration file."""
     try:
+        # Ensure directory exists
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        
         content = await file.read()
         
         # Determine file type and save
@@ -347,7 +373,7 @@ async def upload_config(file: UploadFile = File(...)):
         # Backup and save
         if target.exists():
             backup = target.with_suffix(target.suffix + '.backup')
-            target.rename(backup)
+            backup.write_text(target.read_text())
         
         target.write_bytes(content)
         
