@@ -25,21 +25,13 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Authentication
-ldap3 = { version = "0.11", optional = true }
+ldap3 = "0.11"
+ntlm = "0.3"
 hex = "0.4"
 
 # ACL and Categorization
 regex = "1.10"
 reqwest = { version = "0.11", features = ["json"] }
-
-[features]
-default = []
-auth-basic = []
-auth-ldap = ["ldap3"]
-auth-ntlm = []  # NTLM support - TODO: implement
-auth-all = ["auth-ldap", "auth-ntlm"]
-acl = []
-categorization = ["acl"]
 
 [dev-dependencies]
 tokio-test = "0.4"
