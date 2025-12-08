@@ -14,12 +14,40 @@ tabs.forEach(tab => {
     });
 });
 
+// Check API health on load
+window.addEventListener('DOMContentLoaded', async () => {
+    await checkApiHealth();
+    await loadConfigFromServer();
+    loadConfigFromLocalStorage(); // Fallback
+    
+    // Update visibility of conditional sections
+    authEnabled.dispatchEvent(new Event('change'));
+    authBackend.dispatchEvent(new Event('change'));
+    aclEnabled.dispatchEvent(new Event('change'));
+    categorizationEnabled.dispatchEvent(new Event('change'));
+    cacheCapacity.dispatchEvent(new Event('input'));
+});
+
+// API Health Check
+async function checkApiHealth() {
+    try {
+        const response = await fetch('/api/health');
+        const data = await response.json();
+        console.log('✅ API Health:', data);
+        if (!data.docker_available) {
+            console.warn('⚠️ Docker not available - container restart disabled');
+        }
+    } catch (error) {
+        console.error('❌ API not available:', error);
+        showToast('⚠️ API unavailable - using local mode', 'error');
+    }
+}
+
 // Auto-save on any input change
 const allInputs = document.querySelectorAll('input, select');
 allInputs.forEach(input => {
     input.addEventListener('change', () => {
         saveConfigToLocalStorage();
-        showToast('✅ Configuration auto-saved');
     });
 });
 
@@ -65,24 +93,13 @@ cacheCapacity.addEventListener('input', () => {
     cacheStats.textContent = `${entries.toLocaleString()} entries ≈ ${memoryMB} MB memory`;
 });
 
-// Load saved configuration on page load
-window.addEventListener('DOMContentLoaded', () => {
-    loadConfigFromLocalStorage();
-    // Update visibility of conditional sections
-    authEnabled.dispatchEvent(new Event('change'));
-    authBackend.dispatchEvent(new Event('change'));
-    aclEnabled.dispatchEvent(new Event('change'));
-    categorizationEnabled.dispatchEvent(new Event('change'));
-    cacheCapacity.dispatchEvent(new Event('input'));
-});
-
-// Save configuration to localStorage
+// Save configuration to localStorage (fallback)
 function saveConfigToLocalStorage() {
     const config = collectFormData();
     localStorage.setItem('bsdm-proxy-config', JSON.stringify(config));
 }
 
-// Load configuration from localStorage
+// Load configuration from localStorage (fallback)
 function loadConfigFromLocalStorage() {
     const saved = localStorage.getItem('bsdm-proxy-config');
     if (saved) {
@@ -94,6 +111,68 @@ function loadConfigFromLocalStorage() {
             console.error('❌ Failed to load config:', e);
         }
     }
+}
+
+// Load configuration from server
+async function loadConfigFromServer() {
+    try {
+        const response = await fetch('/api/config/env');
+        const data = await response.json();
+        
+        if (data.exists && data.content) {
+            // Parse .env format
+            const config = {};
+            data.content.split('\n').forEach(line => {
+                const match = line.match(/^([^=]+)=(.*)$/);
+                if (match) {
+                    config[match[1].trim()] = match[2].trim();
+                }
+            });
+            
+            // Map env vars to form fields
+            mapEnvToForm(config);
+            console.log('✅ Configuration loaded from server');
+        }
+    } catch (error) {
+        console.warn('⚠️ Could not load from server:', error);
+    }
+}
+
+// Map environment variables to form fields
+function mapEnvToForm(envConfig) {
+    const mapping = {
+        'HTTP_PORT': 'http_port',
+        'METRICS_PORT': 'metrics_port',
+        'RUST_LOG': 'log_level',
+        'CACHE_CAPACITY': 'cache_capacity',
+        'CACHE_TTL_SECONDS': 'cache_ttl',
+        'KAFKA_BROKERS': 'kafka_brokers',
+        'KAFKA_TOPIC': 'kafka_topic',
+        'KAFKA_BATCH_SIZE': 'kafka_batch_size',
+        'KAFKA_BATCH_TIMEOUT': 'kafka_batch_timeout',
+        'AUTH_ENABLED': 'auth_enabled',
+        'AUTH_BACKEND': 'auth_backend',
+        'AUTH_REALM': 'auth_realm',
+        'AUTH_CACHE_TTL': 'auth_cache_ttl',
+        'ACL_ENABLED': 'acl_enabled',
+        'ACL_DEFAULT_ACTION': 'acl_default_action',
+        'ACL_RULES_PATH': 'acl_rules_path',
+        'OPENSEARCH_URL': 'opensearch_url',
+    };
+    
+    Object.entries(envConfig).forEach(([envKey, value]) => {
+        const fieldId = mapping[envKey];
+        if (fieldId) {
+            const element = document.getElementById(fieldId);
+            if (element) {
+                if (element.type === 'checkbox') {
+                    element.checked = value === 'true';
+                } else {
+                    element.value = value;
+                }
+            }
+        }
+    });
 }
 
 // Collect all form data
@@ -118,19 +197,12 @@ function applyConfigToForm(config) {
         const element = document.getElementById(key);
         if (element) {
             if (element.type === 'checkbox') {
-                element.checked = value;
+                element.checked = value === true || value === 'true';
             } else {
                 element.value = value;
             }
         }
     });
-}
-
-// Generate configuration
-function generateConfig() {
-    const config = collectConfig();
-    const output = formatConfig(config);
-    showModal('Environment Variables', output);
 }
 
 // Collect configuration from form
@@ -204,12 +276,100 @@ function collectConfig() {
     return config;
 }
 
-// Save configuration to file
-function saveConfig() {
-    const config = collectFormData();
-    const json = JSON.stringify(config, null, 2);
-    downloadFile('bsdm-proxy-config.json', json);
-    showToast('✅ Configuration saved to file');
+// Save configuration to server (NEW)
+async function saveConfigToServer() {
+    try {
+        showToast('💾 Saving configuration...', 'success');
+        const config = collectConfig();
+        
+        const response = await fetch('/api/config/env', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(config)
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        
+        const result = await response.json();
+        console.log('✅ Config saved to server:', result);
+        
+        // Also save ACL rules if enabled
+        if (document.getElementById('acl_enabled').checked) {
+            await saveAclRulesToServer();
+        }
+        
+        saveConfigToLocalStorage();
+        return true;
+    } catch (error) {
+        console.error('❌ Failed to save to server:', error);
+        showToast('❌ Failed to save configuration', 'error');
+        return false;
+    }
+}
+
+// Save ACL rules to server
+async function saveAclRulesToServer() {
+    const rules = generateAclRules();
+    if (!rules) return;
+    
+    try {
+        const response = await fetch('/api/config/acl-rules', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(rules)
+        });
+        
+        if (response.ok) {
+            console.log('✅ ACL rules saved');
+        }
+    } catch (error) {
+        console.error('❌ Failed to save ACL rules:', error);
+    }
+}
+
+// Apply configuration (save + restart)
+async function applyConfig() {
+    if (!confirm('🔄 Save configuration and restart containers?')) {
+        return;
+    }
+    
+    const saved = await saveConfigToServer();
+    if (!saved) {
+        return;
+    }
+    
+    showToast('🔄 Restarting containers...', 'success');
+    
+    try {
+        const response = await fetch('/api/docker/restart-all', {
+            method: 'POST',
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        
+        const result = await response.json();
+        console.log('✅ Containers restarted:', result);
+        showToast(`✅ ${result.message}`, 'success');
+    } catch (error) {
+        console.error('❌ Failed to restart containers:', error);
+        showToast('❌ Failed to restart containers', 'error');
+    }
+}
+
+// Save configuration (to server)
+async function saveConfig() {
+    const saved = await saveConfigToServer();
+    if (saved) {
+        showToast('✅ Configuration saved to server', 'success');
+    }
 }
 
 // Load configuration from file
@@ -254,6 +414,13 @@ function resetConfig() {
         localStorage.removeItem('bsdm-proxy-config');
         location.reload();
     }
+}
+
+// Generate configuration
+function generateConfig() {
+    const config = collectConfig();
+    const output = formatConfig(config);
+    showModal('Environment Variables', output);
 }
 
 // Generate ACL rules JSON
@@ -331,7 +498,7 @@ function formatConfig(config) {
     return output;
 }
 
-// Export .env file
+// Export .env file (download)
 function exportEnv() {
     const config = collectConfig();
     const content = formatConfig(config);
@@ -339,7 +506,7 @@ function exportEnv() {
     showToast('✅ .env file exported');
 }
 
-// Export docker-compose.yml
+// Export docker-compose.yml (download)
 function exportDockerCompose() {
     const config = collectConfig();
     const compose = generateDockerCompose(config);
