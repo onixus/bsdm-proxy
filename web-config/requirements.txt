@@ -4,3 +4,7 @@ python-multipart==0.0.6
 pyyaml==6.0.1
 docker==7.0.0
 psutil==5.9.6
+# Pin urllib3 to version that supports http+docker scheme
+urllib3<2.0.0
+# Unix socket support
+requests-unixsocket==0.3.0
