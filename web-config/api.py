@@ -60,13 +60,17 @@ GRAFANA_ENABLED=true
 OPENSEARCH_URL=http://opensearch:9200
 """
 
-# Docker client (requires mounted socket)
+# Docker client - use explicit unix socket
 try:
-    docker_client = docker.from_env()
+    # Try to connect using unix socket directly
+    docker_client = docker.DockerClient(base_url='unix://var/run/docker.sock')
+    # Test connection
+    docker_client.ping()
     DOCKER_AVAILABLE = True
-    print("✅ Docker client connected")
+    print("✅ Docker client connected via unix socket")
 except Exception as e:
     print(f"⚠️  Docker not available: {e}", file=sys.stderr)
+    docker_client = None
     DOCKER_AVAILABLE = False
 
 
@@ -131,7 +135,7 @@ async def get_monitoring_stats():
         
         # Container stats
         containers_stats = []
-        if DOCKER_AVAILABLE:
+        if DOCKER_AVAILABLE and docker_client:
             try:
                 containers = docker_client.containers.list(all=True)
                 for container in containers:
@@ -314,7 +318,7 @@ async def update_acl_rules(rules: Dict[str, Any]):
 @app.get("/api/docker/containers")
 async def list_containers():
     """List Docker containers."""
-    if not DOCKER_AVAILABLE:
+    if not DOCKER_AVAILABLE or not docker_client:
         raise HTTPException(status_code=503, detail="Docker not available")
     
     try:
@@ -337,7 +341,7 @@ async def list_containers():
 @app.post("/api/docker/restart/{container_name}")
 async def restart_container(container_name: str):
     """Restart a specific container."""
-    if not DOCKER_AVAILABLE:
+    if not DOCKER_AVAILABLE or not docker_client:
         raise HTTPException(status_code=503, detail="Docker not available")
     
     try:
@@ -353,7 +357,7 @@ async def restart_container(container_name: str):
 @app.post("/api/docker/restart-all")
 async def restart_all_containers():
     """Restart all BSDM-Proxy related containers."""
-    if not DOCKER_AVAILABLE:
+    if not DOCKER_AVAILABLE or not docker_client:
         raise HTTPException(status_code=503, detail="Docker not available")
     
     try:
