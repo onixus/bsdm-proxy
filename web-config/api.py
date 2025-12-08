@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 import docker
+from docker import APIClient
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -38,7 +39,6 @@ CUSTOM_CATEGORIES_FILE = CONFIG_DIR / "custom-categories.json"
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 print(f"✅ Config directory: {CONFIG_DIR} (exists: {CONFIG_DIR.exists()})")
 print(f"   - Writeable: {os.access(CONFIG_DIR, os.W_OK)}")
-print(f"   - Contents: {list(CONFIG_DIR.iterdir()) if CONFIG_DIR.exists() else 'N/A'}")
 
 # Default configuration
 DEFAULT_ENV = """# BSDM-Proxy Default Configuration
@@ -60,21 +60,20 @@ GRAFANA_ENABLED=true
 OPENSEARCH_URL=http://opensearch:9200
 """
 
-# Docker client - workaround for Alpine docker-py issues
+# Docker client - use low-level APIClient directly
 docker_client = None
 DOCKER_AVAILABLE = False
 
-# Check if socket exists
 SOCKET_PATH = "/var/run/docker.sock"
 if os.path.exists(SOCKET_PATH):
     print(f"✅ Docker socket found: {SOCKET_PATH}")
     try:
-        # Use environment variable approach (most compatible)
-        os.environ['DOCKER_HOST'] = f'unix://{SOCKET_PATH}'
-        docker_client = docker.from_env()
+        # Use low-level APIClient with direct socket path
+        docker_client = APIClient(base_url=f'unix://{SOCKET_PATH}')
+        # Test connection
         docker_client.ping()
         DOCKER_AVAILABLE = True
-        print("✅ Docker client connected via DOCKER_HOST environment variable")
+        print(f"✅ Docker client connected via APIClient (socket: {SOCKET_PATH})")
     except Exception as e:
         print(f"❌ Docker connection failed: {e}", file=sys.stderr)
         docker_client = None
@@ -147,10 +146,11 @@ async def get_monitoring_stats():
         containers_stats = []
         if DOCKER_AVAILABLE and docker_client:
             try:
-                containers = docker_client.containers.list(all=True)
+                # Use APIClient methods
+                containers = docker_client.containers(all=True)
                 for container in containers:
                     try:
-                        stats = container.stats(stream=False)
+                        stats = docker_client.stats(container['Id'], stream=False)
                         
                         # Calculate CPU percentage
                         cpu_delta = stats['cpu_stats']['cpu_usage']['total_usage'] - \
@@ -159,18 +159,22 @@ async def get_monitoring_stats():
                                        stats['precpu_stats']['system_cpu_usage']
                         cpu_percent = 0.0
                         if system_delta > 0:
-                            cpu_percent = (cpu_delta / system_delta) * len(stats['cpu_stats']['cpu_usage'].get('percpu_usage', [1])) * 100
+                            cpu_count = len(stats['cpu_stats']['cpu_usage'].get('percpu_usage', [1]))
+                            cpu_percent = (cpu_delta / system_delta) * cpu_count * 100
                         
                         # Memory stats
                         mem_usage = stats['memory_stats'].get('usage', 0)
                         mem_limit = stats['memory_stats'].get('limit', 1)
                         mem_percent = (mem_usage / mem_limit) * 100 if mem_limit > 0 else 0
                         
+                        # Get container name (remove leading /)
+                        name = container['Names'][0].lstrip('/')
+                        
                         containers_stats.append({
-                            "id": container.id[:12],
-                            "name": container.name,
-                            "status": container.status,
-                            "image": container.image.tags[0] if container.image.tags else "unknown",
+                            "id": container['Id'][:12],
+                            "name": name,
+                            "status": container['State'],
+                            "image": container['Image'],
                             "cpu_percent": round(cpu_percent, 1),
                             "memory_usage": mem_usage,
                             "memory_limit": mem_limit,
@@ -178,11 +182,12 @@ async def get_monitoring_stats():
                         })
                     except Exception as e:
                         # Container might not have stats (stopped)
+                        name = container['Names'][0].lstrip('/')
                         containers_stats.append({
-                            "id": container.id[:12],
-                            "name": container.name,
-                            "status": container.status,
-                            "image": container.image.tags[0] if container.image.tags else "unknown",
+                            "id": container['Id'][:12],
+                            "name": name,
+                            "status": container['State'],
+                            "image": container['Image'],
                             "cpu_percent": 0,
                             "memory_usage": 0,
                             "memory_limit": 0,
@@ -212,11 +217,9 @@ async def get_env_config():
             content = ENV_EXAMPLE_FILE.read_text()
             return {"exists": False, "content": content, "source": "example"}
         else:
-            # Return default config
             return {"exists": False, "content": DEFAULT_ENV, "source": "default"}
     except Exception as e:
         print(f"Error reading .env: {e}", file=sys.stderr)
-        # Return default on any error
         return {"exists": False, "content": DEFAULT_ENV, "source": "default", "error": str(e)}
 
 
@@ -224,13 +227,9 @@ async def get_env_config():
 async def update_env_config(config: Dict[str, Any]):
     """Update .env configuration."""
     try:
-        # Ensure directory exists
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        
-        # Convert dict to .env format
         env_content = "\n".join([f"{k}={v}" for k, v in config.items()])
         
-        # Backup existing
         if ENV_FILE.exists():
             try:
                 backup = CONFIG_DIR / ".env.backup"
@@ -238,7 +237,6 @@ async def update_env_config(config: Dict[str, Any]):
             except Exception as e:
                 print(f"Warning: Could not create backup: {e}", file=sys.stderr)
         
-        # Write new config
         ENV_FILE.write_text(env_content)
         print(f"✅ Configuration written to {ENV_FILE}")
         
@@ -270,18 +268,15 @@ async def update_docker_compose(content: Dict[str, str]):
     try:
         yaml_content = content.get("content", "")
         
-        # Validate YAML
         try:
             yaml.safe_load(yaml_content)
         except yaml.YAMLError as e:
             raise HTTPException(status_code=400, detail=f"Invalid YAML: {e}")
         
-        # Backup existing
         if DOCKER_COMPOSE_FILE.exists():
             backup = CONFIG_DIR / "docker-compose.yml.backup"
             backup.write_text(DOCKER_COMPOSE_FILE.read_text())
         
-        # Write new config
         DOCKER_COMPOSE_FILE.write_text(yaml_content)
         
         return {"success": True, "message": "docker-compose.yml updated"}
@@ -309,15 +304,12 @@ async def get_acl_rules():
 async def update_acl_rules(rules: Dict[str, Any]):
     """Update ACL rules."""
     try:
-        # Ensure directory exists
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         
-        # Backup existing
         if ACL_RULES_FILE.exists():
             backup = CONFIG_DIR / "acl-rules.json.backup"
             backup.write_text(ACL_RULES_FILE.read_text())
         
-        # Write new rules
         ACL_RULES_FILE.write_text(json.dumps(rules, indent=2))
         
         return {"success": True, "message": "ACL rules updated"}
@@ -332,14 +324,14 @@ async def list_containers():
         raise HTTPException(status_code=503, detail="Docker not available")
     
     try:
-        containers = docker_client.containers.list(all=True)
+        containers = docker_client.containers(all=True)
         return {
             "containers": [
                 {
-                    "id": c.id[:12],
-                    "name": c.name,
-                    "status": c.status,
-                    "image": c.image.tags[0] if c.image.tags else "unknown"
+                    "id": c['Id'][:12],
+                    "name": c['Names'][0].lstrip('/'),
+                    "status": c['State'],
+                    "image": c['Image']
                 }
                 for c in containers
             ]
@@ -355,11 +347,21 @@ async def restart_container(container_name: str):
         raise HTTPException(status_code=503, detail="Docker not available")
     
     try:
-        container = docker_client.containers.get(container_name)
-        container.restart(timeout=10)
+        # Find container by name
+        containers = docker_client.containers(all=True)
+        container_id = None
+        for c in containers:
+            if container_name in c['Names'][0]:
+                container_id = c['Id']
+                break
+        
+        if not container_id:
+            raise HTTPException(status_code=404, detail=f"Container {container_name} not found")
+        
+        docker_client.restart(container_id, timeout=10)
         return {"success": True, "message": f"Container {container_name} restarted"}
-    except docker.errors.NotFound:
-        raise HTTPException(status_code=404, detail=f"Container {container_name} not found")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -371,15 +373,17 @@ async def restart_all_containers():
         raise HTTPException(status_code=503, detail="Docker not available")
     
     try:
-        containers = docker_client.containers.list(
-            filters={"label": "com.docker.compose.project=bsdm-proxy"}
+        containers = docker_client.containers(
+            all=True,
+            filters={'label': 'com.docker.compose.project=bsdm-proxy'}
         )
         
         restarted = []
         for container in containers:
-            if "web-ui" not in container.name:  # Don't restart ourselves
-                container.restart(timeout=10)
-                restarted.append(container.name)
+            name = container['Names'][0].lstrip('/')
+            if "web-ui" not in name:  # Don't restart ourselves
+                docker_client.restart(container['Id'], timeout=10)
+                restarted.append(name)
         
         return {
             "success": True,
@@ -394,26 +398,20 @@ async def restart_all_containers():
 async def upload_config(file: UploadFile = File(...)):
     """Upload configuration file."""
     try:
-        # Ensure directory exists
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        
         content = await file.read()
         
-        # Determine file type and save
         if file.filename.endswith('.json'):
-            # Validate JSON
             json.loads(content)
             target = ACL_RULES_FILE if 'acl' in file.filename.lower() else CUSTOM_CATEGORIES_FILE
         elif file.filename.endswith('.env'):
             target = ENV_FILE
         elif file.filename.endswith('.yml') or file.filename.endswith('.yaml'):
-            # Validate YAML
             yaml.safe_load(content)
             target = DOCKER_COMPOSE_FILE
         else:
             raise HTTPException(status_code=400, detail="Unsupported file type")
         
-        # Backup and save
         if target.exists():
             backup = target.with_suffix(target.suffix + '.backup')
             backup.write_text(target.read_text())
