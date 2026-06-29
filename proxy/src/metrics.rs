@@ -35,6 +35,11 @@ pub struct Metrics {
     pub cache_evictions_total: Counter,
     pub cache_lookup_duration_seconds: Histogram,
 
+    // L2 Redis cache metrics
+    pub cache_l2_hits_total: Counter,
+    pub cache_l2_misses_total: Counter,
+    pub cache_l2_errors_total: Counter,
+
     // Upstream metrics
     pub upstream_requests_total: CounterVec,
     pub upstream_duration_seconds: HistogramVec,
@@ -155,6 +160,24 @@ impl Metrics {
             .buckets(vec![0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01]),
         )?;
         registry.register(Box::new(cache_lookup_duration_seconds.clone()))?;
+
+        let cache_l2_hits_total = Counter::new(
+            "bsdm_proxy_cache_l2_hits_total",
+            "Total Redis L2 cache hits",
+        )?;
+        registry.register(Box::new(cache_l2_hits_total.clone()))?;
+
+        let cache_l2_misses_total = Counter::new(
+            "bsdm_proxy_cache_l2_misses_total",
+            "Total Redis L2 cache misses",
+        )?;
+        registry.register(Box::new(cache_l2_misses_total.clone()))?;
+
+        let cache_l2_errors_total = Counter::new(
+            "bsdm_proxy_cache_l2_errors_total",
+            "Total Redis L2 cache errors",
+        )?;
+        registry.register(Box::new(cache_l2_errors_total.clone()))?;
 
         // Upstream metrics
         let upstream_requests_total = CounterVec::new(
@@ -293,6 +316,9 @@ impl Metrics {
             cache_size_bytes,
             cache_evictions_total,
             cache_lookup_duration_seconds,
+            cache_l2_hits_total,
+            cache_l2_misses_total,
+            cache_l2_errors_total,
             upstream_requests_total,
             upstream_duration_seconds,
             upstream_errors_total,

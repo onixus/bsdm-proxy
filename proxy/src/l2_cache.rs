@@ -1,0 +1,219 @@
+//! Redis L2 HTTP response cache (shared across proxy instances).
+
+use crate::cache::CachedResponse;
+use crate::metrics::Metrics;
+use base64::engine::general_purpose::STANDARD as B64;
+use base64::Engine;
+use bytes::Bytes;
+use redis::aio::ConnectionManager;
+use redis::AsyncCommands;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tracing::{debug, warn};
+
+#[derive(Clone, Debug)]
+pub struct L2CacheConfig {
+    pub enabled: bool,
+    pub url: String,
+    pub key_prefix: String,
+}
+
+impl L2CacheConfig {
+    pub fn from_env() -> Self {
+        let enabled = std::env::var("REDIS_L2_ENABLED")
+            .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+            .unwrap_or(false);
+        let url =
+            std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
+        let key_prefix =
+            std::env::var("REDIS_KEY_PREFIX").unwrap_or_else(|_| "bsdm:http:".to_string());
+
+        Self {
+            enabled,
+            url,
+            key_prefix,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct CachedResponseWire {
+    status: u16,
+    headers: Vec<(String, String)>,
+    body_b64: String,
+    cached_at_secs: u64,
+    ttl_secs: u64,
+}
+
+impl CachedResponseWire {
+    fn from_cached(value: &CachedResponse) -> Option<Self> {
+        let cached_at_secs = value.cached_at.duration_since(UNIX_EPOCH).ok()?.as_secs();
+        let headers = value
+            .headers
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        Some(Self {
+            status: value.status,
+            headers,
+            body_b64: B64.encode(value.body.as_ref()),
+            cached_at_secs,
+            ttl_secs: value.ttl.as_secs(),
+        })
+    }
+
+    fn into_cached(self) -> Option<CachedResponse> {
+        let body = Bytes::from(B64.decode(self.body_b64).ok()?);
+        let headers: Arc<[(Arc<str>, Arc<str>)]> = self
+            .headers
+            .into_iter()
+            .map(|(k, v)| (Arc::from(k.as_str()), Arc::from(v.as_str())))
+            .collect();
+        Some(CachedResponse {
+            status: self.status,
+            headers,
+            body,
+            cached_at: UNIX_EPOCH + Duration::from_secs(self.cached_at_secs),
+            ttl: Duration::from_secs(self.ttl_secs),
+        })
+    }
+}
+
+pub fn encode_cached_response(value: &CachedResponse) -> Option<String> {
+    let wire = CachedResponseWire::from_cached(value)?;
+    serde_json::to_string(&wire).ok()
+}
+
+pub fn decode_cached_response(payload: &str) -> Option<CachedResponse> {
+    let wire: CachedResponseWire = serde_json::from_str(payload).ok()?;
+    wire.into_cached()
+}
+
+/// Redis-backed L2 cache. `ConnectionManager` is cheap to clone per operation.
+#[derive(Clone)]
+pub struct RedisL2Cache {
+    conn: ConnectionManager,
+    key_prefix: String,
+    metrics: Arc<Metrics>,
+}
+
+impl RedisL2Cache {
+    pub async fn connect(
+        config: &L2CacheConfig,
+        metrics: Arc<Metrics>,
+    ) -> Result<Self, redis::RedisError> {
+        let client = redis::Client::open(config.url.as_str())?;
+        let conn = ConnectionManager::new(client).await?;
+        Ok(Self {
+            conn,
+            key_prefix: config.key_prefix.clone(),
+            metrics,
+        })
+    }
+
+    fn redis_key(&self, cache_key: &str) -> String {
+        format!("{}{}", self.key_prefix, cache_key)
+    }
+
+    fn remaining_ttl_secs(value: &CachedResponse) -> u64 {
+        value
+            .cached_at
+            .checked_add(value.ttl)
+            .and_then(|expires| expires.duration_since(SystemTime::now()).ok())
+            .map(|d| d.as_secs().max(1))
+            .unwrap_or(1)
+    }
+
+    pub async fn get(&self, cache_key: &str) -> Option<CachedResponse> {
+        let key = self.redis_key(cache_key);
+        let mut conn = self.conn.clone();
+        let payload: Option<String> = match conn.get(&key).await {
+            Ok(v) => v,
+            Err(e) => {
+                warn!("Redis L2 get failed for {}: {}", key, e);
+                self.metrics.cache_l2_errors_total.inc();
+                return None;
+            }
+        };
+
+        let Some(payload) = payload else {
+            self.metrics.cache_l2_misses_total.inc();
+            return None;
+        };
+
+        let cached = match decode_cached_response(&payload) {
+            Some(v) if !v.is_expired() => v,
+            Some(_) => {
+                debug!("Redis L2 entry expired for {}", key);
+                self.metrics.cache_l2_misses_total.inc();
+                let _ = conn.del::<_, ()>(&key).await;
+                return None;
+            }
+            None => {
+                warn!("Redis L2 corrupt payload for {}", key);
+                self.metrics.cache_l2_errors_total.inc();
+                return None;
+            }
+        };
+
+        self.metrics.cache_l2_hits_total.inc();
+        Some(cached)
+    }
+
+    pub async fn set(&self, cache_key: &str, value: &CachedResponse) {
+        let Some(payload) = encode_cached_response(value) else {
+            self.metrics.cache_l2_errors_total.inc();
+            return;
+        };
+
+        let key = self.redis_key(cache_key);
+        let ttl = Self::remaining_ttl_secs(value);
+        let mut conn = self.conn.clone();
+        if let Err(e) = conn.set_ex::<_, _, ()>(&key, payload, ttl).await {
+            warn!("Redis L2 set failed for {}: {}", key, e);
+            self.metrics.cache_l2_errors_total.inc();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    #[test]
+    fn wire_roundtrip() {
+        let original = CachedResponse {
+            status: 200,
+            headers: Arc::from([(Arc::from("content-type"), Arc::from("text/plain"))]),
+            body: Bytes::from_static(b"hello"),
+            cached_at: SystemTime::now(),
+            ttl: Duration::from_secs(3600),
+        };
+        let json = encode_cached_response(&original).unwrap();
+        let decoded = decode_cached_response(&json).unwrap();
+        assert_eq!(decoded.status, 200);
+        assert_eq!(decoded.body, original.body);
+        assert_eq!(decoded.headers.len(), 1);
+    }
+
+    #[test]
+    fn l2_config_defaults_disabled() {
+        std::env::remove_var("REDIS_L2_ENABLED");
+        let cfg = L2CacheConfig::from_env();
+        assert!(!cfg.enabled);
+    }
+
+    #[test]
+    fn remaining_ttl_is_at_least_one() {
+        let cached = CachedResponse {
+            status: 200,
+            headers: Arc::from([]),
+            body: Bytes::new(),
+            cached_at: SystemTime::now(),
+            ttl: Duration::from_secs(60),
+        };
+        assert!(RedisL2Cache::remaining_ttl_secs(&cached) >= 1);
+    }
+}

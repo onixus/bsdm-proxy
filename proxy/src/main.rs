@@ -5,8 +5,8 @@ use auth_config::load_auth_config;
 use bsdm_proxy::{
     build_hierarchy_manager, handle_connection, http_cache_key, icp_server_bind_addr,
     load_hierarchy_config, metrics_server, should_start_icp_server, wait_shutdown_signal,
-    AclAction, AuthManager, CacheConfig, CertCache, IcpServer, Metrics, ProxyPolicy, ProxyService,
-    RateLimitConfig,
+    AclAction, AuthManager, CacheConfig, CertCache, IcpServer, L2CacheConfig, Metrics, ProxyPolicy,
+    ProxyService, RateLimitConfig, RedisL2Cache,
 };
 use policy_config::{load_policy_config, reload_acl_engine};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -63,6 +63,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let kafka_topic = std::env::var("KAFKA_TOPIC").unwrap_or_else(|_| "cache-events".to_string());
     let cache_config = CacheConfig::from_env();
 
+    let l2_config = L2CacheConfig::from_env();
+    let l2_cache = if l2_config.enabled {
+        match RedisL2Cache::connect(&l2_config, metrics.clone()).await {
+            Ok(cache) => {
+                info!(
+                    "Redis L2 cache enabled (url={}, prefix={})",
+                    l2_config.url, l2_config.key_prefix
+                );
+                Some(cache)
+            }
+            Err(e) => {
+                warn!("Redis L2 cache disabled: connection failed: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let auth_config = load_auth_config();
     let auth = if auth_config.enabled {
         Some(Arc::new(AuthManager::new(auth_config.clone())))
@@ -93,6 +112,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let service = Arc::new(ProxyService::new(
         cert_cache,
         cache_config.clone(),
+        l2_cache,
         kafka_brokers,
         kafka_topic,
         metrics.clone(),

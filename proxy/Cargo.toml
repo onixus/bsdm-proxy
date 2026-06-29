@@ -15,6 +15,7 @@ tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 http-body-util = "0.1"
 quick_cache = "0.7"
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
 rand = "0.9"
 rcgen = { version = "0.14", features = ["x509-parser"] }
 rdkafka = "0.39"

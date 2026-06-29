@@ -84,7 +84,7 @@ gantt
 ### Задачи
 
 - [ ] **Hierarchy Phase 4** — peer discovery, cache digest, HTCP (опционально mTLS)
-- [ ] **Redis L2 cache** — распределённый кеш между инстансами
+- [x] **Redis L2 cache** — распределённый кеш между инстансами (`docker-compose.redis-l2.yml`)
 - [ ] **HTTP/2 upstream client**
 - [ ] **Compression** — Brotli/Zstd для cacheable responses
 - [ ] **ACL completeness**
