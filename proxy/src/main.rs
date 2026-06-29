@@ -101,7 +101,7 @@ impl CertCache {
 
         let ca_cert = Arc::new(
             ca_params
-                .self_signed(&ca_key)
+                .self_signed(ca_key.as_ref())
                 .expect("CA cert instance failed"),
         );
 
