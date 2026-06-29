@@ -1,0 +1,15 @@
+{
+  "default_action": "allow",
+  "rules": [
+    {
+      "id": "block-test-domain",
+      "name": "Block test domain for E2E",
+      "enabled": true,
+      "priority": 100,
+      "action": "deny",
+      "rule_type": {
+        "Domain": "blocked.test"
+      }
+    }
+  ]
+}

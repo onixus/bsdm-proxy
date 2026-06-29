@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "proxy",
     "cache-indexer",
+    "e2e",
 ]
 
 [workspace.dependencies]
