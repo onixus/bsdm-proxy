@@ -6,8 +6,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 VERSION="$(grep '^version' proxy/Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
-# Cargo 0.2.2-b → package label 0.2.2b
+# Cargo 0.2.2-b → 0.2.2b, 0.2.3-test → 0.2.3test
 PACKAGE_VERSION="${VERSION//-b/b}"
+PACKAGE_VERSION="${PACKAGE_VERSION//-test/test}"
 ARCH="$(uname -m)"
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 PACKAGE_NAME="bsdm-proxy-${PACKAGE_VERSION}-${OS}-${ARCH}"
