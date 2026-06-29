@@ -185,7 +185,7 @@ cargo test -p bsdm-proxy-e2e --test e2e e2e_mitm_https_with_self_signed_ca -- --
 export HTTP_PORT=1488
 export METRICS_PORT=9090
 export MITM_ENABLED=true
-export RUST_LOG=info,bsdm_proxy=debug
+export RUST_LOG=info,bsdm_proxy=debug   # см. docs/logging.md
 
 # CA для MITM (обязательно)
 mkdir -p certs
@@ -193,6 +193,8 @@ mkdir -p certs
 
 cargo run -p bsdm-proxy --bin proxy
 ```
+
+Подробнее о уровнях и модулях: [logging.md](logging.md).
 
 Проверка:
 ```bash
