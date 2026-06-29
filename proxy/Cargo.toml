@@ -40,7 +40,7 @@ regex = "1.12"
 reqwest = { version = "0.13", features = ["json"] }
 
 [features]
-default = []
+default = ["auth-basic"]
 auth-basic = []
 auth-ldap = ["ldap3"]
 auth-ntlm = []  # NTLM support - TODO: implement with windows-sys or custom
