@@ -1,5 +1,7 @@
 # Hierarchical Caching for BSDM-Proxy
 
+> См. также: [полная документация](hierarchical-caching.md) · [оглавление](README.md)
+
 ## 🎯 Goal
 
 Implement Squid-style hierarchical caching to allow multiple BSDM-Proxy instances to form a cache hierarchy, dramatically improving cache hit rates and reducing upstream traffic.
