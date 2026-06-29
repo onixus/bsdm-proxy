@@ -1,7 +1,8 @@
 //! End-to-end tests — auth, ACL, cache, CONNECT tunnel.
 
 use bsdm_proxy_e2e::{
-    connect_via_proxy, proxy_test_guard, workspace_path, HarnessConfig, ProxyHarness,
+    connect_via_proxy, ensure_test_ca, proxy_test_guard, spawn_mock_https_upstream,
+    test_ca_cert_path, wait_for_tcp, workspace_path, HarnessConfig, ProxyHarness,
 };
 use std::net::SocketAddr;
 
@@ -159,4 +160,51 @@ async fn e2e_auth_and_acl_combined() {
         .expect("authenticated blocked request");
 
     assert_eq!(authed.status(), reqwest::StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn e2e_upstream_tls_accepts_test_ca() {
+    let _guard = proxy_test_guard().await;
+    ensure_test_ca().expect("write test ca");
+    let upstream = spawn_mock_https_upstream(8443)
+        .await
+        .expect("spawn https upstream");
+    wait_for_tcp(upstream.port).await.expect("wait for upstream");
+
+    let ca_pem = std::fs::read(test_ca_cert_path()).expect("read ca");
+    let client = reqwest::Client::builder()
+        .add_root_certificate(reqwest::Certificate::from_pem(&ca_pem).expect("parse ca"))
+        .build()
+        .expect("client");
+
+    let url = format!("https://127.0.0.1:{}/direct-tls", upstream.port);
+    let response = client.get(&url).send().await.expect("direct tls get");
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    assert_eq!(
+        response.text().await.expect("body"),
+        "upstream-tls:/direct-tls"
+    );
+}
+
+#[tokio::test]
+async fn e2e_mitm_https_with_self_signed_ca() {
+    let _guard = proxy_test_guard().await;
+    let harness = ProxyHarness::start(HarnessConfig {
+        mitm_enabled: true,
+        https_upstream_port: Some(8443),
+        upstream_ca_cert: true,
+        ..Default::default()
+    })
+    .await
+    .expect("start proxy with MITM");
+
+    let client = harness.proxy_mitm_client().expect("MITM client");
+    let url = harness.mitm_upstream_url("/mitm-test");
+
+    let response = client.get(&url).send().await.expect("MITM HTTPS GET");
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    assert_eq!(
+        response.text().await.expect("body"),
+        "upstream-tls:/mitm-test"
+    );
 }
