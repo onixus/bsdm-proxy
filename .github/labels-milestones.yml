@@ -1,0 +1,34 @@
+# Milestone labels for issue triage
+# Apply alongside GitHub Milestone when creating issues.
+
+- name: milestone:m1
+  description: M1 Foundation (v0.2.x) — proxy core, ACL, observability
+  color: "0E8A16"
+
+- name: milestone:m2
+  description: M2 Squid parity (v0.3.x) — hierarchy, L2, rate limit
+  color: "1D76DB"
+
+- name: milestone:m3
+  description: M3 Retro-search (v0.4.x) — OpenSearch analytics
+  color: "5319E7"
+
+- name: milestone:m4
+  description: M4 Threat analytics (v0.5.x) — rule-based alerts, C&C heuristics
+  color: "D93F0B"
+
+- name: milestone:m5
+  description: M5 ML security (v1.0.x) — anomaly, phishing, C&C ML
+  color: "B60205"
+
+- name: pillar:squid
+  description: Squid parity — proxy, cache, hierarchy
+  color: "C5DEF5"
+
+- name: pillar:retro-search
+  description: Retro-search — historical traffic analytics
+  color: "E4E669"
+
+- name: pillar:ml-security
+  description: ML security — anomalies, phishing, C&C
+  color: "FEF2C0"

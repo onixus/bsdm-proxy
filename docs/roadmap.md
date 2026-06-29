@@ -1,0 +1,221 @@
+# Roadmap BSDM-Proxy
+
+Целевое состояние проекта:
+
+> **Альтернатива Squid с ретропоиском и ML для выявления отклонений, фишинга и C&C**
+
+Три столпа развития:
+
+| Столп | Описание |
+|-------|----------|
+| **Squid parity** | Forward proxy, кеш, ACL, auth, иерархия, rate limiting |
+| **Ретропоиск** | Поиск и аналитика по историческому HTTP-трафику |
+| **ML-безопасность** | Аномалии, фишинг и C&C поверх логов и поведенческих сигналов |
+
+Текущая версия: **0.2.2b** · [Releases](https://github.com/onixus/bsdm-proxy/releases)
+
+---
+
+## Обзор milestones
+
+| Milestone | Версия | Фокус | Готовность |
+|-----------|--------|-------|------------|
+| [M1 — Foundation](#m1--foundation-v02x) | v0.2.x | Ядро прокси, ACL, категоризация, observability | ~90% |
+| [M2 — Squid parity](#m2--squid-parity-v03x) | v0.3.x | Иерархия, L2, rate limit, полный ACL | ~0% |
+| [M3 — Retro-search](#m3--retro-search-v04x) | v0.4.x | Индексация, дашборды, поиск по истории | ~15% |
+| [M4 — Threat analytics](#m4--threat-analytics-v05x) | v0.5.x | Rule-based угрозы, алерты, C&C heuristics | ~5% |
+| [M5 — ML security](#m5--ml-security-v10x) | v1.0.x | ML anomaly, phishing ML, C&C beacon detection | ~0% |
+
+```mermaid
+gantt
+  title Roadmap milestones
+  dateFormat YYYY-MM
+  section Proxy
+  M1 Foundation           :done, m1, 2025-10, 2026-03
+  M2 Squid parity         :m2, 2026-03, 2026-06
+  section Analytics
+  M3 Retro-search         :m3, 2026-05, 2026-08
+  M4 Threat analytics     :m4, 2026-07, 2026-10
+  section ML
+  M5 ML security          :m5, 2026-09, 2027-03
+```
+
+---
+
+## M1 — Foundation (v0.2.x)
+
+Базовый корпоративный HTTPS-прокси с политиками и наблюдаемостью.
+
+### Выполнено
+
+- [x] Hyper forward proxy + HTTP CONNECT
+- [x] MITM TLS (порты 443/8443), динамические сертификаты
+- [x] L1 in-memory cache (`quick_cache`)
+- [x] Kafka producer (async cache events)
+- [x] cache-indexer → OpenSearch
+- [x] Prometheus metrics (20+) + Grafana dashboard
+- [x] Health endpoints (`/health`, `/ready`, `/metrics`)
+- [x] Graceful shutdown
+- [x] Proxy auth: Basic + LDAP (feature `auth-ldap`)
+- [x] ACL: domain, URL prefix, regex, category, IP, user
+- [x] URL categorization: Shallalist, URLhaus, PhishTank, custom DB
+- [x] E2E / smoke test harness
+- [x] Release packaging (`0.2.2b`) + systemd
+
+### В работе / осталось в M1
+
+- [ ] Rate limiting per user/IP — [#TBD]
+- [ ] Hierarchical caching Phase 3 — интеграция `peers.rs`, `icp.rs`, `hierarchy.rs` в `main.rs` — [#TBD]
+- [ ] Исправить README: NTLM помечен как done, но не реализован (`auth.rs`)
+
+**Критерий завершения M1:** rate limit + hierarchy в production path, все E2E зелёные.
+
+---
+
+## M2 — Squid parity (v0.3.x)
+
+Полноценная замена Squid для корпоративного сценария (без ML).
+
+### Задачи
+
+- [ ] **Hierarchy Phase 4** — peer discovery, cache digest, HTCP (опционально mTLS)
+- [ ] **Redis L2 cache** — распределённый кеш между инстансами
+- [ ] **HTTP/2 upstream client**
+- [ ] **Compression** — Brotli/Zstd для cacheable responses
+- [ ] **ACL completeness**
+  - [ ] TimeWindow rules (сейчас TODO в `acl.rs`)
+  - [ ] Group-based rules (сейчас игнорируются)
+  - [ ] REST API управления ACL (`/api/acl/*` из docs)
+- [ ] **NTLM auth** — реализация или снятие с roadmap
+- [ ] **Negative caching** coordination
+- [ ] **Cache refresh / revalidate** — Squid-style freshness
+- [ ] **docker-compose.hierarchy.yml** — 3-tier demo stack
+- [ ] Hierarchy Prometheus metrics (`bsdm_proxy_hierarchy_*`)
+
+**Критерий завершения M2:** 3-tier cache hierarchy в docker-compose, hit rate sibling/parent измеряется, Redis L2 работает.
+
+**Зависимости:** M1 (hierarchy Phase 3).
+
+---
+
+## M3 — Retro-search (v0.4.x)
+
+Ретроспективный поиск и аналитика по HTTP-трафику.
+
+### Текущий gap
+
+Pipeline Kafka → OpenSearch есть, но:
+- поле `categories` теряется в `cache-indexer`
+- нет OpenSearch Dashboards в стеке
+- нет saved searches и search API
+
+### Задачи
+
+- [ ] **Расширить схему событий**
+  - [ ] `categories`, `acl_action`, `threat_sources` в indexer
+  - [ ] OpenSearch index template + mapping
+  - [ ] ILM / retention policy
+- [ ] **OpenSearch Dashboards** в `docker-compose.yml`
+- [ ] **Saved searches / playbooks**
+  - [ ] Все запросы пользователя X за период
+  - [ ] Доступ к домену Y
+  - [ ] Blocked + phishing/malware events
+  - [ ] Top domains per user / per IP
+- [ ] **Search API** (опционально) — thin REST поверх OpenSearch
+- [ ] **Session correlation** — `session_id`, redirect chains
+- [ ] **Экспорт** — CSV/JSON для SOC
+
+**Критерий завершения M3:** аналитик находит «кто ходил на домен X за 30 дней» через Dashboards без ручного curl; categories индексируются.
+
+**Зависимости:** M1 (стабильный event pipeline).
+
+---
+
+## M4 — Threat analytics (v0.5.x)
+
+Rule-based обнаружение угроз и алертинг (без ML, быстрый win).
+
+### Задачи
+
+- [ ] **Обогащение событий** — reputation score, URLhaus/PhishTank metadata в индексе
+- [ ] **Rule-based anomaly alerts**
+  - [ ] Burst к новому/редкому домену
+  - [ ] Off-hours activity spike
+  - [ ] Множество blocked requests от одного user/IP
+- [ ] **C&C heuristics (rules)**
+  - [ ] Периодические короткие запросы к одному host:port (beacon pattern)
+  - [ ] Long-tail / high-entropy domain scoring
+  - [ ] Корреляция: user → множество POST к редким хостам
+- [ ] **Alerting pipeline** — OpenSearch Alerting → webhook / email / SIEM
+- [ ] **Threat dashboard** — Grafana или OpenSearch Dashboards
+- [ ] **Categorization metrics** в Prometheus (документированы, не реализованы)
+- [ ] **PhishTank API key** support (`PHISHTANK_API_KEY`)
+
+**Критерий завершения M4:** автоматический алерт при beacon-подобном паттерне; threat dashboard показывает top blocked categories.
+
+**Зависимости:** M3 (полная схема данных в OpenSearch).
+
+---
+
+## M5 — ML security (v1.0.x)
+
+ML-слой для аномалий, фишинга и C&C.
+
+### Задачи
+
+- [ ] **Feature store** — извлечение признаков из OpenSearch (frequency, entropy, timing, UA, geo)
+- [ ] **Anomaly detection**
+  - [ ] Baseline per user/IP (volume, unique domains, time distribution)
+  - [ ] Isolation Forest / statistical models (batch)
+  - [ ] OpenSearch Anomaly Detection integration
+- [ ] **Phishing ML**
+  - [ ] URL feature model (дополнение PhishTank blocklist)
+  - [ ] HTML/content features через MITM body (опционально)
+- [ ] **C&C ML**
+  - [ ] Beacon detection (FFT / autocorrelation интервалов)
+  - [ ] DGA domain classifier
+- [ ] **Real-time scoring** (optional) — inline risk score в proxy path
+- [ ] **Feedback loop** — FP/FN разметка → переобучение
+- [ ] **ML pipeline** — training worker (Python/Rust) + model registry
+
+**Критерий завершения M5:** ML anomaly score в индексе; алерт на C&C beacon без URL в blocklist; документированный pipeline обучения.
+
+**Зависимости:** M3 (данные), M4 (heuristics как baseline).
+
+---
+
+## Матрица зрелости
+
+| Столп | Сейчас (0.2.2b) | После M2 | После M3 | После M5 |
+|-------|-----------------|----------|----------|----------|
+| Squid parity | ~45% | ~85% | ~85% | ~90% |
+| Ретропоиск | ~15% | ~15% | ~80% | ~90% |
+| ML / C&C / phishing | ~5% | ~5% | ~10% | ~75% |
+| **Целевое состояние** | **~20%** | **~35%** | **~60%** | **~85%** |
+
+---
+
+## GitHub milestones
+
+Issues привязывайте к milestones:
+
+| GitHub Milestone | Версия | Label suggestion |
+|------------------|--------|------------------|
+| `M1: Foundation (v0.2.x)` | 0.2.x | `milestone:m1` |
+| `M2: Squid parity (v0.3.x)` | 0.3.x | `milestone:m2` |
+| `M3: Retro-search (v0.4.x)` | 0.4.x | `milestone:m3` |
+| `M4: Threat analytics (v0.5.x)` | 0.5.x | `milestone:m4` |
+| `M5: ML security (v1.0.x)` | 1.0.x | `milestone:m5` |
+
+---
+
+## Связанные документы
+
+- [hierarchical-caching.md](hierarchical-caching.md) — дизайн ICP/HTCP (M2)
+- [categorization.md](categorization.md) — threat intel feeds (M1/M4)
+- [acl.md](acl.md) — политики доступа (M1/M2)
+- [development.md](development.md) — сборка и тесты
+
+---
+
+*Последнее обновление: v0.2.2b*

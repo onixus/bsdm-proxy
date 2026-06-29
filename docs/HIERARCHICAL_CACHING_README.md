@@ -135,28 +135,26 @@ if result.response == IcpOpcode::Hit {
 
 ## 📋 Implementation Roadmap
 
-### Phase 1: Core Infrastructure ✅ DONE
-- [x] Peer management module
-- [x] ICP protocol implementation
+См. [roadmap.md](roadmap.md) — milestones M1 (Phase 3) и M2 (Phase 4).
+
+### Phase 1: Core Infrastructure ✅ DONE (M1)
+- [x] Peer management module (`peers.rs`)
+- [x] ICP protocol implementation (`icp.rs`)
 - [x] Unit tests
 
-### Phase 2: Selection & Routing 🚧 IN PROGRESS
-- [ ] Selection strategy trait
-- [ ] Round-robin implementation
-- [ ] Weighted selection
-- [ ] RTT-based selection
-- [ ] Consistent hashing
-- [ ] Hierarchy manager
-- [ ] Request flow coordination
+### Phase 2: Selection & Routing ✅ DONE on disk (M1, not wired)
+- [x] Selection strategies (`selection.rs`) — round-robin, weighted, closest, hash
+- [x] Hierarchy manager (`hierarchy.rs`)
+- [ ] Wire into binary (`lib.rs` / `main.rs`)
 
-### Phase 3: Integration 📅 PLANNED
+### Phase 3: Integration 📅 M1 remaining
 - [ ] Configuration loading (env vars + TOML)
 - [ ] Wire into main.rs request pipeline
 - [ ] Metrics integration (Prometheus)
 - [ ] Docker-compose multi-instance setup
 - [ ] End-to-end tests
 
-### Phase 4: Advanced Features 🔮 FUTURE
+### Phase 4: Advanced Features 🔮 M2
 - [ ] Peer auto-discovery (multicast)
 - [ ] Cache digest (Bloom filters)
 - [ ] HTCP protocol support
