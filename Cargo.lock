@@ -169,7 +169,7 @@ dependencies = [
 
 [[package]]
 name = "bsdm-proxy"
-version = "0.2.2-b"
+version = "0.2.3-test"
 dependencies = [
  "base64",
  "bytes",
@@ -233,7 +233,7 @@ checksum = "8ae3f5d315924270530207e2a68396c3cc547f6dca3fbdca317cfb1a51edb593"
 
 [[package]]
 name = "cache-indexer"
-version = "0.2.2-b"
+version = "0.2.3-test"
 dependencies = [
  "bytes",
  "opensearch",

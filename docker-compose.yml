@@ -27,6 +27,12 @@ services:
     networks:
       - bsdm-net
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
 
   opensearch:
     image: opensearchproject/opensearch:3.7.0
@@ -80,6 +86,20 @@ services:
       timeout: 5s
       retries: 20
 
+  dashboards-setup:
+    image: curlimages/curl:8.5.0
+    depends_on:
+      opensearch-dashboards:
+        condition: service_healthy
+    environment:
+      - OPENSEARCH_INDEX=http-cache
+    networks:
+      - bsdm-net
+    volumes:
+      - ./opensearch-dashboards/setup-saved-objects.sh:/setup-saved-objects.sh:ro
+    entrypoint: ["/bin/sh", "/setup-saved-objects.sh"]
+    restart: "no"
+
   proxy:
     build:
       context: .
@@ -90,6 +110,7 @@ services:
       - "9090:9090"  # Metrics endpoint
     environment:
       - KAFKA_BROKERS=kafka:9092
+      - KAFKA_TOPIC=cache-events
       - CACHE_CAPACITY=10000
       - CACHE_TTL_SECONDS=3600
       - MAX_CACHE_BODY_SIZE=10485760
@@ -107,7 +128,8 @@ services:
       - RUST_LOG=info,bsdm_proxy=debug
       - RUST_BACKTRACE=1
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
     networks:
       - bsdm-net
     volumes:
@@ -130,11 +152,14 @@ services:
     environment:
       - KAFKA_BROKERS=kafka:9092
       - OPENSEARCH_URL=http://opensearch:9200
+      - OPENSEARCH_INDEX=http-cache
       - KAFKA_TOPIC=cache-events
       - KAFKA_GROUP_ID=cache-indexer-group
       - RUST_LOG=info,cache_indexer=debug
       - RUST_BACKTRACE=1
     depends_on:
+      kafka:
+        condition: service_healthy
       opensearch:
         condition: service_healthy
     networks:

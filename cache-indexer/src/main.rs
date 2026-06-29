@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 use tracing::{error, info, warn};
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct CacheEvent {
     url: String,
     method: String,
@@ -39,6 +39,23 @@ struct CacheEvent {
     content_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     user_agent: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    categories: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    event_id: Option<String>,
+}
+
+fn document_id(event: &CacheEvent) -> String {
+    if let Some(id) = event.event_id.as_deref() {
+        if !id.is_empty() {
+            return id.to_string();
+        }
+    }
+
+    format!(
+        "{}:{}:{}:{}",
+        event.timestamp, event.request_duration_ms, event.client_ip, event.cache_key
+    )
 }
 
 struct Indexer {
@@ -131,7 +148,9 @@ impl Indexer {
                                 "ignore_above": 256
                             }
                         }
-                    }
+                    },
+                    "categories": { "type": "keyword" },
+                    "event_id": { "type": "keyword" }
                 }
             },
             "settings": {
@@ -245,7 +264,7 @@ impl Indexer {
             let action = json!({
                 "index": {
                     "_index": &self.index_name,
-                    "_id": &event.cache_key
+                    "_id": document_id(event)
                 }
             });
             body_lines.push(serde_json::to_string(&action)?);
@@ -304,7 +323,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let kafka_topic = std::env::var("KAFKA_TOPIC").unwrap_or_else(|_| "cache-events".to_string());
     let kafka_group =
         std::env::var("KAFKA_GROUP_ID").unwrap_or_else(|_| "cache-indexer-group".to_string());
-    let index_name = "http-cache";
+    let index_name = std::env::var("OPENSEARCH_INDEX").unwrap_or_else(|_| "http-cache".to_string());
 
     info!("🚀 Starting cache-indexer");
     info!("📡 Kafka brokers: {}", kafka_brokers);
@@ -312,6 +331,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("🔐 SSL verification: {}", ssl_verify);
     info!("📨 Kafka topic: {}", kafka_topic);
     info!("👥 Kafka group: {}", kafka_group);
+    info!("📇 OpenSearch index: {}", index_name);
 
     let indexer = Indexer::new(
         &kafka_brokers,
@@ -321,9 +341,90 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ssl_verify,
         &kafka_topic,
         &kafka_group,
-        index_name,
+        &index_name,
     )
     .await?;
 
     indexer.run().await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn document_id_prefers_event_id() {
+        let event = CacheEvent {
+            url: "https://example.com".to_string(),
+            method: "GET".to_string(),
+            status: 200,
+            cache_key: "abc123".to_string(),
+            timestamp: 1700000001,
+            headers: HashMap::new(),
+            cache_status: Some("HIT".to_string()),
+            user_id: None,
+            username: None,
+            client_ip: "127.0.0.1".to_string(),
+            domain: "example.com".to_string(),
+            response_size: 100,
+            request_duration_ms: 5,
+            content_type: None,
+            user_agent: None,
+            categories: vec!["malware".to_string()],
+            event_id: Some("evt-unique-1".to_string()),
+        };
+
+        assert_eq!(document_id(&event), "evt-unique-1");
+    }
+
+    #[test]
+    fn document_id_differs_for_same_second_and_cache_key() {
+        let base = CacheEvent {
+            url: "https://example.com".to_string(),
+            method: "GET".to_string(),
+            status: 200,
+            cache_key: "abc123".to_string(),
+            timestamp: 1700000001,
+            headers: HashMap::new(),
+            cache_status: Some("MISS".to_string()),
+            user_id: None,
+            username: None,
+            client_ip: "127.0.0.1".to_string(),
+            domain: "example.com".to_string(),
+            response_size: 100,
+            request_duration_ms: 5,
+            content_type: None,
+            user_agent: None,
+            categories: vec![],
+            event_id: None,
+        };
+
+        let mut other = base.clone();
+        other.request_duration_ms = 9;
+
+        assert_ne!(document_id(&base), document_id(&other));
+    }
+
+    #[test]
+    fn deserializes_categories_from_proxy_event() {
+        let json_data = r#"{
+            "url": "https://example.com",
+            "method": "GET",
+            "status": 200,
+            "cache_key": "key123",
+            "timestamp": 1700000000,
+            "headers": {},
+            "cache_status": "MISS",
+            "client_ip": "10.0.0.1",
+            "domain": "example.com",
+            "response_size": 512,
+            "request_duration_ms": 42,
+            "categories": ["phishing", "malware"],
+            "event_id": "evt-proxy-1"
+        }"#;
+
+        let event: CacheEvent = serde_json::from_str(json_data).unwrap();
+        assert_eq!(event.categories, vec!["phishing", "malware"]);
+        assert_eq!(event.event_id.as_deref(), Some("evt-proxy-1"));
+    }
 }
