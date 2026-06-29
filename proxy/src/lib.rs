@@ -9,6 +9,7 @@ pub mod hierarchy_config;
 pub mod icp;
 pub mod peer_fetch;
 pub mod peers;
+pub mod rate_limit;
 pub mod selection;
 
 // Re-export commonly used types
@@ -23,6 +24,7 @@ pub use hierarchy_config::{
 pub use icp::{IcpClient, IcpMessage, IcpOpcode, IcpServer};
 pub use peer_fetch::{fetch_via_peer, PeerFetchError};
 pub use peers::{CachePeer, PeerConfig, PeerRegistry, PeerType};
+pub use rate_limit::{RateLimitConfig, RateLimitViolation, RateLimiter};
 pub use selection::{parse_strategy, SelectionStrategy};
 
 // Conditional re-exports based on features

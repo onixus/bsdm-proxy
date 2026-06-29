@@ -9,7 +9,8 @@ use base64::Engine;
 use bsdm_proxy::{
     build_hierarchy_manager, fetch_via_peer, http_cache_key, icp_server_bind_addr,
     load_hierarchy_config, should_start_icp_server, AclAction, AclDecision, AuthManager, Category,
-    HierarchyManager, HierarchyResult, IcpServer, UserInfo,
+    HierarchyManager, HierarchyResult, IcpServer, RateLimitConfig, RateLimitViolation, RateLimiter,
+    UserInfo,
 };
 use bytes::Bytes;
 use hyper::body::Incoming;
@@ -149,6 +150,7 @@ struct ProxyService {
     acl_engine: Option<Arc<Mutex<bsdm_proxy::AclEngine>>>,
     categorization: Option<Arc<bsdm_proxy::CategorizationEngine>>,
     hierarchy: Option<Arc<HierarchyManager>>,
+    rate_limiter: Arc<RateLimiter>,
 }
 
 impl ProxyService {
@@ -163,6 +165,7 @@ impl ProxyService {
         auth: Option<Arc<AuthManager>>,
         policy: &PolicyConfig,
         hierarchy: Option<Arc<HierarchyManager>>,
+        rate_limit_config: RateLimitConfig,
     ) -> Self {
         let kafka_producer = kafka_brokers.and_then(|brokers| {
             ClientConfig::new()
@@ -201,6 +204,7 @@ impl ProxyService {
             acl_engine: policy.acl_engine.clone(),
             categorization: policy.categorization.clone(),
             hierarchy,
+            rate_limiter: Arc::new(RateLimiter::new(rate_limit_config)),
         }
     }
 
@@ -328,6 +332,38 @@ impl ProxyService {
         .unwrap_or((None, None))
     }
 
+    fn check_rate_limit(&self, client_ip: &str, username: Option<&str>) -> Option<Response<Body>> {
+        let violation = self.rate_limiter.check(client_ip, username)?;
+        let limit_type = match violation {
+            RateLimitViolation::Ip => "ip",
+            RateLimitViolation::User => "user",
+        };
+        self.metrics
+            .rate_limit_rejected_total
+            .with_label_values(&[limit_type])
+            .inc();
+        warn!(
+            "Rate limit exceeded ({}) for client_ip={} user={}",
+            limit_type,
+            client_ip,
+            username.unwrap_or("-")
+        );
+        Some(Self::rate_limit_response())
+    }
+
+    fn rate_limit_response() -> Response<Body> {
+        Response::builder()
+            .status(StatusCode::TOO_MANY_REQUESTS)
+            .header("Content-Type", "text/plain; charset=utf-8")
+            .header("Retry-After", "1")
+            .body(Body::new(Bytes::from_static(
+                b"429 Too Many Requests: rate limit exceeded",
+            )))
+            .unwrap_or_else(|_| {
+                Response::new(Body::new(Bytes::from_static(b"429 Too Many Requests")))
+            })
+    }
+
     #[inline]
     fn generate_cache_key(&self, method: &str, url: &str) -> Arc<str> {
         http_cache_key(method, url)
@@ -453,6 +489,12 @@ impl ProxyService {
         } else {
             Self::extract_user_info(&req)
         };
+
+        if let Some(resp) = self.check_rate_limit(&client_ip, username.as_deref()) {
+            guard.finish(429, 0, 0);
+            return resp;
+        }
+
         let domain = Self::extract_domain(&url);
 
         let (policy_decision, categories) = self
@@ -964,6 +1006,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .map_err(|e| -> Box<dyn std::error::Error> { e })?;
 
+    let rate_limit_config = RateLimitConfig::from_env();
+
     let service = Arc::new(ProxyService::new(
         cert_cache,
         cache_config.clone(),
@@ -974,6 +1018,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         auth,
         &policy_config,
         hierarchy.clone(),
+        rate_limit_config.clone(),
     ));
 
     if should_start_icp_server(&hierarchy_config) {
@@ -1061,6 +1106,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     } else {
         info!("👤 Proxy auth: disabled");
+    }
+    if rate_limit_config.enabled {
+        info!(
+            "⏱️  Rate limit: enabled (ip={}/{} rps/burst, user={}/{} rps/burst)",
+            rate_limit_config.ip_rps,
+            rate_limit_config.ip_burst,
+            rate_limit_config.user_rps,
+            rate_limit_config.user_burst
+        );
+    } else {
+        info!("⏱️  Rate limit: disabled");
     }
     info!(
         "📦 Cache: {} entries, TTL: {:?}, max body: {}MB",
@@ -1342,9 +1398,13 @@ async fn handle_connection(
                     Err(resp) => return Ok(resp),
                 };
 
+                let policy_username = proxy_user.as_deref().map(|u| u.username.as_str());
+                if let Some(resp) = service.check_rate_limit(&client_ip, policy_username) {
+                    return Ok::<_, Infallible>(resp);
+                }
+
                 let connect_url = format!("https://{}", authority);
                 let connect_domain = parse_authority(&authority).0;
-                let policy_username = proxy_user.as_deref().map(|u| u.username.as_str());
                 let (policy_decision, _) = service
                     .check_policy(&connect_url, &connect_domain, policy_username, &client_ip)
                     .await;
