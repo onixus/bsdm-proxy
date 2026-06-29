@@ -124,6 +124,15 @@ cargo test -p bsdm-proxy-e2e --test e2e e2e_mitm_https_with_self_signed_ca -- --
 ./scripts/create-milestones.sh
 ```
 
+Создать issues по архитектурным блокерам B1–B25:
+
+```bash
+./scripts/create-blocker-issues.sh
+# ./scripts/create-blocker-issues.sh --dry-run
+```
+
+См. [architecture.md](architecture.md).
+
 ## CI
 
 | Workflow | Триггер | Шаги |

@@ -22,7 +22,9 @@
 
 | Документ | Описание |
 |----------|----------|
-| [roadmap.md](roadmap.md) | **Roadmap и milestones** (Squid + ретропоиск + ML) |
+| [architecture.md](architecture.md) | **Архитектура, потоки данных, блокеры B1–B25** |
+| [BLOCKERS.md](BLOCKERS.md) | Реестр блокеров (чеклист) |
+| [roadmap.md](roadmap.md) | Roadmap и milestones (Squid + ретропоиск + ML) |
 | [hierarchical-caching.md](hierarchical-caching.md) | Иерархический кеш, ICP, peer management |
 | [HIERARCHICAL_CACHING_README.md](HIERARCHICAL_CACHING_README.md) | Краткий обзор hierarchical caching |
 | [OPTIMIZATIONS.md](../OPTIMIZATIONS.md) | Оптимизации Hyper + quick_cache |

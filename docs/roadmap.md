@@ -211,6 +211,7 @@ Issues привязывайте к milestones:
 
 ## Связанные документы
 
+- [architecture.md](architecture.md) — архитектура и блокеры B1–B25
 - [hierarchical-caching.md](hierarchical-caching.md) — дизайн ICP/HTCP (M2)
 - [categorization.md](categorization.md) — threat intel feeds (M1/M4)
 - [acl.md](acl.md) — политики доступа (M1/M2)

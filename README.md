@@ -244,6 +244,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 | [docs/authentication.md](docs/authentication.md) | LDAP, NTLM, Basic Auth |
 | [docs/acl.md](docs/acl.md) | Правила доступа, приоритеты |
 | [docs/categorization.md](docs/categorization.md) | Shallalist, URLhaus, PhishTank |
+| [docs/architecture.md](docs/architecture.md) | Архитектура и блокеры |
 | [docs/roadmap.md](docs/roadmap.md) | Roadmap и milestones |
 | [packaging/README.md](packaging/README.md) | Release-пакет и systemd |
 | [OPTIMIZATIONS.md](OPTIMIZATIONS.md) | Оптимизации v2.0 |
