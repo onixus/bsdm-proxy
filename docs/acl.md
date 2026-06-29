@@ -106,6 +106,8 @@ Flexible access control system for BSDM-Proxy with multiple rule types and prior
 }
 ```
 
+**Time format:** `HH:MM` (24-hour, local server time via `chrono::Local`). Overnight windows supported (e.g. `22:00`–`06:00`). Combine with domain/category rules via separate rule entries and priority.
+
 ### 6. User/Group Rules
 
 ```json
@@ -123,6 +125,8 @@ Flexible access control system for BSDM-Proxy with multiple rule types and prior
   }
 }
 ```
+
+**Groups:** LDAP `memberOf` DNs are matched by full DN or `cn=` value (e.g. rule `"admins"` matches `cn=admins,ou=groups,dc=corp,dc=local`). User and group in the same rule use OR logic.
 
 ### 7. IP Range Rules
 

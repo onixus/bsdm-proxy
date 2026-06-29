@@ -88,8 +88,8 @@ gantt
 - [ ] **HTTP/2 upstream client**
 - [ ] **Compression** — Brotli/Zstd для cacheable responses
 - [ ] **ACL completeness**
-  - [ ] TimeWindow rules (сейчас TODO в `acl.rs`)
-  - [ ] Group-based rules (сейчас игнорируются)
+  - [x] TimeWindow rules (`HH:MM`, local time, overnight windows)
+  - [x] Group-based Principal rules (LDAP `memberOf` cn matching)
   - [ ] REST API управления ACL (`/api/acl/*` из docs)
 - [ ] **NTLM auth** — реализация или снятие с roadmap
 - [ ] **Negative caching** coordination

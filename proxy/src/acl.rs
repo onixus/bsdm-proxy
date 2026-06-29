@@ -8,11 +8,70 @@
 //! - Time-based access control
 //! - User/group-based rules
 
+use chrono::Timelike;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::IpAddr;
 use tracing::{debug, info, warn};
+
+/// Minutes since midnight for time-window matching (0–1439).
+pub(crate) fn minutes_since_midnight(hour: u32, minute: u32) -> u32 {
+    hour * 60 + minute
+}
+
+/// Parse `HH:MM` (24h) into minutes since midnight.
+pub(crate) fn parse_hhmm(value: &str) -> Option<u32> {
+    let (hour, minute) = value.split_once(':')?;
+    let hour: u32 = hour.trim().parse().ok()?;
+    let minute: u32 = minute.trim().parse().ok()?;
+    if hour > 23 || minute > 59 {
+        return None;
+    }
+    Some(minutes_since_midnight(hour, minute))
+}
+
+/// Whether `now` (minutes since midnight) falls in `[start, end]` (supports overnight windows).
+pub(crate) fn time_in_window(start: &str, end: &str, now: u32) -> bool {
+    let Some(start_min) = parse_hhmm(start) else {
+        warn!("Invalid TimeWindow start: {}", start);
+        return false;
+    };
+    let Some(end_min) = parse_hhmm(end) else {
+        warn!("Invalid TimeWindow end: {}", end);
+        return false;
+    };
+
+    if start_min <= end_min {
+        now >= start_min && now <= end_min
+    } else {
+        now >= start_min || now <= end_min
+    }
+}
+
+fn local_minutes_now() -> u32 {
+    let now = chrono::Local::now();
+    minutes_since_midnight(now.hour(), now.minute())
+}
+
+/// Match LDAP `memberOf` DN or plain group name against rule group.
+pub(crate) fn group_matches(member_group: &str, rule_group: &str) -> bool {
+    if member_group.eq_ignore_ascii_case(rule_group) {
+        return true;
+    }
+    for part in member_group.split(',') {
+        let part = part.trim();
+        if let Some(cn) = part
+            .strip_prefix("cn=")
+            .or_else(|| part.strip_prefix("CN="))
+        {
+            if cn.eq_ignore_ascii_case(rule_group) {
+                return true;
+            }
+        }
+    }
+    false
+}
 
 /// ACL action to take
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -153,11 +212,12 @@ impl AclEngine {
         domain: &str,
         categories: &[&str],
         user: Option<&str>,
+        groups: &[&str],
         client_ip: Option<IpAddr>,
     ) -> AclDecision {
         debug!(
-            "ACL check: url={}, domain={}, categories={:?}, user={:?}",
-            url, domain, categories, user
+            "ACL check: url={}, domain={}, categories={:?}, user={:?}, groups={:?}",
+            url, domain, categories, user, groups
         );
 
         // Check each rule in priority order
@@ -169,7 +229,7 @@ impl AclEngine {
             .collect();
 
         for rule in rules {
-            if self.matches_rule(&rule, url, domain, categories, user, client_ip) {
+            if self.matches_rule(&rule, url, domain, categories, user, groups, client_ip) {
                 debug!("Matched ACL rule: {} ({})", rule.name, rule.id);
 
                 return match rule.action {
@@ -200,6 +260,7 @@ impl AclEngine {
     }
 
     /// Check if rule matches
+    #[allow(clippy::too_many_arguments)]
     fn matches_rule(
         &mut self,
         rule: &AclRule,
@@ -207,6 +268,7 @@ impl AclEngine {
         domain: &str,
         categories: &[&str],
         user: Option<&str>,
+        groups: &[&str],
         client_ip: Option<IpAddr>,
     ) -> bool {
         match &rule.rule_type {
@@ -221,20 +283,33 @@ impl AclEngine {
                     false
                 }
             }
-            AclRuleType::TimeWindow { start: _, end: _ } => {
-                // TODO: Implement time-based matching
-                true
+            AclRuleType::TimeWindow { start, end } => {
+                time_in_window(start, end, local_minutes_now())
             }
             AclRuleType::Principal {
                 user: rule_user,
-                group: _,
-            } => {
-                if let Some(u) = user {
-                    rule_user.as_ref().map(|ru| ru == u).unwrap_or(false)
-                } else {
-                    false
-                }
-            }
+                group: rule_group,
+            } => Self::match_principal(rule_user, rule_group, user, groups),
+        }
+    }
+
+    fn match_principal(
+        rule_user: &Option<String>,
+        rule_group: &Option<String>,
+        user: Option<&str>,
+        groups: &[&str],
+    ) -> bool {
+        let user_match = rule_user.as_ref().zip(user).is_some_and(|(ru, u)| ru == u);
+
+        let group_match = rule_group
+            .as_ref()
+            .is_some_and(|rg| groups.iter().any(|g| group_matches(g, rg)));
+
+        match (rule_user.is_some(), rule_group.is_some()) {
+            (true, true) => user_match || group_match,
+            (true, false) => user_match,
+            (false, true) => group_match,
+            (false, false) => false,
         }
     }
 
@@ -327,6 +402,7 @@ mod tests {
             "example.com",
             &[],
             None,
+            &[],
             None,
         );
 
@@ -348,8 +424,14 @@ mod tests {
             comment: None,
         });
 
-        let decision =
-            engine.check_access("https://example.com", "example.com", &["adult"], None, None);
+        let decision = engine.check_access(
+            "https://example.com",
+            "example.com",
+            &["adult"],
+            None,
+            &[],
+            None,
+        );
 
         assert_eq!(decision.action, AclAction::Deny);
     }
@@ -388,10 +470,126 @@ mod tests {
             "admin.example.com",
             &[],
             None,
+            &[],
             None,
         );
 
         assert_eq!(decision.action, AclAction::Deny);
         assert_eq!(decision.rule_id.unwrap(), "high");
+    }
+
+    #[test]
+    fn test_time_window_matching() {
+        assert!(time_in_window(
+            "09:00",
+            "17:00",
+            minutes_since_midnight(12, 0)
+        ));
+        assert!(!time_in_window(
+            "09:00",
+            "17:00",
+            minutes_since_midnight(8, 59)
+        ));
+        assert!(time_in_window(
+            "09:00",
+            "17:00",
+            minutes_since_midnight(17, 0)
+        ));
+        assert!(time_in_window(
+            "22:00",
+            "06:00",
+            minutes_since_midnight(23, 0)
+        ));
+        assert!(time_in_window(
+            "22:00",
+            "06:00",
+            minutes_since_midnight(5, 30)
+        ));
+        assert!(!time_in_window(
+            "22:00",
+            "06:00",
+            minutes_since_midnight(12, 0)
+        ));
+    }
+
+    #[test]
+    fn test_group_matching_ldap_cn() {
+        assert!(group_matches(
+            "cn=admins,ou=groups,dc=example,dc=com",
+            "admins"
+        ));
+        assert!(group_matches("admins", "admins"));
+        assert!(!group_matches(
+            "cn=users,ou=groups,dc=example,dc=com",
+            "admins"
+        ));
+    }
+
+    #[test]
+    fn test_principal_group_rule() {
+        let mut engine = AclEngine::new(AclAction::Deny);
+
+        engine.add_rule(AclRule {
+            id: "admins-allow".to_string(),
+            name: "Allow admins".to_string(),
+            enabled: true,
+            priority: 200,
+            action: AclAction::Allow,
+            rule_type: AclRuleType::Principal {
+                user: None,
+                group: Some("admins".to_string()),
+            },
+            redirect_url: None,
+            comment: None,
+        });
+
+        let decision = engine.check_access(
+            "https://example.com",
+            "example.com",
+            &[],
+            Some("alice"),
+            &["cn=admins,ou=groups,dc=corp,dc=local"],
+            None,
+        );
+        assert_eq!(decision.action, AclAction::Allow);
+
+        let decision = engine.check_access(
+            "https://example.com",
+            "example.com",
+            &[],
+            Some("bob"),
+            &["cn=users,ou=groups,dc=corp,dc=local"],
+            None,
+        );
+        assert_eq!(decision.action, AclAction::Deny);
+    }
+
+    #[test]
+    fn test_principal_user_rule() {
+        let mut engine = AclEngine::new(AclAction::Deny);
+
+        engine.add_rule(AclRule {
+            id: "alice-allow".to_string(),
+            name: "Allow alice".to_string(),
+            enabled: true,
+            priority: 100,
+            action: AclAction::Allow,
+            rule_type: AclRuleType::Principal {
+                user: Some("alice".to_string()),
+                group: None,
+            },
+            redirect_url: None,
+            comment: None,
+        });
+
+        let decision = engine.check_access(
+            "https://example.com",
+            "example.com",
+            &[],
+            Some("alice"),
+            &[],
+            None,
+        );
+        assert_eq!(decision.action, AclAction::Allow);
     }
 }

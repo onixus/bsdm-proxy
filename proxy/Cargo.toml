@@ -38,6 +38,7 @@ hex = "0.4"
 
 # ACL and Categorization
 regex = "1.12"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 reqwest = { version = "0.13", features = ["json", "form"] }
 
 [features]
