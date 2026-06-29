@@ -9,34 +9,34 @@ name = "proxy"
 path = "src/main.rs"
 
 [dependencies]
-hyper = { version = "1.0", features = ["full"] }
+hyper = { version = "1.10", features = ["full"] }
 hyper-util = { version = "0.1", features = ["full"] }
 tokio = { version = "1", features = ["full"] }
 http-body-util = "0.1"
-quick_cache = "0.6"
-rcgen = { version = "0.13", features = ["x509-parser"] }
-rdkafka = "0.38"
-prometheus = { version = "0.13", features = ["process"] }
+quick_cache = "0.7"
+rcgen = { version = "0.14", features = ["x509-parser"] }
+rdkafka = "0.39"
+prometheus = { version = "0.14", features = ["process"] }
 tokio-rustls = { version = "0.26", features = ["ring"] }
 rustls = { version = "0.23", features = ["ring"] }
-rustls-pemfile = "2.1"
+rustls-pemfile = "2.2"
 hyper-rustls = { version = "0.27", default-features = false, features = ["http1", "ring", "tls12", "webpki-roots"] }
-sha2 = "0.10"
+sha2 = "0.11"
 base64 = "0.22"
 url = "2.5"
-bytes = "1.0"
+bytes = "1.12"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Authentication
-ldap3 = { version = "0.11", optional = true }
+ldap3 = { version = "0.12", optional = true }
 hex = "0.4"
 
 # ACL and Categorization
-regex = "1.10"
-reqwest = { version = "0.11", features = ["json"] }
+regex = "1.12"
+reqwest = { version = "0.13", features = ["json"] }
 
 [features]
 default = []

@@ -4,8 +4,8 @@ use bytes::Bytes;
 use hyper::body::Incoming;
 use hyper::Request;
 use rcgen::{
-    BasicConstraints, Certificate, CertificateParams, DistinguishedName, DnType, IsCa,
-    KeyPair, KeyUsagePurpose,
+    BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, Issuer, KeyPair,
+    KeyUsagePurpose,
 };
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::ServerConfig;
@@ -24,39 +24,40 @@ type ServerConfigMap = Arc<RwLock<HashMap<Arc<str>, Arc<ServerConfig>>>>;
 pub struct CertCache {
     certs: CertMap,
     server_configs: ServerConfigMap,
-    ca_cert: Arc<Certificate>,
     ca_key: Arc<KeyPair>,
     ca_cert_pem: Bytes,
+    in_memory_ca_params: Option<CertificateParams>,
 }
 
 impl CertCache {
-    pub fn from_pem(ca_key_pem: &[u8], ca_cert_pem: &[u8]) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_pem(
+        ca_key_pem: &[u8],
+        ca_cert_pem: &[u8],
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let ca_key_pem_str = String::from_utf8_lossy(ca_key_pem);
         let ca_key = Arc::new(KeyPair::from_pem(&ca_key_pem_str)?);
 
-        let ca_cert = if ca_cert_pem.is_empty() {
-            warn!("CA certificate not found, generating in-memory CA (install proxy-generated CA on clients)");
-            Self::generate_in_memory_ca(&ca_key)?
+        let (ca_cert_pem, in_memory_ca_params) = if ca_cert_pem.is_empty() {
+            warn!(
+                "CA certificate not found, generating in-memory CA (install proxy-generated CA on clients)"
+            );
+            let ca_params = Self::in_memory_ca_params()?;
+            let ca_cert = ca_params.self_signed(ca_key.as_ref())?;
+            (Bytes::from(ca_cert.pem().into_bytes()), Some(ca_params))
         } else {
-            let ca_cert_pem_str = String::from_utf8_lossy(ca_cert_pem);
-            let params = CertificateParams::from_ca_cert_pem(&ca_cert_pem_str)?;
-            Arc::new(params.self_signed(ca_key.as_ref())?)
+            (Bytes::copy_from_slice(ca_cert_pem), None)
         };
 
         Ok(Self {
             certs: Arc::new(RwLock::new(HashMap::new())),
             server_configs: Arc::new(RwLock::new(HashMap::new())),
-            ca_cert: ca_cert.clone(),
             ca_key,
-            ca_cert_pem: if ca_cert_pem.is_empty() {
-                Bytes::from(ca_cert.pem().into_bytes())
-            } else {
-                Bytes::copy_from_slice(ca_cert_pem)
-            },
+            ca_cert_pem,
+            in_memory_ca_params,
         })
     }
 
-    fn generate_in_memory_ca(ca_key: &KeyPair) -> Result<Arc<Certificate>, Box<dyn std::error::Error>> {
+    fn in_memory_ca_params() -> Result<CertificateParams, rcgen::Error> {
         let mut ca_params = CertificateParams::new(vec!["BSDM Proxy CA".to_string()])?;
         ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
         ca_params.key_usages = vec![
@@ -67,7 +68,16 @@ impl CertCache {
         ca_params
             .distinguished_name
             .push(DnType::CommonName, "BSDM Proxy CA");
-        Ok(Arc::new(ca_params.self_signed(ca_key)?))
+        Ok(ca_params)
+    }
+
+    fn issuer(&self) -> Result<Issuer<'_, &KeyPair>, rcgen::Error> {
+        if let Some(params) = &self.in_memory_ca_params {
+            Ok(Issuer::from_params(params, self.ca_key.as_ref()))
+        } else {
+            let pem = String::from_utf8_lossy(&self.ca_cert_pem);
+            Issuer::from_ca_cert_pem(&pem, self.ca_key.as_ref())
+        }
     }
 
     pub async fn server_config_for_domain(
@@ -91,7 +101,10 @@ impl CertCache {
         Ok(config)
     }
 
-    async fn get_or_generate(&self, domain: &str) -> Result<CertPair, Box<dyn std::error::Error + Send + Sync>> {
+    async fn get_or_generate(
+        &self,
+        domain: &str,
+    ) -> Result<CertPair, Box<dyn std::error::Error + Send + Sync>> {
         let domain_arc: Arc<str> = domain.into();
 
         {
@@ -115,7 +128,8 @@ impl CertCache {
             KeyUsagePurpose::KeyEncipherment,
         ];
 
-        let cert = params.signed_by(&key_pair, &self.ca_cert, &self.ca_key)?;
+        let issuer = self.issuer()?;
+        let cert = params.signed_by(&key_pair, &issuer)?;
         let cert_pem = Bytes::from(cert.pem().into_bytes());
         let key_pem = Bytes::from(key_pair.serialize_pem().into_bytes());
 
@@ -142,7 +156,9 @@ fn build_server_config(
         .map_err(|e| e.into())
 }
 
-fn parse_certs(pem: &[u8]) -> Result<Vec<CertificateDer<'static>>, Box<dyn std::error::Error + Send + Sync>> {
+fn parse_certs(
+    pem: &[u8],
+) -> Result<Vec<CertificateDer<'static>>, Box<dyn std::error::Error + Send + Sync>> {
     let mut reader = Cursor::new(pem);
     let certs: Vec<CertificateDer<'static>> = certs(&mut reader)
         .collect::<Result<Vec<_>, _>>()?
@@ -152,7 +168,9 @@ fn parse_certs(pem: &[u8]) -> Result<Vec<CertificateDer<'static>>, Box<dyn std::
     Ok(certs)
 }
 
-fn parse_private_key(pem: &[u8]) -> Result<PrivateKeyDer<'static>, Box<dyn std::error::Error + Send + Sync>> {
+fn parse_private_key(
+    pem: &[u8],
+) -> Result<PrivateKeyDer<'static>, Box<dyn std::error::Error + Send + Sync>> {
     let mut reader = Cursor::new(pem);
     rustls_pemfile::private_key(&mut reader)?
         .ok_or_else(|| "no private key found in PEM".into())
@@ -228,11 +246,7 @@ mod tests {
             .ok();
 
         let ca_key = KeyPair::generate().unwrap();
-        let cache = CertCache::from_pem(
-            ca_key.serialize_pem().as_bytes(),
-            b"",
-        )
-        .unwrap();
+        let cache = CertCache::from_pem(ca_key.serialize_pem().as_bytes(), b"").unwrap();
 
         let rt = tokio::runtime::Runtime::new().unwrap();
         let config = rt

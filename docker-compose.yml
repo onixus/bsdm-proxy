@@ -4,7 +4,7 @@ x-bake:
 
 services:
   zookeeper:
-    image: confluentinc/cp-zookeeper:7.5.0
+    image: confluentinc/cp-zookeeper:7.9.8
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
@@ -13,7 +13,7 @@ services:
     restart: unless-stopped
 
   kafka:
-    image: confluentinc/cp-kafka:7.5.0
+    image: confluentinc/cp-kafka:7.9.8
     depends_on:
       - zookeeper
     ports:
@@ -29,7 +29,7 @@ services:
     restart: unless-stopped
 
   opensearch:
-    image: opensearchproject/opensearch:3.3.2
+    image: opensearchproject/opensearch:3.7.0
     environment:
       - cluster.name=opensearch-cluster
       - node.name=opensearch-node1
@@ -61,7 +61,7 @@ services:
       retries: 10
 
   opensearch-dashboards:
-    image: opensearchproject/opensearch-dashboards:3.3.0
+    image: opensearchproject/opensearch-dashboards:3.7.0
     ports:
       - "5601:5601"
     environment:
@@ -133,7 +133,7 @@ services:
     restart: unless-stopped
 
   prometheus:
-    image: prom/prometheus:v2.48.0
+    image: prom/prometheus:v3.12.0
     ports:
       - "9091:9090"
     volumes:
@@ -158,7 +158,7 @@ services:
       retries: 5
 
   grafana:
-    image: grafana/grafana:10.2.2
+    image: grafana/grafana:12.3.8
     ports:
       - "3000:3000"
     environment:
