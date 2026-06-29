@@ -6,13 +6,11 @@ use bytes::Bytes;
 use hyper::body::Incoming;
 use hyper::header::{HeaderName, HeaderValue, AUTHORIZATION, LOCATION};
 use hyper::{Request, Response, StatusCode};
-use hyper_rustls::ConfigBuilderExt;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 use quick_cache::sync::Cache;
 use rdkafka::producer::FutureProducer;
 use std::collections::HashMap;
-use std::io::Cursor;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
@@ -35,6 +33,7 @@ use crate::pipeline::{
 };
 use crate::rate_limit::{RateLimitViolation, RateLimiter};
 use crate::tls::CertCache;
+use crate::upstream::{build_upstream_https_connector, UpstreamTlsConfig};
 
 pub struct ProxyPolicy {
     pub acl_engine: Option<Arc<Mutex<AclEngine>>>,
@@ -85,13 +84,14 @@ impl ProxyService {
         policy: &ProxyPolicy,
         hierarchy: Option<Arc<HierarchyManager>>,
         rate_limit_config: crate::rate_limit::RateLimitConfig,
+        upstream_tls: UpstreamTlsConfig,
     ) -> Self {
         let kafka_producer = kafka_brokers.as_deref().and_then(create_kafka_producer);
 
         let http_cache = Arc::new(Cache::new(cache_config.capacity));
 
-        let https =
-            build_upstream_https_connector().expect("failed to build upstream HTTPS connector");
+        let https = build_upstream_https_connector(&upstream_tls)
+            .expect("failed to build upstream HTTPS connector");
 
         let http_client = hyper_util::client::legacy::Client::builder(TokioExecutor::new())
             .pool_idle_timeout(Duration::from_secs(90))
@@ -672,34 +672,4 @@ impl ProxyService {
             }
         }
     }
-}
-
-fn build_upstream_https_connector(
-) -> Result<hyper_rustls::HttpsConnector<HttpConnector>, Box<dyn std::error::Error>> {
-    let tls_config = if let Ok(path) = std::env::var("UPSTREAM_CA_CERT") {
-        let pem = std::fs::read(&path)
-            .map_err(|e| format!("failed to read UPSTREAM_CA_CERT {path}: {e}"))?;
-        let certs: Vec<rustls::pki_types::CertificateDer<'static>> =
-            rustls_pemfile::certs(&mut Cursor::new(pem))
-                .collect::<Result<Vec<_>, _>>()?
-                .into_iter()
-                .map(|cert| cert.into_owned())
-                .collect();
-        let mut roots = rustls::RootCertStore::empty();
-        roots.add_parsable_certificates(certs);
-        info!("Upstream TLS: trusting custom CA from UPSTREAM_CA_CERT");
-        rustls::ClientConfig::builder()
-            .with_root_certificates(roots)
-            .with_no_client_auth()
-    } else {
-        rustls::ClientConfig::builder()
-            .with_webpki_roots()
-            .with_no_client_auth()
-    };
-
-    Ok(hyper_rustls::HttpsConnectorBuilder::new()
-        .with_tls_config(tls_config)
-        .https_or_http()
-        .enable_http1()
-        .build())
 }

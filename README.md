@@ -154,6 +154,7 @@ cargo build --release -p bsdm-proxy --bin proxy -p cache-indexer --bin cache-ind
 | `MAX_CACHE_BODY_SIZE` | `10485760` | Макс. размер body (байт) |
 | `SHUTDOWN_TIMEOUT_SECONDS` | `30` | Таймаут graceful shutdown |
 | `UPSTREAM_CA_CERT` | — | PEM самоподписанного CA для upstream TLS (тесты/lab) |
+| `UPSTREAM_HTTP2_ENABLED` | `false` | HTTP/2 ALPN для upstream HTTPS |
 | `RUST_LOG` | `info,bsdm_proxy=debug`¹ | Фильтр логов ([docs/logging.md](docs/logging.md)) |
 
 CA для MITM читается из `/certs/ca.key` и `/certs/ca.crt` (fallback: `./certs/`).
