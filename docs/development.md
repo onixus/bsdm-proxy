@@ -22,11 +22,16 @@ sudo apt-get install -y \
 ```
 bsdm-proxy/
 ├── proxy/              # Основной прокси (bin: proxy)
+│   └── src/
+│       ├── main.rs     # ProxyService, HTTP server, cache, Kafka
+│       ├── lib.rs      # acl, auth, categorization, hierarchy, icp, peers
+│       ├── peer_fetch.rs, hierarchy_config.rs, cache_key.rs
+│       └── tls.rs, metrics.rs, policy_config.rs
 ├── cache-indexer/      # Kafka → OpenSearch indexer
 ├── e2e/                # Smoke и E2E тесты
 ├── config/             # Примеры ACL-правил
 ├── packaging/          # Release-пакет (systemd, install.sh)
-├── scripts/            # build-package, run-*-tests
+├── scripts/            # build-package, run-*-tests, pre-push-check
 └── docs/               # Документация
 ```
 
@@ -189,5 +194,13 @@ AUTH_ENABLED=true
 ACL_ENABLED=true
 ACL_RULES_PATH=./config/acl-rules.test.json
 CATEGORIZATION_ENABLED=false
-UPSTREAM_CA_CERT=./certs/ca.crt   # для lab MITM с самоподписанным upstream
+MITM_ENABLED=false                    # старт без CA
+UPSTREAM_CA_CERT=./certs/ca.crt       # для lab MITM с самоподписанным upstream
+
+# Иерархический кеш (локальный тест с mock peer)
+HIERARCHY_ENABLED=true
+CACHE_PARENTS=127.0.0.1:18080
+ICP_BIND=127.0.0.1:3130
 ```
+
+Подробнее: [hierarchical-caching.md](hierarchical-caching.md)

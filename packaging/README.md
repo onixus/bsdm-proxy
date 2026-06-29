@@ -44,6 +44,7 @@ set +a
 | Service | Default port |
 |---------|--------------|
 | Proxy HTTP/HTTPS | 1488 |
+| ICP (UDP, if `HIERARCHY_ENABLED=true`) | 3130 |
 | Metrics / health | 9090 |
 
 ## Verify

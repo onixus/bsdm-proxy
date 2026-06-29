@@ -20,8 +20,8 @@
 
 | Milestone | Версия | Фокус | Готовность |
 |-----------|--------|-------|------------|
-| [M1 — Foundation](#m1--foundation-v02x) | v0.2.x | Ядро прокси, ACL, категоризация, observability | ~90% |
-| [M2 — Squid parity](#m2--squid-parity-v03x) | v0.3.x | Иерархия, L2, rate limit, полный ACL | ~0% |
+| [M1 — Foundation](#m1--foundation-v02x) | v0.2.x | Ядро прокси, ACL, категоризация, observability, иерархия | ~95% |
+| [M2 — Squid parity](#m2--squid-parity-v03x) | v0.3.x | L2, rate limit, полный ACL, hierarchy Phase 4 | ~10% |
 | [M3 — Retro-search](#m3--retro-search-v04x) | v0.4.x | Индексация, дашборды, поиск по истории | ~15% |
 | [M4 — Threat analytics](#m4--threat-analytics-v05x) | v0.5.x | Rule-based угрозы, алерты, C&C heuristics | ~5% |
 | [M5 — ML security](#m5--ml-security-v10x) | v1.0.x | ML anomaly, phishing ML, C&C beacon detection | ~0% |
@@ -61,14 +61,18 @@ gantt
 - [x] URL categorization: Shallalist, URLhaus, PhishTank, custom DB
 - [x] E2E / smoke test harness
 - [x] Release packaging (`0.2.2b`) + systemd
+- [x] Hierarchical caching Phase 3 — modules in lib, ICP server, peer HTTP fetch, env config
+- [x] Optional MITM CA (`MITM_ENABLED=false` без `ca.key`)
+- [x] Pre-push hook (`fmt` + `clippy`)
 
 ### В работе / осталось в M1
 
-- [ ] Rate limiting per user/IP — [#TBD]
-- [ ] Hierarchical caching Phase 3 — интеграция `peers.rs`, `icp.rs`, `hierarchy.rs` в `main.rs` — [#TBD]
+- [ ] Rate limiting per user/IP — [#37](https://github.com/onixus/bsdm-proxy/issues/37)
+- [ ] Рефакторинг `main.rs` — вынос `ProxyService` в lib — [#38](https://github.com/onixus/bsdm-proxy/issues/38)
+- [ ] Hierarchy E2E / `docker-compose.hierarchy.yml`
 - [ ] Исправить README: NTLM помечен как done, но не реализован (`auth.rs`)
 
-**Критерий завершения M1:** rate limit + hierarchy в production path, все E2E зелёные.
+**Критерий завершения M1:** rate limit + рефакторинг main, hierarchy E2E, все CI зелёные.
 
 ---
 
@@ -94,7 +98,7 @@ gantt
 
 **Критерий завершения M2:** 3-tier cache hierarchy в docker-compose, hit rate sibling/parent измеряется, Redis L2 работает.
 
-**Зависимости:** M1 (hierarchy Phase 3).
+**Зависимости:** M1 (B6 rate limit, B7 refactor).
 
 ---
 

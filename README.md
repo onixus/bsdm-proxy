@@ -18,7 +18,7 @@
 
 | Область | Возможности |
 |---------|-------------|
-| **Прокси** | HTTP/HTTPS forward proxy, MITM TLS (порты 443/8443), HTTP CONNECT, кеш L1 |
+| **Прокси** | HTTP/HTTPS forward proxy, MITM TLS (порты 443/8443), HTTP CONNECT, кеш L1, **иерархический кеш** (ICP + parent/sibling peers) |
 | **Безопасность** | Proxy-аутентификация (Basic / LDAP / NTLM), ACL, категоризация URL |
 | **Наблюдаемость** | Prometheus (20+ метрик), Grafana, `/health`, `/ready`, `/metrics` |
 | **Аналитика** | Kafka → cache-indexer → OpenSearch |
@@ -27,18 +27,22 @@
 ## Архитектура
 
 ```
-┌─────────┐         ┌──────────────────────────┐         ┌──────────────┐
-│ Клиент  │◄───────►│  BSDM-Proxy              │◄───────►│   Upstream   │
-│         │  HTTPS  │  Auth → ACL → Cache      │  HTTPS  │    Server    │
-└─────────┘         └────────────┬─────────────┘         └──────────────┘
+┌─────────┐         ┌──────────────────────────────────────┐         ┌──────────────┐
+│ Клиент  │◄───────►│  BSDM-Proxy                          │◄───────►│   Upstream   │
+│         │  HTTPS  │  Auth → ACL → L1 → [ICP → peer]      │  HTTPS  │    Server    │
+└─────────┘         └────────────┬─────────────────────────┘         └──────────────┘
                                  │
                         :9090 /metrics
                     ┌────────────┴────────────┐
              ┌──────▼──────┐           ┌──────▼──────┐
              │ quick_cache │           │   Kafka     │
              │   (L1)      │           │  (async)    │
-             └─────────────┘           └──────┬──────┘
-                                              │
+             └──────┬──────┘           └──────┬──────┘
+                    │ ICP :3130 (UDP)         │
+             ┌──────▼──────┐                  │
+             │ sibling /   │                  │
+             │ parent peer │                  │
+             └─────────────┘                  │
                     ┌─────────────────────────┼─────────────────┐
              ┌──────▼─────────┐        ┌──────▼──────┐   ┌──────▼──────┐
              │ Cache-Indexer  │        │ Prometheus  │   │  Grafana    │
@@ -52,7 +56,8 @@
 
 | Компонент | Порт | Описание |
 |-----------|------|----------|
-| **proxy** | 1488 | HTTPS-прокси, MITM, кеш, метрики |
+| **proxy** | 1488 | HTTPS-прокси, MITM, кеш L1, иерархия (опционально) |
+| **ICP** | 3130 | UDP-запросы между cache peers (при `HIERARCHY_ENABLED=true`) |
 | **metrics** | 9090 | `/health`, `/ready`, `/metrics` |
 | **cache-indexer** | — | Kafka → OpenSearch |
 | **Kafka** | 9092 | Очередь событий кеша |
@@ -181,6 +186,26 @@ CA для MITM читается из `/certs/ca.key` и `/certs/ca.crt` (fallbac
 
 → [docs/acl.md](docs/acl.md) · [docs/categorization.md](docs/categorization.md)
 
+### Иерархический кеш (опционально)
+
+Включается через `HIERARCHY_ENABLED=true`. После промаха L1: ICP-запрос к siblings → выбор parent → HTTP fetch через peer → fallback на origin.
+
+| Переменная | По умолчанию | Описание |
+|-----------|-------------|----------|
+| `HIERARCHY_ENABLED` | `false` | Включить иерархию |
+| `CACHE_PARENTS` | — | Parent peers: `host:port[:weight]` |
+| `CACHE_SIBLINGS` | — | Sibling peers: `host:port[:weight][:icp_port]` |
+| `CACHE_SELECTION_STRATEGY` | `round-robin` | `round-robin`, `weighted`, `closest`, `hash` |
+| `ICP_BIND` | `0.0.0.0:3130` | Адрес ICP-сервера (UDP) |
+| `ICP_CLIENT_BIND` | `0.0.0.0:0` | Bind для ICP-клиента |
+| `ICP_PEER_PORT` | `3130` | ICP-порт siblings по умолчанию |
+| `ICP_TIMEOUT_MS` | `100` | Таймаут ICP-запроса (мс) |
+| `ICP_SERVER_ENABLED` | `true` | Запускать локальный ICP-сервер |
+| `PARENT_TIMEOUT_SECONDS` | `5` | Таймаут HTTP-запроса к peer |
+| `ICP_MAX_SIBLING_QUERIES` | `10` | Макс. параллельных ICP-запросов |
+
+→ [docs/hierarchical-caching.md](docs/hierarchical-caching.md)
+
 ### Cache-indexer
 
 | Переменная | По умолчанию | Описание |
@@ -246,6 +271,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 | [docs/authentication.md](docs/authentication.md) | LDAP, NTLM, Basic Auth |
 | [docs/acl.md](docs/acl.md) | Правила доступа, приоритеты |
 | [docs/categorization.md](docs/categorization.md) | Shallalist, URLhaus, PhishTank |
+| [docs/hierarchical-caching.md](docs/hierarchical-caching.md) | Иерархический кеш, ICP, peers |
 | [docs/architecture.md](docs/architecture.md) | Архитектура и блокеры |
 | [docs/roadmap.md](docs/roadmap.md) | Roadmap и milestones |
 | [packaging/README.md](packaging/README.md) | Release-пакет и systemd |
@@ -260,8 +286,8 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 
 | Milestone | Версия | Фокус | Статус |
 |-----------|--------|-------|--------|
-| **M1** Foundation | v0.2.x | Прокси, ACL, категоризация, observability | ~90% |
-| **M2** Squid parity | v0.3.x | Иерархия, L2, rate limit, полный ACL | Planned |
+| **M1** Foundation | v0.2.x | Прокси, ACL, категоризация, observability, иерархия | ~95% |
+| **M2** Squid parity | v0.3.x | L2 Redis, rate limit, полный ACL, hierarchy Phase 4 | Planned |
 | **M3** Retro-search | v0.4.x | OpenSearch dashboards, поиск по истории | Planned |
 | **M4** Threat analytics | v0.5.x | Rule-based алерты, C&C heuristics | Planned |
 | **M5** ML security | v1.0.x | ML anomaly, phishing, C&C detection | Planned |
@@ -274,8 +300,9 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 - [x] ACL + URL categorization
 - [x] E2E / smoke test harness
 - [x] Release packaging (`0.2.2b`)
+- [x] Hierarchical caching Phase 3 — ICP server, peer fetch, env config
 - [ ] Rate limiting per user/IP
-- [ ] Hierarchical caching — Phase 3 integration
+- [ ] Рефакторинг `main.rs` (вынос `ProxyService` в lib)
 
 ### M2 — Squid parity (v0.3.x)
 
@@ -284,7 +311,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 - [ ] Compression (Brotli/Zstd)
 - [ ] ACL TimeWindow + group rules
 - [ ] NTLM auth
-- [ ] Hierarchy Phase 4 (discovery, digest, HTCP)
+- [ ] Hierarchy Phase 4 (discovery, digest, HTCP, hierarchy metrics)
 
 ### M3–M5
 
