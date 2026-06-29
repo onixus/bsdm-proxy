@@ -28,9 +28,7 @@ fn leaf_cert_params(domain: &str) -> Result<CertificateParams, rcgen::Error> {
     let mut params = CertificateParams::new(vec![domain.to_string()])?;
     apply_leaf_cert_validity(&mut params);
     params.distinguished_name = DistinguishedName::new();
-    params
-        .distinguished_name
-        .push(DnType::CommonName, domain);
+    params.distinguished_name.push(DnType::CommonName, domain);
     params
         .distinguished_name
         .push(DnType::OrganizationName, "BSDM Proxy");
@@ -310,11 +308,9 @@ mod tests {
         let now = time::OffsetDateTime::now_utc();
         assert!(params.not_before <= now);
         assert!(params.not_after > now + time::Duration::days(30));
-        assert!(
-            params
-                .extended_key_usages
-                .contains(&ExtendedKeyUsagePurpose::ServerAuth)
-        );
+        assert!(params
+            .extended_key_usages
+            .contains(&ExtendedKeyUsagePurpose::ServerAuth));
     }
 
     #[test]

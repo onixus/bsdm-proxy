@@ -17,13 +17,13 @@ use hyper::header::{HeaderName, HeaderValue, AUTHORIZATION, LOCATION};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
-use rustls_platform_verifier::BuilderVerifierExt;
 use hyper_util::rt::TokioIo;
 use metrics::{Metrics, RequestMetricsGuard};
 use policy_config::{load_policy_config, reload_acl_engine, PolicyConfig};
 use quick_cache::sync::Cache;
 use rdkafka::config::ClientConfig;
 use rdkafka::producer::{FutureProducer, FutureRecord, Producer};
+use rustls_platform_verifier::BuilderVerifierExt;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -91,10 +91,7 @@ fn normalize_response_headers(
     out
 }
 
-fn apply_response_headers(
-    response: &mut Response<Body>,
-    headers: &HashMap<String, String>,
-) {
+fn apply_response_headers(response: &mut Response<Body>, headers: &HashMap<String, String>) {
     for (key, value) in headers {
         if let (Ok(name), Ok(val)) = (
             HeaderName::from_bytes(key.as_bytes()),
@@ -718,9 +715,7 @@ fn build_upstream_tls_with_combined_roots() -> rustls::ClientConfig {
             native += 1;
         }
     }
-    info!(
-        "Upstream TLS: webpki-roots + {native} native CA certificate(s)"
-    );
+    info!("Upstream TLS: webpki-roots + {native} native CA certificate(s)");
     rustls::ClientConfig::builder()
         .with_root_certificates(roots)
         .with_no_client_auth()
