@@ -85,6 +85,11 @@ impl HierarchyManager {
         self.config.enabled
     }
 
+    /// Timeout for HTTP requests to parent/sibling peers.
+    pub fn parent_timeout(&self) -> Duration {
+        self.config.parent_timeout
+    }
+
     /// Determine where to fetch the resource from
     pub async fn resolve_source(&self, url: &str) -> HierarchyResult {
         if !self.config.enabled {

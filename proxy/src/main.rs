@@ -6,7 +6,11 @@ mod tls;
 use auth_config::load_auth_config;
 use base64::engine::general_purpose;
 use base64::Engine;
-use bsdm_proxy::{AclAction, AclDecision, AuthManager, Category, UserInfo};
+use bsdm_proxy::{
+    build_hierarchy_manager, fetch_via_peer, http_cache_key, icp_server_bind_addr,
+    load_hierarchy_config, should_start_icp_server, AclAction, AclDecision, AuthManager, Category,
+    HierarchyManager, HierarchyResult, IcpServer, UserInfo,
+};
 use bytes::Bytes;
 use hyper::body::Incoming;
 use hyper::header::{HeaderName, HeaderValue, AUTHORIZATION, LOCATION};
@@ -21,7 +25,6 @@ use quick_cache::sync::Cache;
 use rdkafka::config::ClientConfig;
 use rdkafka::producer::{FutureProducer, FutureRecord, Producer};
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::io::Cursor;
@@ -139,9 +142,11 @@ struct ProxyService {
     auth: Option<Arc<AuthManager>>,
     acl_engine: Option<Arc<Mutex<bsdm_proxy::AclEngine>>>,
     categorization: Option<Arc<bsdm_proxy::CategorizationEngine>>,
+    hierarchy: Option<Arc<HierarchyManager>>,
 }
 
 impl ProxyService {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         cert_cache: CertCache,
         cache_config: CacheConfig,
@@ -150,6 +155,7 @@ impl ProxyService {
         mitm_enabled: bool,
         auth: Option<Arc<AuthManager>>,
         policy: &PolicyConfig,
+        hierarchy: Option<Arc<HierarchyManager>>,
     ) -> Self {
         let kafka_producer = kafka_brokers.and_then(|brokers| {
             ClientConfig::new()
@@ -186,6 +192,7 @@ impl ProxyService {
             auth,
             acl_engine: policy.acl_engine.clone(),
             categorization: policy.categorization.clone(),
+            hierarchy,
         }
     }
 
@@ -315,11 +322,39 @@ impl ProxyService {
 
     #[inline]
     fn generate_cache_key(&self, method: &str, url: &str) -> Arc<str> {
-        let mut hasher = Sha256::new();
-        hasher.update(method.as_bytes());
-        hasher.update(b":");
-        hasher.update(url.as_bytes());
-        hex::encode(hasher.finalize()).into()
+        http_cache_key(method, url)
+    }
+
+    /// Try fetching via hierarchy peer (sibling ICP HIT or parent selection).
+    async fn try_fetch_via_hierarchy(
+        &self,
+        method: &str,
+        url: &str,
+        req: Request<Body>,
+    ) -> Option<(Arc<bsdm_proxy::CachePeer>, hyper::Response<Incoming>)> {
+        if !CACHEABLE_METHODS.contains(&method) {
+            return None;
+        }
+
+        let hierarchy = self.hierarchy.as_ref()?;
+
+        let peer = match hierarchy.resolve_source(url).await {
+            HierarchyResult::SiblingHit(peer) | HierarchyResult::ParentHit(peer) => peer,
+            HierarchyResult::LocalHit | HierarchyResult::OriginRequired => return None,
+        };
+
+        let timeout = hierarchy.parent_timeout();
+        match fetch_via_peer(&peer, req, timeout).await {
+            Ok(response) => {
+                info!("Peer response via {} for {}", peer.id, url);
+                Some((peer, response))
+            }
+            Err(e) => {
+                warn!("Peer fetch failed via {} for {}: {}", peer.id, url, e);
+                hierarchy.record_peer_error(&peer).await;
+                None
+            }
+        }
     }
 
     #[inline]
@@ -485,12 +520,23 @@ impl ProxyService {
             }
         };
         let request_body_size = body_bytes.len();
-        let req = Request::from_parts(parts, Body::new(body_bytes));
+        let req = Request::from_parts(parts, Body::new(body_bytes.clone()));
 
         let domain = Self::extract_domain(&url);
         let upstream_start = Instant::now();
 
-        match self.http_client.request(req).await {
+        let peer_fetch = self
+            .try_fetch_via_hierarchy(&method, &url, req.clone())
+            .await;
+        let hierarchy_peer = peer_fetch.as_ref().map(|(peer, _)| peer.clone());
+
+        let fetch_result = if let Some((_, response)) = peer_fetch {
+            Ok(response)
+        } else {
+            self.http_client.request(req).await
+        };
+
+        match fetch_result {
             Ok(response) => {
                 let upstream_duration = upstream_start.elapsed().as_secs_f64();
                 let status = response.status();
@@ -531,6 +577,12 @@ impl ProxyService {
                     }
                 };
                 let body_size = body_bytes.len();
+
+                if let (Some(hierarchy), Some(peer)) =
+                    (self.hierarchy.as_ref(), hierarchy_peer.as_ref())
+                {
+                    hierarchy.record_peer_hit(peer, body_size as u64).await;
+                }
 
                 let cache_status = if self.is_cacheable(&method, status.as_u16(), body_size) {
                     let headers_arc: Arc<[(Arc<str>, Arc<str>)]> = headers_map
@@ -895,6 +947,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("URL categorization enabled");
     }
 
+    let hierarchy_config = load_hierarchy_config();
+    let hierarchy = build_hierarchy_manager(&hierarchy_config)
+        .await
+        .map_err(|e| -> Box<dyn std::error::Error> { e })?;
+
     let service = Arc::new(ProxyService::new(
         cert_cache,
         cache_config.clone(),
@@ -903,7 +960,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         mitm_enabled,
         auth,
         &policy_config,
+        hierarchy.clone(),
     ));
+
+    if should_start_icp_server(&hierarchy_config) {
+        let icp_bind = icp_server_bind_addr();
+        let cache_for_icp = service.http_cache.clone();
+        match IcpServer::new(&icp_bind, move |url: &str| {
+            let key = http_cache_key("GET", url);
+            cache_for_icp
+                .get(&key)
+                .is_some_and(|cached| !cached.is_expired())
+        })
+        .await
+        {
+            Ok(server) => {
+                info!("ICP server listening on {}", icp_bind);
+                let server = Arc::new(server);
+                tokio::spawn(async move {
+                    server.serve().await;
+                });
+            }
+            Err(e) => warn!("ICP server disabled: failed to bind {}: {}", icp_bind, e),
+        }
+    }
+
+    if hierarchy_config.enabled {
+        if let Some(ref manager) = hierarchy {
+            info!("{}", manager.stats_summary().await);
+        }
+    }
 
     if policy_config.acl_auto_reload {
         if let (Some(acl_engine), Some(rules_path)) = (

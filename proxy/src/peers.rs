@@ -103,19 +103,28 @@ impl PeerConfig {
     pub fn parse_from_string(s: &str, peer_type: PeerType) -> Result<Self, String> {
         let parts: Vec<&str> = s.split(':').collect();
         if parts.len() < 2 {
-            return Err("Invalid peer format. Expected host:port[:weight]".to_string());
+            return Err("Invalid peer format. Expected host:port[:weight][:icp_port]".to_string());
         }
 
         let host = parts[0].to_string();
         let port = parts[1]
             .parse::<u16>()
             .map_err(|e| format!("Invalid port: {}", e))?;
-        let weight = if parts.len() > 2 {
+        let weight = if parts.len() > 2 && !parts[2].is_empty() {
             parts[2]
                 .parse::<f64>()
                 .map_err(|e| format!("Invalid weight: {}", e))?
         } else {
             1.0
+        };
+        let icp_port = if parts.len() > 3 && !parts[3].is_empty() {
+            Some(
+                parts[3]
+                    .parse::<u16>()
+                    .map_err(|e| format!("Invalid ICP port: {}", e))?,
+            )
+        } else {
+            None
         };
 
         Ok(Self {
@@ -123,7 +132,7 @@ impl PeerConfig {
             port,
             peer_type,
             weight,
-            icp_port: None,
+            icp_port,
             max_connections: 100,
         })
     }
