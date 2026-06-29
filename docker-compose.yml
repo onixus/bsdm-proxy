@@ -95,6 +95,7 @@ services:
       - MAX_CACHE_BODY_SIZE=10485760
       - HTTP_PORT=1488
       - METRICS_PORT=9090
+      - MITM_ENABLED=true
       - RUST_LOG=info,bsdm_proxy=debug
       - RUST_BACKTRACE=1
     depends_on:
