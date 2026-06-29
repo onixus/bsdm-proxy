@@ -4,8 +4,8 @@ use bytes::Bytes;
 use hyper::body::Incoming;
 use hyper::Request;
 use rcgen::{
-    BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, Issuer, KeyPair,
-    KeyUsagePurpose,
+    BasicConstraints, CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose, IsCa,
+    Issuer, KeyPair, KeyUsagePurpose,
 };
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::ServerConfig;
@@ -15,6 +15,30 @@ use std::io::Cursor;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, warn};
+
+const LEAF_CERT_VALIDITY_DAYS: i64 = 825;
+
+fn apply_leaf_cert_validity(params: &mut CertificateParams) {
+    let now = time::OffsetDateTime::now_utc();
+    params.not_before = now - time::Duration::days(1);
+    params.not_after = now + time::Duration::days(LEAF_CERT_VALIDITY_DAYS);
+}
+
+fn leaf_cert_params(domain: &str) -> Result<CertificateParams, rcgen::Error> {
+    let mut params = CertificateParams::new(vec![domain.to_string()])?;
+    apply_leaf_cert_validity(&mut params);
+    params.distinguished_name = DistinguishedName::new();
+    params.distinguished_name.push(DnType::CommonName, domain);
+    params
+        .distinguished_name
+        .push(DnType::OrganizationName, "BSDM Proxy");
+    params.key_usages = vec![
+        KeyUsagePurpose::DigitalSignature,
+        KeyUsagePurpose::KeyEncipherment,
+    ];
+    params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+    Ok(params)
+}
 
 pub type CertPair = (Bytes, Bytes);
 type CertMap = Arc<RwLock<HashMap<Arc<str>, CertPair>>>;
@@ -95,6 +119,7 @@ impl CertCache {
 
     fn in_memory_ca_params() -> Result<CertificateParams, rcgen::Error> {
         let mut ca_params = CertificateParams::new(vec!["BSDM Proxy CA".to_string()])?;
+        apply_leaf_cert_validity(&mut ca_params);
         ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
         ca_params.key_usages = vec![
             KeyUsagePurpose::KeyCertSign,
@@ -130,7 +155,7 @@ impl CertCache {
         }
 
         let (cert_pem, key_pem) = self.get_or_generate(domain).await?;
-        let config = Arc::new(build_server_config(&cert_pem, &key_pem, &self.ca_cert_pem)?);
+        let config = Arc::new(build_server_config(&cert_pem, &key_pem)?);
 
         let mut cache = self.server_configs.write().await;
         cache.insert(domain_arc, config.clone());
@@ -153,16 +178,7 @@ impl CertCache {
 
         debug!("Certificate cache MISS for {}, generating...", domain);
         let key_pair = KeyPair::generate()?;
-        let mut params = CertificateParams::new(vec![domain.to_string()])?;
-        params.distinguished_name = DistinguishedName::new();
-        params.distinguished_name.push(DnType::CommonName, domain);
-        params
-            .distinguished_name
-            .push(DnType::OrganizationName, "BSDM Proxy");
-        params.key_usages = vec![
-            KeyUsagePurpose::DigitalSignature,
-            KeyUsagePurpose::KeyEncipherment,
-        ];
+        let params = leaf_cert_params(domain)?;
 
         let issuer = self.issuer()?;
         let cert = params.signed_by(&key_pair, &issuer)?;
@@ -179,11 +195,10 @@ impl CertCache {
 fn build_server_config(
     cert_pem: &[u8],
     key_pem: &[u8],
-    ca_cert_pem: &[u8],
 ) -> Result<ServerConfig, Box<dyn std::error::Error + Send + Sync>> {
-    let mut chain = parse_certs(cert_pem)?;
-    chain.extend(parse_certs(ca_cert_pem)?);
-
+    // Send leaf only — clients already trust the CA from their trust store.
+    // Including the self-signed root in the chain triggers UnknownCA in Safari/Chrome.
+    let chain = parse_certs(cert_pem)?;
     let key = parse_private_key(key_pem)?;
 
     ServerConfig::builder()
@@ -285,6 +300,17 @@ mod tests {
         assert!(should_mitm_port(8443));
         assert!(!should_mitm_port(22));
         assert!(!should_mitm_port(8080));
+    }
+
+    #[test]
+    fn leaf_cert_params_use_sane_validity() {
+        let params = leaf_cert_params("example.com").unwrap();
+        let now = time::OffsetDateTime::now_utc();
+        assert!(params.not_before <= now);
+        assert!(params.not_after > now + time::Duration::days(30));
+        assert!(params
+            .extended_key_usages
+            .contains(&ExtendedKeyUsagePurpose::ServerAuth));
     }
 
     #[test]

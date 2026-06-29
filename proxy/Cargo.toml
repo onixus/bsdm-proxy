@@ -22,6 +22,10 @@ prometheus = { version = "0.14", features = ["process"] }
 tokio-rustls = { version = "0.26", features = ["ring"] }
 rustls = { version = "0.23", features = ["ring"] }
 rustls-pemfile = "2.2"
+rustls-platform-verifier = "0.7"
+rustls-native-certs = "0.8"
+webpki-roots = "1.0"
+time = "0.3"
 hyper-rustls = { version = "0.27", default-features = false, features = ["http1", "ring", "tls12", "webpki-roots"] }
 sha2 = "0.11"
 base64 = "0.22"

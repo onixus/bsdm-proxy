@@ -17,13 +17,13 @@ use hyper::header::{HeaderName, HeaderValue, AUTHORIZATION, LOCATION};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
-use hyper_rustls::ConfigBuilderExt;
 use hyper_util::rt::TokioIo;
 use metrics::{Metrics, RequestMetricsGuard};
 use policy_config::{load_policy_config, reload_acl_engine, PolicyConfig};
 use quick_cache::sync::Cache;
 use rdkafka::config::ClientConfig;
 use rdkafka::producer::{FutureProducer, FutureRecord, Producer};
+use rustls_platform_verifier::BuilderVerifierExt;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -48,6 +48,60 @@ type Body = http_body_util::Full<Bytes>;
 const CACHEABLE_METHODS: &[&str] = &["GET", "HEAD"];
 const CACHEABLE_STATUS_CODES: &[u16] = &[200, 203, 204, 206, 300, 301, 404, 405, 410, 414, 501];
 
+/// Hop-by-hop and framing headers that must not be forwarded after the body is buffered.
+const STRIP_RESPONSE_HEADERS: &[&str] = &[
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailers",
+    "transfer-encoding",
+    "upgrade",
+];
+
+fn normalize_response_headers(
+    headers: HashMap<String, String>,
+    body_len: usize,
+    method: &str,
+) -> HashMap<String, String> {
+    let is_head = method.eq_ignore_ascii_case("HEAD");
+    let upstream_content_length = headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+        .map(|(_, v)| v.clone());
+
+    let mut out: HashMap<String, String> = headers
+        .into_iter()
+        .filter(|(k, _)| {
+            let lower = k.to_ascii_lowercase();
+            !STRIP_RESPONSE_HEADERS.contains(&lower.as_str())
+                && !(lower == "content-length" && !is_head)
+        })
+        .collect();
+
+    if is_head {
+        if let Some(cl) = upstream_content_length {
+            out.insert("content-length".to_string(), cl);
+        }
+    } else if body_len > 0 || !matches!(method, "GET" | "HEAD") {
+        out.insert("content-length".to_string(), body_len.to_string());
+    }
+
+    out
+}
+
+fn apply_response_headers(response: &mut Response<Body>, headers: &HashMap<String, String>) {
+    for (key, value) in headers {
+        if let (Ok(name), Ok(val)) = (
+            HeaderName::from_bytes(key.as_bytes()),
+            HeaderValue::from_str(value),
+        ) {
+            response.headers_mut().insert(name, val);
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 struct CachedResponse {
     status: u16,
@@ -69,17 +123,15 @@ impl CachedResponse {
         let mut response = Response::new(Body::new(self.body.clone()));
         *response.status_mut() = StatusCode::from_u16(self.status).unwrap_or(StatusCode::OK);
 
-        let headers_mut = response.headers_mut();
-        for (key, value) in self.headers.iter() {
-            if let (Ok(name), Ok(val)) = (
-                HeaderName::from_bytes(key.as_bytes()),
-                HeaderValue::from_str(value),
-            ) {
-                headers_mut.insert(name, val);
-            }
-        }
-
-        headers_mut.insert("x-cache-status", HeaderValue::from_static("HIT"));
+        let headers_map: HashMap<String, String> = self
+            .headers
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        apply_response_headers(&mut response, &headers_map);
+        response
+            .headers_mut()
+            .insert("x-cache-status", HeaderValue::from_static("HIT"));
         response
     }
 }
@@ -550,7 +602,7 @@ impl ProxyService {
                     .with_label_values(&[&domain])
                     .observe(upstream_duration);
 
-                let headers_map: HashMap<String, String> = response
+                let raw_headers: HashMap<String, String> = response
                     .headers()
                     .iter()
                     .filter_map(|(k, v)| {
@@ -577,6 +629,7 @@ impl ProxyService {
                     }
                 };
                 let body_size = body_bytes.len();
+                let headers_map = normalize_response_headers(raw_headers, body_size, &method);
 
                 if let (Some(hierarchy), Some(peer)) =
                     (self.hierarchy.as_ref(), hierarchy_peer.as_ref())
@@ -630,14 +683,7 @@ impl ProxyService {
 
                 let mut resp = Response::new(Body::new(body_bytes));
                 *resp.status_mut() = status;
-                for (key, value) in headers_map {
-                    if let (Ok(name), Ok(val)) = (
-                        HeaderName::from_bytes(key.as_bytes()),
-                        HeaderValue::from_str(&value),
-                    ) {
-                        resp.headers_mut().insert(name, val);
-                    }
-                }
+                apply_response_headers(&mut resp, &headers_map);
                 guard.finish(status.as_u16(), request_body_size, body_size);
                 resp
             }
@@ -654,6 +700,25 @@ impl ProxyService {
             }
         }
     }
+}
+
+fn build_upstream_tls_with_combined_roots() -> rustls::ClientConfig {
+    let mut roots = rustls::RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let native_certs = rustls_native_certs::load_native_certs();
+    for err in &native_certs.errors {
+        warn!("Failed to load native CA certificate: {err}");
+    }
+    let mut native = 0usize;
+    for cert in native_certs.certs {
+        if roots.add(cert).is_ok() {
+            native += 1;
+        }
+    }
+    info!("Upstream TLS: webpki-roots + {native} native CA certificate(s)");
+    rustls::ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth()
 }
 
 fn build_upstream_https_connector() -> Result<
@@ -675,10 +740,27 @@ fn build_upstream_https_connector() -> Result<
         rustls::ClientConfig::builder()
             .with_root_certificates(roots)
             .with_no_client_auth()
+    } else if std::env::var("UPSTREAM_TLS_PLATFORM")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+    {
+        match rustls::ClientConfig::builder()
+            .with_platform_verifier()
+            .map(|builder| builder.with_no_client_auth())
+        {
+            Ok(config) => {
+                info!("Upstream TLS: using platform certificate verifier");
+                config
+            }
+            Err(e) => {
+                warn!(
+                    "Platform TLS verifier unavailable ({e}); falling back to webpki + native roots"
+                );
+                build_upstream_tls_with_combined_roots()
+            }
+        }
     } else {
-        rustls::ClientConfig::builder()
-            .with_webpki_roots()
-            .with_no_client_auth()
+        build_upstream_tls_with_combined_roots()
     };
 
     Ok(hyper_rustls::HttpsConnectorBuilder::new()

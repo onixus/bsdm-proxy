@@ -187,10 +187,13 @@ dependencies = [
  "regex",
  "reqwest",
  "rustls",
+ "rustls-native-certs",
  "rustls-pemfile",
+ "rustls-platform-verifier",
  "serde",
  "serde_json",
  "sha2",
+ "time",
  "tokio",
  "tokio-rustls",
  "tokio-test",
@@ -198,6 +201,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "webpki-roots",
 ]
 
 [[package]]

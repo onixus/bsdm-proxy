@@ -3,57 +3,40 @@
 # ============================================================
 # Unified builder stage - собирает оба бинарника
 # ============================================================
-FROM rust:1.85-alpine AS builder
+FROM rust:1-bookworm AS builder
 WORKDIR /build
 
-# Установка зависимостей для сборки (включая bash для rdkafka)
-RUN apk add --no-cache \
-    musl-dev \
-    protoc \
-    g++ \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libssl-dev \
+    pkg-config \
     cmake \
-    make \
-    bash \
-    perl \
-    git \
-    openssl-dev \
-    openssl-libs-static \
-    pkgconfig \
     librdkafka-dev \
-    cyrus-sasl-dev \
-    lz4-dev \
-    zlib-dev \
-    zlib-static \
-    zstd-dev
+    libclang-dev \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-# Добавляем musl target
-RUN rustup target add x86_64-unknown-linux-musl
-
-# Копируем весь workspace
+# Копируем workspace (e2e нужен как member в корневом Cargo.toml)
 COPY Cargo.toml Cargo.lock ./
 COPY proxy ./proxy
 COPY cache-indexer ./cache-indexer
+COPY e2e ./e2e
 
-# Настройка окружения для статической линковки
-ENV OPENSSL_STATIC=1 \
-    OPENSSL_LIB_DIR=/usr/lib \
-    OPENSSL_INCLUDE_DIR=/usr/include \
-    RUSTFLAGS="-C target-feature=+crt-static"
-
-# Собираем оба бинарника в release режиме
-RUN cargo build --release --target x86_64-unknown-linux-musl
+RUN cargo build --release \
+    -p bsdm-proxy --bin proxy \
+    -p cache-indexer --bin cache-indexer
 
 # ============================================================
 # Proxy runtime
 # ============================================================
-FROM alpine:3.21 AS proxy
-RUN apk add --no-cache \
+FROM debian:bookworm-slim AS proxy
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
-    libgcc \
-    wget
+    libssl3 \
+    curl \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
 
-# Копируем скомпилированный бинарник
-COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/proxy /usr/local/bin/proxy
+COPY --from=builder /build/target/release/proxy /usr/local/bin/proxy
 
 EXPOSE 1488
 CMD ["proxy"]
@@ -61,13 +44,13 @@ CMD ["proxy"]
 # ============================================================
 # Cache-indexer runtime
 # ============================================================
-FROM alpine:3.21 AS cache-indexer
-RUN apk add --no-cache \
+FROM debian:bookworm-slim AS cache-indexer
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
-    libgcc
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
 
-# Копируем скомпилированный бинарник
-COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/cache-indexer /usr/local/bin/cache-indexer
+COPY --from=builder /build/target/release/cache-indexer /usr/local/bin/cache-indexer
 
 EXPOSE 8080
 CMD ["cache-indexer"]

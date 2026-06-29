@@ -149,6 +149,7 @@ impl ProxyHarness {
             .with_context(|| format!("spawn proxy binary at {}", proxy_bin.display()))?;
 
         wait_for_health(metrics_port, Duration::from_secs(20)).await?;
+        wait_for_tcp(proxy_port).await?;
 
         Ok(Self {
             proxy_port,
