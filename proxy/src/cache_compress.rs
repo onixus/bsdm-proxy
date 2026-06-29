@@ -82,9 +82,9 @@ impl CompressionConfig {
 pub fn decode_body(body: &Bytes, encoding: BodyEncoding) -> Result<Bytes, String> {
     match encoding {
         BodyEncoding::Raw => Ok(body.clone()),
-        BodyEncoding::Zstd => zstd::decode_all(body.as_ref()).map(Bytes::from).map_err(|e| {
-            format!("zstd decompress failed: {e}")
-        }),
+        BodyEncoding::Zstd => zstd::decode_all(body.as_ref())
+            .map(Bytes::from)
+            .map_err(|e| format!("zstd decompress failed: {e}")),
         BodyEncoding::Brotli => {
             let mut reader = std::io::Cursor::new(body.as_ref());
             let mut out = Vec::new();
@@ -120,8 +120,7 @@ fn strip_length_headers(headers: &[(Arc<str>, Arc<str>)]) -> Arc<[(Arc<str>, Arc
     headers
         .iter()
         .filter(|(k, _)| {
-            !k.eq_ignore_ascii_case("content-length")
-                && !k.eq_ignore_ascii_case("content-encoding")
+            !k.eq_ignore_ascii_case("content-length") && !k.eq_ignore_ascii_case("content-encoding")
         })
         .cloned()
         .collect()

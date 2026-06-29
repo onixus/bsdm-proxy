@@ -41,7 +41,10 @@ impl CachedResponse {
         match decode_body(&self.body, self.body_encoding) {
             Ok(body) => Some(body),
             Err(e) => {
-                warn!("failed to decode cached body ({:?}): {e}", self.body_encoding);
+                warn!(
+                    "failed to decode cached body ({:?}): {e}",
+                    self.body_encoding
+                );
                 None
             }
         }
@@ -52,9 +55,7 @@ impl CachedResponse {
     }
 
     pub fn to_response_with_cache_status(&self, cache_status: &str) -> Response<Body> {
-        let body = self
-            .decoded_body()
-            .unwrap_or_else(|| self.body.clone());
+        let body = self.decoded_body().unwrap_or_else(|| self.body.clone());
         let mut response = Response::new(Body::new(body));
         *response.status_mut() = StatusCode::from_u16(self.status).unwrap_or(StatusCode::OK);
 
@@ -162,7 +163,13 @@ mod tests {
             min_bytes: 512,
             zstd_level: 3,
         };
-        let cached = CachedResponse::from_upstream(200, headers, body.clone(), Duration::from_secs(60), &compression);
+        let cached = CachedResponse::from_upstream(
+            200,
+            headers,
+            body.clone(),
+            Duration::from_secs(60),
+            &compression,
+        );
         assert_eq!(cached.body_encoding, BodyEncoding::Zstd);
         let response = cached.to_response();
         let collected = http_body_util::BodyExt::collect(response.into_body());
