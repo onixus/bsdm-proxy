@@ -1,19 +1,21 @@
 mod auth_config;
 mod metrics;
+mod policy_config;
 mod tls;
 
 use auth_config::load_auth_config;
 use base64::engine::general_purpose;
 use base64::Engine;
-use bsdm_proxy::{AuthManager, UserInfo};
+use bsdm_proxy::{AclAction, AclDecision, AuthManager, Category, UserInfo};
 use bytes::Bytes;
 use hyper::body::Incoming;
-use hyper::header::{HeaderName, HeaderValue, AUTHORIZATION};
+use hyper::header::{HeaderName, HeaderValue, AUTHORIZATION, LOCATION};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use metrics::{Metrics, RequestMetricsGuard};
+use policy_config::{load_policy_config, reload_acl_engine, PolicyConfig};
 use quick_cache::sync::Cache;
 use rdkafka::config::ClientConfig;
 use rdkafka::producer::{FutureProducer, FutureRecord, Producer};
@@ -21,7 +23,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::convert::Infallible;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::panic;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -31,6 +33,7 @@ use tokio::io::copy_bidirectional;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::signal;
 use tokio::sync::watch;
+use tokio::sync::Mutex;
 use tokio_rustls::TlsAcceptor;
 use tokio_util::task::TaskTracker;
 use tracing::{debug, error, info, warn};
@@ -98,6 +101,8 @@ struct CacheEvent {
     content_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     user_agent: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    categories: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -130,6 +135,8 @@ struct ProxyService {
     metrics: Arc<Metrics>,
     mitm_enabled: bool,
     auth: Option<Arc<AuthManager>>,
+    acl_engine: Option<Arc<Mutex<bsdm_proxy::AclEngine>>>,
+    categorization: Option<Arc<bsdm_proxy::CategorizationEngine>>,
 }
 
 impl ProxyService {
@@ -140,6 +147,7 @@ impl ProxyService {
         metrics: Arc<Metrics>,
         mitm_enabled: bool,
         auth: Option<Arc<AuthManager>>,
+        policy: &PolicyConfig,
     ) -> Self {
         let kafka_producer = kafka_brokers.and_then(|brokers| {
             ClientConfig::new()
@@ -177,6 +185,99 @@ impl ProxyService {
             metrics,
             mitm_enabled,
             auth,
+            acl_engine: policy.acl_engine.clone(),
+            categorization: policy.categorization.clone(),
+        }
+    }
+
+    fn parse_client_ip(client_ip: &str) -> Option<IpAddr> {
+        client_ip.parse().ok()
+    }
+
+    async fn check_policy(
+        &self,
+        url: &str,
+        domain: &str,
+        username: Option<&str>,
+        client_ip: &str,
+    ) -> (Option<AclDecision>, Vec<String>) {
+        let eval_start = Instant::now();
+        let mut category_names = Vec::new();
+
+        if let Some(engine) = &self.categorization {
+            let result = engine.categorize(url).await;
+            category_names = result
+                .categories
+                .iter()
+                .map(Category::acl_name)
+                .filter(|name| !name.is_empty())
+                .collect();
+        }
+
+        let Some(acl_engine) = &self.acl_engine else {
+            return (None, category_names);
+        };
+
+        let category_refs: Vec<&str> = category_names.iter().map(String::as_str).collect();
+        let decision = {
+            let mut engine = acl_engine.lock().await;
+            engine.check_access(
+                url,
+                domain,
+                &category_refs,
+                username,
+                Self::parse_client_ip(client_ip),
+            )
+        };
+
+        self.metrics
+            .acl_eval_duration_seconds
+            .observe(eval_start.elapsed().as_secs_f64());
+        let action_label = decision.action.to_string();
+        self.metrics
+            .acl_decisions_total
+            .with_label_values(&[&action_label])
+            .inc();
+        if let Some(rule_id) = &decision.rule_id {
+            self.metrics
+                .acl_rules_matched_total
+                .with_label_values(&[rule_id])
+                .inc();
+        }
+
+        if decision.action == AclAction::Allow {
+            (None, category_names)
+        } else {
+            info!("ACL {} for {}: {}", decision.action, url, decision.reason);
+            (Some(decision), category_names)
+        }
+    }
+
+    fn policy_response(decision: &AclDecision) -> Response<Body> {
+        match decision.action {
+            AclAction::Deny => {
+                let body = format!("403 Forbidden: {}", decision.reason);
+                Response::builder()
+                    .status(StatusCode::FORBIDDEN)
+                    .header("Content-Type", "text/plain; charset=utf-8")
+                    .body(Body::new(Bytes::from(body)))
+                    .unwrap_or_else(|_| {
+                        Response::new(Body::new(Bytes::from_static(b"403 Forbidden")))
+                    })
+            }
+            AclAction::Redirect => {
+                let target = decision
+                    .redirect_url
+                    .as_deref()
+                    .filter(|url| !url.is_empty())
+                    .unwrap_or("about:blank");
+                Response::builder()
+                    .status(StatusCode::FOUND)
+                    .header(LOCATION, target)
+                    .body(Body::new(Bytes::new()))
+                    .unwrap_or_else(|_| Response::new(Body::new(Bytes::new())))
+            }
+            AclAction::Allow => Response::new(Body::new(Bytes::new())),
         }
     }
 
@@ -309,6 +410,17 @@ impl ProxyService {
         } else {
             Self::extract_user_info(&req)
         };
+        let domain = Self::extract_domain(&url);
+
+        let (policy_decision, categories) = self
+            .check_policy(&url, &domain, username.as_deref(), &client_ip)
+            .await;
+        if let Some(decision) = policy_decision {
+            let response = Self::policy_response(&decision);
+            guard.finish(response.status().as_u16(), 0, 0);
+            return response;
+        }
+
         let cache_key = self.generate_cache_key(&method, &url);
 
         // Cache lookup with timing
@@ -344,6 +456,7 @@ impl ProxyService {
                             .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
                             .map(|(_, v)| v.to_string()),
                         user_agent: None,
+                        categories: categories.clone(),
                     };
                     self.send_to_kafka_async(event);
                 }
@@ -459,6 +572,7 @@ impl ProxyService {
                         request_duration_ms: request_start.elapsed().as_millis() as u64,
                         content_type: headers_map.get("content-type").cloned(),
                         user_agent: headers_map.get("user-agent").cloned(),
+                        categories: categories.clone(),
                     };
                     self.send_to_kafka_async(event);
                 }
@@ -746,6 +860,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
+    let policy_config = load_policy_config();
+    if policy_config.acl_enabled {
+        info!("ACL enabled");
+    }
+    if policy_config.categorization.is_some() {
+        info!("URL categorization enabled");
+    }
+
     let service = Arc::new(ProxyService::new(
         cert_cache,
         cache_config.clone(),
@@ -753,7 +875,47 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         metrics.clone(),
         mitm_enabled,
         auth,
+        &policy_config,
     ));
+
+    if policy_config.acl_auto_reload {
+        if let (Some(acl_engine), Some(rules_path)) = (
+            policy_config.acl_engine.clone(),
+            policy_config.acl_rules_path.clone(),
+        ) {
+            let default_action = std::env::var("ACL_DEFAULT_ACTION")
+                .map(|v| match v.to_ascii_lowercase().as_str() {
+                    "deny" => AclAction::Deny,
+                    "redirect" => AclAction::Redirect,
+                    _ => AclAction::Allow,
+                })
+                .unwrap_or(AclAction::Allow);
+            let reload_interval = policy_config.acl_reload_interval;
+            let mut shutdown_rx = shutdown_rx.clone();
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(reload_interval);
+                loop {
+                    tokio::select! {
+                        _ = interval.tick() => {
+                            match reload_acl_engine(&rules_path, default_action) {
+                                Ok(engine) => {
+                                    let mut guard = acl_engine.lock().await;
+                                    *guard = engine;
+                                    info!("ACL rules reloaded from {}", rules_path);
+                                }
+                                Err(e) => warn!("ACL reload failed: {}", e),
+                            }
+                        }
+                        changed = shutdown_rx.changed() => {
+                            if changed.is_ok() && *shutdown_rx.borrow() {
+                                break;
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    }
 
     let http_port = std::env::var("HTTP_PORT")
         .ok()
@@ -925,6 +1087,7 @@ async fn handle_connect_tunnel(
                             request_duration_ms: duration_ms,
                             content_type: None,
                             user_agent: None,
+                            categories: vec![],
                         };
                         service.send_to_kafka_async(event);
                     }
@@ -1051,6 +1214,16 @@ async fn handle_connection(
                     Ok(user) => user,
                     Err(resp) => return Ok(resp),
                 };
+
+                let connect_url = format!("https://{}", authority);
+                let connect_domain = parse_authority(&authority).0;
+                let policy_username = proxy_user.as_deref().map(|u| u.username.as_str());
+                let (policy_decision, _) = service
+                    .check_policy(&connect_url, &connect_domain, policy_username, &client_ip)
+                    .await;
+                if let Some(decision) = policy_decision {
+                    return Ok::<_, Infallible>(ProxyService::policy_response(&decision));
+                }
 
                 tasks.spawn({
                     let service = service.clone();

@@ -46,6 +46,11 @@ pub struct Metrics {
     pub kafka_events_sent: Counter,
     pub kafka_send_errors: Counter,
     pub tls_handshakes_total: CounterVec,
+
+    // ACL metrics
+    pub acl_decisions_total: CounterVec,
+    pub acl_rules_matched_total: CounterVec,
+    pub acl_eval_duration_seconds: Histogram,
 }
 
 impl Metrics {
@@ -199,6 +204,27 @@ impl Metrics {
         )?;
         registry.register(Box::new(tls_handshakes_total.clone()))?;
 
+        let acl_decisions_total = CounterVec::new(
+            Opts::new("bsdm_proxy_acl_decisions_total", "Total ACL decisions"),
+            &["action"],
+        )?;
+        registry.register(Box::new(acl_decisions_total.clone()))?;
+
+        let acl_rules_matched_total = CounterVec::new(
+            Opts::new("bsdm_proxy_acl_rules_matched_total", "ACL rules matched"),
+            &["rule_id"],
+        )?;
+        registry.register(Box::new(acl_rules_matched_total.clone()))?;
+
+        let acl_eval_duration_seconds = Histogram::with_opts(
+            HistogramOpts::new(
+                "bsdm_proxy_acl_eval_duration_seconds",
+                "ACL evaluation duration in seconds",
+            )
+            .buckets(vec![0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01]),
+        )?;
+        registry.register(Box::new(acl_eval_duration_seconds.clone()))?;
+
         Ok(Metrics {
             registry,
             requests_total,
@@ -221,6 +247,9 @@ impl Metrics {
             kafka_events_sent,
             kafka_send_errors,
             tls_handshakes_total,
+            acl_decisions_total,
+            acl_rules_matched_total,
+            acl_eval_duration_seconds,
         })
     }
 

@@ -12,11 +12,11 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::sync::Arc;
 use tracing::{debug, info, warn};
 
 /// ACL action to take
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum AclAction {
     /// Allow the request
     Allow,
@@ -52,7 +52,10 @@ pub enum AclRuleType {
     /// Time-based (cron-like)
     TimeWindow { start: String, end: String },
     /// User or group
-    Principal { user: Option<String>, group: Option<String> },
+    Principal {
+        user: Option<String>,
+        group: Option<String>,
+    },
 }
 
 /// ACL rule
@@ -115,7 +118,10 @@ pub struct AclEngine {
 
 impl AclEngine {
     pub fn new(default_action: AclAction) -> Self {
-        info!("ACL engine initialized with default action: {}", default_action);
+        info!(
+            "ACL engine initialized with default action: {}",
+            default_action
+        );
         Self {
             rules: Vec::new(),
             default_action,
@@ -125,16 +131,19 @@ impl AclEngine {
 
     /// Add ACL rule
     pub fn add_rule(&mut self, rule: AclRule) {
-        info!("Adding ACL rule: {} (priority: {})", rule.name, rule.priority);
+        info!(
+            "Adding ACL rule: {} (priority: {})",
+            rule.name, rule.priority
+        );
         self.rules.push(rule);
-        self.rules.sort_by(|a, b| b.priority.cmp(&a.priority));
+        self.rules.sort_by_key(|b| std::cmp::Reverse(b.priority));
     }
 
     /// Load rules from configuration
     pub fn load_rules(&mut self, rules: Vec<AclRule>) {
         info!("Loading {} ACL rules", rules.len());
         self.rules = rules;
-        self.rules.sort_by(|a, b| b.priority.cmp(&a.priority));
+        self.rules.sort_by_key(|b| std::cmp::Reverse(b.priority));
     }
 
     /// Check if request is allowed
@@ -142,22 +151,27 @@ impl AclEngine {
         &mut self,
         url: &str,
         domain: &str,
-        category: Option<&str>,
+        categories: &[&str],
         user: Option<&str>,
         client_ip: Option<IpAddr>,
     ) -> AclDecision {
-        debug!("ACL check: url={}, domain={}, category={:?}, user={:?}", 
-               url, domain, category, user);
+        debug!(
+            "ACL check: url={}, domain={}, categories={:?}, user={:?}",
+            url, domain, categories, user
+        );
 
         // Check each rule in priority order
-        for rule in &self.rules {
-            if !rule.enabled {
-                continue;
-            }
+        let rules: Vec<AclRule> = self
+            .rules
+            .iter()
+            .filter(|rule| rule.enabled)
+            .cloned()
+            .collect();
 
-            if self.matches_rule(rule, url, domain, category, user, client_ip) {
+        for rule in rules {
+            if self.matches_rule(&rule, url, domain, categories, user, client_ip) {
                 debug!("Matched ACL rule: {} ({})", rule.name, rule.id);
-                
+
                 return match rule.action {
                     AclAction::Allow => AclDecision::allow(format!("Rule: {}", rule.name)),
                     AclAction::Deny => AclDecision::deny(
@@ -176,10 +190,7 @@ impl AclEngine {
         // No rules matched, use default action
         match self.default_action {
             AclAction::Allow => AclDecision::allow("Default policy: allow"),
-            AclAction::Deny => AclDecision::deny(
-                "default".to_string(),
-                "Default policy: deny",
-            ),
+            AclAction::Deny => AclDecision::deny("default".to_string(), "Default policy: deny"),
             AclAction::Redirect => AclDecision::redirect(
                 "default".to_string(),
                 "about:blank".to_string(),
@@ -194,7 +205,7 @@ impl AclEngine {
         rule: &AclRule,
         url: &str,
         domain: &str,
-        category: Option<&str>,
+        categories: &[&str],
         user: Option<&str>,
         client_ip: Option<IpAddr>,
     ) -> bool {
@@ -202,9 +213,7 @@ impl AclEngine {
             AclRuleType::Domain(pattern) => self.match_domain(domain, pattern),
             AclRuleType::UrlPrefix(prefix) => url.starts_with(prefix),
             AclRuleType::Regex(pattern) => self.match_regex(url, pattern),
-            AclRuleType::Category(cat) => {
-                category.map(|c| c == cat).unwrap_or(false)
-            }
+            AclRuleType::Category(cat) => categories.iter().any(|c| *c == cat),
             AclRuleType::IpRange { start, end } => {
                 if let Some(ip) = client_ip {
                     self.ip_in_range(ip, *start, *end)
@@ -216,7 +225,10 @@ impl AclEngine {
                 // TODO: Implement time-based matching
                 true
             }
-            AclRuleType::Principal { user: rule_user, group: _ } => {
+            AclRuleType::Principal {
+                user: rule_user,
+                group: _,
+            } => {
                 if let Some(u) = user {
                     rule_user.as_ref().map(|ru| ru == u).unwrap_or(false)
                 } else {
@@ -228,13 +240,12 @@ impl AclEngine {
 
     /// Match domain pattern (supports wildcards)
     fn match_domain(&self, domain: &str, pattern: &str) -> bool {
-        if pattern.starts_with("*.") {
+        if let Some(suffix) = pattern.strip_prefix("*.") {
             // Wildcard subdomain match
-            let suffix = &pattern[2..];
             domain.ends_with(suffix) || domain == suffix
-        } else if pattern.starts_with('*') {
+        } else if let Some(suffix) = pattern.strip_prefix('*') {
             // Wildcard suffix match
-            domain.ends_with(&pattern[1..])
+            domain.ends_with(suffix)
         } else {
             // Exact match
             domain == pattern
@@ -243,15 +254,17 @@ impl AclEngine {
 
     /// Match regex pattern
     fn match_regex(&mut self, text: &str, pattern: &str) -> bool {
-        let regex = self.regex_cache.entry(pattern.to_string())
+        let regex = self
+            .regex_cache
+            .entry(pattern.to_string())
             .or_insert_with(|| {
                 Regex::new(pattern).unwrap_or_else(|e| {
                     warn!("Invalid regex pattern '{}': {}", pattern, e);
-                    Regex::new("(?!)")
-                        .expect("Failed to create never-matching regex")
+                    #[allow(clippy::invalid_regex)]
+                    Regex::new("(?!)").expect("Failed to create never-matching regex")
                 })
             });
-        
+
         regex.is_match(text)
     }
 
@@ -281,12 +294,12 @@ mod tests {
 
     #[test]
     fn test_domain_matching() {
-        let mut engine = AclEngine::new(AclAction::Allow);
-        
+        let engine = AclEngine::new(AclAction::Allow);
+
         // Exact match
         assert!(engine.match_domain("example.com", "example.com"));
         assert!(!engine.match_domain("test.com", "example.com"));
-        
+
         // Wildcard subdomain
         assert!(engine.match_domain("www.example.com", "*.example.com"));
         assert!(engine.match_domain("api.example.com", "*.example.com"));
@@ -297,7 +310,7 @@ mod tests {
     #[test]
     fn test_url_prefix() {
         let mut engine = AclEngine::new(AclAction::Allow);
-        
+
         engine.add_rule(AclRule {
             id: "test1".to_string(),
             name: "Block admin".to_string(),
@@ -308,22 +321,22 @@ mod tests {
             redirect_url: None,
             comment: None,
         });
-        
+
         let decision = engine.check_access(
             "https://example.com/admin/users",
             "example.com",
-            None,
+            &[],
             None,
             None,
         );
-        
+
         assert_eq!(decision.action, AclAction::Deny);
     }
 
     #[test]
     fn test_category_based() {
         let mut engine = AclEngine::new(AclAction::Allow);
-        
+
         engine.add_rule(AclRule {
             id: "cat1".to_string(),
             name: "Block adult content".to_string(),
@@ -334,22 +347,17 @@ mod tests {
             redirect_url: None,
             comment: None,
         });
-        
-        let decision = engine.check_access(
-            "https://example.com",
-            "example.com",
-            Some("adult"),
-            None,
-            None,
-        );
-        
+
+        let decision =
+            engine.check_access("https://example.com", "example.com", &["adult"], None, None);
+
         assert_eq!(decision.action, AclAction::Deny);
     }
 
     #[test]
     fn test_priority_ordering() {
         let mut engine = AclEngine::new(AclAction::Deny);
-        
+
         // Lower priority (allow)
         engine.add_rule(AclRule {
             id: "low".to_string(),
@@ -361,7 +369,7 @@ mod tests {
             redirect_url: None,
             comment: None,
         });
-        
+
         // Higher priority (deny)
         engine.add_rule(AclRule {
             id: "high".to_string(),
@@ -373,16 +381,16 @@ mod tests {
             redirect_url: None,
             comment: None,
         });
-        
+
         // Should match high priority deny rule
         let decision = engine.check_access(
             "https://admin.example.com",
             "admin.example.com",
-            None,
+            &[],
             None,
             None,
         );
-        
+
         assert_eq!(decision.action, AclAction::Deny);
         assert_eq!(decision.rule_id.unwrap(), "high");
     }
