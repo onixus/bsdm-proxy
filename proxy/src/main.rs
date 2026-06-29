@@ -13,8 +13,8 @@ use hyper::header::{HeaderName, HeaderValue, AUTHORIZATION, LOCATION};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
-use hyper_util::rt::TokioIo;
 use hyper_rustls::ConfigBuilderExt;
+use hyper_util::rt::TokioIo;
 use metrics::{Metrics, RequestMetricsGuard};
 use policy_config::{load_policy_config, reload_acl_engine, PolicyConfig};
 use quick_cache::sync::Cache;
@@ -166,8 +166,8 @@ impl ProxyService {
 
         let http_cache = Arc::new(Cache::new(cache_config.capacity));
 
-        let https = build_upstream_https_connector()
-            .expect("failed to build upstream HTTPS connector");
+        let https =
+            build_upstream_https_connector().expect("failed to build upstream HTTPS connector");
 
         let http_client =
             hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
@@ -604,21 +604,19 @@ impl ProxyService {
     }
 }
 
-fn build_upstream_https_connector(
-) -> Result<
+fn build_upstream_https_connector() -> Result<
     hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>,
     Box<dyn std::error::Error>,
 > {
     let tls_config = if let Ok(path) = std::env::var("UPSTREAM_CA_CERT") {
         let pem = std::fs::read(&path)
             .map_err(|e| format!("failed to read UPSTREAM_CA_CERT {path}: {e}"))?;
-        let certs: Vec<rustls::pki_types::CertificateDer<'static>> = rustls_pemfile::certs(
-            &mut Cursor::new(pem),
-        )
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .map(|cert| cert.into_owned())
-        .collect();
+        let certs: Vec<rustls::pki_types::CertificateDer<'static>> =
+            rustls_pemfile::certs(&mut Cursor::new(pem))
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .map(|cert| cert.into_owned())
+                .collect();
         let mut roots = rustls::RootCertStore::empty();
         roots.add_parsable_certificates(certs);
         info!("Upstream TLS: trusting custom CA from UPSTREAM_CA_CERT");

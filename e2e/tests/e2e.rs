@@ -169,7 +169,9 @@ async fn e2e_upstream_tls_accepts_test_ca() {
     let upstream = spawn_mock_https_upstream(8443)
         .await
         .expect("spawn https upstream");
-    wait_for_tcp(upstream.port).await.expect("wait for upstream");
+    wait_for_tcp(upstream.port)
+        .await
+        .expect("wait for upstream");
 
     let ca_pem = std::fs::read(test_ca_cert_path()).expect("read ca");
     let client = reqwest::Client::builder()

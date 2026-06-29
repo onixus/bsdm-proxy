@@ -119,10 +119,7 @@ impl ProxyHarness {
         if config.upstream_ca_cert {
             let ca_path = workspace.join("certs/ca.crt");
             let ca_path = ca_path.canonicalize().unwrap_or(ca_path);
-            command.env(
-                "UPSTREAM_CA_CERT",
-                ca_path.to_string_lossy().into_owned(),
-            );
+            command.env("UPSTREAM_CA_CERT", ca_path.to_string_lossy().into_owned());
         }
 
         if let Some(path) = &acl_rules_path {
@@ -346,9 +343,7 @@ pub async fn spawn_mock_https_upstream(port: u16) -> Result<UpstreamServer> {
     params
         .distinguished_name
         .push(DnType::CommonName, "127.0.0.1");
-    params.subject_alt_names = vec![rcgen::SanType::IpAddress(IpAddr::V4(
-        Ipv4Addr::LOCALHOST,
-    ))];
+    params.subject_alt_names = vec![rcgen::SanType::IpAddress(IpAddr::V4(Ipv4Addr::LOCALHOST))];
     params.key_usages = vec![
         KeyUsagePurpose::DigitalSignature,
         KeyUsagePurpose::KeyEncipherment,
@@ -392,10 +387,7 @@ pub async fn spawn_mock_https_upstream(port: u16) -> Result<UpstreamServer> {
     })
 }
 
-fn build_rustls_server_config(
-    cert_pem: String,
-    key_pem: String,
-) -> Result<Arc<ServerConfig>> {
+fn build_rustls_server_config(cert_pem: String, key_pem: String) -> Result<Arc<ServerConfig>> {
     let mut chain: Vec<CertificateDer<'static>> = certs(&mut Cursor::new(cert_pem.as_bytes()))
         .collect::<Result<Vec<_>, _>>()?
         .into_iter()
