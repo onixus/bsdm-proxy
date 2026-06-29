@@ -114,6 +114,16 @@ cargo test -p bsdm-proxy-e2e --test e2e e2e_mitm_https_with_self_signed_ca -- --
 
 Версия берётся из `proxy/Cargo.toml` (например `0.2.2-b` → пакет `0.2.2b`).
 
+## Roadmap и milestones
+
+Полный план: [roadmap.md](roadmap.md)
+
+Создать GitHub milestones (требует admin scope):
+
+```bash
+./scripts/create-milestones.sh
+```
+
 ## CI
 
 | Workflow | Триггер | Шаги |

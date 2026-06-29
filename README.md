@@ -244,29 +244,50 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 | [docs/authentication.md](docs/authentication.md) | LDAP, NTLM, Basic Auth |
 | [docs/acl.md](docs/acl.md) | Правила доступа, приоритеты |
 | [docs/categorization.md](docs/categorization.md) | Shallalist, URLhaus, PhishTank |
-| [docs/hierarchical-caching.md](docs/hierarchical-caching.md) | Иерархический кеш (ICP) |
+| [docs/roadmap.md](docs/roadmap.md) | Roadmap и milestones |
 | [packaging/README.md](packaging/README.md) | Release-пакет и systemd |
 | [OPTIMIZATIONS.md](OPTIMIZATIONS.md) | Оптимизации v2.0 |
 | [docker-compose.yml](docker-compose.yml) | Полный стек |
 
 ## Roadmap
 
-### v0.2.x (текущая линия)
+Цель: **альтернатива Squid с ретропоиском и ML** для аномалий, фишинга и C&C.
+
+Полный план: **[docs/roadmap.md](docs/roadmap.md)**
+
+| Milestone | Версия | Фокус | Статус |
+|-----------|--------|-------|--------|
+| **M1** Foundation | v0.2.x | Прокси, ACL, категоризация, observability | ~90% |
+| **M2** Squid parity | v0.3.x | Иерархия, L2, rate limit, полный ACL | Planned |
+| **M3** Retro-search | v0.4.x | OpenSearch dashboards, поиск по истории | Planned |
+| **M4** Threat analytics | v0.5.x | Rule-based алерты, C&C heuristics | Planned |
+| **M5** ML security | v1.0.x | ML anomaly, phishing, C&C detection | Planned |
+
+### M1 — Foundation (v0.2.x, текущий)
 
 - [x] Prometheus + Grafana + health checks
 - [x] Graceful shutdown
-- [x] Proxy authentication (Basic / LDAP / NTLM)
+- [x] Proxy authentication (Basic / LDAP; NTLM — в backlog M2)
 - [x] ACL + URL categorization
 - [x] E2E / smoke test harness
 - [x] Release packaging (`0.2.2b`)
 - [ ] Rate limiting per user/IP
 - [ ] Hierarchical caching — Phase 3 integration
 
-### v0.3.x
+### M2 — Squid parity (v0.3.x)
 
 - [ ] Redis L2 cache
 - [ ] HTTP/2 upstream client
 - [ ] Compression (Brotli/Zstd)
+- [ ] ACL TimeWindow + group rules
+- [ ] NTLM auth
+- [ ] Hierarchy Phase 4 (discovery, digest, HTCP)
+
+### M3–M5
+
+- [ ] **M3:** индексация threat-полей, OpenSearch Dashboards, saved searches
+- [ ] **M4:** rule-based anomaly alerts, C&C beacon heuristics, SIEM export
+- [ ] **M5:** ML pipeline, anomaly/phishing/C&C models
 
 ## Лицензия
 

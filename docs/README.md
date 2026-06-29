@@ -18,10 +18,11 @@
 | [acl.md](acl.md) | Списки контроля доступа (ACL) |
 | [categorization.md](categorization.md) | Категоризация URL и threat intelligence |
 
-## Архитектура и производительность
+## Архитектура и roadmap
 
 | Документ | Описание |
 |----------|----------|
+| [roadmap.md](roadmap.md) | **Roadmap и milestones** (Squid + ретропоиск + ML) |
 | [hierarchical-caching.md](hierarchical-caching.md) | Иерархический кеш, ICP, peer management |
 | [HIERARCHICAL_CACHING_README.md](HIERARCHICAL_CACHING_README.md) | Краткий обзор hierarchical caching |
 | [OPTIMIZATIONS.md](../OPTIMIZATIONS.md) | Оптимизации Hyper + quick_cache |
