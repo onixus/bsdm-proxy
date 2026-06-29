@@ -10,6 +10,7 @@
 | [packaging/README.md](../packaging/README.md) | Установка из release-пакета |
 | [development.md](development.md) | Сборка, тесты, CI, релиз |
 | [releases/v0.2.3-test.md](releases/v0.2.3-test.md) | **Release notes 0.2.3-test** |
+| [capacity-planning.md](capacity-planning.md) | **Планирование ёмкости (корп. сценарии)** |
 
 ## Функциональность
 

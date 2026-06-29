@@ -321,6 +321,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 | [docs/hierarchical-caching.md](docs/hierarchical-caching.md) | Иерархический кеш, ICP, peers |
 | [docs/architecture.md](docs/architecture.md) | Архитектура и блокеры |
 | [docs/roadmap.md](docs/roadmap.md) | Roadmap и milestones |
+| [docs/capacity-planning.md](docs/capacity-planning.md) | Планирование ёмкости (корп. сценарии) |
 | [docs/releases/v0.2.3-test.md](docs/releases/v0.2.3-test.md) | Release notes 0.2.3-test |
 | [packaging/README.md](packaging/README.md) | Release-пакет и systemd |
 | [OPTIMIZATIONS.md](OPTIMIZATIONS.md) | Оптимизации v2.0 |
