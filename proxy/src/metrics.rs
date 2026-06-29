@@ -51,6 +51,9 @@ pub struct Metrics {
     pub acl_decisions_total: CounterVec,
     pub acl_rules_matched_total: CounterVec,
     pub acl_eval_duration_seconds: Histogram,
+
+    // Rate limit metrics
+    pub rate_limit_rejected_total: CounterVec,
 }
 
 impl Metrics {
@@ -225,6 +228,15 @@ impl Metrics {
         )?;
         registry.register(Box::new(acl_eval_duration_seconds.clone()))?;
 
+        let rate_limit_rejected_total = CounterVec::new(
+            Opts::new(
+                "bsdm_proxy_rate_limit_rejected_total",
+                "Total requests rejected by rate limiting",
+            ),
+            &["limit_type"],
+        )?;
+        registry.register(Box::new(rate_limit_rejected_total.clone()))?;
+
         Ok(Metrics {
             registry,
             requests_total,
@@ -250,6 +262,7 @@ impl Metrics {
             acl_decisions_total,
             acl_rules_matched_total,
             acl_eval_duration_seconds,
+            rate_limit_rejected_total,
         })
     }
 

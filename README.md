@@ -19,7 +19,7 @@
 | Область | Возможности |
 |---------|-------------|
 | **Прокси** | HTTP/HTTPS forward proxy, MITM TLS (порты 443/8443), HTTP CONNECT, кеш L1, **иерархический кеш** (ICP + parent/sibling peers) |
-| **Безопасность** | Proxy-аутентификация (Basic / LDAP / NTLM), ACL, категоризация URL |
+| **Безопасность** | Proxy-аутентификация (Basic / LDAP), ACL, категоризация URL, rate limiting |
 | **Наблюдаемость** | Prometheus (20+ метрик), Grafana, `/health`, `/ready`, `/metrics` |
 | **Аналитика** | Kafka → cache-indexer → OpenSearch |
 | **Эксплуатация** | Graceful shutdown, настраиваемые порты, release-пакет + systemd |
@@ -186,6 +186,19 @@ CA для MITM читается из `/certs/ca.key` и `/certs/ca.crt` (fallbac
 
 → [docs/acl.md](docs/acl.md) · [docs/categorization.md](docs/categorization.md)
 
+### Rate limiting (опционально)
+
+Token-bucket лимиты на IP и аутентифицированного пользователя. Метрика: `bsdm_proxy_rate_limit_rejected_total{limit_type="ip|user"}`.
+
+| Переменная | По умолчанию | Описание |
+|-----------|-------------|----------|
+| `RATE_LIMIT_ENABLED` | `false` | Включить rate limiting |
+| `RATE_LIMIT_IP_RPS` | `100` | Запросов/сек на IP |
+| `RATE_LIMIT_IP_BURST` | `200` | Burst на IP |
+| `RATE_LIMIT_USER_RPS` | `50` | Запросов/сек на пользователя |
+| `RATE_LIMIT_USER_BURST` | `100` | Burst на пользователя |
+| `RATE_LIMIT_MAX_KEYS` | `10000` | Макс. отслеживаемых ключей |
+
 ### Иерархический кеш (опционально)
 
 Включается через `HIERARCHY_ENABLED=true`. После промаха L1: ICP-запрос к siblings → выбор parent → HTTP fetch через peer → fallback на origin.
@@ -301,7 +314,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 - [x] E2E / smoke test harness
 - [x] Release packaging (`0.2.2b`)
 - [x] Hierarchical caching Phase 3 — ICP server, peer fetch, env config
-- [ ] Rate limiting per user/IP
+- [x] Rate limiting per user/IP
 - [x] Рефакторинг `main.rs` (вынос `ProxyService` в lib)
 
 ### M2 — Squid parity (v0.3.x)

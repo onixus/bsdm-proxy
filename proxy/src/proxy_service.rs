@@ -32,6 +32,7 @@ use crate::peers::CachePeer;
 use crate::pipeline::{
     create_kafka_producer, flush_kafka, new_event_id, send_to_kafka_async, CacheEvent,
 };
+use crate::rate_limit::{RateLimitViolation, RateLimiter};
 use crate::tls::CertCache;
 
 pub struct ProxyPolicy {
@@ -53,6 +54,7 @@ pub struct ProxyService {
     acl_engine: Option<Arc<Mutex<AclEngine>>>,
     categorization: Option<Arc<CategorizationEngine>>,
     hierarchy: Option<Arc<HierarchyManager>>,
+    rate_limiter: Arc<RateLimiter>,
 }
 
 impl ProxyService {
@@ -79,6 +81,7 @@ impl ProxyService {
         auth: Option<Arc<AuthManager>>,
         policy: &ProxyPolicy,
         hierarchy: Option<Arc<HierarchyManager>>,
+        rate_limit_config: crate::rate_limit::RateLimitConfig,
     ) -> Self {
         let kafka_producer = kafka_brokers.as_deref().and_then(create_kafka_producer);
 
@@ -105,6 +108,7 @@ impl ProxyService {
             acl_engine: policy.acl_engine.clone(),
             categorization: policy.categorization.clone(),
             hierarchy,
+            rate_limiter: Arc::new(RateLimiter::new(rate_limit_config)),
         }
     }
 
@@ -232,6 +236,42 @@ impl ProxyService {
         .unwrap_or((None, None))
     }
 
+    pub(crate) fn check_rate_limit(
+        &self,
+        client_ip: &str,
+        username: Option<&str>,
+    ) -> Option<Response<Body>> {
+        let violation = self.rate_limiter.check(client_ip, username)?;
+        let limit_type = match violation {
+            RateLimitViolation::Ip => "ip",
+            RateLimitViolation::User => "user",
+        };
+        self.metrics
+            .rate_limit_rejected_total
+            .with_label_values(&[limit_type])
+            .inc();
+        warn!(
+            "Rate limit exceeded ({}) for client_ip={} user={}",
+            limit_type,
+            client_ip,
+            username.unwrap_or("-")
+        );
+        Some(Self::rate_limit_response())
+    }
+
+    fn rate_limit_response() -> Response<Body> {
+        Response::builder()
+            .status(StatusCode::TOO_MANY_REQUESTS)
+            .header("Content-Type", "text/plain; charset=utf-8")
+            .header("Retry-After", "1")
+            .body(Body::new(Bytes::from_static(
+                b"429 Too Many Requests: rate limit exceeded",
+            )))
+            .unwrap_or_else(|_| {
+                Response::new(Body::new(Bytes::from_static(b"429 Too Many Requests")))
+            })
+    }
+
     #[inline]
     pub(crate) fn generate_cache_key(&self, method: &str, url: &str) -> Arc<str> {
         http_cache_key(method, url)
@@ -329,6 +369,12 @@ impl ProxyService {
         } else {
             Self::extract_user_info(&req)
         };
+
+        if let Some(resp) = self.check_rate_limit(&client_ip, username.as_deref()) {
+            guard.finish(429, 0, 0);
+            return resp;
+        }
+
         let domain = Self::extract_domain(&url);
 
         let (policy_decision, categories) = self

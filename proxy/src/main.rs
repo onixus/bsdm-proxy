@@ -5,8 +5,8 @@ use auth_config::load_auth_config;
 use bsdm_proxy::{
     build_hierarchy_manager, handle_connection, http_cache_key, icp_server_bind_addr,
     load_hierarchy_config, metrics_server, should_start_icp_server, wait_shutdown_signal,
-    AclAction, AuthManager, CacheConfig, CertCache, IcpServer, Metrics,
-    ProxyPolicy, ProxyService,
+    AclAction, AuthManager, CacheConfig, CertCache, IcpServer, Metrics, ProxyPolicy, ProxyService,
+    RateLimitConfig,
 };
 use policy_config::{load_policy_config, reload_acl_engine};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -87,6 +87,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .map_err(|e| -> Box<dyn std::error::Error> { e })?;
 
+    let rate_limit_config = RateLimitConfig::from_env();
+
     let service = Arc::new(ProxyService::new(
         cert_cache,
         cache_config.clone(),
@@ -97,6 +99,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         auth,
         &proxy_policy,
         hierarchy.clone(),
+        rate_limit_config.clone(),
     ));
 
     if should_start_icp_server(&hierarchy_config) {
@@ -184,6 +187,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     } else {
         info!("👤 Proxy auth: disabled");
+    }
+    if rate_limit_config.enabled {
+        info!(
+            "⏱️  Rate limit: enabled (ip={}/{} rps/burst, user={}/{} rps/burst)",
+            rate_limit_config.ip_rps,
+            rate_limit_config.ip_burst,
+            rate_limit_config.user_rps,
+            rate_limit_config.user_burst
+        );
+    } else {
+        info!("⏱️  Rate limit: disabled");
     }
     info!(
         "📦 Cache: {} entries, TTL: {:?}, max body: {}MB",

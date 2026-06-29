@@ -383,9 +383,13 @@ pub async fn handle_connection(
                     Err(resp) => return Ok(resp),
                 };
 
+                let policy_username = proxy_user.as_deref().map(|u| u.username.as_str());
+                if let Some(resp) = service.check_rate_limit(&client_ip, policy_username) {
+                    return Ok::<_, Infallible>(resp);
+                }
+
                 let connect_url = format!("https://{}", authority);
                 let connect_domain = parse_authority(&authority).0;
-                let policy_username = proxy_user.as_deref().map(|u| u.username.as_str());
                 let (policy_decision, _) = service
                     .check_policy(&connect_url, &connect_domain, policy_username, &client_ip)
                     .await;
