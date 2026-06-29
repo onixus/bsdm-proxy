@@ -114,8 +114,21 @@ docker compose -f docker-compose.test.yml up -d --build
 | `e2e_connect_tunnel_establishes_tcp_path` | HTTP CONNECT без MITM |
 | `e2e_mitm_https_with_self_signed_ca` | MITM + самоподписанный upstream CA |
 | `e2e_upstream_tls_accepts_test_ca` | Прямой HTTPS к mock upstream |
+| `e2e_hierarchy_parent_fetch_on_child_miss` | Child → parent peer fetch |
+| `e2e_hierarchy_sibling_icp_hit` | Child → sibling ICP HIT |
+| `e2e_hierarchy_parent_serves_cached_response_to_child` | Parent cache → child via peer |
 
-E2E harness: `e2e/src/lib.rs` — `ProxyHarness`, mock upstream, test CA.
+E2E harness: `e2e/src/lib.rs` — `ProxyHarness`, mock upstream, test CA, hierarchy helpers.
+
+### Hierarchy demo (Docker)
+
+```bash
+docker compose -f docker-compose.hierarchy.yml up -d --build
+curl -x http://127.0.0.1:1488 http://upstream/get
+docker compose -f docker-compose.hierarchy.yml down
+```
+
+3-tier stack: **child** (1488) → **sibling** (ICP, 1490) / **parent** (1489) → **upstream**.
 
 Переменные для тестов MITM:
 - `UPSTREAM_CA_CERT` — proxy доверяет самоподписанному CA upstream

@@ -316,6 +316,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 - [x] Hierarchical caching Phase 3 — ICP server, peer fetch, env config
 - [x] Rate limiting per user/IP
 - [x] Рефакторинг `main.rs` (вынос `ProxyService` в lib)
+- [x] Hierarchy E2E + `docker-compose.hierarchy.yml`
 
 ### M2 — Squid parity (v0.3.x)
 

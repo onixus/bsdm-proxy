@@ -17,6 +17,7 @@ use rcgen::{
 use rustls::pki_types::CertificateDer;
 use rustls::ServerConfig;
 use rustls_pemfile::certs;
+use std::collections::HashMap;
 use std::io::Cursor;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
@@ -41,6 +42,8 @@ pub struct HarnessConfig {
     /// Trust workspace test CA for upstream TLS (sets UPSTREAM_CA_CERT in proxy).
     pub upstream_ca_cert: bool,
     pub kafka_brokers: Option<String>,
+    /// Additional environment variables passed to the proxy process.
+    pub extra_env: HashMap<String, String>,
 }
 
 pub struct ProxyHarness {
@@ -127,6 +130,9 @@ impl ProxyHarness {
         }
         if let Some(brokers) = &config.kafka_brokers {
             command.env("KAFKA_BROKERS", brokers);
+        }
+        for (key, value) in &config.extra_env {
+            command.env(key, value);
         }
 
         let stderr_log = if config.mitm_enabled {
@@ -295,7 +301,7 @@ pub struct UpstreamServer {
     handle: tokio::task::JoinHandle<()>,
 }
 
-async fn spawn_mock_upstream() -> Result<UpstreamServer> {
+pub async fn spawn_mock_upstream() -> Result<UpstreamServer> {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .context("bind mock upstream")?;
@@ -480,6 +486,56 @@ pub async fn connect_via_proxy(proxy_port: u16, target: SocketAddr) -> Result<St
 fn reserve_port() -> Result<u16> {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").context("reserve port")?;
     Ok(listener.local_addr()?.port())
+}
+
+/// Reserve a local UDP port for ICP bind (released before the proxy starts).
+pub fn reserve_udp_port() -> Result<u16> {
+    let socket = std::net::UdpSocket::bind("127.0.0.1:0").context("reserve UDP port")?;
+    Ok(socket.local_addr()?.port())
+}
+
+/// Environment for a cache peer that runs an ICP server (sibling role).
+pub fn hierarchy_icp_server_env(icp_udp_port: u16) -> HashMap<String, String> {
+    HashMap::from([
+        ("HIERARCHY_ENABLED".into(), "true".into()),
+        ("ICP_BIND".into(), format!("127.0.0.1:{icp_udp_port}")),
+        ("ICP_SERVER_ENABLED".into(), "true".into()),
+    ])
+}
+
+/// Environment for a child proxy with a single parent peer.
+pub fn hierarchy_child_with_parent_env(parent_http_port: u16) -> HashMap<String, String> {
+    HashMap::from([
+        ("HIERARCHY_ENABLED".into(), "true".into()),
+        (
+            "CACHE_PARENTS".into(),
+            format!("127.0.0.1:{parent_http_port}:1.0"),
+        ),
+    ])
+}
+
+/// Environment for a child proxy with a single sibling peer (ICP + HTTP).
+pub fn hierarchy_child_with_sibling_env(
+    sibling_http_port: u16,
+    sibling_icp_port: u16,
+) -> HashMap<String, String> {
+    HashMap::from([
+        ("HIERARCHY_ENABLED".into(), "true".into()),
+        (
+            "CACHE_SIBLINGS".into(),
+            format!("127.0.0.1:{sibling_http_port}:1.0:{sibling_icp_port}"),
+        ),
+    ])
+}
+
+/// Build an HTTP client that uses the given proxy port.
+pub fn proxy_client_for_port(proxy_port: u16) -> Result<reqwest::Client> {
+    let proxy = reqwest::Proxy::http(format!("http://127.0.0.1:{proxy_port}"))?;
+    reqwest::Client::builder()
+        .proxy(proxy)
+        .timeout(Duration::from_secs(10))
+        .build()
+        .context("build proxied HTTP client")
 }
 
 fn bool_env(value: bool) -> &'static str {
