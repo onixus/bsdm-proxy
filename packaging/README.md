@@ -55,6 +55,8 @@ curl http://127.0.0.1:9090/ready
 curl http://127.0.0.1:9090/metrics | head
 ```
 
+Логи: `journalctl -u bsdm-proxy -f` или см. [docs/logging.md](../docs/logging.md) (`RUST_LOG` в `config/*.env.example`).
+
 ## Build package from source
 
 ```bash

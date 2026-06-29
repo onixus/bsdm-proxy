@@ -154,9 +154,11 @@ cargo build --release -p bsdm-proxy --bin proxy -p cache-indexer --bin cache-ind
 | `MAX_CACHE_BODY_SIZE` | `10485760` | Макс. размер body (байт) |
 | `SHUTDOWN_TIMEOUT_SECONDS` | `30` | Таймаут graceful shutdown |
 | `UPSTREAM_CA_CERT` | — | PEM самоподписанного CA для upstream TLS (тесты/lab) |
-| `RUST_LOG` | `info` | Уровень логов |
+| `RUST_LOG` | `info,bsdm_proxy=debug`¹ | Фильтр логов ([docs/logging.md](docs/logging.md)) |
 
 CA для MITM читается из `/certs/ca.key` и `/certs/ca.crt` (fallback: `./certs/`).
+
+¹ Если `RUST_LOG` не задана — fallback в коде; для production задайте `RUST_LOG=info,bsdm_proxy=info` (см. [docs/logging.md](docs/logging.md)).
 
 ### Аутентификация
 
@@ -282,6 +284,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 |----------|------------|
 | [docs/README.md](docs/README.md) | Оглавление документации |
 | [docs/authentication.md](docs/authentication.md) | LDAP, Basic Auth (NTLM — M2) |
+| [docs/logging.md](docs/logging.md) | Логирование (`RUST_LOG`, уровни, просмотр) |
 | [docs/acl.md](docs/acl.md) | Правила доступа, приоритеты |
 | [docs/categorization.md](docs/categorization.md) | Shallalist, URLhaus, PhishTank |
 | [docs/hierarchical-caching.md](docs/hierarchical-caching.md) | Иерархический кеш, ICP, peers |
@@ -299,7 +302,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 
 | Milestone | Версия | Фокус | Статус |
 |-----------|--------|-------|--------|
-| **M1** Foundation | v0.2.x | Прокси, ACL, категоризация, observability, иерархия | ~95% |
+| **M1** Foundation | v0.2.x | Прокси, ACL, категоризация, observability, иерархия | ✅ Done |
 | **M2** Squid parity | v0.3.x | L2 Redis, rate limit, полный ACL, hierarchy Phase 4 | Planned |
 | **M3** Retro-search | v0.4.x | OpenSearch dashboards, поиск по истории | Planned |
 | **M4** Threat analytics | v0.5.x | Rule-based алерты, C&C heuristics | Planned |

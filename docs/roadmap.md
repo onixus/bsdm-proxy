@@ -20,7 +20,7 @@
 
 | Milestone | Версия | Фокус | Готовность |
 |-----------|--------|-------|------------|
-| [M1 — Foundation](#m1--foundation-v02x) | v0.2.x | Ядро прокси, ACL, категоризация, observability, иерархия | ~95% |
+| [M1 — Foundation](#m1--foundation-v02x) | v0.2.x | Ядро прокси, ACL, категоризация, observability, иерархия | ✅ Done |
 | [M2 — Squid parity](#m2--squid-parity-v03x) | v0.3.x | L2, rate limit, полный ACL, hierarchy Phase 4 | ~10% |
 | [M3 — Retro-search](#m3--retro-search-v04x) | v0.4.x | Индексация, дашборды, поиск по истории | ~15% |
 | [M4 — Threat analytics](#m4--threat-analytics-v05x) | v0.5.x | Rule-based угрозы, алерты, C&C heuristics | ~5% |
@@ -71,8 +71,9 @@ gantt
 - [x] Рефакторинг `main.rs` — вынос `ProxyService` в lib — [#38](https://github.com/onixus/bsdm-proxy/issues/38)
 - [x] Hierarchy E2E / `docker-compose.hierarchy.yml`
 - [x] Документация NTLM: помечен как M2 / не реализован — [#44](https://github.com/onixus/bsdm-proxy/issues/44)
+- [x] Документация логирования (`RUST_LOG`, профили production/dev)
 
-**Критерий завершения M1:** все CI зелёные.
+**Критерий завершения M1:** все CI зелёные — **выполнен** (v0.2.3-test).
 
 ---
 
@@ -93,7 +94,6 @@ gantt
 - [ ] **NTLM auth** — реализация или снятие с roadmap
 - [ ] **Negative caching** coordination
 - [ ] **Cache refresh / revalidate** — Squid-style freshness
-- [ ] **docker-compose.hierarchy.yml** — 3-tier demo stack
 - [ ] Hierarchy Prometheus metrics (`bsdm_proxy_hierarchy_*`)
 
 **Критерий завершения M2:** 3-tier cache hierarchy в docker-compose, hit rate sibling/parent измеряется, Redis L2 работает.
@@ -217,10 +217,11 @@ Issues привязывайте к milestones:
 
 - [architecture.md](architecture.md) — архитектура и блокеры B1–B25
 - [hierarchical-caching.md](hierarchical-caching.md) — дизайн ICP/HTCP (M2)
+- [logging.md](logging.md) — `RUST_LOG` и профили логирования
 - [categorization.md](categorization.md) — threat intel feeds (M1/M4)
 - [acl.md](acl.md) — политики доступа (M1/M2)
 - [development.md](development.md) — сборка и тесты
 
 ---
 
-*Последнее обновление: v0.2.2b*
+*Последнее обновление: M1 завершён (v0.2.3-test)*
