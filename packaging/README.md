@@ -1,5 +1,7 @@
 # BSDM-Proxy release package
 
+Установка из готового release-архива. Общая документация: [README.md](../README.md) · [docs/README.md](../docs/README.md)
+
 ## Contents
 
 | Path | Description |
@@ -14,8 +16,8 @@
 ## Quick start
 
 ```bash
-tar xzf bsdm-proxy-0.2.2b-linux-amd64.tar.gz
-cd bsdm-proxy-0.2.2b-linux-amd64
+tar xzf bsdm-proxy-0.2.2b-linux-x86_64.tar.gz
+cd bsdm-proxy-0.2.2b-linux-x86_64
 sudo ./install.sh --create-user --systemd
 ```
 
@@ -31,7 +33,9 @@ sudo systemctl start bsdm-proxy
 ## Manual run
 
 ```bash
-export $(grep -v '^#' config/bsdm-proxy.env.example | xargs)
+set -a
+source config/bsdm-proxy.env.example
+set +a
 ./bin/proxy
 ```
 
@@ -47,4 +51,14 @@ export $(grep -v '^#' config/bsdm-proxy.env.example | xargs)
 ```bash
 curl http://127.0.0.1:9090/health
 curl http://127.0.0.1:9090/ready
+curl http://127.0.0.1:9090/metrics | head
 ```
+
+## Build package from source
+
+```bash
+./scripts/build-package.sh
+# → dist/bsdm-proxy-0.2.2b-linux-<arch>.tar.gz
+```
+
+См. также [docs/development.md](../docs/development.md).

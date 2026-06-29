@@ -1,5 +1,7 @@
 # Access Control Lists (ACL)
 
+> См. также: [оглавление документации](README.md) · [пример правил](../config/acl-rules.example.json)
+
 Flexible access control system for BSDM-Proxy with multiple rule types and priority-based matching.
 
 ## Features

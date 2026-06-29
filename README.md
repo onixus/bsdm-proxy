@@ -2,109 +2,67 @@
 
 **B**usiness **S**ecure **D**ata **M**onitoring Proxy
 
-Высокопроизводительный кеширующий HTTPS-прокси на базе [Hyper](https://hyper.rs/) с [quick_cache](https://crates.io/crates/quick_cache), интегрированный с Kafka, OpenSearch, Prometheus и Grafana для полноценного анализа и мониторинга HTTP-трафика.
+Высокопроизводительный кеширующий HTTPS-прокси на [Hyper](https://hyper.rs/) с [quick_cache](https://crates.io/crates/quick_cache), MITM TLS, аутентификацией, ACL и интеграцией с Kafka, OpenSearch, Prometheus и Grafana.
 
-[![Build Status](https://github.com/onixus/bsdm-proxy/actions/workflows/rust.yml/badge.svg)](https://github.com/onixus/bsdm-proxy/actions)
+[![Build Status](https://github.com/onixus/bsdm-proxy/actions/workflows/rust.yml/badge.svg)](https://github.com/onixus/bsdm-proxy/actions/workflows/rust.yml)
+[![E2E Tests](https://github.com/onixus/bsdm-proxy/actions/workflows/e2e.yml/badge.svg)](https://github.com/onixus/bsdm-proxy/actions/workflows/e2e.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Rust Version](https://img.shields.io/badge/rust-1.75+-orange.svg)](https://www.rust-lang.org)
-[![Hyper](https://img.shields.io/badge/hyper-1.0-blue.svg)](https://hyper.rs/)
-[![Prometheus](https://img.shields.io/badge/prometheus-enabled-brightgreen.svg)](https://prometheus.io/)
-[![Grafana](https://img.shields.io/badge/grafana-dashboard-orange.svg)](https://grafana.com/)
+[![Version](https://img.shields.io/badge/version-0.2.2b-blue.svg)](https://github.com/onixus/bsdm-proxy/releases/tag/v0.2.2b)
+[![Rust](https://img.shields.io/badge/rust-1.85+-orange.svg)](https://www.rust-lang.org)
 
-## 🚀 v2.0: Hyper + quick_cache + Prometheus
+> **Текущая версия:** `0.2.2b` (beta) — см. [Releases](https://github.com/onixus/bsdm-proxy/releases)
 
-**Полностью переписан** на нативном Hyper с полным мониторингом:
+⚠️ **MITM-прокси для HTTPS.** Используйте только в корпоративной среде с согласия пользователей и в рамках законодательства.
 
-| Метрика | v1.x (Pingora) | v2.0 (Hyper + monitoring) | Улучшение |
-|---------|----------------|--------------------------|----------|
-| **Cache HIT latency** | 1-2 мс | **0.1-0.2 мс** | **10x быстрее** |
-| **Memory per entry** | ~500 bytes | **~120 bytes** | **4.2x меньше** |
-| **HTTP CONNECT** | ⚠️ Workarounds | ✅ **Нативная поддержка** | **Новая функция** |
-| **Prometheus metrics** | ❌ | ✅ **20+ метрик** | **Новая функция** |
-| **Grafana dashboard** | ❌ | ✅ **7 панелей** | **Новая функция** |
-| **Kafka latency** | 8-12 мс | **2-5 мс** | **3x быстрее** |
+## Возможности
 
-### 🔥 Ключевые особенности
+| Область | Возможности |
+|---------|-------------|
+| **Прокси** | HTTP/HTTPS forward proxy, MITM TLS (порты 443/8443), HTTP CONNECT, кеш L1 |
+| **Безопасность** | Proxy-аутентификация (Basic / LDAP / NTLM), ACL, категоризация URL |
+| **Наблюдаемость** | Prometheus (20+ метрик), Grafana, `/health`, `/ready`, `/metrics` |
+| **Аналитика** | Kafka → cache-indexer → OpenSearch |
+| **Эксплуатация** | Graceful shutdown, настраиваемые порты, release-пакет + systemd |
 
-- **Arc<str> вместо String**: Zero-cost cloning, 80% меньше аллокаций
-- **Prometheus metrics**: 20+ метрик производительности (request rate, latency, cache hit rate)
-- **Grafana dashboard**: 7 панелей с auto-refresh из коробки
-- **Health checks**: `/health` и `/ready` endpoints
-- **Connection pooling**: 50-70% быстрее к upstream
-- **Async Kafka**: Fire-and-forget, не блокирует proxy
-
-👉 Подробности в [OPTIMIZATIONS.md](OPTIMIZATIONS.md)
-
-⚠️ **Предупреждение:** MITM-прокси для HTTPS. Используйте только в корпоративной среде с согласия пользователей.
-
-## 🏗️ Архитектура
+## Архитектура
 
 ```
-┌─────────┐         ┌──────────────────┐         ┌──────────────┐
-│ Клиент  │◄───────►│  BSDM-Proxy      │◄───────►│   Upstream   │
-│         │  HTTPS  │  (Hyper + cache) │  HTTPS  │    Server    │
-└─────────┘         └────────┬─────────┘         └──────────────┘
-                             │
-                             │ :9090 /metrics
-                    ┌────────┴────────┐
-                    │                 │
-             ┌──────▼──────┐   ┌─────▼──────┐
-             │ quick_cache │   │   Kafka    │
-             │ (in-memory) │   │ (async)    │
-             └─────────────┘   └─────┬──────┘
-                                     │
-              ┌──────────────────────┴──────┐
-              │                             │
-       ┌──────▼─────────┐          ┌────────▼────────┐
-       │ Cache-Indexer  │          │  Prometheus     │
-       └──────┬─────────┘          │  (scrapes :9090)│
-              │                    └────────┬────────┘
-       ┌──────▼─────────┐                  │
-       │  OpenSearch    │          ┌───────▼─────────┐
-       │  (L2 Cache)    │          │    Grafana      │
-       └────────────────┘          │  (dashboards)   │
-                                   └─────────────────┘
+┌─────────┐         ┌──────────────────────────┐         ┌──────────────┐
+│ Клиент  │◄───────►│  BSDM-Proxy              │◄───────►│   Upstream   │
+│         │  HTTPS  │  Auth → ACL → Cache      │  HTTPS  │    Server    │
+└─────────┘         └────────────┬─────────────┘         └──────────────┘
+                                 │
+                        :9090 /metrics
+                    ┌────────────┴────────────┐
+             ┌──────▼──────┐           ┌──────▼──────┐
+             │ quick_cache │           │   Kafka     │
+             │   (L1)      │           │  (async)    │
+             └─────────────┘           └──────┬──────┘
+                                              │
+                    ┌─────────────────────────┼─────────────────┐
+             ┌──────▼─────────┐        ┌──────▼──────┐   ┌──────▼──────┐
+             │ Cache-Indexer  │        │ Prometheus  │   │  Grafana    │
+             └──────┬─────────┘        └─────────────┘   └─────────────┘
+             ┌──────▼─────────┐
+             │  OpenSearch    │
+             └────────────────┘
 ```
 
-## ✨ Возможности
+## Компоненты
 
-### Прокси-сервер
-- 🔐 **MITM TLS** с динамической генерацией сертификатов
-- ⚡ **Sub-ms latency**: quick_cache обеспечивает 0.1-0.2 мс cache hits
-- 💾 **L1+L2 caching**: quick_cache + OpenSearch
-- 🔄 **HTTP CONNECT**: Нативная поддержка forward proxy
-- 👤 **User analytics**: Basic Auth parsing
+| Компонент | Порт | Описание |
+|-----------|------|----------|
+| **proxy** | 1488 | HTTPS-прокси, MITM, кеш, метрики |
+| **metrics** | 9090 | `/health`, `/ready`, `/metrics` |
+| **cache-indexer** | — | Kafka → OpenSearch |
+| **Kafka** | 9092 | Очередь событий кеша |
+| **OpenSearch** | 9200 | Поиск и аналитика |
+| **Prometheus** | 9091 | Сбор метрик |
+| **Grafana** | 3000 | Дашборды (`admin` / `admin`) |
 
-### Мониторинг
-- 📊 **Prometheus**: 20+ метрик (request rate, latency p50/p95/p99, cache hit rate)
-- 📈 **Grafana**: 7 панелей (auto-provisioned, auto-refresh 5s)
-- 🏥 **Health checks**: `/health`, `/ready`, `/metrics` endpoints
-- 🔍 **Real-time**: Sub-second visibility в производительность
+## Быстрый старт (Docker)
 
-### Аналитика
-- 📊 **OpenSearch**: Full-text поиск, агрегации
-- 📈 **Kafka**: Асинхронная индексация событий
-
-## 📦 Компоненты
-
-### 1. Proxy (порт 1488)
-- TLS-прокси на Hyper 1.0
-- quick_cache L1 (10k entries, 1h TTL)
-- Kafka producer (async fire-and-forget)
-- **Metrics server** (порт 9090)
-
-### 2. Cache Indexer
-- Kafka → OpenSearch (батч 50 событий/5с)
-
-### 3. Инфраструктура
-- **Kafka** (порт 9092) - очередь событий
-- **OpenSearch** (порт 9200) - поиск и аналитика
-- **Prometheus** (порт 9091) - сбор метрик
-- **Grafana** (порт 3000) - дашборды (логин: admin/admin)
-
-## 🚀 Быстрый старт
-
-### 1. Генерация CA сертификата
+### 1. CA для MITM
 
 ```bash
 mkdir -p certs && cd certs
@@ -114,14 +72,14 @@ openssl req -new -x509 -days 3650 -key ca.key -out ca.crt \
 cd ..
 ```
 
-### 2. Запуск
+### 2. Запуск стека
 
 ```bash
-docker-compose up -d
-docker-compose ps  # Проверка статуса
+docker compose up -d
+docker compose ps
 ```
 
-### 3. Установка CA сертификата
+### 3. Доверие клиенту к CA
 
 **Linux:**
 ```bash
@@ -135,202 +93,185 @@ sudo security add-trusted-cert -d -r trustRoot \
   -k /Library/Keychains/System.keychain certs/ca.crt
 ```
 
-**Windows:** `certmgr.msc` → Доверенные корневые ЦС → Импорт `ca.crt`
-
 ### 4. Проверка
 
 ```bash
-# Тест proxy
 curl -x http://localhost:1488 https://httpbin.org/get
-
-# Проверка метрик
-curl http://localhost:9090/metrics | grep bsdm_proxy
 curl http://localhost:9090/health
-
-# Открыть dashboards
-open http://localhost:9091  # Prometheus
-open http://localhost:3000  # Grafana (admin/admin)
+curl http://localhost:9090/metrics | grep bsdm_proxy
 ```
 
-## 📊 Prometheus Metrics
+## Установка (native package)
 
-### Доступные метрики
+Сборка пакета из исходников:
 
-**Request Metrics:**
-- `bsdm_proxy_requests_total{method,status,cache_status}` - counter
-- `bsdm_proxy_requests_in_flight` - gauge
-- `bsdm_proxy_request_duration_seconds` - histogram (p50/p95/p99)
-- `bsdm_proxy_request_size_bytes` / `response_size_bytes` - histograms
+```bash
+./scripts/build-package.sh
+```
 
-**Cache Metrics:**
-- `bsdm_proxy_cache_hits_total` / `misses_total` / `bypasses_total` - counters
-- `bsdm_proxy_cache_entries` / `cache_size_bytes` - gauges
-- `bsdm_proxy_cache_lookup_duration_seconds` - histogram
+Архив: `dist/bsdm-proxy-0.2.2b-linux-<arch>.tar.gz`
 
-**Upstream Metrics:**
-- `bsdm_proxy_upstream_requests_total{host,status}` - counter
-- `bsdm_proxy_upstream_duration_seconds{host}` - histogram
-- `bsdm_proxy_upstream_errors_total{host,error_type}` - counter
-- `bsdm_proxy_upstream_connections_active` / `created_total` - gauge/counter
+Установка:
 
-**System Metrics:**
-- `bsdm_proxy_kafka_events_sent_total` / `send_errors_total` - counters
-- `bsdm_proxy_tls_handshakes_total` - counter
+```bash
+tar xzf dist/bsdm-proxy-0.2.2b-linux-x86_64.tar.gz
+cd bsdm-proxy-0.2.2b-linux-x86_64
+sudo ./install.sh --create-user --systemd
+sudo cp certs/ca.key certs/ca.crt /certs/
+sudo systemctl start bsdm-proxy
+```
+
+Подробнее: [packaging/README.md](packaging/README.md)
+
+## Сборка из исходников
+
+```bash
+# Зависимости (Debian/Ubuntu)
+sudo apt-get install -y libssl-dev pkg-config cmake librdkafka-dev libclang-dev
+
+cargo build --release -p bsdm-proxy --bin proxy -p cache-indexer --bin cache-indexer
+```
+
+Бинарники: `target/release/proxy`, `target/release/cache-indexer`
+
+## Конфигурация
+
+### Proxy — основные переменные
+
+| Переменная | По умолчанию | Описание |
+|-----------|-------------|----------|
+| `HTTP_PORT` | `1488` | Порт прокси |
+| `METRICS_PORT` | `9090` | Порт health/metrics |
+| `MITM_ENABLED` | `true` | MITM для портов 443 и 8443 |
+| `KAFKA_BROKERS` | — | Kafka (опционально) |
+| `CACHE_CAPACITY` | `10000` | Размер L1-кеша |
+| `CACHE_TTL_SECONDS` | `3600` | TTL кеша (сек) |
+| `MAX_CACHE_BODY_SIZE` | `10485760` | Макс. размер body (байт) |
+| `SHUTDOWN_TIMEOUT_SECONDS` | `30` | Таймаут graceful shutdown |
+| `UPSTREAM_CA_CERT` | — | PEM самоподписанного CA для upstream TLS (тесты/lab) |
+| `RUST_LOG` | `info` | Уровень логов |
+
+CA для MITM читается из `/certs/ca.key` и `/certs/ca.crt` (fallback: `./certs/`).
+
+### Аутентификация
+
+| Переменная | Описание |
+|-----------|----------|
+| `AUTH_ENABLED` | `true` / `false` |
+| `AUTH_BACKEND` | `basic`, `ldap`, `ntlm` |
+| `AUTH_REALM` | Realm для `Proxy-Authenticate` |
+| `AUTH_CACHE_TTL` | TTL кеша сессий (сек) |
+
+→ [docs/authentication.md](docs/authentication.md)
+
+### ACL и категоризация
+
+| Переменная | Описание |
+|-----------|----------|
+| `ACL_ENABLED` | Включить ACL |
+| `ACL_DEFAULT_ACTION` | `allow`, `deny`, `redirect` |
+| `ACL_RULES_PATH` | Путь к JSON с правилами |
+| `ACL_AUTO_RELOAD` | Автоперезагрузка правил |
+| `ACL_RELOAD_INTERVAL` | Интервал перезагрузки (сек) |
+| `CATEGORIZATION_ENABLED` | Категоризация URL |
+| `SHALLALIST_PATH` | Путь к Shallalist |
+| `CUSTOM_DB_PATH` | Пользовательская БД категорий |
+
+Пример правил: [config/acl-rules.example.json](config/acl-rules.example.json)
+
+→ [docs/acl.md](docs/acl.md) · [docs/categorization.md](docs/categorization.md)
+
+### Cache-indexer
+
+| Переменная | По умолчанию | Описание |
+|-----------|-------------|----------|
+| `KAFKA_BROKERS` | `kafka:9092` | Брокеры Kafka |
+| `KAFKA_TOPIC` | `cache-events` | Топик |
+| `KAFKA_GROUP_ID` | `cache-indexer-group` | Consumer group |
+| `OPENSEARCH_URL` | `http://opensearch:9200` | URL OpenSearch |
+
+## Мониторинг
+
+### Endpoints
+
+| URL | Ответ |
+|-----|-------|
+| `GET /health` | `{"status":"ok"}` |
+| `GET /ready` | `{"status":"ready"}` или `draining` при shutdown |
+| `GET /metrics` | Prometheus text format |
 
 ### Примеры PromQL
 
 ```promql
 # Cache hit rate
-bsdm_proxy_cache_hits_total / 
+bsdm_proxy_cache_hits_total /
   (bsdm_proxy_cache_hits_total + bsdm_proxy_cache_misses_total)
 
-# Request rate per second
-rate(bsdm_proxy_requests_total[1m])
-
 # P95 latency
-histogram_quantile(0.95, 
+histogram_quantile(0.95,
   rate(bsdm_proxy_request_duration_seconds_bucket[5m])
 )
-
-# Error rate
-rate(bsdm_proxy_requests_total{status=~"5.."}[5m]) / 
-  rate(bsdm_proxy_requests_total[5m])
 ```
 
-## 📈 Grafana Dashboard
+Grafana: http://localhost:3000 → **BSDM Proxy Dashboard** (7 панелей, auto-provisioned).
 
-### Auto-provisioned Dashboard
-
-Grafana dashboard загружается автоматически при старте:
-
-1. Откройте: http://localhost:3000
-2. Логин: `admin` / Пароль: `admin`
-3. **Dashboards → BSDM Proxy Dashboard**
-
-### 7 панелей:
-
-1. **Request Rate** - req/s по методам и cache status
-2. **Cache Hit Rate** - gauge с порогами (>80% = green)
-3. **Requests In Flight** - активные запросы
-4. **Request Latency** - p50/p95/p99 перцентили
-5. **Cache Lookup Latency** - p99 скорость поиска в кеше
-6. **Cache Statistics** - entries и размер в MB
-7. **Upstream Connections** - активные соединения
-
-**Features:**
-- Auto-refresh каждые 5 секунд
-- Time range: Last 15 minutes (configurable)
-- Color-coded thresholds
-
-## ⚙️ Конфигурация
-
-### Proxy Environment Variables
-
-| Переменная | По умолчанию | Описание |
-|-----------|-------------|----------|
-| `KAFKA_BROKERS` | `kafka:9092` | Kafka брокеры |
-| `CACHE_CAPACITY` | `10000` | L1 кеш (записей) |
-| `CACHE_TTL_SECONDS` | `3600` | TTL кеша (сек) |
-| `MAX_CACHE_BODY_SIZE` | `10485760` | Макс body (bytes) |
-| `HTTP_PORT` | `1488` | Порт proxy |
-| `RUST_LOG` | `info` | Уровень логов |
-
-### Примеры
-
-**Высокая нагрузка:**
-```yaml
-services:
-  proxy:
-    environment:
-      - CACHE_CAPACITY=100000
-      - CACHE_TTL_SECONDS=1800
-      - MAX_CACHE_BODY_SIZE=1048576
-```
-
-**Низкая память:**
-```yaml
-services:
-  proxy:
-    environment:
-      - CACHE_CAPACITY=5000
-      - MAX_CACHE_BODY_SIZE=524288
-```
-
-## 🔍 OpenSearch Аналитика
+## Тестирование
 
 ```bash
-# Поиск по user
-curl "http://localhost:9200/http-cache/_search?q=username:john"
+# Unit + integration (workspace)
+cargo test --workspace
 
-# Cache hits/misses
-curl -X GET "http://localhost:9200/http-cache/_search" -H 'Content-Type: application/json' -d'
-{
-  "size": 0,
-  "aggs": {
-    "cache_status": {"terms": {"field": "cache_status"}}
-  }
-}'
+# Smoke (health, metrics, HTTP forward)
+./scripts/run-smoke-tests.sh
 
-# Топ медленных запросов
-curl "http://localhost:9200/http-cache/_search?q=request_duration_ms:>1000&sort=request_duration_ms:desc"
+# E2E (auth, ACL, cache, MITM, CONNECT)
+./scripts/run-e2e-tests.sh
+
+# Docker test stack
+docker compose -f docker-compose.test.yml up -d
+./scripts/run-smoke-tests.sh --external
 ```
 
-## 📊 Производительность
+CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.yml](.github/workflows/e2e.yml).
 
-### Бенчмарки (v2.0)
+→ [docs/development.md](docs/development.md)
 
-- **L1 cache latency**: 0.1-0.2 мс
-- **Throughput**: 100,000+ req/s
-- **Kafka latency**: 2-5 мс
-- **Memory per entry**: ~120 bytes
-- **Metrics export**: <1 мс
+## Документация
 
-### vs Pingora (v1.x)
+| Документ | Содержание |
+|----------|------------|
+| [docs/README.md](docs/README.md) | Оглавление документации |
+| [docs/authentication.md](docs/authentication.md) | LDAP, NTLM, Basic Auth |
+| [docs/acl.md](docs/acl.md) | Правила доступа, приоритеты |
+| [docs/categorization.md](docs/categorization.md) | Shallalist, URLhaus, PhishTank |
+| [docs/hierarchical-caching.md](docs/hierarchical-caching.md) | Иерархический кеш (ICP) |
+| [packaging/README.md](packaging/README.md) | Release-пакет и systemd |
+| [OPTIMIZATIONS.md](OPTIMIZATIONS.md) | Оптимизации v2.0 |
+| [docker-compose.yml](docker-compose.yml) | Полный стек |
 
-```bash
-# 1000 запросов к кешу
-time for i in {1..1000}; do curl -s -x http://localhost:1488 https://httpbin.org/get > /dev/null; done
+## Roadmap
 
-# Pingora: ~2.5s (2.5ms avg)
-# Hyper:   ~0.8s (0.8ms avg) — 3x faster!
-```
+### v0.2.x (текущая линия)
 
-## 🗺️ Roadmap
-
-### v2.1 (Q1 2026)
-- [x] ~~Prometheus metrics~~ ✅ **Done**
-- [x] ~~Health checks~~ ✅ **Done**
-- [x] ~~Grafana dashboard~~ ✅ **Done**
-- [ ] Graceful shutdown
+- [x] Prometheus + Grafana + health checks
+- [x] Graceful shutdown
+- [x] Proxy authentication (Basic / LDAP / NTLM)
+- [x] ACL + URL categorization
+- [x] E2E / smoke test harness
+- [x] Release packaging (`0.2.2b`)
 - [ ] Rate limiting per user/IP
-- [ ] **Hierarchical caching** 🚧 **In Progress**
-  - [x] Peer management
-  - [x] ICP protocol (RFC 2186)
-  - [x] Selection strategies
-  - [x] Hierarchy manager
-  - [ ] Integration (Phase 3)
+- [ ] Hierarchical caching — Phase 3 integration
 
-### v2.2 (Q2 2026)
+### v0.3.x
+
 - [ ] Redis L2 cache
 - [ ] HTTP/2 upstream client
 - [ ] Compression (Brotli/Zstd)
-- [ ] Advanced alerting
 
-### v3.0 (Q3 2026)
-- [ ] Machine Learning anomaly detection
-- [ ] Threat Intelligence integration
-- [ ] io_uring (для Linux 5.1+)
+## Лицензия
 
-## 📚 Документация
-
-- [OPTIMIZATIONS.md](OPTIMIZATIONS.md) — детали оптимизаций
-- [docs/hierarchical-caching.md](docs/hierarchical-caching.md) — Squid-style hierarchy
-- [docker-compose.yml](docker-compose.yml) — конфигурация
-
-## 📝 Лицензия
-
-MIT License - Copyright (c) 2025 BSDM-Proxy Contributors
+MIT License — Copyright (c) 2025 BSDM-Proxy Contributors
 
 ---
 
-**⚠️ Disclaimer:** Используйте только в легальных целях с согласия всех сторон.
+**Disclaimer:** Используйте только в легальных целях с согласия всех сторон.
