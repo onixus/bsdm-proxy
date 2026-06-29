@@ -7,10 +7,10 @@
 [![Build Status](https://github.com/onixus/bsdm-proxy/actions/workflows/rust.yml/badge.svg)](https://github.com/onixus/bsdm-proxy/actions/workflows/rust.yml)
 [![E2E Tests](https://github.com/onixus/bsdm-proxy/actions/workflows/e2e.yml/badge.svg)](https://github.com/onixus/bsdm-proxy/actions/workflows/e2e.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.2.2b-blue.svg)](https://github.com/onixus/bsdm-proxy/releases/tag/v0.2.2b)
+[![Version](https://img.shields.io/badge/version-0.2.3--test-blue.svg)](https://github.com/onixus/bsdm-proxy/releases)
 [![Rust](https://img.shields.io/badge/rust-1.85+-orange.svg)](https://www.rust-lang.org)
 
-> **Текущая версия:** `0.2.2b` (beta) — см. [Releases](https://github.com/onixus/bsdm-proxy/releases)
+> **Текущая версия:** `0.2.3-test` (тестовый pre-release) — см. [Releases](https://github.com/onixus/bsdm-proxy/releases) · [release notes](docs/releases/v0.2.3-test.md)
 
 ⚠️ **MITM-прокси для HTTPS.** Используйте только в корпоративной среде с согласия пользователей и в рамках законодательства.
 
@@ -18,7 +18,7 @@
 
 | Область | Возможности |
 |---------|-------------|
-| **Прокси** | HTTP/HTTPS forward proxy, MITM TLS (порты 443/8443), HTTP CONNECT, кеш L1, **иерархический кеш** (ICP + parent/sibling peers) |
+| **Прокси** | HTTP/HTTPS forward proxy, MITM TLS (порты 443/8443), HTTP CONNECT, кеш **L1 + Redis L2**, **иерархический кеш** (ICP + parent/sibling peers), **HTTP/2 upstream** (опц.) |
 | **Безопасность** | Proxy-аутентификация (Basic / LDAP), ACL, категоризация URL, rate limiting |
 | **Наблюдаемость** | Prometheus (20+ метрик), Grafana, `/health`, `/ready`, `/metrics` |
 | **Аналитика** | Kafka → cache-indexer → OpenSearch |
@@ -114,13 +114,13 @@ curl http://localhost:9090/metrics | grep bsdm_proxy
 ./scripts/build-package.sh
 ```
 
-Архив: `dist/bsdm-proxy-0.2.2b-linux-<arch>.tar.gz`
+Архив: `dist/bsdm-proxy-0.2.3test-linux-<arch>.tar.gz`
 
 Установка:
 
 ```bash
-tar xzf dist/bsdm-proxy-0.2.2b-linux-x86_64.tar.gz
-cd bsdm-proxy-0.2.2b-linux-x86_64
+tar xzf dist/bsdm-proxy-0.2.3test-linux-x86_64.tar.gz
+cd bsdm-proxy-0.2.3test-linux-x86_64
 sudo ./install.sh --create-user --systemd
 sudo cp certs/ca.key certs/ca.crt /certs/
 sudo systemctl start bsdm-proxy
@@ -155,6 +155,9 @@ cargo build --release -p bsdm-proxy --bin proxy -p cache-indexer --bin cache-ind
 | `SHUTDOWN_TIMEOUT_SECONDS` | `30` | Таймаут graceful shutdown |
 | `UPSTREAM_CA_CERT` | — | PEM самоподписанного CA для upstream TLS (тесты/lab) |
 | `UPSTREAM_HTTP2_ENABLED` | `false` | HTTP/2 ALPN для upstream HTTPS |
+| `CACHE_COMPRESSION` | `off` | At-rest сжатие кеша: `zstd`, `brotli`, `off` |
+| `CACHE_COMPRESS_MIN_BYTES` | `1024` | Мин. размер body для сжатия в кеше |
+| `CACHE_COMPRESS_ZSTD_LEVEL` | `3` | Уровень Zstd (1–22) |
 | `RUST_LOG` | `info,bsdm_proxy=debug`¹ | Фильтр логов ([docs/logging.md](docs/logging.md)) |
 
 CA для MITM читается из `/certs/ca.key` и `/certs/ca.crt` (fallback: `./certs/`).
@@ -216,6 +219,18 @@ Token-bucket лимиты на IP и аутентифицированного п
 Ответ при L2 hit: заголовок `x-cache-status: L2-HIT`.
 
 Демо: `docker compose -f docker-compose.redis-l2.yml up -d --build`
+
+### At-rest compression (опционально)
+
+Прозрачное сжатие тел cacheable-ответов в L1/L2. Клиент всегда получает распакованный ответ.
+
+| Переменная | По умолчанию | Описание |
+|-----------|-------------|----------|
+| `CACHE_COMPRESSION` | `off` | `zstd`, `brotli` или `off` |
+| `CACHE_COMPRESS_MIN_BYTES` | `1024` | Сжимать только если body ≥ N байт |
+| `CACHE_COMPRESS_ZSTD_LEVEL` | `3` | Уровень Zstd |
+
+Ответы с заголовком `Content-Encoding` не сжимаются повторно.
 
 ### Иерархический кеш (опционально)
 
@@ -306,6 +321,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 | [docs/hierarchical-caching.md](docs/hierarchical-caching.md) | Иерархический кеш, ICP, peers |
 | [docs/architecture.md](docs/architecture.md) | Архитектура и блокеры |
 | [docs/roadmap.md](docs/roadmap.md) | Roadmap и milestones |
+| [docs/releases/v0.2.3-test.md](docs/releases/v0.2.3-test.md) | Release notes 0.2.3-test |
 | [packaging/README.md](packaging/README.md) | Release-пакет и systemd |
 | [OPTIMIZATIONS.md](OPTIMIZATIONS.md) | Оптимизации v2.0 |
 | [docker-compose.yml](docker-compose.yml) | Полный стек |
@@ -319,7 +335,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 | Milestone | Версия | Фокус | Статус |
 |-----------|--------|-------|--------|
 | **M1** Foundation | v0.2.x | Прокси, ACL, категоризация, observability, иерархия | ✅ Done |
-| **M2** Squid parity | v0.3.x | L2 Redis, rate limit, полный ACL, hierarchy Phase 4 | Planned |
+| **M2** Squid parity | v0.3.x | L2 Redis, HTTP/2, compression, полный ACL, hierarchy Phase 4 | ~45% |
 | **M3** Retro-search | v0.4.x | OpenSearch dashboards, поиск по истории | Planned |
 | **M4** Threat analytics | v0.5.x | Rule-based алерты, C&C heuristics | Planned |
 | **M5** ML security | v1.0.x | ML anomaly, phishing, C&C detection | Planned |
@@ -331,7 +347,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 - [x] Proxy authentication (Basic / LDAP; NTLM — в backlog M2)
 - [x] ACL + URL categorization
 - [x] E2E / smoke test harness
-- [x] Release packaging (`0.2.2b`)
+- [x] Release packaging (`0.2.3-test`)
 - [x] Hierarchical caching Phase 3 — ICP server, peer fetch, env config
 - [x] Rate limiting per user/IP
 - [x] Рефакторинг `main.rs` (вынос `ProxyService` в lib)
@@ -343,9 +359,11 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 - [x] Redis L2 cache
 - [x] HTTP/2 upstream client — `UPSTREAM_HTTP2_ENABLED`
 - [x] Compression (Brotli/Zstd) — `CACHE_COMPRESSION=zstd|brotli`
-- [ ] ACL TimeWindow + group rules
+- [x] ACL TimeWindow + group rules
 - [ ] NTLM auth
-- [ ] Hierarchy Phase 4 (discovery, digest, HTCP, hierarchy metrics)
+- [ ] Hierarchy Phase 4 (discovery, digest, HTCP)
+- [ ] Negative caching / cache refresh (B22)
+- [ ] REST ACL API (`/api/acl/*`)
 
 ### M3–M5
 

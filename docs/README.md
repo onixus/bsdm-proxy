@@ -9,6 +9,7 @@
 | [README.md](../README.md) | Обзор, быстрый старт, конфигурация |
 | [packaging/README.md](../packaging/README.md) | Установка из release-пакета |
 | [development.md](development.md) | Сборка, тесты, CI, релиз |
+| [releases/v0.2.3-test.md](releases/v0.2.3-test.md) | **Release notes 0.2.3-test** |
 
 ## Функциональность
 
@@ -36,6 +37,7 @@
 |----------|----------|
 | [docker-compose.yml](../docker-compose.yml) | Полный стек (proxy, Kafka, OpenSearch, monitoring) |
 | [docker-compose.test.yml](../docker-compose.test.yml) | Минимальный стек для smoke-тестов |
+| [docker-compose.redis-l2.yml](../docker-compose.redis-l2.yml) | Демо Redis L2 (2 proxy + Redis) |
 | [OPENSEARCH_UPGRADE.md](../OPENSEARCH_UPGRADE.md) | Обновление OpenSearch |
 | [web-config/README.md](../web-config/README.md) | Web UI для генерации конфигурации |
 
@@ -50,6 +52,9 @@
 
 ## Версии
 
-Текущая beta-версия: **0.2.2b** — [GitHub Releases](https://github.com/onixus/bsdm-proxy/releases)
+| Версия | Тип | Описание |
+|--------|-----|----------|
+| **0.2.3-test** | test pre-release | M2: L2 Redis, HTTP/2 upstream, at-rest compression — [notes](releases/v0.2.3-test.md) |
+| 0.2.2b | beta | Иерархический кеш, optional MITM CA — [GitHub Releases](https://github.com/onixus/bsdm-proxy/releases/tag/v0.2.2b) |
 
-**Новое в 0.2.2b:** иерархический кеш (ICP + peer fetch), optional MITM CA, pre-push hook.
+**Новое в 0.2.3-test:** Redis L2, `UPSTREAM_HTTP2_ENABLED`, `CACHE_COMPRESSION` (zstd/brotli), ACL TimeWindow/group, rate limiting, `ProxyService` в lib.
