@@ -1,113 +1,110 @@
-# OpenSearch 3.3.2 Upgrade Guide
+# OpenSearch Upgrade Guide
 
-## 🎉 Что нового
+Руководство по обновлению OpenSearch в стеке BSDM-Proxy.
 
-### Обновление с 2.11.0 → 3.3.2
+**Текущая версия в `docker-compose.yml`:** `opensearchproject/opensearch:3.7.0`  
+**OpenSearch Dashboards:** `opensearchproject/opensearch-dashboards:3.7.0`
 
-**OpenSearch 3.3.2** (декабрь 2025) - последняя стабильная версия
+## Что нового в 3.7.0
 
-### Основные изменения:
+OpenSearch 3.7.0 (июнь 2026) — актуальный релиз в линейке 3.x. По сравнению с 3.3.2:
 
-#### 1. **JDK 21** (обязательно)
-- OpenSearch 3.x требует Java 21
-- В Docker образе уже включен
+- Улучшения производительности индексации и поиска на базе Lucene 10.x
+- Развитие AI/ML возможностей (hybrid search, semantic search)
+- Обновлённый OpenSearch Dashboards UI
+- JDK 21 (включён в Docker-образ)
 
-#### 2. **Lucene 10.1.0**
-- Улучшенная производительность индексации
-- Оптимизированный поиск
+## Сравнение версий
 
-#### 3. **AI/ML улучшения**
-- Hybrid search с Z-score normalization
-- Memory-optimized Faiss engine
-- Improved semantic search
+| Параметр | 2.11.0 | 3.3.2 | 3.7.0 |
+|----------|--------|-------|-------|
+| **JDK** | 11/17 | 21 | 21 |
+| **Lucene** | 9.7.0 | 10.1.0 | 10.x |
+| **RAM (min)** | 512MB | 1GB | 1GB |
+| **Support** | EOL | Active | Active |
 
-#### 4. **Производительность**
-- Увеличена память: 512MB → 1GB
-- Лучшее управление ресурсами
+## Миграция
 
-## 🚀 Миграция
-
-### Шаг 1: Переключение на ветку
+### Шаг 1: Остановка текущего стека
 
 ```bash
-git fetch origin
-git checkout feature/opensearch-3.3
+# Остановка без удаления данных (если нужно сохранить индексы)
+docker compose down
+
+# ИЛИ полная очистка (рекомендуется при смене мажорной версии)
+docker compose down -v
 ```
 
-### Шаг 2: Остановка старой версии
+> При обновлении между версиями 3.x обычно достаточно `docker compose pull && docker compose up -d`. Если OpenSearch не стартует — используйте `docker compose down -v` (данные будут удалены).
+
+### Шаг 2: Загрузка новых образов
 
 ```bash
-# Остановка без удаления данных (если нужно сохранить)
-docker-compose down
+docker pull opensearchproject/opensearch:3.7.0
+docker pull opensearchproject/opensearch-dashboards:3.7.0
 
-# ИЛИ полная очистка (для чистой установки)
-docker-compose down -v
-```
-
-### Шаг 3: Загрузка новых образов
-
-```bash
-# Скачивание OpenSearch 3.3.2
-docker pull opensearchproject/opensearch:3.3.2
-docker pull opensearchproject/opensearch-dashboards:3.3.2
-
-# Проверка
 docker images | grep opensearch
 ```
 
-### Шаг 4: Запуск
+### Шаг 3: Запуск
 
 ```bash
-# Запуск с новой версией
-docker-compose up -d
+docker compose up -d
 
-# Мониторинг запуска
-docker-compose logs -f opensearch
+docker compose logs -f opensearch
 ```
 
-### Шаг 5: Проверка
+### Шаг 4: Проверка
 
 ```bash
-# Проверка версии
 curl http://localhost:9200
+curl http://localhost:9200/_cluster/health?pretty
+curl http://localhost:5601/api/status
 ```
 
-Ожидаемый вывод:
+Ожидаемый фрагмент ответа:
+
 ```json
 {
-  "name" : "opensearch-node1",
-  "cluster_name" : "opensearch-cluster",
-  "cluster_uuid" : "...",
-  "version" : {
-    "number" : "3.3.2",
-    "build_type" : "tar",
-    "build_hash" : "...",
-    "build_date" : "2025-12-XX",
-    "build_snapshot" : false,
-    "lucene_version" : "10.1.0",
-    "minimum_wire_compatibility_version" : "3.0.0",
-    "minimum_index_compatibility_version" : "3.0.0"
+  "name": "opensearch-node1",
+  "cluster_name": "opensearch-cluster",
+  "version": {
+    "number": "3.7.0",
+    "lucene_version": "10.x",
+    "minimum_wire_compatibility_version": "3.0.0",
+    "minimum_index_compatibility_version": "3.0.0"
   },
-  "tagline" : "The OpenSearch Project: https://opensearch.org/"
+  "tagline": "The OpenSearch Project: https://opensearch.org/"
 }
 ```
 
-## 🔍 Сравнение версий
+Проверка индексации cache-indexer:
 
-| Параметр | 2.11.0 | 3.3.2 |
-|------------|---------|--------|
-| **JDK** | 11/17 | 21 (required) |
-| **Lucene** | 9.7.0 | 10.1.0 |
-| **RAM (min)** | 512MB | 1GB |
-| **Дата релиза** | Окт 2023 | Дек 2025 |
-| **Support** | EOL скоро | Active |
-| **AI/ML** | Базовый | Улучшенный |
+```bash
+curl http://localhost:9200/http-cache/_count?pretty
+```
 
-## 💡 Новые фичи 3.3.2
+## Требования
 
-### 1. Hybrid Search
+### JDK 21
 
-Комбинирует keyword + semantic поиск:
+OpenSearch 3.x требует Java 21. В официальном Docker-образе JDK уже включён.
+
+### Память
+
+В `docker-compose.yml` задано:
+
+```yaml
+OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g
+```
+
+Для production с большим объёмом данных увеличьте до 2GB и более.
+
+## Новые возможности 3.x
+
+### Hybrid Search
+
+Комбинирует keyword и semantic поиск:
 
 ```json
 POST /http-cache/_search
@@ -135,87 +132,72 @@ POST /http-cache/_search
 }
 ```
 
-### 2. Search Relevance Workbench
+### Search Relevance Workbench
 
-Инструмент для оптимизации поиска в Dashboards.
+Инструмент для настройки релевантности поиска в Dashboards.
 
-### 3. Memory-Optimized Faiss
+## Breaking Changes
 
-Улучшенный векторный поиск для ML.
+1. **JDK 21 обязателен** — собственные плагины нужно перекомпилировать под Java 21.
+2. **Минимум 1GB RAM** — вместо 512MB в OpenSearch 2.x.
+3. **Удалены устаревшие API** — см. [changelog](https://github.com/opensearch-project/OpenSearch/releases/tag/3.7.0).
 
-### 4. Improved Dashboards UI
+## Troubleshooting
 
-- Обновлённый дизайн
-- Быстрее загрузка
-- Лучшая визуализация
-
-## ⚠️ Breaking Changes
-
-### 1. JDK 21 обязателен
-
-Если используете собственные плагины - перекомпилируйте под Java 21.
-
-### 2. Увеличены требования к памяти
-
-Минимум: 1GB RAM (вместо 512MB)
-
-### 3. API изменения
-
-Некоторые устаревшие API удалены. Проверьте [changelog](https://github.com/opensearch-project/OpenSearch/releases/tag/3.3.2).
-
-## 🐛 Troubleshooting
-
-### Ошибка: "OutOfMemoryError"
-
-Увеличьте heap size:
+### OutOfMemoryError
 
 ```yaml
 environment:
   - "OPENSEARCH_JAVA_OPTS=-Xms2g -Xmx2g"
 ```
 
-### Ошибка: "UnsupportedClassVersionError"
+### UnsupportedClassVersionError
 
-Это означает старый JDK. Пересоберите Docker образ:
+Обновите образ без кеша:
 
 ```bash
-docker pull opensearchproject/opensearch:3.3.2 --no-cache
+docker pull opensearchproject/opensearch:3.7.0
+docker compose up -d --force-recreate opensearch
 ```
 
 ### Медленный старт
 
-OpenSearch 3.x требует больше времени на инициализацию (~60-90 сек).
+OpenSearch 3.x инициализируется 60–90 секунд. Дождитесь прохождения healthcheck в `docker compose ps`.
 
-## 🔙 Rollback
-
-Если что-то пошло не так:
+### OpenSearch не стартует после обновления
 
 ```bash
-# Вернуться на main с 2.11.0
-git checkout main
-docker-compose down -v
-docker-compose up -d
+docker compose down -v
+docker compose up -d
 ```
 
-## 📚 Ресурсы
+## Rollback
 
-- [OpenSearch 3.3.2 Release Notes](https://github.com/opensearch-project/OpenSearch/releases/tag/3.3.2)
-- [Migration Guide](https://opensearch.org/docs/latest/upgrade-to/upgrade-to/)
+```bash
+# Вернуться к предыдущей версии в docker-compose.yml, например 3.3.2
+docker compose down -v
+docker compose up -d
+```
+
+## Ресурсы
+
+- [OpenSearch 3.7.0 Release Notes](https://github.com/opensearch-project/OpenSearch/releases/tag/3.7.0)
+- [Migration Guide](https://docs.opensearch.org/latest/upgrade-to/upgrade-to/)
 - [What's New in 3.x](https://opensearch.org/blog/)
 - [Breaking Changes](https://github.com/opensearch-project/OpenSearch/blob/main/CHANGELOG.md)
 
-## ✅ Checklist
+## Checklist
 
 - [ ] Сделан backup данных (если нужно)
-- [ ] Остановлена старая версия
-- [ ] Скачаны образы 3.3.2
-- [ ] Запущена новая версия
-- [ ] Проверена версия (curl)
-- [ ] Проверен Dashboards (UI)
-- [ ] Проверена индексация
+- [ ] Остановлен текущий стек
+- [ ] Скачаны образы 3.7.0
+- [ ] Запущен обновлённый стек
+- [ ] Проверена версия (`curl http://localhost:9200`)
+- [ ] Проверен Dashboards (http://localhost:5601)
+- [ ] Проверена индексация cache-indexer
 
 ---
 
-**Версия:** 1.0  
-**Дата:** Декабрь 2025  
+**Версия документа:** 2.0  
+**Дата:** Июнь 2026  
 **Автор:** BSDM-Proxy Team
