@@ -133,6 +133,7 @@ struct ProxyService {
     http_cache: Arc<Cache<Arc<str>, CachedResponse>>,
     cache_config: CacheConfig,
     kafka_producer: Option<Arc<FutureProducer>>,
+    kafka_topic: String,
     http_client: hyper_util::client::legacy::Client<
         hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>,
         Body,
@@ -151,6 +152,7 @@ impl ProxyService {
         cert_cache: CertCache,
         cache_config: CacheConfig,
         kafka_brokers: Option<String>,
+        kafka_topic: String,
         metrics: Arc<Metrics>,
         mitm_enabled: bool,
         auth: Option<Arc<AuthManager>>,
@@ -164,7 +166,7 @@ impl ProxyService {
                 .set("compression.type", "snappy")
                 .set("batch.size", "32768")
                 .set("linger.ms", "5")
-                .set("acks", "0")
+                .set("acks", "1")
                 .create()
                 .ok()
                 .map(Arc::new)
@@ -186,6 +188,7 @@ impl ProxyService {
             http_cache,
             cache_config,
             kafka_producer,
+            kafka_topic,
             http_client,
             metrics,
             mitm_enabled,
@@ -392,10 +395,11 @@ impl ProxyService {
     fn send_to_kafka_async(&self, event: CacheEvent) {
         if let Some(producer) = self.kafka_producer.clone() {
             let metrics = self.metrics.clone();
+            let topic = self.kafka_topic.clone();
             tokio::spawn(async move {
                 match serde_json::to_string(&event) {
                     Ok(payload) => {
-                        let record = FutureRecord::to("cache-events")
+                        let record = FutureRecord::to(&topic)
                             .payload(&payload)
                             .key(&event.cache_key);
                         match producer.send(record, Duration::ZERO).await {
@@ -913,6 +917,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let cert_cache = CertCache::load_for_startup(mitm_enabled).await?;
     let kafka_brokers = std::env::var("KAFKA_BROKERS").ok();
+    let kafka_topic =
+        std::env::var("KAFKA_TOPIC").unwrap_or_else(|_| "cache-events".to_string());
     let cache_capacity = std::env::var("CACHE_CAPACITY")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -956,6 +962,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         cert_cache,
         cache_config.clone(),
         kafka_brokers,
+        kafka_topic,
         metrics.clone(),
         mitm_enabled,
         auth,

@@ -73,9 +73,17 @@ mod tests {
                     "method": { "type": "keyword" },
                     "status": { "type": "short" },
                     "cache_key": { "type": "keyword" },
+                    "cache_status": { "type": "keyword" },
                     "timestamp": { "type": "date", "format": "epoch_second" },
                     "headers": { "type": "object" },
-                    "body": { "type": "text" }
+                    "user_id": { "type": "keyword" },
+                    "username": { "type": "keyword" },
+                    "client_ip": { "type": "ip" },
+                    "domain": { "type": "keyword" },
+                    "response_size": { "type": "long" },
+                    "request_duration_ms": { "type": "long" },
+                    "content_type": { "type": "keyword" },
+                    "categories": { "type": "keyword" }
                 }
             }
         });
@@ -92,16 +100,18 @@ mod tests {
     fn test_bulk_action_format() {
         let index_name = "http-cache";
         let cache_key = "test-key-123";
+        let timestamp = 1700000001_u64;
+        let document_id = format!("{timestamp}:{cache_key}");
 
         let action = json!({
             "index": {
                 "_index": index_name,
-                "_id": cache_key
+                "_id": document_id
             }
         });
 
         assert_eq!(action["index"]["_index"], "http-cache");
-        assert_eq!(action["index"]["_id"], "test-key-123");
+        assert_eq!(action["index"]["_id"], "1700000001:test-key-123");
     }
 
     #[test]
