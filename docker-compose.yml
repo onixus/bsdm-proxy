@@ -96,6 +96,7 @@ services:
       - HTTP_PORT=1488
       - METRICS_PORT=9090
       - MITM_ENABLED=true
+      - AUTH_ENABLED=false
       - SHUTDOWN_TIMEOUT_SECONDS=30
       - RUST_LOG=info,bsdm_proxy=debug
       - RUST_BACKTRACE=1

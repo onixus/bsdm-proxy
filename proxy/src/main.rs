@@ -1,8 +1,11 @@
+mod auth_config;
 mod metrics;
 mod tls;
 
+use auth_config::load_auth_config;
 use base64::engine::general_purpose;
 use base64::Engine;
+use bsdm_proxy::{AuthManager, UserInfo};
 use bytes::Bytes;
 use hyper::body::Incoming;
 use hyper::header::{HeaderName, HeaderValue, AUTHORIZATION};
@@ -126,6 +129,7 @@ struct ProxyService {
     >,
     metrics: Arc<Metrics>,
     mitm_enabled: bool,
+    auth: Option<Arc<AuthManager>>,
 }
 
 impl ProxyService {
@@ -135,6 +139,7 @@ impl ProxyService {
         kafka_brokers: Option<String>,
         metrics: Arc<Metrics>,
         mitm_enabled: bool,
+        auth: Option<Arc<AuthManager>>,
     ) -> Self {
         let kafka_producer = kafka_brokers.and_then(|brokers| {
             ClientConfig::new()
@@ -171,7 +176,41 @@ impl ProxyService {
             http_client,
             metrics,
             mitm_enabled,
+            auth,
         }
+    }
+
+    async fn authenticate_proxy(
+        &self,
+        req: &Request<Incoming>,
+    ) -> Result<Option<Arc<UserInfo>>, Response<Body>> {
+        let Some(auth) = &self.auth else {
+            return Ok(None);
+        };
+        if !auth.is_enabled() {
+            return Ok(None);
+        }
+
+        let Some((username, password)) = auth.extract_credentials(req) else {
+            debug!("Proxy authentication required, credentials missing");
+            return Err(auth.create_auth_required_response());
+        };
+
+        match auth.authenticate(&username, &password).await {
+            Ok(user) => Ok(Some(Arc::new(user))),
+            Err(e) => {
+                warn!("Proxy authentication failed for {}: {}", username, e);
+                Err(auth.create_auth_required_response())
+            }
+        }
+    }
+
+    fn user_fields(user: Option<&UserInfo>) -> (Option<String>, Option<String>) {
+        user.map(|u| {
+            let name = u.username.clone();
+            (Some(name.clone()), Some(name))
+        })
+        .unwrap_or((None, None))
     }
 
     #[inline]
@@ -254,13 +293,22 @@ impl ProxyService {
         }
     }
 
-    async fn handle_request(&self, req: Request<Incoming>, client_ip: String) -> Response<Body> {
+    async fn handle_request(
+        &self,
+        req: Request<Incoming>,
+        client_ip: String,
+        proxy_user: Option<Arc<UserInfo>>,
+    ) -> Response<Body> {
         let mut guard = RequestMetricsGuard::new(self.metrics.clone(), req.method().to_string());
         let request_start = Instant::now();
         let method = req.method().to_string();
         let uri = req.uri().clone();
         let url = uri.to_string();
-        let (user_id, username) = Self::extract_user_info(&req);
+        let (user_id, username) = if let Some(user) = proxy_user.as_deref() {
+            Self::user_fields(Some(user))
+        } else {
+            Self::extract_user_info(&req)
+        };
         let cache_key = self.generate_cache_key(&method, &url);
 
         // Cache lookup with timing
@@ -691,12 +739,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         max_body_size,
     };
 
+    let auth_config = load_auth_config();
+    let auth = if auth_config.enabled {
+        Some(Arc::new(AuthManager::new(auth_config.clone())))
+    } else {
+        None
+    };
+
     let service = Arc::new(ProxyService::new(
         cert_cache,
         cache_config.clone(),
         kafka_brokers,
         metrics.clone(),
         mitm_enabled,
+        auth,
     ));
 
     let http_port = std::env::var("HTTP_PORT")
@@ -710,6 +766,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "🔐 MITM: {} (ports 443/8443)",
         if mitm_enabled { "enabled" } else { "disabled" }
     );
+    if auth_config.enabled {
+        info!(
+            "👤 Proxy auth: enabled (backend={}, realm={})",
+            auth_config.backend, auth_config.realm
+        );
+    } else {
+        info!("👤 Proxy auth: disabled");
+    }
     info!(
         "📦 Cache: {} entries, TTL: {:?}, max body: {}MB",
         service.http_cache.capacity(),
@@ -746,6 +810,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+
+    if let Some(auth_manager) = service.auth.clone() {
+        let mut auth_shutdown_rx = shutdown_rx.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(60));
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => auth_manager.cleanup_cache().await,
+                    changed = auth_shutdown_rx.changed() => {
+                        if changed.is_ok() && *auth_shutdown_rx.borrow() {
+                            debug!("Auth cache cleanup stopped");
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+    }
 
     loop {
         tokio::select! {
@@ -807,6 +889,7 @@ async fn handle_connect_tunnel(
     service: Arc<ProxyService>,
     client_ip: String,
     request_start: Instant,
+    proxy_user: Option<Arc<UserInfo>>,
 ) {
     let mut client_io = TokioIo::new(upgraded);
 
@@ -820,6 +903,7 @@ async fn handle_connect_tunnel(
                     service.metrics.upstream_connections_active.dec();
                     let duration_ms = request_start.elapsed().as_millis() as u64;
                     let domain = parse_authority(&authority).0;
+                    let (user_id, username) = ProxyService::user_fields(proxy_user.as_deref());
 
                     if let Ok(timestamp) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)
                     {
@@ -833,8 +917,8 @@ async fn handle_connect_tunnel(
                             cache_status: "BYPASS",
                             timestamp: timestamp.as_secs(),
                             headers: HashMap::new(),
-                            user_id: None,
-                            username: None,
+                            user_id,
+                            username,
                             client_ip,
                             domain,
                             response_size: bytes_u2c,
@@ -868,6 +952,7 @@ async fn handle_connect_mitm(
     authority: String,
     service: Arc<ProxyService>,
     client_ip: String,
+    proxy_user: Option<Arc<UserInfo>>,
 ) {
     let (domain, _port) = parse_authority(&authority);
 
@@ -907,6 +992,7 @@ async fn handle_connect_mitm(
         let service = service.clone();
         let client_ip = client_ip.clone();
         let authority = authority.clone();
+        let proxy_user = proxy_user.clone();
 
         async move {
             let req = match rewrite_mitm_request(req, &authority) {
@@ -919,7 +1005,7 @@ async fn handle_connect_mitm(
                 }
             };
 
-            Ok::<_, Infallible>(service.handle_request(req, client_ip).await)
+            Ok::<_, Infallible>(service.handle_request(req, client_ip, proxy_user).await)
         }
     });
 
@@ -961,17 +1047,25 @@ async fn handle_connection(
                     }
                 };
 
+                let proxy_user = match service.authenticate_proxy(&req).await {
+                    Ok(user) => user,
+                    Err(resp) => return Ok(resp),
+                };
+
                 tasks.spawn({
                     let service = service.clone();
                     let client_ip = client_ip.clone();
                     let authority = authority.clone();
+                    let proxy_user = proxy_user.clone();
                     async move {
                         match hyper::upgrade::on(req).await {
                             Ok(upgraded) => {
                                 let (_, port) = parse_authority(&authority);
                                 if service.mitm_enabled && should_mitm_port(port) {
-                                    handle_connect_mitm(upgraded, authority, service, client_ip)
-                                        .await;
+                                    handle_connect_mitm(
+                                        upgraded, authority, service, client_ip, proxy_user,
+                                    )
+                                    .await;
                                 } else {
                                     handle_connect_tunnel(
                                         upgraded,
@@ -979,6 +1073,7 @@ async fn handle_connection(
                                         service,
                                         client_ip,
                                         request_start,
+                                        proxy_user,
                                     )
                                     .await;
                                 }
@@ -1000,7 +1095,12 @@ async fn handle_connection(
                 return Ok::<_, Infallible>(response);
             }
 
-            Ok::<_, Infallible>(service.handle_request(req, client_ip).await)
+            let proxy_user = match service.authenticate_proxy(&req).await {
+                Ok(user) => user,
+                Err(resp) => return Ok(resp),
+            };
+
+            Ok::<_, Infallible>(service.handle_request(req, client_ip, proxy_user).await)
         }
     });
 
