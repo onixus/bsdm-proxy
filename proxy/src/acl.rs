@@ -13,6 +13,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::IpAddr;
+use std::sync::Mutex;
 use tracing::{debug, info, warn};
 
 /// Minutes since midnight for time-window matching (0–1439).
@@ -172,7 +173,7 @@ impl AclDecision {
 pub struct AclEngine {
     rules: Vec<AclRule>,
     default_action: AclAction,
-    regex_cache: HashMap<String, Regex>,
+    regex_cache: Mutex<HashMap<String, Regex>>,
 }
 
 impl AclEngine {
@@ -184,7 +185,7 @@ impl AclEngine {
         Self {
             rules: Vec::new(),
             default_action,
-            regex_cache: HashMap::new(),
+            regex_cache: Mutex::new(HashMap::new()),
         }
     }
 
@@ -205,9 +206,9 @@ impl AclEngine {
         self.rules.sort_by_key(|b| std::cmp::Reverse(b.priority));
     }
 
-    /// Check if request is allowed
+    /// Check if request is allowed (read-mostly; safe under `RwLock` read guard).
     pub fn check_access(
-        &mut self,
+        &self,
         url: &str,
         domain: &str,
         categories: &[&str],
@@ -262,7 +263,7 @@ impl AclEngine {
     /// Check if rule matches
     #[allow(clippy::too_many_arguments)]
     fn matches_rule(
-        &mut self,
+        &self,
         rule: &AclRule,
         url: &str,
         domain: &str,
@@ -328,17 +329,15 @@ impl AclEngine {
     }
 
     /// Match regex pattern
-    fn match_regex(&mut self, text: &str, pattern: &str) -> bool {
-        let regex = self
-            .regex_cache
-            .entry(pattern.to_string())
-            .or_insert_with(|| {
-                Regex::new(pattern).unwrap_or_else(|e| {
-                    warn!("Invalid regex pattern '{}': {}", pattern, e);
-                    #[allow(clippy::invalid_regex)]
-                    Regex::new("(?!)").expect("Failed to create never-matching regex")
-                })
-            });
+    fn match_regex(&self, text: &str, pattern: &str) -> bool {
+        let mut cache = self.regex_cache.lock().unwrap_or_else(|e| e.into_inner());
+        let regex = cache.entry(pattern.to_string()).or_insert_with(|| {
+            Regex::new(pattern).unwrap_or_else(|e| {
+                warn!("Invalid regex pattern '{}': {}", pattern, e);
+                #[allow(clippy::invalid_regex)]
+                Regex::new("(?!)").expect("Failed to create never-matching regex")
+            })
+        });
 
         regex.is_match(text)
     }

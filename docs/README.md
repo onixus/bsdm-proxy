@@ -17,6 +17,7 @@
 |----------|----------|
 | [authentication.md](authentication.md) | Аутентификация прокси (Basic, LDAP; NTLM — M2) |
 | [logging.md](logging.md) | Логирование (`RUST_LOG`, уровни, troubleshooting) |
+| [performance.md](performance.md) | Тюнинг RPS (`PERF_FAST_CACHE_HIT`, `WORKER_COUNT`, bench) |
 | [acl.md](acl.md) | Списки контроля доступа (ACL) |
 | [categorization.md](categorization.md) | Категоризация URL и threat intelligence |
 

@@ -60,6 +60,9 @@ pub struct Metrics {
     // Rate limit metrics
     pub rate_limit_rejected_total: CounterVec,
 
+    /// Requests that used the lightweight metrics fast path (no histograms).
+    pub requests_fast_total: Counter,
+
     // Hierarchy metrics (M2)
     pub hierarchy_resolutions_total: CounterVec,
     pub hierarchy_peer_requests_total: CounterVec,
@@ -266,6 +269,12 @@ impl Metrics {
         )?;
         registry.register(Box::new(rate_limit_rejected_total.clone()))?;
 
+        let requests_fast_total = Counter::new(
+            "bsdm_proxy_requests_fast_total",
+            "HTTP requests completed on the lightweight metrics fast path",
+        )?;
+        registry.register(Box::new(requests_fast_total.clone()))?;
+
         let hierarchy_resolutions_total = CounterVec::new(
             Opts::new(
                 "bsdm_proxy_hierarchy_resolutions_total",
@@ -331,6 +340,7 @@ impl Metrics {
             acl_rules_matched_total,
             acl_eval_duration_seconds,
             rate_limit_rejected_total,
+            requests_fast_total,
             hierarchy_resolutions_total,
             hierarchy_peer_requests_total,
             hierarchy_icp_queries_total,
@@ -428,6 +438,30 @@ impl RequestMetricsGuard {
         self.metrics
             .response_size_bytes
             .observe(response_size as f64);
+    }
+}
+
+/// Lightweight in-flight tracking without per-request histograms.
+pub struct FastRequestScope {
+    metrics: Arc<Metrics>,
+}
+
+impl FastRequestScope {
+    pub fn begin(metrics: Arc<Metrics>) -> Self {
+        metrics.requests_in_flight.inc();
+        Self { metrics }
+    }
+
+    pub fn finish_cache_hit(self) {
+        self.metrics.requests_in_flight.dec();
+        self.metrics.cache_hits_total.inc();
+        self.metrics.requests_fast_total.inc();
+    }
+
+    pub fn finish(self, status_code: u16) {
+        self.metrics.requests_in_flight.dec();
+        let _ = status_code;
+        self.metrics.requests_fast_total.inc();
     }
 }
 

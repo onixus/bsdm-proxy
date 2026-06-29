@@ -14,8 +14,8 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
-use tokio::sync::Mutex;
-use tracing::{error, info, warn};
+use tokio::sync::RwLock;
+use tracing::{debug, error, info, warn};
 
 use crate::acl::{AclAction, AclDecision, AclEngine};
 use crate::auth::{AuthManager, UserInfo};
@@ -25,9 +25,10 @@ use crate::categorization::{CategorizationEngine, Category};
 use crate::hierarchy::{HierarchyManager, HierarchyResult};
 use crate::http_types::Body;
 use crate::l2_cache::RedisL2Cache;
-use crate::metrics::{Metrics, RequestMetricsGuard};
+use crate::metrics::{FastRequestScope, Metrics, RequestMetricsGuard};
 use crate::peer_fetch::fetch_via_peer;
 use crate::peers::CachePeer;
+use crate::perf::PerfConfig;
 use crate::pipeline::{
     create_kafka_producer, flush_kafka, new_event_id, send_to_kafka_async, CacheEvent,
 };
@@ -36,7 +37,7 @@ use crate::tls::CertCache;
 use crate::upstream::{build_upstream_https_connector, UpstreamTlsConfig};
 
 pub struct ProxyPolicy {
-    pub acl_engine: Option<Arc<Mutex<AclEngine>>>,
+    pub acl_engine: Option<Arc<RwLock<AclEngine>>>,
     pub categorization: Option<Arc<CategorizationEngine>>,
 }
 
@@ -52,10 +53,11 @@ pub struct ProxyService {
     pub(crate) metrics: Arc<Metrics>,
     pub(crate) mitm_enabled: bool,
     auth: Option<Arc<AuthManager>>,
-    acl_engine: Option<Arc<Mutex<AclEngine>>>,
+    acl_engine: Option<Arc<RwLock<AclEngine>>>,
     categorization: Option<Arc<CategorizationEngine>>,
     hierarchy: Option<Arc<HierarchyManager>>,
     rate_limiter: Arc<RateLimiter>,
+    perf: PerfConfig,
 }
 
 impl ProxyService {
@@ -69,6 +71,10 @@ impl ProxyService {
 
     pub fn metrics(&self) -> Arc<Metrics> {
         self.metrics.clone()
+    }
+
+    pub fn http_preserve_header_case(&self) -> bool {
+        self.perf.http_preserve_header_case
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -85,6 +91,7 @@ impl ProxyService {
         hierarchy: Option<Arc<HierarchyManager>>,
         rate_limit_config: crate::rate_limit::RateLimitConfig,
         upstream_tls: UpstreamTlsConfig,
+        perf: PerfConfig,
     ) -> Self {
         let kafka_producer = kafka_brokers.as_deref().and_then(create_kafka_producer);
 
@@ -113,6 +120,7 @@ impl ProxyService {
             categorization: policy.categorization.clone(),
             hierarchy,
             rate_limiter: Arc::new(RateLimiter::new(rate_limit_config)),
+            perf,
         }
     }
 
@@ -178,34 +186,36 @@ impl ProxyService {
         }
     }
 
-    pub(crate) async fn check_policy(
+    async fn categorize_url(&self, url: &str) -> Vec<String> {
+        let Some(engine) = &self.categorization else {
+            return Vec::new();
+        };
+        let result = engine.categorize(url).await;
+        result
+            .categories
+            .iter()
+            .map(Category::acl_name)
+            .filter(|name| !name.is_empty())
+            .collect()
+    }
+
+    async fn check_acl(
         &self,
         url: &str,
         domain: &str,
+        category_names: &[String],
         username: Option<&str>,
         groups: &[&str],
         client_ip: &str,
-    ) -> (Option<AclDecision>, Vec<String>) {
-        let eval_start = Instant::now();
-        let mut category_names = Vec::new();
-
-        if let Some(engine) = &self.categorization {
-            let result = engine.categorize(url).await;
-            category_names = result
-                .categories
-                .iter()
-                .map(Category::acl_name)
-                .filter(|name| !name.is_empty())
-                .collect();
-        }
-
+    ) -> Option<AclDecision> {
         let Some(acl_engine) = &self.acl_engine else {
-            return (None, category_names);
+            return None;
         };
 
+        let eval_start = Instant::now();
         let category_refs: Vec<&str> = category_names.iter().map(String::as_str).collect();
         let decision = {
-            let mut engine = acl_engine.lock().await;
+            let engine = acl_engine.read().await;
             engine.check_access(
                 url,
                 domain,
@@ -232,11 +242,71 @@ impl ProxyService {
         }
 
         if decision.action == AclAction::Allow {
-            (None, category_names)
+            None
         } else {
             info!("ACL {} for {}: {}", decision.action, url, decision.reason);
-            (Some(decision), category_names)
+            Some(decision)
         }
+    }
+
+    pub(crate) async fn check_policy(
+        &self,
+        url: &str,
+        domain: &str,
+        username: Option<&str>,
+        groups: &[&str],
+        client_ip: &str,
+    ) -> (Option<AclDecision>, Vec<String>) {
+        let category_names = self.categorize_url(url).await;
+        let decision = self
+            .check_acl(url, domain, &category_names, username, groups, client_ip)
+            .await;
+        (decision, category_names)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn serve_l1_hit(
+        &self,
+        cached: &CachedResponse,
+        cache_key: &Arc<str>,
+        url: &str,
+        method: &str,
+        user_id: &Option<String>,
+        username: &Option<String>,
+        client_ip: &str,
+        categories: &[String],
+        request_start: Instant,
+        detailed_metrics: bool,
+        guard: &mut Option<RequestMetricsGuard>,
+        fast_scope: &mut Option<FastRequestScope>,
+    ) -> Response<Body> {
+        if detailed_metrics {
+            if let Some(g) = guard.as_mut() {
+                g.set_cache_status("HIT");
+            }
+            self.metrics.cache_hits_total.inc();
+            self.emit_cache_hit_event(
+                url,
+                method,
+                cache_key,
+                "HIT",
+                cached,
+                user_id,
+                username,
+                client_ip,
+                categories,
+                request_start,
+            );
+        } else if let Some(scope) = fast_scope.take() {
+            scope.finish_cache_hit();
+        }
+
+        let response = cached.to_response();
+        let body_size = cached.response_body_len();
+        if let Some(g) = guard.take() {
+            g.finish(cached.status, 0, body_size);
+        }
+        response
     }
 
     pub(crate) fn policy_response(decision: &AclDecision) -> Response<Body> {
@@ -399,6 +469,9 @@ impl ProxyService {
     }
 
     pub(crate) fn send_cache_event(&self, event: CacheEvent) {
+        if !self.perf.should_emit_kafka_event() {
+            return;
+        }
         if let Some(producer) = self.kafka_producer.clone() {
             send_to_kafka_async(
                 producer,
@@ -417,17 +490,72 @@ impl ProxyService {
         flush_kafka(producer, timeout).await;
     }
 
+    fn finish_request_metrics(
+        guard: &mut Option<RequestMetricsGuard>,
+        fast_scope: &mut Option<FastRequestScope>,
+        status: u16,
+        request_size: usize,
+        response_size: usize,
+    ) {
+        if let Some(g) = guard.take() {
+            g.finish(status, request_size, response_size);
+        } else if let Some(scope) = fast_scope.take() {
+            scope.finish(status);
+        }
+    }
+
     pub(crate) async fn handle_request(
         &self,
         req: Request<Incoming>,
         client_ip: String,
         proxy_user: Option<Arc<UserInfo>>,
     ) -> Response<Body> {
-        let mut guard = RequestMetricsGuard::new(self.metrics.clone(), req.method().to_string());
-        let request_start = Instant::now();
-        let method = req.method().to_string();
-        let uri = req.uri().clone();
+        let detailed_metrics = self.perf.record_detailed_metrics();
+        let http_method = req.method().clone();
+        let method = http_method.as_str();
+        let uri = req.uri();
         let url = uri.to_string();
+
+        let mut guard = if detailed_metrics {
+            Some(RequestMetricsGuard::new(
+                self.metrics.clone(),
+                method.to_string(),
+            ))
+        } else {
+            None
+        };
+        let mut fast_scope = if detailed_metrics {
+            None
+        } else {
+            Some(FastRequestScope::begin(self.metrics.clone()))
+        };
+
+        let request_start = Instant::now();
+
+        let cache_key = self.generate_cache_key(method, &url);
+
+        if self.perf.fast_cache_hit {
+            if let Some(cached) = self.http_cache.get(&cache_key) {
+                if !cached.is_expired() {
+                    debug!("Cache HIT (fast path): {} {}", method, url);
+                    return self.serve_l1_hit(
+                        &cached,
+                        &cache_key,
+                        &url,
+                        method,
+                        &None,
+                        &None,
+                        &client_ip,
+                        &[],
+                        request_start,
+                        false,
+                        &mut guard,
+                        &mut fast_scope,
+                    );
+                }
+            }
+        }
+
         let (user_id, username) = if let Some(user) = proxy_user.as_deref() {
             Self::user_fields(Some(user))
         } else {
@@ -435,45 +563,74 @@ impl ProxyService {
         };
 
         if let Some(resp) = self.check_rate_limit(&client_ip, username.as_deref()) {
-            guard.finish(429, 0, 0);
+            if let Some(g) = guard.take() {
+                g.finish(429, 0, 0);
+            } else if let Some(scope) = fast_scope.take() {
+                scope.finish(429);
+            }
             return resp;
         }
-
-        let domain = Self::extract_domain(&url);
 
         let user_groups: Vec<&str> = proxy_user
             .as_deref()
             .map(|u| u.groups.iter().map(String::as_str).collect())
             .unwrap_or_default();
 
+        let domain = Self::extract_domain(&url);
         let (policy_decision, categories) = self
             .check_policy(&url, &domain, username.as_deref(), &user_groups, &client_ip)
             .await;
         if let Some(decision) = policy_decision {
             let response = Self::policy_response(&decision);
-            guard.finish(response.status().as_u16(), 0, 0);
+            if let Some(g) = guard.take() {
+                g.finish(response.status().as_u16(), 0, 0);
+            } else if let Some(scope) = fast_scope.take() {
+                scope.finish(response.status().as_u16());
+            }
             return response;
         }
 
-        let cache_key = self.generate_cache_key(&method, &url);
-
-        // Cache lookup with timing
         let cache_lookup_start = Instant::now();
         if let Some(cached) = self.http_cache.get(&cache_key) {
-            self.metrics
-                .cache_lookup_duration_seconds
-                .observe(cache_lookup_start.elapsed().as_secs_f64());
+            if detailed_metrics {
+                self.metrics
+                    .cache_lookup_duration_seconds
+                    .observe(cache_lookup_start.elapsed().as_secs_f64());
+            }
 
             if !cached.is_expired() {
-                info!("Cache HIT: {} {}", method, url);
-                self.metrics.cache_hits_total.inc();
-                guard.set_cache_status("HIT");
+                debug!("Cache HIT: {} {}", method, url);
+                return self.serve_l1_hit(
+                    &cached,
+                    &cache_key,
+                    &url,
+                    method,
+                    &user_id,
+                    &username,
+                    &client_ip,
+                    &categories,
+                    request_start,
+                    detailed_metrics,
+                    &mut guard,
+                    &mut fast_scope,
+                );
+            }
+        }
 
+        if let Some(cached) = self.try_l2_cache_get(&cache_key).await {
+            debug!("Cache L2 HIT: {} {}", method, url);
+            self.http_cache.insert(cache_key.clone(), cached.clone());
+            if let Some(g) = guard.as_mut() {
+                g.set_cache_status("L2_HIT");
+                self.metrics.cache_hits_total.inc();
+            }
+
+            if detailed_metrics {
                 self.emit_cache_hit_event(
                     &url,
-                    &method,
+                    method,
                     &cache_key,
-                    "HIT",
+                    "L2_HIT",
                     &cached,
                     &user_id,
                     &username,
@@ -481,45 +638,27 @@ impl ProxyService {
                     &categories,
                     request_start,
                 );
-                let response = cached.to_response();
-                let body_size = cached.response_body_len();
-                guard.finish(cached.status, 0, body_size);
-                return response;
             }
-        }
-
-        if let Some(cached) = self.try_l2_cache_get(&cache_key).await {
-            info!("Cache L2 HIT: {} {}", method, url);
-            self.http_cache.insert(cache_key.clone(), cached.clone());
-            guard.set_cache_status("L2_HIT");
-
-            self.emit_cache_hit_event(
-                &url,
-                &method,
-                &cache_key,
-                "L2_HIT",
-                &cached,
-                &user_id,
-                &username,
-                &client_ip,
-                &categories,
-                request_start,
-            );
 
             let response = cached.to_response_with_cache_status("L2-HIT");
             let body_size = cached.response_body_len();
-            guard.finish(cached.status, 0, body_size);
+            if let Some(g) = guard.take() {
+                g.finish(cached.status, 0, body_size);
+            } else if let Some(scope) = fast_scope.take() {
+                scope.finish_cache_hit();
+            }
             return response;
         }
 
-        self.metrics
-            .cache_lookup_duration_seconds
-            .observe(cache_lookup_start.elapsed().as_secs_f64());
+        if detailed_metrics {
+            self.metrics
+                .cache_lookup_duration_seconds
+                .observe(cache_lookup_start.elapsed().as_secs_f64());
+        }
 
-        info!("Cache MISS: {} {}", method, url);
+        debug!("Cache MISS: {} {}", method, url);
         self.metrics.cache_misses_total.inc();
 
-        // Request to upstream
         let (parts, body) = req.into_parts();
         let body_bytes = match http_body_util::BodyExt::collect(body).await {
             Ok(collected) => collected.to_bytes(),
@@ -527,7 +666,7 @@ impl ProxyService {
                 error!("Body collection failed: {}", e);
                 let mut resp = Response::new(Body::new(Bytes::from_static(b"400 Bad Request")));
                 *resp.status_mut() = StatusCode::BAD_REQUEST;
-                guard.finish(400, 0, 15);
+                Self::finish_request_metrics(&mut guard, &mut fast_scope, 400, 0, 15);
                 return resp;
             }
         };
@@ -538,7 +677,7 @@ impl ProxyService {
         let upstream_start = Instant::now();
 
         let peer_fetch = self
-            .try_fetch_via_hierarchy(&method, &url, req.clone())
+            .try_fetch_via_hierarchy(method, &url, req.clone())
             .await;
         let hierarchy_peer = peer_fetch.as_ref().map(|(peer, _)| peer.clone());
 
@@ -584,7 +723,13 @@ impl ProxyService {
                         let mut resp =
                             Response::new(Body::new(Bytes::from_static(b"502 Bad Gateway")));
                         *resp.status_mut() = StatusCode::BAD_GATEWAY;
-                        guard.finish(502, request_body_size, 15);
+                        Self::finish_request_metrics(
+                            &mut guard,
+                            &mut fast_scope,
+                            502,
+                            request_body_size,
+                            15,
+                        );
                         return resp;
                     }
                 };
@@ -597,7 +742,7 @@ impl ProxyService {
                 }
 
                 let cache_status = if is_cacheable(
-                    &method,
+                    method,
                     status.as_u16(),
                     body_size,
                     self.cache_config.max_body_size,
@@ -615,18 +760,22 @@ impl ProxyService {
                         &self.cache_config.compression,
                     );
                     self.store_in_l1_and_l2(cache_key.clone(), cached_response);
-                    guard.set_cache_status("MISS");
+                    if let Some(g) = guard.as_mut() {
+                        g.set_cache_status("MISS");
+                    }
                     "MISS"
                 } else {
                     self.metrics.cache_bypasses_total.inc();
-                    guard.set_cache_status("BYPASS");
+                    if let Some(g) = guard.as_mut() {
+                        g.set_cache_status("BYPASS");
+                    }
                     "BYPASS"
                 };
 
                 if let Ok(timestamp) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
                     let event = CacheEvent {
                         url: url.clone(),
-                        method: method.clone(),
+                        method: method.to_string(),
                         status: status.as_u16(),
                         cache_key: cache_key.to_string(),
                         cache_status,
@@ -656,7 +805,13 @@ impl ProxyService {
                         resp.headers_mut().insert(name, val);
                     }
                 }
-                guard.finish(status.as_u16(), request_body_size, body_size);
+                Self::finish_request_metrics(
+                    &mut guard,
+                    &mut fast_scope,
+                    status.as_u16(),
+                    request_body_size,
+                    body_size,
+                );
                 resp
             }
             Err(e) => {
@@ -667,7 +822,13 @@ impl ProxyService {
                     .inc();
                 let mut response = Response::new(Body::new(Bytes::from_static(b"502 Bad Gateway")));
                 *response.status_mut() = StatusCode::BAD_GATEWAY;
-                guard.finish(502, request_body_size, 15);
+                Self::finish_request_metrics(
+                    &mut guard,
+                    &mut fast_scope,
+                    502,
+                    request_body_size,
+                    15,
+                );
                 response
             }
         }
