@@ -1,0 +1,74 @@
+name: E2E and Smoke Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  smoke:
+    name: Smoke Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libssl-dev \
+            pkg-config \
+            cmake \
+            librdkafka-dev \
+            libclang-dev
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build proxy binary
+        run: cargo build -p bsdm-proxy --bin proxy
+
+      - name: Run smoke tests
+        run: cargo test -p bsdm-proxy-e2e --test smoke
+
+  e2e:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libssl-dev \
+            pkg-config \
+            cmake \
+            librdkafka-dev \
+            libclang-dev
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build proxy binary
+        run: cargo build -p bsdm-proxy --bin proxy
+
+      - name: Run E2E tests
+        run: cargo test -p bsdm-proxy-e2e --test e2e

@@ -609,16 +609,18 @@ async fn metrics_server(
     metrics: Arc<Metrics>,
     draining: Arc<AtomicBool>,
     mut shutdown_rx: watch::Receiver<bool>,
+    metrics_port: u16,
 ) {
-    let listener = match TcpListener::bind("0.0.0.0:9090").await {
+    let bind_addr = format!("0.0.0.0:{}", metrics_port);
+    let listener = match TcpListener::bind(&bind_addr).await {
         Ok(l) => l,
         Err(e) => {
-            error!("Failed to bind metrics server: {}", e);
+            error!("Failed to bind metrics server on {}: {}", bind_addr, e);
             return;
         }
     };
 
-    info!("📊 Metrics server started on 0.0.0.0:9090");
+    info!("📊 Metrics server started on {}", bind_addr);
 
     loop {
         tokio::select! {
@@ -810,10 +812,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or(30);
     let shutdown_timeout = Duration::from_secs(shutdown_timeout_secs);
 
+    let metrics_port = std::env::var("METRICS_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(9090);
+
     tokio::spawn(metrics_server(
         metrics.clone(),
         draining.clone(),
         shutdown_rx.clone(),
+        metrics_port,
     ));
 
     let ca_key = tokio::fs::read("/certs/ca.key").await.or_else(|_| {

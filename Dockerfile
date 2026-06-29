@@ -49,7 +49,8 @@ RUN cargo build --release --target x86_64-unknown-linux-musl
 FROM alpine:3.21 AS proxy
 RUN apk add --no-cache \
     ca-certificates \
-    libgcc
+    libgcc \
+    wget
 
 # Копируем скомпилированный бинарник
 COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/proxy /usr/local/bin/proxy
