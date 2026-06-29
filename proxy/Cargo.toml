@@ -14,12 +14,13 @@ hyper-util = { version = "0.1", features = ["full"] }
 tokio = { version = "1", features = ["full"] }
 http-body-util = "0.1"
 quick_cache = "0.6"
-rcgen = "0.13"
+rcgen = { version = "0.13", features = ["x509-parser"] }
 rdkafka = "0.38"
 prometheus = { version = "0.13", features = ["process"] }
 tokio-rustls = { version = "0.26", features = ["ring"] }
-rustls = "0.23"
+rustls = { version = "0.23", features = ["ring"] }
 rustls-pemfile = "2.1"
+hyper-rustls = { version = "0.27", default-features = false, features = ["http1", "ring", "tls12", "webpki-roots"] }
 sha2 = "0.10"
 base64 = "0.22"
 url = "2.5"

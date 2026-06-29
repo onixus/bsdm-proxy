@@ -1,4 +1,5 @@
 mod metrics;
+mod tls;
 
 use base64::engine::general_purpose;
 use base64::Engine;
@@ -11,10 +12,6 @@ use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use metrics::{Metrics, RequestMetricsGuard};
 use quick_cache::sync::Cache;
-use rcgen::{
-    BasicConstraints, Certificate, CertificateParams, DistinguishedName, DnType, IsCa, KeyPair,
-    KeyUsagePurpose,
-};
 use rdkafka::config::ClientConfig;
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use serde::Serialize;
@@ -25,13 +22,12 @@ use std::net::SocketAddr;
 use std::panic;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
+use tls::{parse_authority, rewrite_mitm_request, should_mitm_port, CertCache};
 use tokio::io::copy_bidirectional;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::RwLock;
+use tokio_rustls::TlsAcceptor;
 use tracing::{debug, error, info, warn};
 
-type CertPair = (Bytes, Bytes);
-type CertMap = Arc<RwLock<HashMap<Arc<str>, CertPair>>>;
 type Body = http_body_util::Full<Bytes>;
 
 const CACHEABLE_METHODS: &[&str] = &["GET", "HEAD"];
@@ -70,76 +66,6 @@ impl CachedResponse {
 
         headers_mut.insert("x-cache-status", HeaderValue::from_static("HIT"));
         response
-    }
-}
-
-#[derive(Clone)]
-struct CertCache {
-    certs: CertMap,
-    ca_cert: Arc<Certificate>,
-    ca_key: Arc<KeyPair>,
-}
-
-impl CertCache {
-    fn new(ca_key_pem: Vec<u8>) -> Self {
-        let ca_key = Arc::new(
-            KeyPair::from_pem(&String::from_utf8_lossy(&ca_key_pem))
-                .expect("CA key parse failed"),
-        );
-
-        let mut ca_params = CertificateParams::new(vec!["BSDM Proxy CA".to_string()])
-            .expect("Failed to create CA params");
-        ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
-        ca_params.key_usages = vec![
-            KeyUsagePurpose::KeyCertSign,
-            KeyUsagePurpose::DigitalSignature,
-        ];
-        ca_params.distinguished_name = DistinguishedName::new();
-        ca_params
-            .distinguished_name
-            .push(DnType::CommonName, "BSDM Proxy CA");
-
-        let ca_cert = Arc::new(
-            ca_params
-                .self_signed(&ca_key)
-                .expect("CA cert instance failed"),
-        );
-
-        Self {
-            certs: Arc::new(RwLock::new(HashMap::new())),
-            ca_cert,
-            ca_key,
-        }
-    }
-
-    async fn get_or_generate(&self, domain: &str) -> Result<CertPair, Box<dyn std::error::Error>> {
-        let domain_arc: Arc<str> = domain.into();
-
-        {
-            let cache = self.certs.read().await;
-            if let Some(cert) = cache.get(&domain_arc) {
-                debug!("Certificate cache HIT for {}", domain);
-                return Ok(cert.clone());
-            }
-        }
-
-        debug!("Certificate cache MISS for {}, generating...", domain);
-        let key_pair = KeyPair::generate()?;
-        let mut params = CertificateParams::new(vec![domain.to_string()])?;
-        params.distinguished_name = DistinguishedName::new();
-        params.distinguished_name.push(DnType::CommonName, domain);
-        params
-            .distinguished_name
-            .push(DnType::OrganizationName, "BSDM Proxy");
-
-        let cert = params.self_signed(&key_pair)?;
-        let cert_pem = Bytes::from(cert.pem().into_bytes());
-        let key_pem = Bytes::from(key_pair.serialize_pem().into_bytes());
-
-        let cert_pair = (cert_pem, key_pem);
-        let mut cache = self.certs.write().await;
-        cache.insert(domain_arc, cert_pair.clone());
-        Ok(cert_pair)
     }
 }
 
@@ -191,8 +117,9 @@ struct ProxyService {
     cache_config: CacheConfig,
     kafka_producer: Option<Arc<FutureProducer>>,
     http_client:
-        hyper_util::client::legacy::Client<hyper_util::client::legacy::connect::HttpConnector, Body>,
+        hyper_util::client::legacy::Client<hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>, Body>,
     metrics: Arc<Metrics>,
+    mitm_enabled: bool,
 }
 
 impl ProxyService {
@@ -201,6 +128,7 @@ impl ProxyService {
         cache_config: CacheConfig,
         kafka_brokers: Option<String>,
         metrics: Arc<Metrics>,
+        mitm_enabled: bool,
     ) -> Self {
         let kafka_producer = kafka_brokers.and_then(|brokers| {
             ClientConfig::new()
@@ -217,12 +145,18 @@ impl ProxyService {
 
         let http_cache = Arc::new(Cache::new(cache_config.capacity));
 
+        let https = hyper_rustls::HttpsConnectorBuilder::new()
+            .with_webpki_roots()
+            .https_or_http()
+            .enable_http1()
+            .build();
+
         let http_client = hyper_util::client::legacy::Client::builder(
             hyper_util::rt::TokioExecutor::new(),
         )
         .pool_idle_timeout(Duration::from_secs(90))
         .pool_max_idle_per_host(32)
-        .build_http();
+        .build(https);
 
         Self {
             cert_cache,
@@ -231,6 +165,7 @@ impl ProxyService {
             kafka_producer,
             http_client,
             metrics,
+            mitm_enabled,
         }
     }
 
@@ -605,6 +540,10 @@ async fn metrics_server(metrics: Arc<Metrics>) {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -624,8 +563,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         warn!("Failed to read /certs/ca.key, trying ./certs/ca.key");
         std::fs::read("./certs/ca.key")
     })?;
-    
-    let cert_cache = CertCache::new(ca_key);
+
+    let ca_cert = tokio::fs::read("/certs/ca.crt").await.or_else(|_| {
+        warn!("Failed to read /certs/ca.crt, trying ./certs/ca.crt");
+        std::fs::read("./certs/ca.crt")
+    }).unwrap_or_default();
+
+    let cert_cache = CertCache::from_pem(&ca_key, &ca_cert)?;
+    let mitm_enabled = std::env::var("MITM_ENABLED")
+        .map(|v| !matches!(v.to_ascii_lowercase().as_str(), "0" | "false" | "no"))
+        .unwrap_or(true);
     let kafka_brokers = std::env::var("KAFKA_BROKERS").ok();
     let cache_capacity = std::env::var("CACHE_CAPACITY")
         .ok()
@@ -651,6 +598,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         cache_config.clone(),
         kafka_brokers,
         metrics.clone(),
+        mitm_enabled,
     ));
     
     let http_port = std::env::var("HTTP_PORT")
@@ -660,6 +608,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let listener = TcpListener::bind(format!("0.0.0.0:{}", http_port)).await?;
     info!("🚀 BSDM-Proxy v2.0 (optimized) on 0.0.0.0:{}", http_port);
+    info!(
+        "🔐 MITM: {} (ports 443/8443)",
+        if mitm_enabled { "enabled" } else { "disabled" }
+    );
     info!(
         "📦 Cache: {} entries, TTL: {:?}, max body: {}MB",
         service.http_cache.capacity(),
@@ -700,6 +652,138 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
+async fn handle_connect_tunnel(
+    upgraded: hyper::upgrade::Upgraded,
+    authority: String,
+    service: Arc<ProxyService>,
+    client_ip: String,
+    request_start: Instant,
+) {
+    let mut client_io = TokioIo::new(upgraded);
+
+    match TcpStream::connect(&authority).await {
+        Ok(mut upstream) => {
+            service.metrics.upstream_connections_created.inc();
+            service.metrics.upstream_connections_active.inc();
+
+            match copy_bidirectional(&mut client_io, &mut upstream).await {
+                Ok((bytes_c2u, bytes_u2c)) => {
+                    service.metrics.upstream_connections_active.dec();
+                    let duration_ms = request_start.elapsed().as_millis() as u64;
+                    let domain = parse_authority(&authority).0;
+
+                    if let Ok(timestamp) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
+                        let event = CacheEvent {
+                            url: format!("https://{}", authority),
+                            method: "CONNECT".to_string(),
+                            status: 200,
+                            cache_key: service
+                                .generate_cache_key("CONNECT", &authority)
+                                .to_string(),
+                            cache_status: "BYPASS",
+                            timestamp: timestamp.as_secs(),
+                            headers: HashMap::new(),
+                            user_id: None,
+                            username: None,
+                            client_ip,
+                            domain,
+                            response_size: bytes_u2c,
+                            request_duration_ms: duration_ms,
+                            content_type: None,
+                            user_agent: None,
+                        };
+                        service.send_to_kafka_async(event);
+                    }
+                    debug!("CONNECT tunnel closed: {}↑ {}↓", bytes_c2u, bytes_u2c);
+                }
+                Err(e) => {
+                    error!("CONNECT copy failed: {}", e);
+                    service.metrics.upstream_connections_active.dec();
+                }
+            }
+        }
+        Err(e) => {
+            error!("CONNECT upstream failed: {}", e);
+            service
+                .metrics
+                .upstream_errors_total
+                .with_label_values(&[&authority, "connect"])
+                .inc();
+        }
+    }
+}
+
+async fn handle_connect_mitm(
+    upgraded: hyper::upgrade::Upgraded,
+    authority: String,
+    service: Arc<ProxyService>,
+    client_ip: String,
+) {
+    let (domain, _port) = parse_authority(&authority);
+
+    let server_config = match service.cert_cache.server_config_for_domain(&domain).await {
+        Ok(config) => config,
+        Err(e) => {
+            error!("Failed to build TLS config for {}: {}", domain, e);
+            return;
+        }
+    };
+
+    let tls_acceptor = TlsAcceptor::from(server_config);
+    let tls_stream = match tls_acceptor.accept(TokioIo::new(upgraded)).await {
+        Ok(stream) => {
+            service
+                .metrics
+                .tls_handshakes_total
+                .with_label_values(&["success"])
+                .inc();
+            stream
+        }
+        Err(e) => {
+            service
+                .metrics
+                .tls_handshakes_total
+                .with_label_values(&["error"])
+                .inc();
+            error!("TLS handshake failed for {}: {}", domain, e);
+            return;
+        }
+    };
+
+    info!("MITM session established for {}", authority);
+    let authority_log = authority.clone();
+    let io = TokioIo::new(tls_stream);
+    let svc = service_fn(move |req: Request<Incoming>| {
+        let service = service.clone();
+        let client_ip = client_ip.clone();
+        let authority = authority.clone();
+
+        async move {
+            let req = match rewrite_mitm_request(req, &authority) {
+                Ok(req) => req,
+                Err(e) => {
+                    error!("Failed to rewrite MITM request for {}: {}", authority, e);
+                    let mut resp =
+                        Response::new(Body::new(Bytes::from_static(b"400 Bad Request")));
+                    *resp.status_mut() = StatusCode::BAD_REQUEST;
+                    return Ok::<_, Infallible>(resp);
+                }
+            };
+
+            Ok::<_, Infallible>(service.handle_request(req, client_ip).await)
+        }
+    });
+
+    if let Err(e) = http1::Builder::new()
+        .preserve_header_case(true)
+        .title_case_headers(true)
+        .serve_connection(io, svc)
+        .await
+    {
+        debug!("MITM connection closed for {}: {}", authority_log, e);
+    }
+}
+
 async fn handle_connection(
     stream: TcpStream,
     addr: SocketAddr,
@@ -729,69 +813,23 @@ async fn handle_connection(
                 tokio::spawn({
                     let service = service.clone();
                     let client_ip = client_ip.clone();
+                    let authority = authority.clone();
                     async move {
                         match hyper::upgrade::on(req).await {
                             Ok(upgraded) => {
-                                let mut client_io = TokioIo::new(upgraded);
-
-                                match TcpStream::connect(&authority).await {
-                                    Ok(mut upstream) => {
-                                        service.metrics.upstream_connections_created.inc();
-                                        service.metrics.upstream_connections_active.inc();
-
-                                        match copy_bidirectional(&mut client_io, &mut upstream)
-                                            .await
-                                        {
-                                            Ok((bytes_c2u, bytes_u2c)) => {
-                                                service.metrics.upstream_connections_active.dec();
-                                                let duration_ms =
-                                                    request_start.elapsed().as_millis() as u64;
-                                                let domain = authority
-                                                    .split(':')
-                                                    .next()
-                                                    .unwrap_or("unknown")
-                                                    .to_string();
-
-                                                if let Ok(timestamp) = SystemTime::now()
-                                                    .duration_since(SystemTime::UNIX_EPOCH)
-                                                {
-                                                    let event = CacheEvent {
-                                                        url: format!("https://{}", authority),
-                                                        method: "CONNECT".to_string(),
-                                                        status: 200,
-                                                        cache_key: service
-                                                            .generate_cache_key("CONNECT", &authority)
-                                                            .to_string(),
-                                                        cache_status: "BYPASS",
-                                                        timestamp: timestamp.as_secs(),
-                                                        headers: HashMap::new(),
-                                                        user_id: None,
-                                                        username: None,
-                                                        client_ip,
-                                                        domain,
-                                                        response_size: bytes_u2c,
-                                                        request_duration_ms: duration_ms,
-                                                        content_type: None,
-                                                        user_agent: None,
-                                                    };
-                                                    service.send_to_kafka_async(event);
-                                                }
-                                                debug!("CONNECT closed: {}↑ {}↓", bytes_c2u, bytes_u2c);
-                                            }
-                                            Err(e) => {
-                                                error!("CONNECT copy failed: {}", e);
-                                                service.metrics.upstream_connections_active.dec();
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        error!("CONNECT upstream failed: {}", e);
-                                        service
-                                            .metrics
-                                            .upstream_errors_total
-                                            .with_label_values(&[&authority, "connect"])
-                                            .inc();
-                                    }
+                                let (_, port) = parse_authority(&authority);
+                                if service.mitm_enabled && should_mitm_port(port) {
+                                    handle_connect_mitm(upgraded, authority, service, client_ip)
+                                        .await;
+                                } else {
+                                    handle_connect_tunnel(
+                                        upgraded,
+                                        authority,
+                                        service,
+                                        client_ip,
+                                        request_start,
+                                    )
+                                    .await;
                                 }
                             }
                             Err(e) => error!("Upgrade failed: {}", e),
