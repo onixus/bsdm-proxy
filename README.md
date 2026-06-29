@@ -341,7 +341,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 
 - [x] Redis L2 cache
 - [ ] HTTP/2 upstream client
-- [ ] Compression (Brotli/Zstd)
+- [x] Compression (Brotli/Zstd) — `CACHE_COMPRESSION=zstd|brotli`
 - [ ] ACL TimeWindow + group rules
 - [ ] NTLM auth
 - [ ] Hierarchy Phase 4 (discovery, digest, HTCP, hierarchy metrics)

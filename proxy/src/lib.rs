@@ -3,6 +3,7 @@
 pub mod acl;
 pub mod auth;
 pub mod cache;
+pub mod cache_compress;
 pub mod cache_key;
 pub mod categorization;
 pub mod hierarchy;
@@ -24,6 +25,7 @@ pub mod tls;
 pub use acl::{AclAction, AclDecision, AclEngine, AclRule};
 pub use auth::{AuthBackend, AuthConfig, AuthManager, UserInfo};
 pub use cache::{CacheConfig, CachedResponse};
+pub use cache_compress::{BodyEncoding, CompressionConfig};
 pub use cache_key::http_cache_key;
 pub use categorization::{CategorizationConfig, CategorizationEngine, Category};
 pub use hierarchy::{HierarchyConfig, HierarchyManager, HierarchyResult};

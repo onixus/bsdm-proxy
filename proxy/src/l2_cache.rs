@@ -1,6 +1,7 @@
 //! Redis L2 HTTP response cache (shared across proxy instances).
 
 use crate::cache::CachedResponse;
+use crate::cache_compress::BodyEncoding;
 use crate::metrics::Metrics;
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
@@ -42,6 +43,10 @@ struct CachedResponseWire {
     status: u16,
     headers: Vec<(String, String)>,
     body_b64: String,
+    #[serde(default)]
+    body_encoding: Option<String>,
+    #[serde(default)]
+    uncompressed_len: Option<usize>,
     cached_at_secs: u64,
     ttl_secs: u64,
 }
@@ -58,6 +63,12 @@ impl CachedResponseWire {
             status: value.status,
             headers,
             body_b64: B64.encode(value.body.as_ref()),
+            body_encoding: if value.body_encoding == BodyEncoding::Raw {
+                None
+            } else {
+                Some(value.body_encoding.wire_name().to_string())
+            },
+            uncompressed_len: Some(value.uncompressed_len),
             cached_at_secs,
             ttl_secs: value.ttl.as_secs(),
         })
@@ -70,10 +81,18 @@ impl CachedResponseWire {
             .into_iter()
             .map(|(k, v)| (Arc::from(k.as_str()), Arc::from(v.as_str())))
             .collect();
+        let body_encoding = self
+            .body_encoding
+            .as_deref()
+            .and_then(BodyEncoding::from_wire)
+            .unwrap_or(BodyEncoding::Raw);
+        let uncompressed_len = self.uncompressed_len.unwrap_or_else(|| body.len());
         Some(CachedResponse {
             status: self.status,
             headers,
             body,
+            body_encoding,
+            uncompressed_len,
             cached_at: UNIX_EPOCH + Duration::from_secs(self.cached_at_secs),
             ttl: Duration::from_secs(self.ttl_secs),
         })
@@ -188,6 +207,8 @@ mod tests {
             status: 200,
             headers: Arc::from([(Arc::from("content-type"), Arc::from("text/plain"))]),
             body: Bytes::from_static(b"hello"),
+            body_encoding: BodyEncoding::Raw,
+            uncompressed_len: 5,
             cached_at: SystemTime::now(),
             ttl: Duration::from_secs(3600),
         };
@@ -196,6 +217,33 @@ mod tests {
         assert_eq!(decoded.status, 200);
         assert_eq!(decoded.body, original.body);
         assert_eq!(decoded.headers.len(), 1);
+    }
+
+    #[test]
+    fn wire_roundtrip_compressed() {
+        use crate::cache_compress::CompressionConfig;
+
+        let body = Bytes::from("z".repeat(2048));
+        let headers: Arc<[(Arc<str>, Arc<str>)]> =
+            Arc::from([(Arc::from("content-type"), Arc::from("text/plain"))]);
+        let compression = CompressionConfig {
+            codec: BodyEncoding::Zstd,
+            min_bytes: 512,
+            zstd_level: 3,
+        };
+        let original = crate::cache::CachedResponse::from_upstream(
+            200,
+            headers,
+            body.clone(),
+            Duration::from_secs(3600),
+            &compression,
+        );
+        assert_eq!(original.body_encoding, BodyEncoding::Zstd);
+        let json = encode_cached_response(&original).unwrap();
+        let decoded = decode_cached_response(&json).unwrap();
+        assert_eq!(decoded.body_encoding, BodyEncoding::Zstd);
+        assert_eq!(decoded.uncompressed_len, body.len());
+        assert_eq!(decoded.decoded_body().unwrap(), body);
     }
 
     #[test]
@@ -211,6 +259,8 @@ mod tests {
             status: 200,
             headers: Arc::from([]),
             body: Bytes::new(),
+            body_encoding: BodyEncoding::Raw,
+            uncompressed_len: 0,
             cached_at: SystemTime::now(),
             ttl: Duration::from_secs(60),
         };

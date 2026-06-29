@@ -147,7 +147,7 @@ impl ProxyService {
                 username: username.clone(),
                 client_ip: client_ip.to_string(),
                 domain: Self::extract_domain(url),
-                response_size: cached.body.len() as u64,
+                response_size: cached.response_body_len() as u64,
                 request_duration_ms: request_start.elapsed().as_millis() as u64,
                 content_type: cached
                     .headers
@@ -482,7 +482,7 @@ impl ProxyService {
                     request_start,
                 );
                 let response = cached.to_response();
-                let body_size = cached.body.len();
+                let body_size = cached.response_body_len();
                 guard.finish(cached.status, 0, body_size);
                 return response;
             }
@@ -507,7 +507,7 @@ impl ProxyService {
             );
 
             let response = cached.to_response_with_cache_status("L2-HIT");
-            let body_size = cached.body.len();
+            let body_size = cached.response_body_len();
             guard.finish(cached.status, 0, body_size);
             return response;
         }
@@ -607,13 +607,13 @@ impl ProxyService {
                         .map(|(k, v)| (Arc::from(k.as_str()), Arc::from(v.as_str())))
                         .collect();
 
-                    let cached_response = CachedResponse {
-                        status: status.as_u16(),
-                        headers: headers_arc,
-                        body: body_bytes.clone(),
-                        cached_at: SystemTime::now(),
-                        ttl: self.cache_config.default_ttl,
-                    };
+                    let cached_response = CachedResponse::from_upstream(
+                        status.as_u16(),
+                        headers_arc,
+                        body_bytes.clone(),
+                        self.cache_config.default_ttl,
+                        &self.cache_config.compression,
+                    );
                     self.store_in_l1_and_l2(cache_key.clone(), cached_response);
                     guard.set_cache_status("MISS");
                     "MISS"
