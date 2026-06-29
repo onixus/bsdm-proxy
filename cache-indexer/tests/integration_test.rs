@@ -81,7 +81,10 @@ mod tests {
         });
 
         assert!(mapping["mappings"]["properties"]["url"]["type"].is_string());
-        assert_eq!(mapping["mappings"]["properties"]["method"]["type"], "keyword");
+        assert_eq!(
+            mapping["mappings"]["properties"]["method"]["type"],
+            "keyword"
+        );
         assert_eq!(mapping["mappings"]["properties"]["status"]["type"], "short");
     }
 

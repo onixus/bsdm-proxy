@@ -116,8 +116,10 @@ struct ProxyService {
     http_cache: Arc<Cache<Arc<str>, CachedResponse>>,
     cache_config: CacheConfig,
     kafka_producer: Option<Arc<FutureProducer>>,
-    http_client:
-        hyper_util::client::legacy::Client<hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>, Body>,
+    http_client: hyper_util::client::legacy::Client<
+        hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>,
+        Body,
+    >,
     metrics: Arc<Metrics>,
     mitm_enabled: bool,
 }
@@ -151,12 +153,11 @@ impl ProxyService {
             .enable_http1()
             .build();
 
-        let http_client = hyper_util::client::legacy::Client::builder(
-            hyper_util::rt::TokioExecutor::new(),
-        )
-        .pool_idle_timeout(Duration::from_secs(90))
-        .pool_max_idle_per_host(32)
-        .build(https);
+        let http_client =
+            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+                .pool_idle_timeout(Duration::from_secs(90))
+                .pool_max_idle_per_host(32)
+                .build(https);
 
         Self {
             cert_cache,
@@ -283,7 +284,7 @@ impl ProxyService {
                 }
                 let response = cached.to_response();
                 let body_size = cached.body.len();
-                guard.finish(cached.status, body_size);
+                guard.finish(cached.status, 0, body_size);
                 return response;
             }
         }
@@ -302,10 +303,11 @@ impl ProxyService {
                 error!("Body collection failed: {}", e);
                 let mut resp = Response::new(Body::new(Bytes::from_static(b"400 Bad Request")));
                 *resp.status_mut() = StatusCode::BAD_REQUEST;
-                guard.finish(400, 15);
+                guard.finish(400, 0, 15);
                 return resp;
             }
         };
+        let request_body_size = body_bytes.len();
         let req = Request::from_parts(parts, Body::new(body_bytes));
 
         let domain = Self::extract_domain(&url);
@@ -347,7 +349,7 @@ impl ProxyService {
                         let mut resp =
                             Response::new(Body::new(Bytes::from_static(b"502 Bad Gateway")));
                         *resp.status_mut() = StatusCode::BAD_GATEWAY;
-                        guard.finish(502, 15);
+                        guard.finish(502, request_body_size, 15);
                         return resp;
                     }
                 };
@@ -406,7 +408,7 @@ impl ProxyService {
                         resp.headers_mut().insert(name, val);
                     }
                 }
-                guard.finish(status.as_u16(), body_size);
+                guard.finish(status.as_u16(), request_body_size, body_size);
                 resp
             }
             Err(e) => {
@@ -417,7 +419,7 @@ impl ProxyService {
                     .inc();
                 let mut response = Response::new(Body::new(Bytes::from_static(b"502 Bad Gateway")));
                 *response.status_mut() = StatusCode::BAD_GATEWAY;
-                guard.finish(502, 15);
+                guard.finish(502, request_body_size, 15);
                 response
             }
         }
@@ -432,7 +434,7 @@ async fn metrics_server(metrics: Arc<Metrics>) {
             return;
         }
     };
-    
+
     info!("📊 Metrics server started on 0.0.0.0:9090");
 
     loop {
@@ -452,15 +454,14 @@ async fn metrics_server(metrics: Arc<Metrics>) {
                 async move {
                     let path = req.uri().path();
                     debug!("Metrics request from {}: {}", addr, path);
-                    
+
                     let response = match path {
                         "/metrics" => {
                             debug!("Exporting metrics...");
                             // Wrap in catch_unwind to catch panics
-                            let export_result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-                                metrics.export()
-                            }));
-                            
+                            let export_result =
+                                panic::catch_unwind(panic::AssertUnwindSafe(|| metrics.export()));
+
                             match export_result {
                                 Ok(Ok(body)) => {
                                     debug!("Metrics exported successfully: {} bytes", body.len());
@@ -471,25 +472,35 @@ async fn metrics_server(metrics: Arc<Metrics>) {
                                         .body(Body::new(Bytes::from(body)))
                                         .unwrap_or_else(|e| {
                                             error!("Failed to build metrics response: {}", e);
-                                            Response::new(Body::new(Bytes::from_static(b"500 Internal Server Error")))
+                                            Response::new(Body::new(Bytes::from_static(
+                                                b"500 Internal Server Error",
+                                            )))
                                         })
                                 }
                                 Ok(Err(e)) => {
                                     error!("Failed to export metrics: {}", e);
                                     Response::builder()
                                         .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                        .body(Body::new(Bytes::from_static(b"500 Internal Server Error")))
+                                        .body(Body::new(Bytes::from_static(
+                                            b"500 Internal Server Error",
+                                        )))
                                         .unwrap_or_else(|_| {
-                                            Response::new(Body::new(Bytes::from_static(b"500 Internal Server Error")))
+                                            Response::new(Body::new(Bytes::from_static(
+                                                b"500 Internal Server Error",
+                                            )))
                                         })
                                 }
                                 Err(panic_info) => {
                                     error!("Metrics export panicked: {:?}", panic_info);
                                     Response::builder()
                                         .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                        .body(Body::new(Bytes::from_static(b"500 Panic in metrics export")))
+                                        .body(Body::new(Bytes::from_static(
+                                            b"500 Panic in metrics export",
+                                        )))
                                         .unwrap_or_else(|_| {
-                                            Response::new(Body::new(Bytes::from_static(b"500 Internal Server Error")))
+                                            Response::new(Body::new(Bytes::from_static(
+                                                b"500 Internal Server Error",
+                                            )))
                                         })
                                 }
                             }
@@ -499,9 +510,11 @@ async fn metrics_server(metrics: Arc<Metrics>) {
                             Response::builder()
                                 .status(StatusCode::OK)
                                 .header("Content-Type", "application/json")
-                                .body(Body::new(Bytes::from_static(b"{\"status\":\"ok\"}")))  
+                                .body(Body::new(Bytes::from_static(b"{\"status\":\"ok\"}")))
                                 .unwrap_or_else(|_| {
-                                    Response::new(Body::new(Bytes::from_static(b"{\"status\":\"ok\"}")))  
+                                    Response::new(Body::new(Bytes::from_static(
+                                        b"{\"status\":\"ok\"}",
+                                    )))
                                 })
                         }
                         "/ready" => {
@@ -509,9 +522,11 @@ async fn metrics_server(metrics: Arc<Metrics>) {
                             Response::builder()
                                 .status(StatusCode::OK)
                                 .header("Content-Type", "application/json")
-                                .body(Body::new(Bytes::from_static(b"{\"status\":\"ready\"}")))  
+                                .body(Body::new(Bytes::from_static(b"{\"status\":\"ready\"}")))
                                 .unwrap_or_else(|_| {
-                                    Response::new(Body::new(Bytes::from_static(b"{\"status\":\"ready\"}")))  
+                                    Response::new(Body::new(Bytes::from_static(
+                                        b"{\"status\":\"ready\"}",
+                                    )))
                                 })
                         }
                         _ => {
@@ -528,10 +543,7 @@ async fn metrics_server(metrics: Arc<Metrics>) {
                 }
             });
 
-            if let Err(e) = http1::Builder::new()
-                .serve_connection(io, service)
-                .await
-            {
+            if let Err(e) = http1::Builder::new().serve_connection(io, service).await {
                 error!("Metrics server connection error from {}: {}", addr, e);
             }
         });
@@ -564,10 +576,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::fs::read("./certs/ca.key")
     })?;
 
-    let ca_cert = tokio::fs::read("/certs/ca.crt").await.or_else(|_| {
-        warn!("Failed to read /certs/ca.crt, trying ./certs/ca.crt");
-        std::fs::read("./certs/ca.crt")
-    }).unwrap_or_default();
+    let ca_cert = tokio::fs::read("/certs/ca.crt")
+        .await
+        .or_else(|_| {
+            warn!("Failed to read /certs/ca.crt, trying ./certs/ca.crt");
+            std::fs::read("./certs/ca.crt")
+        })
+        .unwrap_or_default();
 
     let cert_cache = CertCache::from_pem(&ca_key, &ca_cert)?;
     let mitm_enabled = std::env::var("MITM_ENABLED")
@@ -600,7 +615,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         metrics.clone(),
         mitm_enabled,
     ));
-    
+
     let http_port = std::env::var("HTTP_PORT")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -629,10 +644,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // quick_cache API: len() and weight() only
             let entries = cache_clone.len();
             let weight = cache_clone.weight();
-            
+
             metrics_clone.cache_entries.set(entries as f64);
             metrics_clone.cache_size_bytes.set(weight as f64);
-            
+
             debug!(
                 "Cache stats: entries={}, weight={}KB",
                 entries,
@@ -672,7 +687,8 @@ async fn handle_connect_tunnel(
                     let duration_ms = request_start.elapsed().as_millis() as u64;
                     let domain = parse_authority(&authority).0;
 
-                    if let Ok(timestamp) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
+                    if let Ok(timestamp) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)
+                    {
                         let event = CacheEvent {
                             url: format!("https://{}", authority),
                             method: "CONNECT".to_string(),
@@ -763,8 +779,7 @@ async fn handle_connect_mitm(
                 Ok(req) => req,
                 Err(e) => {
                     error!("Failed to rewrite MITM request for {}: {}", authority, e);
-                    let mut resp =
-                        Response::new(Body::new(Bytes::from_static(b"400 Bad Request")));
+                    let mut resp = Response::new(Body::new(Bytes::from_static(b"400 Bad Request")));
                     *resp.status_mut() = StatusCode::BAD_REQUEST;
                     return Ok::<_, Infallible>(resp);
                 }
