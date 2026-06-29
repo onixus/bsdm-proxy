@@ -1,0 +1,14 @@
+M1: Foundation (v0.2.x)
+Proxy core, ACL, categorization, observability, rate limiting, hierarchy Phase 3. docs/roadmap.md
+
+M2: Squid parity (v0.3.x)
+Cache hierarchy Phase 4, Redis L2, HTTP/2, compression, full ACL, NTLM. docs/roadmap.md
+
+M3: Retro-search (v0.4.x)
+OpenSearch schema, dashboards, saved searches, historical traffic analytics. docs/roadmap.md
+
+M4: Threat analytics (v0.5.x)
+Rule-based anomaly alerts, C&C heuristics, threat enrichment, SIEM export. docs/roadmap.md
+
+M5: ML security (v1.0.x)
+ML anomaly detection, phishing ML, C&C beacon detection, feedback loop. docs/roadmap.md
