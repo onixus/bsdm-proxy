@@ -364,24 +364,6 @@ impl Default for Metrics {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn hierarchy_metrics_exported() {
-        let m = Metrics::new().unwrap();
-        m.record_hierarchy_resolution("parent_hit");
-        m.record_hierarchy_icp_query("hit");
-        m.record_hierarchy_peer_request("parent", "hit");
-        let out = String::from_utf8(m.export().unwrap()).unwrap();
-        assert!(out.contains("bsdm_proxy_hierarchy_resolutions_total"));
-        assert!(out.contains("bsdm_proxy_hierarchy_icp_queries_total"));
-        assert!(out.contains("bsdm_proxy_hierarchy_peer_requests_total"));
-        assert!(out.contains("parent_hit"));
-    }
-}
-
 /// Helper to record request metrics with RAII pattern
 pub struct RequestMetricsGuard {
     metrics: Arc<Metrics>,
@@ -420,5 +402,23 @@ impl RequestMetricsGuard {
         self.metrics
             .response_size_bytes
             .observe(response_size as f64);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hierarchy_metrics_exported() {
+        let m = Metrics::new().unwrap();
+        m.record_hierarchy_resolution("parent_hit");
+        m.record_hierarchy_icp_query("hit");
+        m.record_hierarchy_peer_request("parent", "hit");
+        let out = String::from_utf8(m.export().unwrap()).unwrap();
+        assert!(out.contains("bsdm_proxy_hierarchy_resolutions_total"));
+        assert!(out.contains("bsdm_proxy_hierarchy_icp_queries_total"));
+        assert!(out.contains("bsdm_proxy_hierarchy_peer_requests_total"));
+        assert!(out.contains("parent_hit"));
     }
 }
