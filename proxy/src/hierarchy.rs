@@ -4,6 +4,7 @@
 //! Local cache → Siblings (ICP) → Parents → Origin
 
 use crate::icp::{IcpClient, IcpOpcode};
+use crate::metrics::Metrics;
 use crate::peers::{CachePeer, PeerRegistry};
 use crate::selection::SelectionStrategy;
 use std::sync::Arc;
@@ -56,6 +57,7 @@ pub struct HierarchyManager {
     peer_registry: PeerRegistry,
     selection_strategy: Box<dyn SelectionStrategy>,
     icp_client: Option<Arc<IcpClient>>,
+    metrics: Option<Arc<Metrics>>,
 }
 
 impl HierarchyManager {
@@ -69,7 +71,13 @@ impl HierarchyManager {
             peer_registry,
             selection_strategy,
             icp_client: None,
+            metrics: None,
         }
+    }
+
+    pub fn with_metrics(mut self, metrics: Arc<Metrics>) -> Self {
+        self.metrics = Some(metrics);
+        self
     }
 
     /// Initialize ICP client
@@ -106,6 +114,7 @@ impl HierarchyManager {
                 sibling.id,
                 start.elapsed().as_millis()
             );
+            self.record_resolution("sibling_hit", start);
             return HierarchyResult::SiblingHit(sibling);
         }
 
@@ -117,6 +126,7 @@ impl HierarchyManager {
                 parent.id,
                 start.elapsed().as_millis()
             );
+            self.record_resolution("parent_hit", start);
             return HierarchyResult::ParentHit(parent);
         }
 
@@ -126,7 +136,15 @@ impl HierarchyManager {
             url,
             start.elapsed().as_millis()
         );
+        self.record_resolution("origin_required", start);
         HierarchyResult::OriginRequired
+    }
+
+    fn record_resolution(&self, result: &str, start: Instant) {
+        if let Some(metrics) = &self.metrics {
+            metrics.record_hierarchy_resolution(result);
+            metrics.observe_hierarchy_lookup(start.elapsed().as_secs_f64());
+        }
     }
 
     /// Query sibling caches via ICP
@@ -165,6 +183,25 @@ impl HierarchyManager {
             .query_peers(&sibling_addrs, url, self.config.icp_timeout)
             .await;
 
+        let responded = results.len();
+        for result in &results {
+            if let Some(metrics) = &self.metrics {
+                let outcome = match result.response {
+                    IcpOpcode::Hit => "hit",
+                    IcpOpcode::Miss => "miss",
+                    IcpOpcode::Error | IcpOpcode::Denied => "error",
+                    _ => "error",
+                };
+                metrics.record_hierarchy_icp_query(outcome);
+            }
+        }
+        let unanswered = sibling_addrs.len().saturating_sub(responded);
+        if let Some(metrics) = &self.metrics {
+            for _ in 0..unanswered {
+                metrics.record_hierarchy_icp_query("timeout");
+            }
+        }
+
         // Find first HIT
         for result in results {
             if result.response == IcpOpcode::Hit {
@@ -198,18 +235,27 @@ impl HierarchyManager {
 
     /// Record successful fetch from peer
     pub async fn record_peer_hit(&self, peer: &CachePeer, bytes: u64) {
+        if let Some(metrics) = &self.metrics {
+            metrics.record_hierarchy_peer_request(&peer.config.peer_type.to_string(), "hit");
+        }
         peer.stats.record_request().await;
         peer.stats.record_hit(bytes).await;
     }
 
     /// Record miss from peer
     pub async fn record_peer_miss(&self, peer: &CachePeer) {
+        if let Some(metrics) = &self.metrics {
+            metrics.record_hierarchy_peer_request(&peer.config.peer_type.to_string(), "miss");
+        }
         peer.stats.record_request().await;
         peer.stats.record_miss().await;
     }
 
     /// Record error from peer
     pub async fn record_peer_error(&self, peer: &CachePeer) {
+        if let Some(metrics) = &self.metrics {
+            metrics.record_hierarchy_peer_request(&peer.config.peer_type.to_string(), "error");
+        }
         peer.stats.record_request().await;
         peer.stats.record_error().await;
 

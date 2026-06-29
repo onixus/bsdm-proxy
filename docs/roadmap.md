@@ -94,7 +94,7 @@ gantt
 - [ ] **NTLM auth** — реализация или снятие с roadmap
 - [ ] **Negative caching** coordination
 - [ ] **Cache refresh / revalidate** — Squid-style freshness
-- [ ] Hierarchy Prometheus metrics (`bsdm_proxy_hierarchy_*`)
+- [x] Hierarchy Prometheus metrics (`bsdm_proxy_hierarchy_*`)
 
 **Критерий завершения M2:** 3-tier cache hierarchy в docker-compose, hit rate sibling/parent измеряется, Redis L2 работает.
 

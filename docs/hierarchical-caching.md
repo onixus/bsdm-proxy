@@ -256,15 +256,21 @@ pub enum IcpOpcode {
 
 ## Metrics
 
-New Prometheus metrics:
+Prometheus metrics (v0.2.x / M2):
 
 ```
-bsdm_proxy_hierarchy_requests_total{peer, result}
-bsdm_proxy_hierarchy_icp_queries_total{peer, result}
-bsdm_proxy_hierarchy_peer_health{peer, type}
-bsdm_proxy_hierarchy_peer_rtt_ms{peer}
-bsdm_proxy_hierarchy_selection_duration_seconds
-bsdm_proxy_hierarchy_fetch_duration_seconds{peer, cache_status}
+bsdm_proxy_hierarchy_resolutions_total{result}   # sibling_hit, parent_hit, origin_required
+bsdm_proxy_hierarchy_peer_requests_total{peer_type, outcome}  # parent|sibling × hit|miss|error
+bsdm_proxy_hierarchy_icp_queries_total{outcome}  # hit, miss, timeout, error
+bsdm_proxy_hierarchy_lookup_duration_seconds
+```
+
+Example queries:
+
+```promql
+rate(bsdm_proxy_hierarchy_resolutions_total[5m])
+rate(bsdm_proxy_hierarchy_peer_requests_total{outcome="hit"}[5m])
+  / rate(bsdm_proxy_hierarchy_peer_requests_total[5m])
 ```
 
 ## Testing Strategy
