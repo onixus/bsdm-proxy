@@ -86,7 +86,7 @@ gantt
 - [ ] **Hierarchy Phase 4** — peer discovery, cache digest, HTCP (опционально mTLS)
 - [x] **Redis L2 cache** — распределённый кеш между инстансами (`docker-compose.redis-l2.yml`)
 - [x] **HTTP/2 upstream client** — `UPSTREAM_HTTP2_ENABLED` + ALPN h2
-- [ ] **Compression** — Brotli/Zstd для cacheable responses
+- [x] **Compression** — Brotli/Zstd at-rest for cacheable responses (`CACHE_COMPRESSION`)
 - [ ] **ACL completeness**
   - [x] TimeWindow rules (`HH:MM`, local time, overnight windows)
   - [x] Group-based Principal rules (LDAP `memberOf` cn matching)

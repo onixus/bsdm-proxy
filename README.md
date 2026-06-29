@@ -341,8 +341,8 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 ### M2 — Squid parity (v0.3.x)
 
 - [x] Redis L2 cache
-- [ ] HTTP/2 upstream client
-- [ ] Compression (Brotli/Zstd)
+- [x] HTTP/2 upstream client — `UPSTREAM_HTTP2_ENABLED`
+- [x] Compression (Brotli/Zstd) — `CACHE_COMPRESSION=zstd|brotli`
 - [ ] ACL TimeWindow + group rules
 - [ ] NTLM auth
 - [ ] Hierarchy Phase 4 (discovery, digest, HTCP, hierarchy metrics)
