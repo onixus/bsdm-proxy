@@ -1,0 +1,89 @@
+# Redis L2 cache demo — shared cache between proxy instances
+#
+# Usage:
+#   docker compose -f docker-compose.redis-l2.yml up -d --build
+#   curl -x http://127.0.0.1:1488 http://upstream/get   # MISS
+#   docker compose -f docker-compose.redis-l2.yml restart proxy-a
+#   curl -x http://127.0.0.1:1488 http://upstream/get   # L2-HIT (x-cache-status)
+#
+# Requires two proxies (proxy-a / proxy-b) sharing Redis; only proxy-a is exposed on 1488.
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - l2-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  upstream:
+    image: kennethreitz/httpbin:latest
+    networks:
+      - l2-net
+
+  proxy-a:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: proxy
+    ports:
+      - "1488:1488"
+      - "9090:9090"
+    environment:
+      - HTTP_PORT=1488
+      - METRICS_PORT=9090
+      - MITM_ENABLED=false
+      - AUTH_ENABLED=false
+      - ACL_ENABLED=false
+      - CATEGORIZATION_ENABLED=false
+      - CACHE_CAPACITY=100
+      - CACHE_TTL_SECONDS=3600
+      - REDIS_L2_ENABLED=true
+      - REDIS_URL=redis://redis:6379
+      - REDIS_KEY_PREFIX=bsdm:http:
+      - RUST_LOG=info,bsdm_proxy=info
+    depends_on:
+      redis:
+        condition: service_healthy
+      upstream:
+        condition: service_started
+    networks:
+      - l2-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:9090/health | grep -q ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  proxy-b:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: proxy
+    environment:
+      - HTTP_PORT=1488
+      - METRICS_PORT=9090
+      - MITM_ENABLED=false
+      - AUTH_ENABLED=false
+      - ACL_ENABLED=false
+      - CATEGORIZATION_ENABLED=false
+      - CACHE_CAPACITY=100
+      - CACHE_TTL_SECONDS=3600
+      - REDIS_L2_ENABLED=true
+      - REDIS_URL=redis://redis:6379
+      - REDIS_KEY_PREFIX=bsdm:http:
+      - RUST_LOG=info,bsdm_proxy=info
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - l2-net
+
+networks:
+  l2-net:
+    driver: bridge

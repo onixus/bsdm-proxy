@@ -133,6 +133,16 @@ docker compose -f docker-compose.hierarchy.yml down
 
 3-tier stack: **child** (1488) → **sibling** (ICP, 1490) / **parent** (1489) → **upstream**.
 
+### Redis L2 demo (Docker)
+
+```bash
+docker compose -f docker-compose.redis-l2.yml up -d --build
+curl -x http://127.0.0.1:1488 http://upstream/get          # MISS
+docker compose -f docker-compose.redis-l2.yml restart proxy-a  # clears L1 only
+curl -x http://127.0.0.1:1488 http://upstream/get          # L2-HIT (x-cache-status)
+docker compose -f docker-compose.redis-l2.yml down
+```
+
 Переменные для тестов MITM:
 - `UPSTREAM_CA_CERT` — proxy доверяет самоподписанному CA upstream
 - `MITM_ENABLED=true`

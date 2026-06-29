@@ -201,6 +201,21 @@ Token-bucket лимиты на IP и аутентифицированного п
 | `RATE_LIMIT_USER_BURST` | `100` | Burst на пользователя |
 | `RATE_LIMIT_MAX_KEYS` | `10000` | Макс. отслеживаемых ключей |
 
+### Redis L2 cache (опционально)
+
+Распределённый кеш между инстансами прокси. Порядок: **L1 → Redis L2 → hierarchy → origin**.
+
+| Переменная | По умолчанию | Описание |
+|-----------|-------------|----------|
+| `REDIS_L2_ENABLED` | `false` | Включить Redis L2 |
+| `REDIS_URL` | `redis://127.0.0.1:6379` | URL Redis |
+| `REDIS_KEY_PREFIX` | `bsdm:http:` | Префикс ключей (тот же `SHA256(method:url)`) |
+
+Метрики: `bsdm_proxy_cache_l2_hits_total`, `bsdm_proxy_cache_l2_misses_total`, `bsdm_proxy_cache_l2_errors_total`.  
+Ответ при L2 hit: заголовок `x-cache-status: L2-HIT`.
+
+Демо: `docker compose -f docker-compose.redis-l2.yml up -d --build`
+
 ### Иерархический кеш (опционально)
 
 Включается через `HIERARCHY_ENABLED=true`. После промаха L1: ICP-запрос к siblings → выбор parent → HTTP fetch через peer → fallback на origin.
@@ -324,7 +339,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 
 ### M2 — Squid parity (v0.3.x)
 
-- [ ] Redis L2 cache
+- [x] Redis L2 cache
 - [ ] HTTP/2 upstream client
 - [ ] Compression (Brotli/Zstd)
 - [ ] ACL TimeWindow + group rules

@@ -9,6 +9,7 @@ pub mod hierarchy;
 pub mod hierarchy_config;
 pub mod http_types;
 pub mod icp;
+pub mod l2_cache;
 pub mod metrics;
 pub mod peer_fetch;
 pub mod peers;
@@ -30,6 +31,7 @@ pub use hierarchy_config::{
     build_hierarchy_manager, icp_server_bind_addr, load_hierarchy_config, should_start_icp_server,
 };
 pub use icp::{IcpClient, IcpMessage, IcpOpcode, IcpServer};
+pub use l2_cache::{L2CacheConfig, RedisL2Cache};
 pub use metrics::{Metrics, RequestMetricsGuard};
 pub use peer_fetch::{fetch_via_peer, PeerFetchError};
 pub use peers::{CachePeer, PeerConfig, PeerRegistry, PeerType};

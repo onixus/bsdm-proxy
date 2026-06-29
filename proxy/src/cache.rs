@@ -29,6 +29,10 @@ impl CachedResponse {
     }
 
     pub fn to_response(&self) -> Response<Body> {
+        self.to_response_with_cache_status("HIT")
+    }
+
+    pub fn to_response_with_cache_status(&self, cache_status: &str) -> Response<Body> {
         let mut response = Response::new(Body::new(self.body.clone()));
         *response.status_mut() = StatusCode::from_u16(self.status).unwrap_or(StatusCode::OK);
 
@@ -42,7 +46,9 @@ impl CachedResponse {
             }
         }
 
-        headers_mut.insert("x-cache-status", HeaderValue::from_static("HIT"));
+        if let Ok(val) = HeaderValue::from_str(cache_status) {
+            headers_mut.insert("x-cache-status", val);
+        }
         response
     }
 }

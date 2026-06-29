@@ -26,6 +26,7 @@ use crate::cache_key::http_cache_key;
 use crate::categorization::{CategorizationEngine, Category};
 use crate::hierarchy::{HierarchyManager, HierarchyResult};
 use crate::http_types::Body;
+use crate::l2_cache::RedisL2Cache;
 use crate::metrics::{Metrics, RequestMetricsGuard};
 use crate::peer_fetch::fetch_via_peer;
 use crate::peers::CachePeer;
@@ -43,6 +44,7 @@ pub struct ProxyPolicy {
 pub struct ProxyService {
     pub(crate) cert_cache: CertCache,
     http_cache: Arc<Cache<Arc<str>, CachedResponse>>,
+    l2_cache: Option<RedisL2Cache>,
     cache_config: CacheConfig,
     kafka_producer: Option<Arc<FutureProducer>>,
     kafka_topic: String,
@@ -74,6 +76,7 @@ impl ProxyService {
     pub fn new(
         cert_cache: CertCache,
         cache_config: CacheConfig,
+        l2_cache: Option<RedisL2Cache>,
         kafka_brokers: Option<String>,
         kafka_topic: String,
         metrics: Arc<Metrics>,
@@ -98,6 +101,7 @@ impl ProxyService {
         Self {
             cert_cache,
             http_cache,
+            l2_cache,
             cache_config,
             kafka_producer,
             kafka_topic,
@@ -114,6 +118,64 @@ impl ProxyService {
 
     fn parse_client_ip(client_ip: &str) -> Option<IpAddr> {
         client_ip.parse().ok()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_cache_hit_event(
+        &self,
+        url: &str,
+        method: &str,
+        cache_key: &Arc<str>,
+        cache_status: &'static str,
+        cached: &CachedResponse,
+        user_id: &Option<String>,
+        username: &Option<String>,
+        client_ip: &str,
+        categories: &[String],
+        request_start: Instant,
+    ) {
+        if let Ok(timestamp) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
+            let event = CacheEvent {
+                url: url.to_string(),
+                method: method.to_string(),
+                status: cached.status,
+                cache_key: cache_key.to_string(),
+                cache_status,
+                timestamp: timestamp.as_secs(),
+                headers: HashMap::new(),
+                user_id: user_id.clone(),
+                username: username.clone(),
+                client_ip: client_ip.to_string(),
+                domain: Self::extract_domain(url),
+                response_size: cached.body.len() as u64,
+                request_duration_ms: request_start.elapsed().as_millis() as u64,
+                content_type: cached
+                    .headers
+                    .iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+                    .map(|(_, v)| v.to_string()),
+                user_agent: None,
+                categories: categories.to_vec(),
+                event_id: new_event_id(),
+            };
+            self.send_cache_event(event);
+        }
+    }
+
+    async fn try_l2_cache_get(&self, cache_key: &Arc<str>) -> Option<CachedResponse> {
+        let l2 = self.l2_cache.as_ref()?;
+        l2.get(cache_key.as_ref()).await
+    }
+
+    fn store_in_l1_and_l2(&self, cache_key: Arc<str>, cached_response: CachedResponse) {
+        self.http_cache
+            .insert(cache_key.clone(), cached_response.clone());
+        if let Some(l2) = &self.l2_cache {
+            let l2 = l2.clone();
+            tokio::spawn(async move {
+                l2.set(cache_key.as_ref(), &cached_response).await;
+            });
+        }
     }
 
     pub(crate) async fn check_policy(
@@ -407,38 +469,49 @@ impl ProxyService {
                 self.metrics.cache_hits_total.inc();
                 guard.set_cache_status("HIT");
 
-                if let Ok(timestamp) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
-                    let event = CacheEvent {
-                        url: url.clone(),
-                        method: method.clone(),
-                        status: cached.status,
-                        cache_key: cache_key.to_string(),
-                        cache_status: "HIT",
-                        timestamp: timestamp.as_secs(),
-                        headers: HashMap::new(),
-                        user_id: user_id.clone(),
-                        username: username.clone(),
-                        client_ip: client_ip.clone(),
-                        domain: Self::extract_domain(&url),
-                        response_size: cached.body.len() as u64,
-                        request_duration_ms: request_start.elapsed().as_millis() as u64,
-                        content_type: cached
-                            .headers
-                            .iter()
-                            .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
-                            .map(|(_, v)| v.to_string()),
-                        user_agent: None,
-                        categories: categories.clone(),
-                        event_id: new_event_id(),
-                    };
-                    self.send_cache_event(event);
-                }
+                self.emit_cache_hit_event(
+                    &url,
+                    &method,
+                    &cache_key,
+                    "HIT",
+                    &cached,
+                    &user_id,
+                    &username,
+                    &client_ip,
+                    &categories,
+                    request_start,
+                );
                 let response = cached.to_response();
                 let body_size = cached.body.len();
                 guard.finish(cached.status, 0, body_size);
                 return response;
             }
         }
+
+        if let Some(cached) = self.try_l2_cache_get(&cache_key).await {
+            info!("Cache L2 HIT: {} {}", method, url);
+            self.http_cache.insert(cache_key.clone(), cached.clone());
+            guard.set_cache_status("L2_HIT");
+
+            self.emit_cache_hit_event(
+                &url,
+                &method,
+                &cache_key,
+                "L2_HIT",
+                &cached,
+                &user_id,
+                &username,
+                &client_ip,
+                &categories,
+                request_start,
+            );
+
+            let response = cached.to_response_with_cache_status("L2-HIT");
+            let body_size = cached.body.len();
+            guard.finish(cached.status, 0, body_size);
+            return response;
+        }
+
         self.metrics
             .cache_lookup_duration_seconds
             .observe(cache_lookup_start.elapsed().as_secs_f64());
@@ -541,7 +614,7 @@ impl ProxyService {
                         cached_at: SystemTime::now(),
                         ttl: self.cache_config.default_ttl,
                     };
-                    self.http_cache.insert(cache_key.clone(), cached_response);
+                    self.store_in_l1_and_l2(cache_key.clone(), cached_response);
                     guard.set_cache_status("MISS");
                     "MISS"
                 } else {
