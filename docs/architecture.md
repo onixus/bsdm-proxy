@@ -21,17 +21,19 @@ flowchart TB
     AUTH[auth.rs]
     POL[policy: categorize + ACL]
     CACHE[L1 quick_cache]
+    HIER[hierarchy.rs]
+    PEER[peer_fetch.rs]
+    ICP[icp.rs server :3130]
     UP[Hyper upstream client]
     TLS[tls.rs MITM]
     MET[metrics :9090]
     KPROD[Kafka producer]
   end
 
-  subgraph orphan [Код вне бинарника]
+  subgraph lib_modules [Library modules]
     PEERS[peers.rs]
-    ICP[icp.rs]
-    HIER[hierarchy.rs]
     SEL[selection.rs]
+    HCFG[hierarchy_config.rs]
   end
 
   subgraph pipeline [Analytics pipeline]
@@ -49,6 +51,10 @@ flowchart TB
   MAIN --> AUTH --> POL --> CACHE
   POL --> CAT[categorization.rs]
   POL --> ACL[acl.rs]
+  CACHE --> HIER
+  HIER --> ICP
+  HIER --> PEER
+  PEER --> UP
   CACHE --> UP
   MAIN --> TLS
   MAIN --> KPROD --> KAFKA --> IDX --> OS
@@ -60,7 +66,7 @@ flowchart TB
 | Proxy binary | `proxy/src/main.rs` | ✅ |
 | Policy library | `proxy/src/lib.rs` — `acl`, `auth`, `categorization` | ✅ |
 | MITM | `proxy/src/tls.rs` | ✅ |
-| Hierarchy / ICP | `peers.rs`, `icp.rs`, `hierarchy.rs`, `selection.rs` | ❌ не подключены |
+| Hierarchy / ICP | `hierarchy.rs`, `peer_fetch.rs`, `icp.rs`, `hierarchy_config.rs` | ✅ opt-in (`HIERARCHY_ENABLED`) |
 | Event indexer | `cache-indexer/src/main.rs` | ✅ |
 | ML / analytics worker | — | ❌ не существует |
 
@@ -77,7 +83,11 @@ TCP accept
        → categorization.categorize()   # Shallalist / URLhaus / PhishTank
        → acl_engine.check_access()     # Mutex lock
   → L1 cache lookup (GET/HEAD)
-  → upstream HTTP request
+  → [if HIERARCHY_ENABLED] resolve_source()
+       → ICP query siblings (parallel UDP)
+       → select parent (round-robin / weighted / closest / hash)
+       → fetch_via_peer() on SiblingHit / ParentHit
+  → upstream HTTP request (origin fallback)
   → cache insert + response
   → send_to_kafka_async()         # fire-and-forget
 ```
@@ -89,16 +99,20 @@ TCP accept
 | Entry | `main.rs` | `handle_connection`, `handle_request` |
 | Auth | `auth.rs` | `AuthManager::authenticate` |
 | Policy | `main.rs` | `ProxyService::check_policy` |
-| Cache | `main.rs` | `http_cache`, `generate_cache_key` |
+| Cache | `main.rs`, `cache_key.rs` | `http_cache`, `http_cache_key` |
+| Hierarchy | `hierarchy.rs`, `hierarchy_config.rs` | `resolve_source`, env loading |
+| Peer fetch | `peer_fetch.rs` | `fetch_via_peer` |
+| ICP | `icp.rs`, `main.rs` | `IcpServer::serve`, `IcpClient::query_peers` |
 | Upstream | `main.rs` | `build_upstream_https_connector`, `http_client` |
 | MITM | `tls.rs`, `main.rs` | `handle_connect_mitm`, `CertCache` |
 
 ### Ограничения request path
 
-- Вся логика в **binary crate** (`main.rs` ~1300 строк) — `ProxyService` не в `lib.rs`
+- Вся логика в **binary crate** (`main.rs` ~1300 строк) — `ProxyService` не в `lib.rs` (B7)
 - Categorization с online API на **критическом пути** каждого запроса
 - ACL под глобальным `Mutex` — serializes concurrent ACL checks
-- Hierarchy **не участвует** в выборе источника ответа
+- Hierarchy metrics (`bsdm_proxy_hierarchy_*`) ещё не экспортируются в Prometheus
+- Нет `docker-compose.hierarchy.yml` для multi-instance E2E
 
 ---
 
@@ -137,30 +151,35 @@ sequenceDiagram
 ```
 proxy/
 ├── src/
-│   ├── main.rs          ← монолит: ProxyService, cache, Kafka, HTTP server
-│   ├── lib.rs           ← acl, auth, categorization (exported)
+│   ├── main.rs          ← монолит: ProxyService, cache, Kafka, HTTP server, ICP spawn
+│   ├── lib.rs           ← acl, auth, categorization, hierarchy, icp, peers, selection
+│   ├── hierarchy.rs     ← resolve_source, sibling ICP, parent selection
+│   ├── hierarchy_config.rs ← env: HIERARCHY_ENABLED, CACHE_PARENTS, …
+│   ├── peer_fetch.rs    ← HTTP forward-proxy к parent/sibling
+│   ├── cache_key.rs     ← shared cache key (proxy + ICP handler)
+│   ├── peers.rs         ← peer registry, health, stats
+│   ├── icp.rs           ← ICP v2 UDP client/server
+│   ├── selection.rs     ← round-robin, weighted, closest, hash
 │   ├── tls.rs           ← MITM cert cache
 │   ├── metrics.rs       ← Prometheus
 │   ├── policy_config.rs ← env loading
-│   ├── auth_config.rs
-│   ├── peers.rs         ← ORPHAN (not mod)
-│   ├── icp.rs           ← ORPHAN
-│   ├── hierarchy.rs     ← ORPHAN
-│   └── selection.rs     ← ORPHAN (uses rand, not in Cargo.toml)
+│   └── auth_config.rs
 cache-indexer/
 └── src/main.rs          ← Kafka → OpenSearch
 e2e/                     ← smoke + E2E harness
 ```
 
-### Hierarchy (не интегрирована)
+### Hierarchy (интегрирована, opt-in)
 
-Задуманный flow (`hierarchy.rs`):
+Flow при `HIERARCHY_ENABLED=true`:
 
 ```
-Local L1 miss → ICP query siblings → select parent → ??? → origin
+Local L1 miss → ICP query siblings → select parent → fetch_via_peer → origin fallback
 ```
 
-**Пробел:** `resolve_source()` возвращает `SiblingHit` / `ParentHit`, но **нет HTTP fetch** с выбранного peer. `IcpServer` не стартует в `main.rs`.
+Локальный ICP-сервер отвечает HIT/MISS по наличию URL в `http_cache` (ключ `GET:<url>`).
+
+**Ограничения Phase 3:** нет peer discovery, cache digest, HTCP, hierarchy Prometheus metrics, docker-compose demo.
 
 ---
 
@@ -172,14 +191,14 @@ Local L1 miss → ICP query siblings → select parent → ??? → origin
 
 ### 🔴 Critical — M1 Foundation
 
-| ID | Блокер | Файлы | Решение |
-|----|--------|-------|---------|
-| **B1** | Hierarchy modules не в бинарнике | `lib.rs`, `peers.rs`, `icp.rs`, `hierarchy.rs`, `selection.rs` | Добавить `mod`, экспорт, тесты в CI |
-| **B2** | `rand` отсутствует в Cargo.toml | `selection.rs:84`, `Cargo.toml` | Добавить `rand = "0.8"` |
-| **B3** | Hierarchy без HTTP fetch к peer | `hierarchy.rs` | После `ParentHit` — proxy HTTP GET к peer |
-| **B4** | ICP server не запускается | `icp.rs`, `main.rs` | Spawn `IcpServer` при `HIERARCHY_ENABLED` |
-| **B5** | `ca.key` обязателен при старте | `main.rs:858` | Optional при `MITM_ENABLED=false` |
-| **B6** | Rate limiting отсутствует | `main.rs` | Token bucket per IP/user |
+| ID | Блокер | Статус | Файлы |
+|----|--------|--------|-------|
+| **B1** | Hierarchy modules не в бинарнике | ✅ Done | `lib.rs` |
+| **B2** | `rand` отсутствует в Cargo.toml | ✅ Done | `Cargo.toml` |
+| **B3** | Hierarchy без HTTP fetch к peer | ✅ Done | `peer_fetch.rs`, `main.rs` |
+| **B4** | ICP server не запускается | ✅ Done | `icp.rs`, `main.rs` |
+| **B5** | `ca.key` обязателен при старте | ✅ Done | `tls.rs` |
+| **B6** | Rate limiting отсутствует | ❌ Open | `main.rs` |
 
 ### 🟠 High — M2 Squid parity / M3 Retro-search
 
@@ -220,8 +239,8 @@ Local L1 miss → ICP query siblings → select parent → ??? → origin
 ## Блокеры по milestones
 
 ```
-M1  ████████████░░  B1 B2 B3 B4 B5 B6 B7
-M2  ██████████████  B7 B8 B9 B13 B14 B21 B22 B23 B25 + B1–B4
+M1  █████████████░  B6 B7 (B1–B5 ✅)
+M2  ██████████████  B7 B8 B9 B13 B14 B21 B22 B23 B25
 M3  ████████████░░  B10 B11 B12 B17 B20
 M4  ██████████████  B15 B16 B18 B19 + M3
 M5  ██████████████  B15 B16 B18 + M4
@@ -231,11 +250,11 @@ M5  ██████████████  B15 B16 B18 + M4
 
 ## Приоритет разблокировки
 
-### Волна 1 — разблокировать M1
+### Волна 1 — завершить M1
 
-1. **B5** — optional CA при `MITM_ENABLED=false` (quick win)
-2. **B1 + B2** — подключить hierarchy modules + `rand`
-3. **B3 + B4** — HTTP fetch к peer + ICP server
+1. ~~**B5** — optional CA при `MITM_ENABLED=false`~~ ✅
+2. ~~**B1 + B2** — подключить hierarchy modules + `rand`~~ ✅
+3. ~~**B3 + B4** — HTTP fetch к peer + ICP server~~ ✅
 4. **B6** — rate limiting
 5. **B7** — начать вынос `ProxyService` в `lib.rs`
 
@@ -263,8 +282,8 @@ flowchart LR
   B16 --> B15[B15 analytics worker]
   B1[B1 wire hierarchy] --> B3[B3 HTTP fetch]
   B3 --> B4[B4 ICP server]
-  B7[B7 refactor main] --> B6[B6 rate limit]
-  B7 --> B3
+  B4 -.done.-> B6[B6 rate limit]
+  B7[B7 refactor main] --> B6
   B10[B10 reliable Kafka] --> B17[B17 dashboards]
 ```
 
@@ -274,7 +293,7 @@ flowchart LR
 
 | Milestone | Архитектурный критерий |
 |-----------|------------------------|
-| **M1** | Hierarchy в request path, rate limit, proxy стартует без CA при MITM=off |
+| **M1** | Hierarchy в request path ✅, rate limit, proxy стартует без CA при MITM=off ✅ |
 | **M2** | `ProxyService` в lib, L2 Redis, ACL complete |
 | **M3** | Единая event schema, indexer parity, Dashboards, Kafka acks≥1 |
 | **M4** | Analytics worker, alerting, extended schema |
@@ -282,4 +301,4 @@ flowchart LR
 
 ---
 
-*Версия документа: 0.2.2b · блокеры B1–B25*
+*Версия документа: 0.2.2b · B1–B5 resolved, B6–B25 open*

@@ -105,139 +105,78 @@ Enum CacheSelectionStrategy {
 
 ## Configuration
 
-### Environment Variables
+### Environment Variables (implemented)
 
 ```bash
-# Enable hierarchical caching
+# Enable hierarchical caching (default: false)
 HIERARCHY_ENABLED=true
 
-# Parent caches (comma-separated)
+# Parent caches (comma-separated: host:port[:weight])
 CACHE_PARENTS=parent1.example.com:1488:1.0,parent2.example.com:1488:0.5
-# Format: host:port:weight
 
-# Sibling caches
-CACHE_SIBLINGS=sibling1.example.com:1488,sibling2.example.com:1488
+# Sibling caches (host:port[:weight][:icp_port])
+CACHE_SIBLINGS=sibling1.example.com:1488,sibling2.example.com:1488:1.0:3130
 
-# ICP settings
-ICP_PORT=3130
+# ICP server bind (UDP, default 0.0.0.0:3130)
+ICP_BIND=0.0.0.0:3130
+
+# ICP client bind (default 0.0.0.0:0)
+ICP_CLIENT_BIND=0.0.0.0:0
+
+# Default ICP port for siblings without explicit icp_port
+ICP_PEER_PORT=3130
+
 ICP_TIMEOUT_MS=100
-ICP_ENABLED=true
+ICP_SERVER_ENABLED=true          # set false to disable local ICP listener
+PARENT_TIMEOUT_SECONDS=5
+ICP_MAX_SIBLING_QUERIES=10
 
-# Selection strategy
-CACHE_SELECTION_STRATEGY=weighted  # round-robin, weighted, closest, hash
+# Selection strategy: round-robin, weighted, closest, hash
+CACHE_SELECTION_STRATEGY=weighted
+```
 
-# Peer discovery
+### Not yet implemented
+
+```bash
+# Planned for Phase 4 (M2)
 PEER_DISCOVERY_ENABLED=true
 PEER_DISCOVERY_MULTICAST=239.255.255.1:3131
-PEER_DISCOVERY_INTERVAL_SEC=60
-
-# Cache hierarchy rules
-HIERARCHY_DIRECT_DOMAINS=localhost,127.0.0.1  # Bypass hierarchy
-HIERARCHY_NEVER_DIRECT=false  # Always use hierarchy
+HIERARCHY_DIRECT_DOMAINS=localhost,127.0.0.1
 ```
 
 ### Configuration File (TOML)
 
-```toml
-[hierarchy]
-enabled = true
-selection_strategy = "weighted"
-never_direct = false
+TOML config is **planned** for M2. Currently only environment variables are supported via `hierarchy_config.rs`.
 
-[[hierarchy.parents]]
-host = "parent1.example.com"
-port = 1488
-weight = 1.0
-max_connections = 100
-icp_port = 3130
+## Implementation Status
 
-[[hierarchy.parents]]
-host = "parent2.example.com"
-port = 1488
-weight = 0.5
-max_connections = 50
-icp_port = 3130
+### Phase 1: Core Infrastructure ✅
 
-[[hierarchy.siblings]]
-host = "sibling1.example.com"
-port = 1488
-icp_port = 3130
+1. **Peer Management** (`proxy/src/peers.rs`) — done
+2. **ICP Protocol** (`proxy/src/icp.rs`) — done
+3. **Selection Strategy** (`proxy/src/selection.rs`) — done
 
-[hierarchy.icp]
-enabled = true
-port = 3130
-timeout_ms = 100
-max_retries = 2
+### Phase 2: Request Routing ✅
 
-[hierarchy.discovery]
-enabled = true
-multicast_address = "239.255.255.1:3131"
-announce_interval_sec = 60
-ttl = 3
+4. **Hierarchy Manager** (`proxy/src/hierarchy.rs`) — done
+5. **Cache Fetcher** (`proxy/src/peer_fetch.rs`) — done (HTTP/1 forward proxy)
 
-[hierarchy.rules]
-# Domains to fetch directly (bypass hierarchy)
-direct_domains = ["localhost", "127.0.0.1"]
+### Phase 3: Integration ✅ (v0.2.2b)
 
-# Domains to never cache
-no_cache_domains = ["accounts.google.com"]
+6. **Configuration** (`proxy/src/hierarchy_config.rs`) — env vars
+7. **Runtime wiring** (`proxy/src/main.rs`) — request path + ICP server spawn
+8. **Cache key** (`proxy/src/cache_key.rs`) — shared L1 + ICP lookup
 
-# Force parent for specific domains
-[[hierarchy.rules.domain_routing]]
-pattern = "*.cdn.example.com"
-parent = "cdn-parent.example.com:1488"
-```
+**Remaining in Phase 3:**
+- Docker-compose multi-instance demo
+- Hierarchy Prometheus metrics
+- E2E tests for peer fetch
 
-## Implementation Plan
+### Phase 4: Discovery & Optimization 📅 M2
 
-### Phase 1: Core Infrastructure
-
-1. **Peer Management Module** (`proxy/src/peers.rs`)
-   - Peer registry
-   - Health checking (active/passive)
-   - Connection pooling per peer
-   - RTT tracking
-
-2. **ICP Protocol** (`proxy/src/icp.rs`)
-   - UDP server/client
-   - ICP message encoding/decoding
-   - Query/response handling
-   - Timeout management
-
-3. **Selection Strategy** (`proxy/src/selection.rs`)
-   - Strategy trait
-   - Implementations (round-robin, weighted, etc.)
-   - Peer scoring
-
-### Phase 2: Request Routing
-
-4. **Hierarchy Manager** (`proxy/src/hierarchy.rs`)
-   - Request flow coordination
-   - Sibling queries (parallel ICP)
-   - Parent fallback
-   - Origin fallback
-
-5. **Cache Fetcher** (`proxy/src/fetcher.rs`)
-   - HTTP client for peer communication
-   - Streaming responses
-   - Error handling and retries
-
-### Phase 3: Discovery & Optimization
-
-6. **Peer Discovery** (`proxy/src/discovery.rs`)
-   - Multicast announcements
-   - Peer registration
-   - Auto-configuration
-
-7. **Cache Digest** (`proxy/src/digest.rs`)
-   - Bloom filter for cached URLs
-   - Periodic digest exchange
-   - Digest-based pre-filtering
-
-8. **Metrics** (extend `proxy/src/metrics.rs`)
-   - Hierarchy metrics
-   - Peer performance stats
-   - ICP query stats
+9. **Peer Discovery** — not started
+10. **Cache Digest** — not started
+11. **Metrics** (`bsdm_proxy_hierarchy_*`) — not started
 
 ## Data Structures
 

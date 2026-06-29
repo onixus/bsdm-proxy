@@ -1,293 +1,125 @@
 # Hierarchical Caching for BSDM-Proxy
 
-> См. также: [полная документация](hierarchical-caching.md) · [оглавление](README.md)
+> См. также: [полная документация](hierarchical-caching.md) · [оглавление](README.md) · [architecture.md](architecture.md)
 
-## 🎯 Goal
+## Статус: Phase 3 интегрирована (v0.2.2b)
 
-Implement Squid-style hierarchical caching to allow multiple BSDM-Proxy instances to form a cache hierarchy, dramatically improving cache hit rates and reducing upstream traffic.
+Иерархический кеш **включён в runtime** и активируется через `HIERARCHY_ENABLED=true` (по умолчанию выключен).
 
-## 🏗️ Architecture
+## Архитектура
 
-### Cache Hierarchy Levels
+### Уровни кеша
 
 ```
-Level 1: Edge Caches (close to users)
-  ↓ Query siblings via ICP
-  ↓ Query parents on MISS
-Level 2: Regional Caches (fewer, larger)
-  ↓ Query siblings via ICP  
-  ↓ Query central parent on MISS
-Level 3: Central Cache (single, very large)
-  ↓ Fetch from origin
+Level 1: Edge (локальный L1 quick_cache)
+  ↓ ICP query siblings (UDP :3130)
+  ↓ HTTP fetch parent on MISS
+Level 2: Parent caches
+  ↓
 Origin Servers
 ```
 
-### Key Components
+### Реализованные модули
 
-✅ **Peer Management** (`proxy/src/peers.rs`) - DONE
-- Registry of parent and sibling caches
-- Health tracking and statistics
-- RTT measurement
-- Peer scoring algorithm
+| Модуль | Файл | Статус |
+|--------|------|--------|
+| Peer registry | `peers.rs` | ✅ |
+| ICP v2 UDP | `icp.rs` | ✅ client + server |
+| Selection | `selection.rs` | ✅ round-robin, weighted, closest, hash |
+| Hierarchy manager | `hierarchy.rs` | ✅ `resolve_source()` |
+| Env config | `hierarchy_config.rs` | ✅ |
+| Peer HTTP fetch | `peer_fetch.rs` | ✅ `fetch_via_peer()` |
+| Cache key | `cache_key.rs` | ✅ shared proxy + ICP |
+| Runtime wiring | `main.rs` | ✅ request path + ICP spawn |
 
-✅ **ICP Protocol** (`proxy/src/icp.rs`) - DONE
-- UDP-based cache queries (RFC 2186)
-- Fast HIT/MISS responses (<100ms)
-- Parallel queries to multiple siblings
-- Async non-blocking implementation
+## Поток запроса
 
-🚧 **Selection Strategy** (TODO)
-- Round-robin
-- Weighted
-- Closest (RTT-based)
-- Consistent hashing
-
-🚧 **Hierarchy Manager** (TODO)
-- Request flow coordination
-- Cache level traversal
-- Fallback logic
-
-🚧 **Integration** (TODO)
-- Wire into main request pipeline
-- Configuration loading
-- Metrics integration
-
-## 📦 What's Been Implemented
-
-### 1. Peer Management (`peers.rs`)
-
-```rust
-// Create peer registry
-let registry = PeerRegistry::new();
-
-// Add parent cache
-let parent_config = PeerConfig {
-    host: "parent.example.com".to_string(),
-    port: 1488,
-    peer_type: PeerType::Parent,
-    weight: 1.0,
-    icp_port: Some(3130),
-    max_connections: 100,
-};
-registry.add_peer(parent_config).await;
-
-// Get healthy parents
-let parents = registry.parent_caches().await;
+```
+1. Client → proxy
+2. L1 cache lookup
+   ├─ HIT → return
+   └─ MISS → continue
+3. [HIERARCHY_ENABLED] resolve_source(url)
+   ├─ ICP query siblings (parallel)
+   ├─ select parent (strategy)
+   └─ fetch_via_peer() on hit
+4. origin fallback (http_client)
+5. cache insert → response
 ```
 
-**Features:**
-- Parent/sibling peer types
-- Health tracking (automatic unhealthy peer exclusion)
-- Per-peer statistics (requests, hits, misses, errors)
-- RTT tracking
-- Peer scoring (weight × (1 - error_rate) × rtt_factor)
-- Concurrent access with RwLock
+## Конфигурация
 
-### 2. ICP Protocol (`icp.rs`)
-
-```rust
-// Server: respond to ICP queries
-let server = IcpServer::new("0.0.0.0:3130", |url| {
-    // Check if URL is in cache
-    cache.contains(url)
-}).await?;
-
-tokio::spawn(async move { server.serve().await });
-
-// Client: query peers
-let client = IcpClient::new("0.0.0.0:0").await?;
-let peer = "sibling.example.com:3130".parse()?;
-
-let result = client.query_peer(
-    peer,
-    "http://example.com/image.jpg",
-    Duration::from_millis(100)
-).await?;
-
-if result.response == IcpOpcode::Hit {
-    println!("Sibling has the object! Fetch from {}", result.peer);
-}
-```
-
-**Features:**
-- Full ICP v2 protocol (RFC 2186)
-- Query/Hit/Miss/Error opcodes
-- Parallel queries to multiple peers
-- Configurable timeouts
-- Low latency (<1ms encoding/decoding)
-- Unit tests included
-
-## 🚀 Benefits
-
-### Cache Hit Rate Improvement
-- **Before**: 30-40% (single instance)
-- **After**: 70-85% (3-tier hierarchy)
-
-### Bandwidth Savings
-- Reduced origin traffic by 60-70%
-- Faster response times (peer << origin)
-- Lower CDN costs
-
-### Scalability
-- Horizontal scaling: add more edge caches
-- Load distribution across multiple parents
-- Sibling cooperation reduces parent load
-
-## 📋 Implementation Roadmap
-
-См. [roadmap.md](roadmap.md) — milestones M1 (Phase 3) и M2 (Phase 4).
-
-### Phase 1: Core Infrastructure ✅ DONE (M1)
-- [x] Peer management module (`peers.rs`)
-- [x] ICP protocol implementation (`icp.rs`)
-- [x] Unit tests
-
-### Phase 2: Selection & Routing ✅ DONE on disk (M1, not wired)
-- [x] Selection strategies (`selection.rs`) — round-robin, weighted, closest, hash
-- [x] Hierarchy manager (`hierarchy.rs`)
-- [ ] Wire into binary (`lib.rs` / `main.rs`)
-
-### Phase 3: Integration 📅 M1 remaining
-- [ ] Configuration loading (env vars + TOML)
-- [ ] Wire into main.rs request pipeline
-- [ ] Metrics integration (Prometheus)
-- [ ] Docker-compose multi-instance setup
-- [ ] End-to-end tests
-
-### Phase 4: Advanced Features 🔮 M2
-- [ ] Peer auto-discovery (multicast)
-- [ ] Cache digest (Bloom filters)
-- [ ] HTCP protocol support
-- [ ] mTLS between peers
-- [ ] Geographic routing
-
-## 🔧 Configuration (Planned)
-
-### Environment Variables
+### Переменные окружения
 
 ```bash
-# Enable hierarchy
 HIERARCHY_ENABLED=true
 
-# Parent caches (comma-separated: host:port:weight)
+# Parents: host:port[:weight]
 CACHE_PARENTS=parent1.example.com:1488:1.0,parent2.example.com:1488:0.5
 
-# Sibling caches
-CACHE_SIBLINGS=sibling1.example.com:1488,sibling2.example.com:1488
+# Siblings: host:port[:weight][:icp_port]
+CACHE_SIBLINGS=sibling1.example.com:1488,sibling2.example.com:1488:1.0:3130
 
-# ICP settings
-ICP_PORT=3130
+CACHE_SELECTION_STRATEGY=round-robin   # weighted, closest, hash
+
+ICP_BIND=0.0.0.0:3130                  # локальный ICP server (UDP)
+ICP_CLIENT_BIND=0.0.0.0:0                # ICP client bind
+ICP_PEER_PORT=3130                       # default ICP port для siblings
 ICP_TIMEOUT_MS=100
-
-# Selection strategy
-CACHE_SELECTION_STRATEGY=weighted  # round-robin, weighted, closest, hash
+ICP_SERVER_ENABLED=true                  # false — не слушать ICP
+PARENT_TIMEOUT_SECONDS=5                 # HTTP timeout к peer
+ICP_MAX_SIBLING_QUERIES=10
 ```
 
-### TOML Configuration
+Пример в пакете: [packaging/config/bsdm-proxy.env.example](../packaging/config/bsdm-proxy.env.example)
 
-```toml
-[hierarchy]
-enabled = true
-selection_strategy = "weighted"
-
-[[hierarchy.parents]]
-host = "parent.example.com"
-port = 1488
-weight = 1.0
-icp_port = 3130
-
-[[hierarchy.siblings]]
-host = "sibling.example.com"
-port = 1488
-icp_port = 3130
-```
-
-## 🧪 Testing
-
-### Run Unit Tests
+## Быстрый старт (два инстанса)
 
 ```bash
-# Test peer management
-cargo test --lib peers
+# Terminal 1: parent (с ICP)
+HIERARCHY_ENABLED=true \
+MITM_ENABLED=false \
+HTTP_PORT=1488 \
+ICP_BIND=127.0.0.1:3130 \
+./target/release/proxy
 
-# Test ICP protocol
-cargo test --lib icp
+# Terminal 2: child (parent = localhost:1488)
+HIERARCHY_ENABLED=true \
+MITM_ENABLED=false \
+HTTP_PORT=1489 \
+CACHE_PARENTS=127.0.0.1:1488:1.0 \
+ICP_BIND=127.0.0.1:3131 \
+./target/release/proxy
 
-# All tests
-cargo test
+# Запрос через child
+curl -x http://127.0.0.1:1489 http://httpbin.org/get
 ```
 
-### Multi-Instance Test Setup (Coming Soon)
+## Тесты
 
 ```bash
-# Start 3-tier hierarchy
-docker-compose -f docker-compose.hierarchy.yml up -d
-
-# Test flow:
-# Client → Edge Cache → Regional Cache → Central Cache → Origin
+cargo test -p bsdm-proxy --lib peers
+cargo test -p bsdm-proxy --lib icp
+cargo test -p bsdm-proxy --lib hierarchy
+cargo test -p bsdm-proxy --lib peer_fetch
+cargo test -p bsdm-proxy --lib hierarchy_config
 ```
 
-## 📊 Metrics (Planned)
+## Roadmap (оставшееся)
 
-```promql
-# Hierarchy request flow
-bsdm_proxy_hierarchy_requests_total{peer, result}
+### Phase 3 — доработки M1
+- [ ] `docker-compose.hierarchy.yml` — 3-tier demo
+- [ ] E2E тест hierarchy peer fetch
+- [ ] Prometheus metrics `bsdm_proxy_hierarchy_*`
 
-# ICP queries
-bsdm_proxy_hierarchy_icp_queries_total{peer, response}
+### Phase 4 — M2
+- [ ] Peer auto-discovery (multicast)
+- [ ] Cache digest (Bloom filters)
+- [ ] HTCP protocol
+- [ ] mTLS между peers
 
-# Peer health
-bsdm_proxy_hierarchy_peer_health{peer, type}
-
-# Selection latency
-bsdm_proxy_hierarchy_selection_duration_seconds
-
-# Cache hierarchy hit rate
-sum(rate(bsdm_proxy_hierarchy_requests_total{result="hit"}[5m])) /
-sum(rate(bsdm_proxy_hierarchy_requests_total[5m]))
-```
-
-## 🤝 Contributing
-
-Next steps for contributors:
-
-1. **Selection Strategies**: Implement `proxy/src/selection.rs`
-2. **Hierarchy Manager**: Implement `proxy/src/hierarchy.rs`
-3. **Integration Tests**: Create multi-instance docker-compose setup
-4. **Documentation**: Add usage examples and tutorials
-
-## 📚 References
+## Ссылки
 
 - [Squid Cache Hierarchy](http://www.squid-cache.org/Doc/config/cache_peer/)
 - [RFC 2186: ICP v2](https://datatracker.ietf.org/doc/html/rfc2186)
-- [RFC 2756: HTCP](https://datatracker.ietf.org/doc/html/rfc2756)
-- [Cache Hierarchy Best Practices](https://wiki.squid-cache.org/SquidFaq/CacheHierarchy)
-
-## 🎉 Quick Demo (Coming Soon)
-
-```bash
-# Terminal 1: Central cache
-CACHE_LEVEL=central cargo run --bin proxy
-
-# Terminal 2: Regional cache
-CACHE_LEVEL=regional \
-CACHE_PARENTS=localhost:1488:1.0 \
-cargo run --bin proxy -- --http-port 1489
-
-# Terminal 3: Edge cache
-CACHE_LEVEL=edge \
-CACHE_PARENTS=localhost:1489:1.0 \
-CACHE_SIBLINGS=localhost:1490:1.0 \
-cargo run --bin proxy -- --http-port 1490
-
-# Terminal 4: Test request
-curl -x http://localhost:1490 https://httpbin.org/get
-
-# Check hierarchy traversal in logs!
-```
-
----
-
-**Status**: 🚧 Work in Progress - Phase 1 Complete
-
-**ETA for MVP**: Q1 2026
+- [roadmap.md](roadmap.md)

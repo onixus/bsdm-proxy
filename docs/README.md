@@ -50,3 +50,5 @@
 ## Версии
 
 Текущая beta-версия: **0.2.2b** — [GitHub Releases](https://github.com/onixus/bsdm-proxy/releases)
+
+**Новое в 0.2.2b:** иерархический кеш (ICP + peer fetch), optional MITM CA, pre-push hook.
