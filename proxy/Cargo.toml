@@ -12,6 +12,7 @@ path = "src/main.rs"
 hyper = { version = "1.10", features = ["full"] }
 hyper-util = { version = "0.1", features = ["full"] }
 tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
 http-body-util = "0.1"
 quick_cache = "0.7"
 rcgen = { version = "0.14", features = ["x509-parser"] }

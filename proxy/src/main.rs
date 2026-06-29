@@ -13,19 +13,23 @@ use hyper_util::rt::TokioIo;
 use metrics::{Metrics, RequestMetricsGuard};
 use quick_cache::sync::Cache;
 use rdkafka::config::ClientConfig;
-use rdkafka::producer::{FutureProducer, FutureRecord};
+use rdkafka::producer::{FutureProducer, FutureRecord, Producer};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::panic;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 use tls::{parse_authority, rewrite_mitm_request, should_mitm_port, CertCache};
 use tokio::io::copy_bidirectional;
 use tokio::net::{TcpListener, TcpStream};
+use tokio::signal;
+use tokio::sync::watch;
 use tokio_rustls::TlsAcceptor;
+use tokio_util::task::TaskTracker;
 use tracing::{debug, error, info, warn};
 
 type Body = http_body_util::Full<Bytes>;
@@ -237,6 +241,19 @@ impl ProxyService {
         }
     }
 
+    async fn flush_kafka(&self, timeout: Duration) {
+        let Some(producer) = self.kafka_producer.clone() else {
+            return;
+        };
+
+        info!("Flushing Kafka producer...");
+        match tokio::task::spawn_blocking(move || producer.flush(timeout)).await {
+            Ok(Ok(())) => info!("Kafka producer flushed"),
+            Ok(Err(e)) => warn!("Kafka flush error: {}", e),
+            Err(e) => error!("Kafka flush task failed: {}", e),
+        }
+    }
+
     async fn handle_request(&self, req: Request<Incoming>, client_ip: String) -> Response<Body> {
         let mut guard = RequestMetricsGuard::new(self.metrics.clone(), req.method().to_string());
         let request_start = Instant::now();
@@ -426,7 +443,11 @@ impl ProxyService {
     }
 }
 
-async fn metrics_server(metrics: Arc<Metrics>) {
+async fn metrics_server(
+    metrics: Arc<Metrics>,
+    draining: Arc<AtomicBool>,
+    mut shutdown_rx: watch::Receiver<bool>,
+) {
     let listener = match TcpListener::bind("0.0.0.0:9090").await {
         Ok(l) => l,
         Err(e) => {
@@ -438,115 +459,168 @@ async fn metrics_server(metrics: Arc<Metrics>) {
     info!("📊 Metrics server started on 0.0.0.0:9090");
 
     loop {
-        let (stream, addr) = match listener.accept().await {
-            Ok(conn) => conn,
-            Err(e) => {
-                error!("Failed to accept metrics connection: {}", e);
-                continue;
-            }
-        };
+        tokio::select! {
+            accept_result = listener.accept() => {
+                let (stream, addr) = match accept_result {
+                    Ok(conn) => conn,
+                    Err(e) => {
+                        error!("Failed to accept metrics connection: {}", e);
+                        continue;
+                    }
+                };
 
-        let metrics = metrics.clone();
-        tokio::spawn(async move {
-            let io = TokioIo::new(stream);
-            let service = service_fn(move |req: Request<Incoming>| {
                 let metrics = metrics.clone();
-                async move {
-                    let path = req.uri().path();
-                    debug!("Metrics request from {}: {}", addr, path);
+                let draining = draining.clone();
+                tokio::spawn(async move {
+                    let io = TokioIo::new(stream);
+                    let service = service_fn(move |req: Request<Incoming>| {
+                        let metrics = metrics.clone();
+                        let draining = draining.clone();
+                        async move {
+                            let path = req.uri().path();
+                            debug!("Metrics request from {}: {}", addr, path);
 
-                    let response = match path {
-                        "/metrics" => {
-                            debug!("Exporting metrics...");
-                            // Wrap in catch_unwind to catch panics
-                            let export_result =
-                                panic::catch_unwind(panic::AssertUnwindSafe(|| metrics.export()));
+                            let response = match path {
+                                "/metrics" => {
+                                    debug!("Exporting metrics...");
+                                    let export_result =
+                                        panic::catch_unwind(panic::AssertUnwindSafe(|| metrics.export()));
 
-                            match export_result {
-                                Ok(Ok(body)) => {
-                                    debug!("Metrics exported successfully: {} bytes", body.len());
+                                    match export_result {
+                                        Ok(Ok(body)) => {
+                                            debug!("Metrics exported successfully: {} bytes", body.len());
+                                            Response::builder()
+                                                .status(StatusCode::OK)
+                                                .header("Content-Type", "text/plain; version=0.0.4")
+                                                .header("Content-Length", body.len().to_string())
+                                                .body(Body::new(Bytes::from(body)))
+                                                .unwrap_or_else(|e| {
+                                                    error!("Failed to build metrics response: {}", e);
+                                                    Response::new(Body::new(Bytes::from_static(
+                                                        b"500 Internal Server Error",
+                                                    )))
+                                                })
+                                        }
+                                        Ok(Err(e)) => {
+                                            error!("Failed to export metrics: {}", e);
+                                            Response::builder()
+                                                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                                .body(Body::new(Bytes::from_static(
+                                                    b"500 Internal Server Error",
+                                                )))
+                                                .unwrap_or_else(|_| {
+                                                    Response::new(Body::new(Bytes::from_static(
+                                                        b"500 Internal Server Error",
+                                                    )))
+                                                })
+                                        }
+                                        Err(panic_info) => {
+                                            error!("Metrics export panicked: {:?}", panic_info);
+                                            Response::builder()
+                                                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                                .body(Body::new(Bytes::from_static(
+                                                    b"500 Panic in metrics export",
+                                                )))
+                                                .unwrap_or_else(|_| {
+                                                    Response::new(Body::new(Bytes::from_static(
+                                                        b"500 Internal Server Error",
+                                                    )))
+                                                })
+                                        }
+                                    }
+                                }
+                                "/health" => {
+                                    debug!("Health check OK");
                                     Response::builder()
                                         .status(StatusCode::OK)
-                                        .header("Content-Type", "text/plain; version=0.0.4")
-                                        .header("Content-Length", body.len().to_string())
-                                        .body(Body::new(Bytes::from(body)))
-                                        .unwrap_or_else(|e| {
-                                            error!("Failed to build metrics response: {}", e);
-                                            Response::new(Body::new(Bytes::from_static(
-                                                b"500 Internal Server Error",
-                                            )))
-                                        })
-                                }
-                                Ok(Err(e)) => {
-                                    error!("Failed to export metrics: {}", e);
-                                    Response::builder()
-                                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                        .body(Body::new(Bytes::from_static(
-                                            b"500 Internal Server Error",
-                                        )))
+                                        .header("Content-Type", "application/json")
+                                        .body(Body::new(Bytes::from_static(b"{\"status\":\"ok\"}")))
                                         .unwrap_or_else(|_| {
                                             Response::new(Body::new(Bytes::from_static(
-                                                b"500 Internal Server Error",
+                                                b"{\"status\":\"ok\"}",
                                             )))
                                         })
                                 }
-                                Err(panic_info) => {
-                                    error!("Metrics export panicked: {:?}", panic_info);
+                                "/ready" => {
+                                    if draining.load(Ordering::Relaxed) {
+                                        debug!("Readiness check: draining");
+                                        Response::builder()
+                                            .status(StatusCode::SERVICE_UNAVAILABLE)
+                                            .header("Content-Type", "application/json")
+                                            .body(Body::new(Bytes::from_static(
+                                                b"{\"status\":\"draining\"}",
+                                            )))
+                                            .unwrap_or_else(|_| {
+                                                Response::new(Body::new(Bytes::from_static(
+                                                    b"{\"status\":\"draining\"}",
+                                                )))
+                                            })
+                                    } else {
+                                        debug!("Readiness check OK");
+                                        Response::builder()
+                                            .status(StatusCode::OK)
+                                            .header("Content-Type", "application/json")
+                                            .body(Body::new(Bytes::from_static(
+                                                b"{\"status\":\"ready\"}",
+                                            )))
+                                            .unwrap_or_else(|_| {
+                                                Response::new(Body::new(Bytes::from_static(
+                                                    b"{\"status\":\"ready\"}",
+                                                )))
+                                            })
+                                    }
+                                }
+                                _ => {
+                                    warn!("Unknown metrics endpoint: {}", path);
                                     Response::builder()
-                                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                        .body(Body::new(Bytes::from_static(
-                                            b"500 Panic in metrics export",
-                                        )))
+                                        .status(StatusCode::NOT_FOUND)
+                                        .body(Body::new(Bytes::from_static(b"404 Not Found")))
                                         .unwrap_or_else(|_| {
-                                            Response::new(Body::new(Bytes::from_static(
-                                                b"500 Internal Server Error",
-                                            )))
+                                            Response::new(Body::new(Bytes::from_static(b"404 Not Found")))
                                         })
                                 }
-                            }
+                            };
+                            Ok::<_, Infallible>(response)
                         }
-                        "/health" => {
-                            debug!("Health check OK");
-                            Response::builder()
-                                .status(StatusCode::OK)
-                                .header("Content-Type", "application/json")
-                                .body(Body::new(Bytes::from_static(b"{\"status\":\"ok\"}")))
-                                .unwrap_or_else(|_| {
-                                    Response::new(Body::new(Bytes::from_static(
-                                        b"{\"status\":\"ok\"}",
-                                    )))
-                                })
-                        }
-                        "/ready" => {
-                            debug!("Readiness check OK");
-                            Response::builder()
-                                .status(StatusCode::OK)
-                                .header("Content-Type", "application/json")
-                                .body(Body::new(Bytes::from_static(b"{\"status\":\"ready\"}")))
-                                .unwrap_or_else(|_| {
-                                    Response::new(Body::new(Bytes::from_static(
-                                        b"{\"status\":\"ready\"}",
-                                    )))
-                                })
-                        }
-                        _ => {
-                            warn!("Unknown metrics endpoint: {}", path);
-                            Response::builder()
-                                .status(StatusCode::NOT_FOUND)
-                                .body(Body::new(Bytes::from_static(b"404 Not Found")))
-                                .unwrap_or_else(|_| {
-                                    Response::new(Body::new(Bytes::from_static(b"404 Not Found")))
-                                })
-                        }
-                    };
-                    Ok::<_, Infallible>(response)
-                }
-            });
+                    });
 
-            if let Err(e) = http1::Builder::new().serve_connection(io, service).await {
-                error!("Metrics server connection error from {}: {}", addr, e);
+                    if let Err(e) = http1::Builder::new().serve_connection(io, service).await {
+                        error!("Metrics server connection error from {}: {}", addr, e);
+                    }
+                });
             }
-        });
+            changed = shutdown_rx.changed() => {
+                if changed.is_ok() && *shutdown_rx.borrow() {
+                    info!("Metrics server stopping");
+                    break;
+                }
+            }
+        }
+    }
+}
+
+async fn wait_shutdown_signal() {
+    let ctrl_c = async {
+        if let Err(e) = signal::ctrl_c().await {
+            error!("Failed to listen for Ctrl+C: {}", e);
+        } else {
+            info!("Received Ctrl+C");
+        }
+    };
+
+    #[cfg(unix)]
+    {
+        let mut sigterm =
+            signal::unix::signal(signal::unix::SignalKind::terminate()).expect("SIGTERM handler");
+        tokio::select! {
+            _ = ctrl_c => {},
+            _ = sigterm.recv() => info!("Received SIGTERM"),
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        ctrl_c.await;
     }
 }
 
@@ -564,12 +638,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let metrics = Arc::new(Metrics::new()?);
+    let draining = Arc::new(AtomicBool::new(false));
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    let connection_tasks = TaskTracker::new();
 
-    // Start metrics server
-    let metrics_clone = metrics.clone();
-    tokio::spawn(async move {
-        metrics_server(metrics_clone).await;
-    });
+    let shutdown_timeout_secs = std::env::var("SHUTDOWN_TIMEOUT_SECONDS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(30);
+    let shutdown_timeout = Duration::from_secs(shutdown_timeout_secs);
+
+    tokio::spawn(metrics_server(
+        metrics.clone(),
+        draining.clone(),
+        shutdown_rx.clone(),
+    ));
 
     let ca_key = tokio::fs::read("/certs/ca.key").await.or_else(|_| {
         warn!("Failed to read /certs/ca.key, trying ./certs/ca.key");
@@ -634,37 +717,88 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         max_body_size / 1024 / 1024
     );
 
-    // Update cache metrics periodically
     let metrics_clone = metrics.clone();
     let cache_clone = service.http_cache.clone();
+    let mut cache_shutdown_rx = shutdown_rx.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(10));
         loop {
-            interval.tick().await;
-            // quick_cache API: len() and weight() only
-            let entries = cache_clone.len();
-            let weight = cache_clone.weight();
+            tokio::select! {
+                _ = interval.tick() => {
+                    let entries = cache_clone.len();
+                    let weight = cache_clone.weight();
 
-            metrics_clone.cache_entries.set(entries as f64);
-            metrics_clone.cache_size_bytes.set(weight as f64);
+                    metrics_clone.cache_entries.set(entries as f64);
+                    metrics_clone.cache_size_bytes.set(weight as f64);
 
-            debug!(
-                "Cache stats: entries={}, weight={}KB",
-                entries,
-                weight / 1024
-            );
+                    debug!(
+                        "Cache stats: entries={}, weight={}KB",
+                        entries,
+                        weight / 1024
+                    );
+                }
+                changed = cache_shutdown_rx.changed() => {
+                    if changed.is_ok() && *cache_shutdown_rx.borrow() {
+                        debug!("Cache metrics reporter stopped");
+                        break;
+                    }
+                }
+            }
         }
     });
 
     loop {
-        let (stream, addr) = listener.accept().await?;
-        let service_clone = service.clone();
-        let client_ip = addr.ip().to_string();
-
-        tokio::task::spawn(async move {
-            handle_connection(stream, addr, service_clone, client_ip).await;
-        });
+        tokio::select! {
+            accept_result = listener.accept() => {
+                let (stream, addr) = match accept_result {
+                    Ok(conn) => conn,
+                    Err(e) => {
+                        error!("Accept failed: {}", e);
+                        continue;
+                    }
+                };
+                let service_clone = service.clone();
+                let client_ip = addr.ip().to_string();
+                let tasks = connection_tasks.clone();
+                connection_tasks.spawn(async move {
+                    handle_connection(stream, addr, service_clone, client_ip, tasks).await;
+                });
+            }
+            _ = wait_shutdown_signal() => {
+                info!("Shutdown signal received, stopping accept loop");
+                break;
+            }
+        }
     }
+
+    draining.store(true, Ordering::SeqCst);
+    let _ = shutdown_tx.send(true);
+    drop(listener);
+
+    let in_flight = service.metrics.requests_in_flight.get() as usize;
+    info!(
+        "Draining connections: {} tracked tasks, {} in-flight HTTP requests",
+        connection_tasks.len(),
+        in_flight
+    );
+
+    connection_tasks.close();
+    tokio::select! {
+        _ = connection_tasks.wait() => info!("All proxy connections closed"),
+        _ = tokio::time::sleep(shutdown_timeout) => {
+            warn!(
+                "Shutdown timeout after {}s, {} tasks still active",
+                shutdown_timeout_secs,
+                connection_tasks.len()
+            );
+        }
+    }
+
+    service
+        .flush_kafka(shutdown_timeout.min(Duration::from_secs(10)))
+        .await;
+    info!("Graceful shutdown complete");
+    Ok(())
 }
 
 async fn handle_connect_tunnel(
@@ -804,6 +938,7 @@ async fn handle_connection(
     addr: SocketAddr,
     service: Arc<ProxyService>,
     client_ip: String,
+    tasks: TaskTracker,
 ) {
     let io = TokioIo::new(stream);
 
@@ -811,6 +946,7 @@ async fn handle_connection(
         let service = service.clone();
         let client_ip = client_ip.clone();
         let request_start = Instant::now();
+        let tasks = tasks.clone();
 
         async move {
             if req.method() == Method::CONNECT {
@@ -825,7 +961,7 @@ async fn handle_connection(
                     }
                 };
 
-                tokio::spawn({
+                tasks.spawn({
                     let service = service.clone();
                     let client_ip = client_ip.clone();
                     let authority = authority.clone();
