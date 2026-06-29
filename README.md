@@ -154,6 +154,7 @@ cargo build --release -p bsdm-proxy --bin proxy -p cache-indexer --bin cache-ind
 | `MAX_CACHE_BODY_SIZE` | `10485760` | Макс. размер body (байт) |
 | `SHUTDOWN_TIMEOUT_SECONDS` | `30` | Таймаут graceful shutdown |
 | `UPSTREAM_CA_CERT` | — | PEM самоподписанного CA для upstream TLS (тесты/lab) |
+| `UPSTREAM_HTTP2_ENABLED` | `false` | HTTP/2 ALPN для upstream HTTPS |
 | `RUST_LOG` | `info,bsdm_proxy=debug`¹ | Фильтр логов ([docs/logging.md](docs/logging.md)) |
 
 CA для MITM читается из `/certs/ca.key` и `/certs/ca.crt` (fallback: `./certs/`).
@@ -340,7 +341,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 ### M2 — Squid parity (v0.3.x)
 
 - [x] Redis L2 cache
-- [ ] HTTP/2 upstream client
+- [x] HTTP/2 upstream client — `UPSTREAM_HTTP2_ENABLED`
 - [x] Compression (Brotli/Zstd) — `CACHE_COMPRESSION=zstd|brotli`
 - [ ] ACL TimeWindow + group rules
 - [ ] NTLM auth

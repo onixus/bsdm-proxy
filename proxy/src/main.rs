@@ -6,7 +6,7 @@ use bsdm_proxy::{
     build_hierarchy_manager, handle_connection, http_cache_key, icp_server_bind_addr,
     load_hierarchy_config, metrics_server, should_start_icp_server, wait_shutdown_signal,
     AclAction, AuthManager, CacheConfig, CertCache, IcpServer, L2CacheConfig, Metrics, ProxyPolicy,
-    ProxyService, RateLimitConfig, RedisL2Cache,
+    ProxyService, RateLimitConfig, RedisL2Cache, UpstreamTlsConfig,
 };
 use policy_config::{load_policy_config, reload_acl_engine};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -108,6 +108,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|e| -> Box<dyn std::error::Error> { e })?;
 
     let rate_limit_config = RateLimitConfig::from_env();
+    let upstream_tls = UpstreamTlsConfig::from_env();
 
     let service = Arc::new(ProxyService::new(
         cert_cache,
@@ -121,6 +122,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &proxy_policy,
         hierarchy.clone(),
         rate_limit_config.clone(),
+        upstream_tls,
     ));
 
     if should_start_icp_server(&hierarchy_config) {
