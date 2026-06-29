@@ -28,7 +28,7 @@ pub enum Category {
     Malware,
     Phishing,
     Spyware,
-    Adv,          // Advertising
+    Adv, // Advertising
     Redirector,
     Tracker,
     // Safe categories
@@ -59,6 +59,16 @@ impl std::fmt::Display for Category {
 }
 
 impl Category {
+    /// Lowercase name used by ACL category rules.
+    pub fn acl_name(&self) -> String {
+        match self {
+            Category::Custom(s) => s.clone(),
+            Category::Unknown => String::new(),
+            other => format!("{:?}", other).to_lowercase(),
+        }
+    }
+
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "adult" | "porn" => Category::Adult,
@@ -158,7 +168,7 @@ pub struct CategorizationEngine {
 impl CategorizationEngine {
     pub fn new(config: CategorizationConfig) -> Self {
         info!("Categorization engine initialized");
-        
+
         let mut engine = Self {
             config,
             cache: Arc::new(RwLock::new(HashMap::new())),
@@ -172,8 +182,8 @@ impl CategorizationEngine {
 
         // Load Shallalist if enabled
         if engine.config.shallalist_enabled {
-            if let Some(path) = &engine.config.shallalist_path {
-                match engine.load_shallalist(path) {
+            if let Some(path) = engine.config.shallalist_path.clone() {
+                match engine.load_shallalist(&path) {
                     Ok(count) => info!("Loaded {} Shallalist entries", count),
                     Err(e) => error!("Failed to load Shallalist: {}", e),
                 }
@@ -182,8 +192,8 @@ impl CategorizationEngine {
 
         // Load custom database if enabled
         if engine.config.custom_db_enabled {
-            if let Some(path) = &engine.config.custom_db_path {
-                match engine.load_custom_db(path) {
+            if let Some(path) = engine.config.custom_db_path.clone() {
+                match engine.load_custom_db(&path) {
                     Ok(count) => info!("Loaded {} custom categories", count),
                     Err(e) => error!("Failed to load custom DB: {}", e),
                 }
@@ -204,7 +214,7 @@ impl CategorizationEngine {
         };
 
         let domain = parsed_url.host_str().unwrap_or("").to_string();
-        
+
         // Check cache first
         if let Some(cached) = self.get_cached(&domain).await {
             debug!("Category cache hit for: {}", domain);
@@ -227,7 +237,11 @@ impl CategorizationEngine {
         if self.config.custom_db_enabled {
             if let Some(cats) = self.check_custom_db(&domain) {
                 categories.extend(cats);
-                source = if source == "unknown" { "custom" } else { "multiple" };
+                source = if source == "unknown" {
+                    "custom"
+                } else {
+                    "multiple"
+                };
             }
         }
 
@@ -245,7 +259,11 @@ impl CategorizationEngine {
             if self.config.phishtank_enabled {
                 if let Some(cats) = self.check_phishtank(url).await {
                     categories.extend(cats);
-                    source = if source == "unknown" { "phishtank" } else { "multiple" };
+                    source = if source == "unknown" {
+                        "phishtank"
+                    } else {
+                        "multiple"
+                    };
                 }
             }
         }
@@ -270,7 +288,8 @@ impl CategorizationEngine {
 
     /// Check URLhaus API
     async fn check_urlhaus(&self, url: &str) -> Option<HashSet<Category>> {
-        let response = self.http_client
+        let response = self
+            .http_client
             .post(&self.config.urlhaus_api)
             .form(&[("url", url)])
             .send()
@@ -279,7 +298,7 @@ impl CategorizationEngine {
 
         if response.status().is_success() {
             let data: serde_json::Value = response.json().await.ok()?;
-            
+
             if data["query_status"] == "ok" {
                 let mut cats = HashSet::new();
                 cats.insert(Category::Malware);
@@ -292,19 +311,17 @@ impl CategorizationEngine {
 
     /// Check PhishTank API
     async fn check_phishtank(&self, url: &str) -> Option<HashSet<Category>> {
-        let response = self.http_client
+        let response = self
+            .http_client
             .post(&self.config.phishtank_api)
-            .form(&[
-                ("url", url),
-                ("format", "json"),
-            ])
+            .form(&[("url", url), ("format", "json")])
             .send()
             .await
             .ok()?;
 
         if response.status().is_success() {
             let data: serde_json::Value = response.json().await.ok()?;
-            
+
             if data["results"]["in_database"].as_bool() == Some(true) {
                 let mut cats = HashSet::new();
                 cats.insert(Category::Phishing);
@@ -322,10 +339,10 @@ impl CategorizationEngine {
         // adult/domains:
         //   example.com
         //   test.com
-        
+
         let mut db = HashMap::new();
         let categories_dir = std::path::Path::new(path);
-        
+
         if !categories_dir.exists() {
             return Err(format!("Shallalist directory not found: {}", path));
         }
@@ -337,12 +354,12 @@ impl CategorizationEngine {
             let entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
             let category_name = entry.file_name().to_string_lossy().to_string();
             let category = Category::from_str(&category_name);
-            
+
             let domains_file = entry.path().join("domains");
             if domains_file.exists() {
                 let content = std::fs::read_to_string(&domains_file)
                     .map_err(|e| format!("Failed to read domains file: {}", e))?;
-                
+
                 for line in content.lines() {
                     let domain = line.trim();
                     if !domain.is_empty() && !domain.starts_with('#') {
@@ -363,18 +380,17 @@ impl CategorizationEngine {
     fn load_custom_db(&mut self, path: &str) -> Result<usize, String> {
         let content = std::fs::read_to_string(path)
             .map_err(|e| format!("Failed to read custom DB: {}", e))?;
-        
+
         let data: HashMap<String, Vec<String>> = serde_json::from_str(&content)
             .map_err(|e| format!("Failed to parse custom DB JSON: {}", e))?;
-        
+
         let mut db = HashMap::new();
         for (domain, cats) in data {
-            let categories: HashSet<Category> = cats.iter()
-                .map(|c| Category::from_str(c))
-                .collect();
+            let categories: HashSet<Category> =
+                cats.iter().map(|c| Category::from_str(c)).collect();
             db.insert(domain, categories);
         }
-        
+
         let count = db.len();
         self.custom_db = Some(db);
         Ok(count)
@@ -409,7 +425,7 @@ impl CategorizationEngine {
         cached: bool,
     ) -> CategorizationResult {
         let confidence = if categories.is_empty() { 0.0 } else { 0.9 };
-        
+
         CategorizationResult {
             url: url.to_string(),
             domain: domain.to_string(),
@@ -445,10 +461,10 @@ mod tests {
             enabled: false,
             ..Default::default()
         };
-        
+
         let engine = CategorizationEngine::new(config);
         let result = engine.categorize("https://example.com").await;
-        
+
         assert!(result.categories.is_empty());
     }
 
@@ -456,11 +472,11 @@ mod tests {
     async fn test_cache() {
         let config = CategorizationConfig::default();
         let engine = CategorizationEngine::new(config);
-        
+
         let mut cats = HashSet::new();
         cats.insert(Category::News);
         engine.cache_categories("example.com", cats.clone()).await;
-        
+
         let cached = engine.get_cached("example.com").await;
         assert!(cached.is_some());
         assert_eq!(cached.unwrap().categories, cats);

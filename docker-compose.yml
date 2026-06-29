@@ -98,6 +98,12 @@ services:
       - MITM_ENABLED=true
       - AUTH_ENABLED=false
       - SHUTDOWN_TIMEOUT_SECONDS=30
+      - ACL_ENABLED=false
+      - ACL_DEFAULT_ACTION=allow
+      - ACL_RULES_PATH=/etc/bsdm-proxy/acl-rules.json
+      - ACL_AUTO_RELOAD=false
+      - CATEGORIZATION_ENABLED=false
+      - SHALLALIST_ENABLED=false
       - RUST_LOG=info,bsdm_proxy=debug
       - RUST_BACKTRACE=1
     depends_on:
@@ -106,6 +112,7 @@ services:
       - bsdm-net
     volumes:
       - ./certs:/certs:ro
+      - ./config/acl-rules.example.json:/etc/bsdm-proxy/acl-rules.json:ro
     tty: true
     stdin_open: true
     restart: unless-stopped
