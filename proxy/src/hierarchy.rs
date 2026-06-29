@@ -4,15 +4,11 @@
 //! Local cache → Siblings (ICP) → Parents → Origin
 
 use crate::icp::{IcpClient, IcpOpcode};
-use crate::peers::{CachePeer, PeerRegistry, PeerType};
+use crate::peers::{CachePeer, PeerRegistry};
 use crate::selection::SelectionStrategy;
-use bytes::Bytes;
-use hyper::{Request, Response, StatusCode};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
-
-type Body = http_body_util::Full<Bytes>;
 
 /// Result of hierarchy query
 #[derive(Debug, Clone)]
@@ -132,7 +128,7 @@ impl HierarchyManager {
     async fn query_siblings(&self, url: &str) -> Option<Arc<CachePeer>> {
         let icp_client = self.icp_client.as_ref()?;
         let siblings = self.peer_registry.sibling_caches().await;
-        
+
         if siblings.is_empty() {
             return None;
         }
@@ -141,11 +137,9 @@ impl HierarchyManager {
         let sibling_addrs: Vec<_> = siblings
             .iter()
             .filter_map(|s| {
-                s.config.icp_port.map(|port| {
-                    format!("{}:{}", s.config.host, port)
-                        .parse()
-                        .ok()
-                })
+                s.config
+                    .icp_port
+                    .map(|port| format!("{}:{}", s.config.host, port).parse().ok())
             })
             .flatten()
             .take(self.config.max_sibling_queries)
@@ -155,7 +149,11 @@ impl HierarchyManager {
             return None;
         }
 
-        debug!("Querying {} siblings via ICP for {}", sibling_addrs.len(), url);
+        debug!(
+            "Querying {} siblings via ICP for {}",
+            sibling_addrs.len(),
+            url
+        );
 
         // Query siblings in parallel
         let results = icp_client
@@ -184,15 +182,13 @@ impl HierarchyManager {
     /// Select a parent cache using configured strategy
     async fn select_parent(&self, url: &str) -> Option<Arc<CachePeer>> {
         let parents = self.peer_registry.parent_caches().await;
-        
+
         if parents.is_empty() {
             return None;
         }
 
         // Use selection strategy
-        self.selection_strategy
-            .select(&parents, url)
-            .cloned()
+        self.selection_strategy.select(&parents, url).cloned()
     }
 
     /// Record successful fetch from peer
@@ -211,7 +207,7 @@ impl HierarchyManager {
     pub async fn record_peer_error(&self, peer: &CachePeer) {
         peer.stats.record_request().await;
         peer.stats.record_error().await;
-        
+
         // Check if peer should be marked unhealthy
         let error_rate = peer.stats.error_rate();
         if error_rate > 0.5 {
@@ -228,15 +224,18 @@ impl HierarchyManager {
     pub async fn stats_summary(&self) -> String {
         let mut summary = String::new();
         summary.push_str(&format!("Hierarchy enabled: {}\n", self.config.enabled));
-        summary.push_str(&format!("Selection strategy: {}\n", self.selection_strategy.name()));
+        summary.push_str(&format!(
+            "Selection strategy: {}\n",
+            self.selection_strategy.name()
+        ));
         summary.push_str(&format!("ICP timeout: {:?}\n", self.config.icp_timeout));
-        
+
         let siblings = self.peer_registry.sibling_caches().await;
         let parents = self.peer_registry.parent_caches().await;
-        
+
         summary.push_str(&format!("Siblings: {}\n", siblings.len()));
         summary.push_str(&format!("Parents: {}\n", parents.len()));
-        
+
         summary.push_str(&self.peer_registry.stats_summary().await);
         summary
     }
@@ -247,6 +246,7 @@ mod tests {
     use super::*;
     use crate::peers::PeerConfig;
     use crate::selection::RoundRobinStrategy;
+    use crate::PeerType;
 
     #[tokio::test]
     async fn test_hierarchy_disabled() {
@@ -256,9 +256,9 @@ mod tests {
         };
         let registry = PeerRegistry::new();
         let strategy = Box::new(RoundRobinStrategy::new());
-        
+
         let manager = HierarchyManager::new(config, registry, strategy);
-        
+
         let result = manager.resolve_source("http://example.com/test").await;
         assert!(matches!(result, HierarchyResult::OriginRequired));
     }
@@ -270,7 +270,7 @@ mod tests {
             ..Default::default()
         };
         let registry = PeerRegistry::new();
-        
+
         // Add parent
         let parent_config = PeerConfig {
             host: "parent.example.com".to_string(),
@@ -281,10 +281,10 @@ mod tests {
             max_connections: 100,
         };
         registry.add_peer(parent_config).await;
-        
+
         let strategy = Box::new(RoundRobinStrategy::new());
         let manager = HierarchyManager::new(config, registry, strategy);
-        
+
         let result = manager.resolve_source("http://example.com/test").await;
         assert!(matches!(result, HierarchyResult::ParentHit(_)));
     }
@@ -292,7 +292,7 @@ mod tests {
     #[tokio::test]
     async fn test_peer_statistics() {
         let registry = PeerRegistry::new();
-        
+
         let peer_config = PeerConfig {
             host: "test.example.com".to_string(),
             port: 1488,
@@ -302,19 +302,30 @@ mod tests {
             max_connections: 100,
         };
         let peer = registry.add_peer(peer_config).await;
-        
+
         let config = HierarchyConfig::default();
         let strategy = Box::new(RoundRobinStrategy::new());
         let manager = HierarchyManager::new(config, registry, strategy);
-        
+
         // Record some hits
         manager.record_peer_hit(&peer, 1024).await;
         manager.record_peer_hit(&peer, 2048).await;
         manager.record_peer_miss(&peer).await;
-        
-        assert_eq!(peer.stats.requests.load(std::sync::atomic::Ordering::Relaxed), 3);
-        assert_eq!(peer.stats.hits.load(std::sync::atomic::Ordering::Relaxed), 2);
-        assert_eq!(peer.stats.misses.load(std::sync::atomic::Ordering::Relaxed), 1);
+
+        assert_eq!(
+            peer.stats
+                .requests
+                .load(std::sync::atomic::Ordering::Relaxed),
+            3
+        );
+        assert_eq!(
+            peer.stats.hits.load(std::sync::atomic::Ordering::Relaxed),
+            2
+        );
+        assert_eq!(
+            peer.stats.misses.load(std::sync::atomic::Ordering::Relaxed),
+            1
+        );
         assert_eq!(peer.stats.hit_rate(), 2.0 / 3.0);
     }
 }

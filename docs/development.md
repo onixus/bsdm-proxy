@@ -47,7 +47,28 @@ cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-CI запускает `cargo fmt --check` — перед пушем обязательно `cargo fmt --all`.
+CI запускает `cargo fmt --check` — **перед каждым push** прогоняйте проверки:
+
+```bash
+./scripts/pre-push-check.sh
+```
+
+### Git pre-push hook (рекомендуется)
+
+Автоматически запускает `fmt --check` и `clippy` перед `git push`:
+
+```bash
+./scripts/install-git-hooks.sh
+```
+
+Один раз пропустить: `git push --no-verify`
+
+Проверка вручную без hook:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+```
 
 ## Тесты
 

@@ -57,6 +57,42 @@ impl CertCache {
         })
     }
 
+    /// Load CA for proxy startup. When MITM is off, missing CA files are allowed.
+    pub async fn load_for_startup(mitm_enabled: bool) -> Result<Self, Box<dyn std::error::Error>> {
+        async fn read_key() -> std::io::Result<Vec<u8>> {
+            tokio::fs::read("/certs/ca.key")
+                .await
+                .or_else(|_| std::fs::read("./certs/ca.key"))
+        }
+
+        async fn read_cert() -> Vec<u8> {
+            tokio::fs::read("/certs/ca.crt")
+                .await
+                .or_else(|_| std::fs::read("./certs/ca.crt"))
+                .unwrap_or_default()
+        }
+
+        if mitm_enabled {
+            let ca_key = read_key().await.map_err(|e| {
+                format!("MITM enabled but CA key not found at /certs/ca.key or ./certs/ca.key: {e}")
+            })?;
+            let ca_cert = read_cert().await;
+            return Self::from_pem(&ca_key, &ca_cert);
+        }
+
+        match read_key().await {
+            Ok(ca_key) => {
+                let ca_cert = read_cert().await;
+                Self::from_pem(&ca_key, &ca_cert)
+            }
+            Err(_) => {
+                warn!("MITM disabled and no CA key on disk; using ephemeral in-memory CA");
+                let key_pair = KeyPair::generate()?;
+                Self::from_pem(key_pair.serialize_pem().as_bytes(), b"")
+            }
+        }
+    }
+
     fn in_memory_ca_params() -> Result<CertificateParams, rcgen::Error> {
         let mut ca_params = CertificateParams::new(vec!["BSDM Proxy CA".to_string()])?;
         ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
@@ -213,6 +249,19 @@ pub fn rewrite_mitm_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn load_for_startup_without_ca_when_mitm_disabled() {
+        let dir = std::env::temp_dir().join(format!("bsdm-proxy-ca-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let prev = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&dir).unwrap();
+        let result = CertCache::load_for_startup(false).await;
+        std::env::set_current_dir(prev).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(result.is_ok());
+    }
 
     #[test]
     fn test_parse_authority_default_port() {

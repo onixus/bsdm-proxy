@@ -181,6 +181,7 @@ dependencies = [
  "ldap3",
  "prometheus",
  "quick_cache",
+ "rand",
  "rcgen",
  "rdkafka",
  "regex",

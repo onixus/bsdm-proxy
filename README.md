@@ -217,6 +217,8 @@ Grafana: http://localhost:3000 → **BSDM Proxy Dashboard** (7 панелей, a
 
 ## Тестирование
 
+Перед push: `./scripts/pre-push-check.sh` (или `./scripts/install-git-hooks.sh` для auto hook).
+
 ```bash
 # Unit + integration (workspace)
 cargo test --workspace

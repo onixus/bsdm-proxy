@@ -68,7 +68,8 @@ impl PeerStats {
 
     pub fn hit_rate(&self) -> f64 {
         let hits = self.hits.load(Ordering::Relaxed) as f64;
-        let total = (self.hits.load(Ordering::Relaxed) + self.misses.load(Ordering::Relaxed)) as f64;
+        let total =
+            (self.hits.load(Ordering::Relaxed) + self.misses.load(Ordering::Relaxed)) as f64;
         if total == 0.0 {
             0.0
         } else {
@@ -106,10 +107,12 @@ impl PeerConfig {
         }
 
         let host = parts[0].to_string();
-        let port = parts[1].parse::<u16>()
+        let port = parts[1]
+            .parse::<u16>()
             .map_err(|e| format!("Invalid port: {}", e))?;
         let weight = if parts.len() > 2 {
-            parts[2].parse::<f64>()
+            parts[2]
+                .parse::<f64>()
                 .map_err(|e| format!("Invalid weight: {}", e))?
         } else {
             1.0
@@ -140,9 +143,11 @@ pub struct CachePeer {
 impl CachePeer {
     pub fn new(config: PeerConfig) -> Self {
         let id = format!("{}:{}:{}", config.peer_type, config.host, config.port);
-        info!("Creating cache peer: {} (type: {}, weight: {})", 
-              id, config.peer_type, config.weight);
-        
+        info!(
+            "Creating cache peer: {} (type: {}, weight: {})",
+            id, config.peer_type, config.weight
+        );
+
         Self {
             id,
             config,
@@ -186,7 +191,7 @@ impl CachePeer {
         let base_score = self.config.weight;
         let error_rate = self.stats.error_rate();
         let rtt_factor = 1.0 / (1.0 + (self.rtt().as_millis() as f64 / 100.0));
-        
+
         base_score * (1.0 - error_rate) * rtt_factor
     }
 
@@ -233,7 +238,8 @@ impl PeerRegistry {
 
     /// Get all healthy peers
     pub async fn healthy_peers(&self) -> Vec<Arc<CachePeer>> {
-        self.all_peers().await
+        self.all_peers()
+            .await
             .into_iter()
             .filter(|p| p.is_healthy())
             .collect()
@@ -241,7 +247,8 @@ impl PeerRegistry {
 
     /// Get peers by type
     pub async fn peers_by_type(&self, peer_type: PeerType) -> Vec<Arc<CachePeer>> {
-        self.all_peers().await
+        self.all_peers()
+            .await
             .into_iter()
             .filter(|p| p.config.peer_type == peer_type)
             .collect()
@@ -249,7 +256,8 @@ impl PeerRegistry {
 
     /// Get healthy peers by type
     pub async fn healthy_peers_by_type(&self, peer_type: PeerType) -> Vec<Arc<CachePeer>> {
-        self.healthy_peers().await
+        self.healthy_peers()
+            .await
             .into_iter()
             .filter(|p| p.config.peer_type == peer_type)
             .collect()
@@ -273,7 +281,7 @@ impl PeerRegistry {
         for peer in peers {
             // Passive health check based on error rate
             let error_rate = peer.stats.error_rate();
-            
+
             if error_rate > 0.5 {
                 peer.set_healthy(false);
             } else if error_rate < 0.1 && !peer.is_healthy() {
@@ -356,7 +364,7 @@ mod tests {
         };
 
         let peer = CachePeer::new(config);
-        
+
         peer.stats.record_request().await;
         peer.stats.record_hit(1024).await;
         peer.stats.record_request().await;
@@ -405,12 +413,9 @@ mod tests {
 
     #[test]
     fn test_peer_config_parse() {
-        let result = PeerConfig::parse_from_string(
-            "parent.example.com:1488:1.5",
-            PeerType::Parent
-        );
+        let result = PeerConfig::parse_from_string("parent.example.com:1488:1.5", PeerType::Parent);
         assert!(result.is_ok());
-        
+
         let config = result.unwrap();
         assert_eq!(config.host, "parent.example.com");
         assert_eq!(config.port, 1488);
