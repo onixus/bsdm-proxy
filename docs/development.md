@@ -98,6 +98,9 @@ docker compose -f docker-compose.test.yml up -d --build
 ./scripts/run-smoke-tests.sh --external
 ```
 
+> Proxy Alpine image includes **wget** (not curl). Healthchecks in compose files use  
+> `wget -q -O- http://127.0.0.1:9090/health | grep -q ok`.
+
 Покрытие: `/health`, `/ready`, `/metrics`, HTTP forward через прокси.
 
 ### E2E-тесты
