@@ -172,12 +172,43 @@ cargo test -p bsdm-proxy-e2e --test e2e e2e_mitm_https_with_self_signed_ca -- --
 
 См. [architecture.md](architecture.md).
 
+## Issue automation
+
+При merge PR связанные GitHub issue закрываются автоматически:
+
+| Способ | Пример | Поведение |
+|--------|--------|-----------|
+| Блокер в **заголовке** PR | `feat(proxy): rate limit (B6)` | Закрывает #37 |
+| **`Closes #NN`** в теле PR | `Closes #37` | Закрывает #37 (стандарт GitHub + workflow) |
+| **workflow_dispatch** | Actions → Close blocker issues | Ручное закрытие / backfill |
+| **Скрипт** | `./scripts/close-blocker-issue.sh 6 65` | Локально через `gh` |
+
+**Маппинг:** B*n* → issue #*(31+n)* (B1→#32 … B25→#56).
+
+**Исключение B13 (#44):** auto-close только при `Closes #44` в теле PR (полная реализация NTLM). PR с docs-only и `(B13)` в заголовке **не** закрывают #44.
+
+Шаблон PR: [.github/pull_request_template.md](../.github/pull_request_template.md).
+
+### Backfill (уже смерженные PR без Closes)
+
+```bash
+# Через GitHub Actions UI: Close blocker issues → Run workflow
+#   blocker_id: 6, pr_number: 65
+#   blocker_id: 7, pr_number: 67
+
+# Или локально:
+./scripts/close-blocker-issue.sh 6 65   # B6 → #37
+./scripts/close-blocker-issue.sh 7 67   # B7 → #38
+```
+
 ## CI
 
 | Workflow | Триггер | Шаги |
 |----------|---------|------|
 | [rust.yml](../.github/workflows/rust.yml) | push/PR → main | fmt, clippy, build, test, cargo-audit |
 | [e2e.yml](../.github/workflows/e2e.yml) | push/PR → main | smoke + e2e |
+| [close-blockers.yml](../.github/workflows/close-blockers.yml) | PR merged / manual | auto-close B1–B25 issues |
+| [pr-blocker-hint.yml](../.github/workflows/pr-blocker-hint.yml) | PR opened/edited | комментарий со ссылками на issue |
 
 ## Локальный запуск proxy
 

@@ -1,0 +1,97 @@
+# Remind authors to link blocker issues when PR title references B1–B25.
+
+name: PR blocker link hint
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  hint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const title = pr.title || '';
+            const body = pr.body || '';
+            const base = 31;
+
+            const blockers = [];
+            for (const m of title.matchAll(/\bB(\d{1,2})\b/gi)) {
+              const n = parseInt(m[1], 10);
+              if (n >= 1 && n <= 25) blockers.push(n);
+            }
+
+            if (blockers.length === 0) {
+              core.info('No blockers in PR title');
+              return;
+            }
+
+            const hasCloses = /(?:close|closes|fix|fixes|resolve|resolves)\s+#\d+/i.test(body);
+            const marker = '<!-- blocker-link-hint -->';
+            if (hasCloses) {
+              core.info('PR body already has Closes/Fixes #NN');
+              return;
+            }
+
+            const lines = blockers.map((n) => {
+              const issue = base + n;
+              const note =
+                n === 13
+                  ? ' *(B13: auto-close только с `Closes #44` в теле PR)*'
+                  : ' *(закроется автоматически при merge)*';
+              return `- **B${n}** → [#${issue}](https://github.com/${context.repo.owner}/${context.repo.repo}/issues/${issue})${note}`;
+            });
+
+            const comment = [
+              marker,
+              '### 🔗 Blocker issues',
+              '',
+              'В заголовке PR указаны блокеры:',
+              ...lines,
+              '',
+              'При **merge** связанные issue закроются workflow [close-blockers](https://github.com/' +
+                context.repo.owner +
+                '/' +
+                context.repo.repo +
+                '/actions/workflows/close-blockers.yml).',
+              'Можно явно добавить в описание PR: `Closes #37`.',
+              '',
+              'См. [docs/development.md](https://github.com/' +
+                context.repo.owner +
+                '/' +
+                context.repo.repo +
+                '/blob/main/docs/development.md#issue-automation).',
+            ].join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+              per_page: 100,
+            });
+
+            const existing = comments.find((c) => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: comment,
+              });
+              core.info('Updated blocker hint comment');
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                body: comment,
+              });
+              core.info('Posted blocker hint comment');
+            }
