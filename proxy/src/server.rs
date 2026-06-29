@@ -357,7 +357,11 @@ pub async fn handle_connection(
     client_ip: String,
     tasks: TaskTracker,
 ) {
+    if let Err(e) = stream.set_nodelay(true) {
+        debug!("set_nodelay failed for {}: {}", addr, e);
+    }
     let io = TokioIo::new(stream);
+    let preserve_headers = service.http_preserve_header_case();
 
     let svc = service_fn(move |req: Request<Incoming>| {
         let service = service.clone();
@@ -459,13 +463,21 @@ pub async fn handle_connection(
         }
     });
 
-    if let Err(e) = http1::Builder::new()
-        .preserve_header_case(true)
-        .title_case_headers(true)
-        .serve_connection(io, svc)
-        .with_upgrades()
-        .await
-    {
+    let serve_result = if preserve_headers {
+        http1::Builder::new()
+            .preserve_header_case(true)
+            .title_case_headers(true)
+            .serve_connection(io, svc)
+            .with_upgrades()
+            .await
+    } else {
+        http1::Builder::new()
+            .serve_connection(io, svc)
+            .with_upgrades()
+            .await
+    };
+
+    if let Err(e) = serve_result {
         error!("Connection error from {}: {}", addr, e);
     }
 }

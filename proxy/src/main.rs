@@ -3,10 +3,11 @@ mod policy_config;
 
 use auth_config::load_auth_config;
 use bsdm_proxy::{
-    build_hierarchy_manager, handle_connection, http_cache_key, icp_server_bind_addr,
-    load_hierarchy_config, metrics_server, should_start_icp_server, wait_shutdown_signal,
-    AclAction, AuthManager, CacheConfig, CertCache, IcpServer, L2CacheConfig, Metrics, ProxyPolicy,
-    ProxyService, RateLimitConfig, RedisL2Cache, UpstreamTlsConfig,
+    bind_http_listeners, build_hierarchy_manager, handle_connection, http_cache_key,
+    icp_server_bind_addr, load_hierarchy_config, metrics_server, should_start_icp_server,
+    wait_shutdown_signal, AclAction, AuthManager, CacheConfig, CertCache, IcpServer, L2CacheConfig,
+    Metrics, PerfConfig, ProxyPolicy, ProxyService, RateLimitConfig, RedisL2Cache,
+    UpstreamTlsConfig,
 };
 use policy_config::{load_policy_config, reload_acl_engine};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,6 +17,38 @@ use tokio::net::TcpListener;
 use tokio::sync::watch;
 use tokio_util::task::TaskTracker;
 use tracing::{debug, error, info, warn};
+
+async fn run_accept_loop(
+    listener: Arc<TcpListener>,
+    service: Arc<ProxyService>,
+    connection_tasks: TaskTracker,
+    mut shutdown_rx: watch::Receiver<bool>,
+) {
+    loop {
+        tokio::select! {
+            accept_result = listener.accept() => {
+                let (stream, addr) = match accept_result {
+                    Ok(conn) => conn,
+                    Err(e) => {
+                        error!("Accept failed: {}", e);
+                        continue;
+                    }
+                };
+                let service_clone = service.clone();
+                let client_ip = addr.ip().to_string();
+                let tasks = connection_tasks.clone();
+                connection_tasks.spawn(async move {
+                    handle_connection(stream, addr, service_clone, client_ip, tasks).await;
+                });
+            }
+            changed = shutdown_rx.changed() => {
+                if changed.is_ok() && *shutdown_rx.borrow() {
+                    break;
+                }
+            }
+        }
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -109,6 +142,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let rate_limit_config = RateLimitConfig::from_env();
     let upstream_tls = UpstreamTlsConfig::from_env();
+    let perf = PerfConfig::from_env();
 
     let service = Arc::new(ProxyService::new(
         cert_cache,
@@ -123,6 +157,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         hierarchy.clone(),
         rate_limit_config.clone(),
         upstream_tls,
+        perf.clone(),
     ));
 
     if should_start_icp_server(&hierarchy_config) {
@@ -174,7 +209,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         _ = interval.tick() => {
                             match reload_acl_engine(&rules_path, default_action) {
                                 Ok(engine) => {
-                                    let mut guard = acl_engine.lock().await;
+                                    let mut guard = acl_engine.write().await;
                                     *guard = engine;
                                     info!("ACL rules reloaded from {}", rules_path);
                                 }
@@ -197,8 +232,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|s| s.parse().ok())
         .unwrap_or(1488);
 
-    let listener = TcpListener::bind(format!("0.0.0.0:{}", http_port)).await?;
-    info!("🚀 BSDM-Proxy v2.0 (optimized) on 0.0.0.0:{}", http_port);
+    let listeners = bind_http_listeners(http_port, perf.worker_count).await?;
+    let worker_count = listeners.len();
+    info!(
+        "🚀 BSDM-Proxy v2.0 (optimized) on 0.0.0.0:{} ({} accept worker(s))",
+        http_port, worker_count
+    );
+    if perf.fast_cache_hit {
+        info!("⚡ PERF_FAST_CACHE_HIT enabled — L1 HIT skips policy/Kafka on hot path");
+    }
+    if perf.worker_count > 1 {
+        info!("⚡ WORKER_COUNT={} (SO_REUSEPORT)", perf.worker_count);
+    }
     info!(
         "🔐 MITM: {} (ports 443/8443)",
         if mitm_enabled { "enabled" } else { "disabled" }
@@ -277,33 +322,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    loop {
-        tokio::select! {
-            accept_result = listener.accept() => {
-                let (stream, addr) = match accept_result {
-                    Ok(conn) => conn,
-                    Err(e) => {
-                        error!("Accept failed: {}", e);
-                        continue;
-                    }
-                };
-                let service_clone = service.clone();
-                let client_ip = addr.ip().to_string();
-                let tasks = connection_tasks.clone();
-                connection_tasks.spawn(async move {
-                    handle_connection(stream, addr, service_clone, client_ip, tasks).await;
-                });
-            }
-            _ = wait_shutdown_signal() => {
-                info!("Shutdown signal received, stopping accept loop");
-                break;
-            }
-        }
+    for listener in listeners {
+        let listener = Arc::new(listener);
+        let service_clone = service.clone();
+        let tasks = connection_tasks.clone();
+        let shutdown_rx = shutdown_rx.clone();
+        tokio::spawn(run_accept_loop(listener, service_clone, tasks, shutdown_rx));
     }
 
-    draining.store(true, Ordering::SeqCst);
+    wait_shutdown_signal().await;
+    info!("Shutdown signal received, stopping accept loops");
     let _ = shutdown_tx.send(true);
-    drop(listener);
+
+    draining.store(true, Ordering::SeqCst);
 
     let in_flight = service.metrics().requests_in_flight.get() as usize;
     info!(

@@ -5,13 +5,13 @@ use bsdm_proxy::categorization::{CategorizationConfig, CategorizationEngine};
 use serde::Deserialize;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 use tracing::{info, warn};
 
 #[derive(Clone)]
 pub struct PolicyConfig {
     pub acl_enabled: bool,
-    pub acl_engine: Option<Arc<Mutex<AclEngine>>>,
+    pub acl_engine: Option<Arc<RwLock<AclEngine>>>,
     pub acl_rules_path: Option<String>,
     pub acl_auto_reload: bool,
     pub acl_reload_interval: Duration,
@@ -105,7 +105,7 @@ pub fn load_policy_config() -> PolicyConfig {
             info!("ACL enabled without ACL_RULES_PATH, using default action only");
             AclEngine::new(default_action)
         };
-        Some(Arc::new(Mutex::new(engine)))
+        Some(Arc::new(RwLock::new(engine)))
     } else {
         None
     };
