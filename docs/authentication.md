@@ -2,9 +2,17 @@
 
 > См. также: [оглавление документации](README.md) · [конфигурация в README](../README.md#конфигурация)
 
-BSDM-Proxy supports multiple authentication backends for proxy access control.
+BSDM-Proxy supports proxy authentication backends for access control.
 
-## Supported Backends
+## Supported Backends (v0.2.x)
+
+| Backend | Status | Build feature |
+|---------|--------|---------------|
+| **Basic** | ✅ Implemented | `auth-basic` (default) |
+| **LDAP** | ✅ Implemented | `auth-ldap` |
+| **NTLM** | ❌ Not implemented | Planned M2 — see [#44](https://github.com/onixus/bsdm-proxy/issues/44) |
+
+> **Note:** `AUTH_BACKEND=ntlm` is rejected at runtime (`NTLM not implemented yet` in `auth.rs`). Use **LDAP** for Active Directory integration today.
 
 ### 1. Basic Authentication
 
@@ -36,16 +44,26 @@ export LDAP_USE_TLS=true
 export LDAP_TIMEOUT=5
 ```
 
-### 3. NTLM (Windows Integrated Authentication)
+## Planned: NTLM (M2 — not implemented)
 
-Challenge-response authentication for Windows environments.
+NTLM (Windows Integrated Authentication) is on the [M2 roadmap](roadmap.md#m2--squid-parity-v03x). Configuration stubs exist in code (`auth-ntlm` Cargo feature, env vars) but authentication is **not functional** in v0.2.x.
+
+**Do not use** the examples below in production until [#44](https://github.com/onixus/bsdm-proxy/issues/44) is resolved.
+
+<details>
+<summary>Future NTLM configuration (reference only)</summary>
 
 ```bash
+# NOT SUPPORTED in v0.2.x
 export AUTH_ENABLED=true
 export AUTH_BACKEND=ntlm
 export NTLM_DOMAIN="CORPORATE"
 export NTLM_WORKSTATION="PROXY01"
 ```
+
+For Windows domains today, use **LDAP** with `sAMAccountName` user filter instead.
+
+</details>
 
 ## Features
 
@@ -113,18 +131,6 @@ services:
       - LDAP_USE_TLS=false
 ```
 
-### NTLM (Windows Domain)
-
-```yaml
-services:
-  proxy:
-    environment:
-      - AUTH_ENABLED=true
-      - AUTH_BACKEND=ntlm
-      - NTLM_DOMAIN=CORPORATE
-      - NTLM_WORKSTATION=PROXY01
-```
-
 ## Client Configuration
 
 ### cURL with Basic Auth
@@ -138,17 +144,6 @@ curl -x http://username:password@localhost:1488 https://example.com
 1. Configure proxy: `localhost:1488`
 2. Enable "Use proxy authentication"
 3. Enter credentials when prompted
-
-### NTLM (Windows)
-
-Windows will automatically use current user credentials:
-
-```bash
-# PowerShell
-$proxy = [System.Net.WebProxy]::new('http://localhost:1488')
-$proxy.UseDefaultCredentials = $true
-[System.Net.WebRequest]::DefaultWebProxy = $proxy
-```
 
 ## Metrics
 
@@ -188,13 +183,6 @@ docker-compose logs -f proxy | grep -i ldap
 ldapsearch -H ldap://dc.example.com -b "dc=example,dc=com" "(sAMAccountName=username)"
 ```
 
-### NTLM Challenge Failed
-
-Ensure:
-1. Domain is correctly configured
-2. Client supports NTLM (Windows)
-3. Proxy is joined to domain (if required)
-
 ## Security Best Practices
 
 1. **Use TLS for LDAP** (`LDAP_USE_TLS=true`)
@@ -208,10 +196,10 @@ Ensure:
 
 - **Cache hit**: <0.1ms (local hash verification)
 - **LDAP auth**: 50-200ms (depending on network)
-- **NTLM auth**: 100-300ms (challenge-response)
 
 ## Roadmap
 
+- [ ] **NTLM auth** (M2) — [#44](https://github.com/onixus/bsdm-proxy/issues/44)
 - [ ] OAuth2/OIDC support
 - [ ] RADIUS authentication
 - [ ] Multi-factor authentication (MFA)

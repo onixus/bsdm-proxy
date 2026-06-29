@@ -163,7 +163,7 @@ CA для MITM читается из `/certs/ca.key` и `/certs/ca.crt` (fallbac
 | Переменная | Описание |
 |-----------|----------|
 | `AUTH_ENABLED` | `true` / `false` |
-| `AUTH_BACKEND` | `basic`, `ldap`, `ntlm` |
+| `AUTH_BACKEND` | `basic` (default), `ldap` (feature `auth-ldap`). `ntlm` — **не реализован**, см. M2 |
 | `AUTH_REALM` | Realm для `Proxy-Authenticate` |
 | `AUTH_CACHE_TTL` | TTL кеша сессий (сек) |
 
@@ -281,7 +281,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 | Документ | Содержание |
 |----------|------------|
 | [docs/README.md](docs/README.md) | Оглавление документации |
-| [docs/authentication.md](docs/authentication.md) | LDAP, NTLM, Basic Auth |
+| [docs/authentication.md](docs/authentication.md) | LDAP, Basic Auth (NTLM — M2) |
 | [docs/acl.md](docs/acl.md) | Правила доступа, приоритеты |
 | [docs/categorization.md](docs/categorization.md) | Shallalist, URLhaus, PhishTank |
 | [docs/hierarchical-caching.md](docs/hierarchical-caching.md) | Иерархический кеш, ICP, peers |
@@ -317,6 +317,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 - [x] Rate limiting per user/IP
 - [x] Рефакторинг `main.rs` (вынос `ProxyService` в lib)
 - [x] Hierarchy E2E + `docker-compose.hierarchy.yml`
+- [x] NTLM: документация исправлена (M2, не реализован)
 
 ### M2 — Squid parity (v0.3.x)
 
