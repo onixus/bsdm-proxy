@@ -230,7 +230,7 @@ Local L1 miss → ICP query siblings → select parent → fetch_via_peer → or
 |----|--------|-------|
 | **B21** | Feature flags не в main | `Cargo.toml` features |
 | **B22** | Нет negative caching / refresh | `main.rs` |
-| **B23** | HTTP/2 upstream — `UPSTREAM_HTTP2_ENABLED` | `upstream.rs` |
+| **B23** | HTTP/2 upstream — `UPSTREAM_HTTP2_ENABLED` | `upstream.rs` | ✅ |
 | **B24** | Healthcheck curl vs wget — исправлено (`wget` в compose) | `docker-compose.yml`, `Dockerfile` |
 | **B25** | REST ACL API документирован, не реализован | `docs/acl.md`, `main.rs` metrics server |
 
@@ -301,4 +301,4 @@ flowchart LR
 
 ---
 
-*Версия документа: 0.2.2b · B1–B5 resolved, B6–B25 open*
+*Версия документа: 0.2.3-test · M1 done, M2 ~45% (L2, HTTP/2, compression)*

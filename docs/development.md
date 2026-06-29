@@ -164,7 +164,7 @@ cargo test -p bsdm-proxy-e2e --test e2e e2e_mitm_https_with_self_signed_ca -- --
 - примерами конфигурации и systemd unit-файлами
 - `install.sh` и `SHA256SUMS`
 
-Версия берётся из `proxy/Cargo.toml` (например `0.2.2-b` → пакет `0.2.2b`).
+Версия берётся из `proxy/Cargo.toml` (например `0.2.3-test` → пакет `0.2.3test`, `0.2.2-b` → `0.2.2b`).
 
 ## Roadmap и milestones
 
