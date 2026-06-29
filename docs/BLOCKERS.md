@@ -5,6 +5,8 @@
 | GitHub | Скрипт |
 |--------|--------|
 | Issues [#32–#56](https://github.com/onixus/bsdm-proxy/issues?q=is%3Aissue+in%3Atitle+B) | `./scripts/create-blocker-issues.sh` |
+| Закрыть блокер вручную | `./scripts/close-blocker-issue.sh <id> [pr]` |
+| Auto-close при merge PR | [.github/workflows/close-blockers.yml](../.github/workflows/close-blockers.yml) |
 
 ---
 
