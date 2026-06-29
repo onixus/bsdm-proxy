@@ -51,7 +51,7 @@
 |----|-------|--------|--------|
 | B21 | [#52](https://github.com/onixus/bsdm-proxy/issues/52) | Use Cargo feature flags in main | ❌ |
 | B22 | [#53](https://github.com/onixus/bsdm-proxy/issues/53) | Cache refresh + negative caching | ❌ |
-| B23 | [#54](https://github.com/onixus/bsdm-proxy/issues/54) | HTTP/2 upstream client | ❌ |
+| B23 | [#54](https://github.com/onixus/bsdm-proxy/issues/54) | HTTP/2 upstream client | ✅ |
 | B24 | [#55](https://github.com/onixus/bsdm-proxy/issues/55) | Fix healthcheck curl vs wget | ✅ |
 | B25 | [#56](https://github.com/onixus/bsdm-proxy/issues/56) | Implement or remove REST ACL API | ❌ |
 

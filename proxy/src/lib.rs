@@ -19,6 +19,7 @@ pub mod rate_limit;
 pub mod selection;
 pub mod server;
 pub mod tls;
+pub mod upstream;
 
 // Re-export commonly used types
 pub use acl::{AclAction, AclDecision, AclEngine, AclRule};
@@ -41,6 +42,7 @@ pub use rate_limit::{RateLimitConfig, RateLimitViolation, RateLimiter};
 pub use selection::{parse_strategy, SelectionStrategy};
 pub use server::{handle_connection, metrics_server, wait_shutdown_signal};
 pub use tls::CertCache;
+pub use upstream::{build_upstream_https_connector, UpstreamTlsConfig};
 
 // Conditional re-exports based on features
 #[cfg(feature = "auth-ldap")]
