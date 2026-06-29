@@ -17,7 +17,7 @@ use hyper::header::{HeaderName, HeaderValue, AUTHORIZATION, LOCATION};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
-use hyper_rustls::ConfigBuilderExt;
+use rustls_platform_verifier::BuilderVerifierExt;
 use hyper_util::rt::TokioIo;
 use metrics::{Metrics, RequestMetricsGuard};
 use policy_config::{load_policy_config, reload_acl_engine, PolicyConfig};
@@ -656,6 +656,27 @@ impl ProxyService {
     }
 }
 
+fn build_upstream_tls_with_combined_roots() -> rustls::ClientConfig {
+    let mut roots = rustls::RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let native_certs = rustls_native_certs::load_native_certs();
+    for err in &native_certs.errors {
+        warn!("Failed to load native CA certificate: {err}");
+    }
+    let mut native = 0usize;
+    for cert in native_certs.certs {
+        if roots.add(cert).is_ok() {
+            native += 1;
+        }
+    }
+    info!(
+        "Upstream TLS: webpki-roots + {native} native CA certificate(s)"
+    );
+    rustls::ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth()
+}
+
 fn build_upstream_https_connector() -> Result<
     hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>,
     Box<dyn std::error::Error>,
@@ -675,10 +696,27 @@ fn build_upstream_https_connector() -> Result<
         rustls::ClientConfig::builder()
             .with_root_certificates(roots)
             .with_no_client_auth()
+    } else if std::env::var("UPSTREAM_TLS_PLATFORM")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+    {
+        match rustls::ClientConfig::builder()
+            .with_platform_verifier()
+            .map(|builder| builder.with_no_client_auth())
+        {
+            Ok(config) => {
+                info!("Upstream TLS: using platform certificate verifier");
+                config
+            }
+            Err(e) => {
+                warn!(
+                    "Platform TLS verifier unavailable ({e}); falling back to webpki + native roots"
+                );
+                build_upstream_tls_with_combined_roots()
+            }
+        }
     } else {
-        rustls::ClientConfig::builder()
-            .with_webpki_roots()
-            .with_no_client_auth()
+        build_upstream_tls_with_combined_roots()
     };
 
     Ok(hyper_rustls::HttpsConnectorBuilder::new()
