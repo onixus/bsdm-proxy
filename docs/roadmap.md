@@ -69,7 +69,7 @@ gantt
 
 - [x] Rate limiting per user/IP — [#37](https://github.com/onixus/bsdm-proxy/issues/37)
 - [x] Рефакторинг `main.rs` — вынос `ProxyService` в lib — [#38](https://github.com/onixus/bsdm-proxy/issues/38)
-- [ ] Hierarchy E2E / `docker-compose.hierarchy.yml`
+- [x] Hierarchy E2E / `docker-compose.hierarchy.yml`
 - [ ] Исправить README: NTLM помечен как done, но не реализован (`auth.rs`)
 
 **Критерий завершения M1:** hierarchy E2E, все CI зелёные.

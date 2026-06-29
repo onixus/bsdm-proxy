@@ -13,7 +13,7 @@ if [[ "$EXTERNAL" == "false" ]]; then
   echo "Building proxy binary..."
   cargo build -p bsdm-proxy --bin proxy
   echo "Running in-process E2E tests..."
-  cargo test -p bsdm-proxy-e2e --test e2e -- --nocapture
+  cargo test -p bsdm-proxy-e2e
 else
   echo "Running E2E checks against docker-compose.test.yml stack..."
   PROXY_URL="${PROXY_URL:-http://127.0.0.1:1488}"

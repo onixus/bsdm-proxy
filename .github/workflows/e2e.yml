@@ -71,4 +71,4 @@ jobs:
         run: cargo build -p bsdm-proxy --bin proxy
 
       - name: Run E2E tests
-        run: cargo test -p bsdm-proxy-e2e --test e2e
+        run: cargo test -p bsdm-proxy-e2e
