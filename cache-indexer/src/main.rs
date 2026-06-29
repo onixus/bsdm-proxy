@@ -22,7 +22,7 @@ struct CacheEvent {
     status: u16,
     cache_key: String,
     timestamp: u64,
-    #[serde(default)]  // ИСПРАВЛЕНИЕ: делаем поле опциональным
+    #[serde(default)] // ИСПРАВЛЕНИЕ: делаем поле опциональным
     headers: HashMap<String, String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     cache_status: Option<String>,
@@ -48,6 +48,7 @@ struct Indexer {
 }
 
 impl Indexer {
+    #[allow(clippy::too_many_arguments)]
     async fn new(
         kafka_brokers: &str,
         opensearch_url: &str,
@@ -70,22 +71,19 @@ impl Indexer {
         info!("Subscribed to Kafka topic: {}", kafka_topic);
 
         // Создаём транспорт с аутентификацией
-        let mut transport_builder = TransportBuilder::new(
-            SingleNodeConnectionPool::new(opensearch_url.parse()?),
-        );
+        let mut transport_builder =
+            TransportBuilder::new(SingleNodeConnectionPool::new(opensearch_url.parse()?));
 
         // Добавляем credentials если указаны
         if let (Some(username), Some(password)) = (opensearch_username, opensearch_password) {
             info!("Using authentication for OpenSearch: {}", username);
-            transport_builder = transport_builder
-                .auth(Credentials::Basic(username, password));
+            transport_builder = transport_builder.auth(Credentials::Basic(username, password));
         }
 
         // Отключаем проверку SSL если нужно
         if !ssl_verify {
             warn!("SSL certificate verification is disabled!");
-            transport_builder = transport_builder
-                .cert_validation(CertificateValidation::None);
+            transport_builder = transport_builder.cert_validation(CertificateValidation::None);
         }
 
         let transport = transport_builder.build()?;
@@ -205,7 +203,11 @@ impl Indexer {
                                 }
                             }
                             Err(e) => {
-                                warn!("Failed to parse event: {} - Payload: {}", e, String::from_utf8_lossy(payload));
+                                warn!(
+                                    "Failed to parse event: {} - Payload: {}",
+                                    e,
+                                    String::from_utf8_lossy(payload)
+                                );
                             }
                         }
                     }

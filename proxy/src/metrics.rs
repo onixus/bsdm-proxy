@@ -31,6 +31,7 @@ pub struct Metrics {
     pub cache_bypasses_total: Counter,
     pub cache_entries: Gauge,
     pub cache_size_bytes: Gauge,
+    #[allow(dead_code)]
     pub cache_evictions_total: Counter,
     pub cache_lookup_duration_seconds: Histogram,
 
@@ -77,22 +78,26 @@ impl Metrics {
         )?;
         registry.register(Box::new(request_duration_seconds.clone()))?;
 
-        let request_size_bytes = Histogram::with_opts(HistogramOpts::new(
-            "bsdm_proxy_request_size_bytes",
-            "HTTP request size in bytes",
-        )
-        .buckets(vec![
-            100.0, 1000.0, 10000.0, 100000.0, 1000000.0, 10000000.0,
-        ]))?;
+        let request_size_bytes = Histogram::with_opts(
+            HistogramOpts::new(
+                "bsdm_proxy_request_size_bytes",
+                "HTTP request size in bytes",
+            )
+            .buckets(vec![
+                100.0, 1000.0, 10000.0, 100000.0, 1000000.0, 10000000.0,
+            ]),
+        )?;
         registry.register(Box::new(request_size_bytes.clone()))?;
 
-        let response_size_bytes = Histogram::with_opts(HistogramOpts::new(
-            "bsdm_proxy_response_size_bytes",
-            "HTTP response size in bytes",
-        )
-        .buckets(vec![
-            100.0, 1000.0, 10000.0, 100000.0, 1000000.0, 10000000.0,
-        ]))?;
+        let response_size_bytes = Histogram::with_opts(
+            HistogramOpts::new(
+                "bsdm_proxy_response_size_bytes",
+                "HTTP response size in bytes",
+            )
+            .buckets(vec![
+                100.0, 1000.0, 10000.0, 100000.0, 1000000.0, 10000000.0,
+            ]),
+        )?;
         registry.register(Box::new(response_size_bytes.clone()))?;
 
         // Cache metrics
@@ -128,11 +133,13 @@ impl Metrics {
         )?;
         registry.register(Box::new(cache_evictions_total.clone()))?;
 
-        let cache_lookup_duration_seconds = Histogram::with_opts(HistogramOpts::new(
-            "bsdm_proxy_cache_lookup_duration_seconds",
-            "Cache lookup duration in seconds",
-        )
-        .buckets(vec![0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01]))?;
+        let cache_lookup_duration_seconds = Histogram::with_opts(
+            HistogramOpts::new(
+                "bsdm_proxy_cache_lookup_duration_seconds",
+                "Cache lookup duration in seconds",
+            )
+            .buckets(vec![0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01]),
+        )?;
         registry.register(Box::new(cache_lookup_duration_seconds.clone()))?;
 
         // Upstream metrics
@@ -227,6 +234,7 @@ impl Metrics {
     }
 
     /// Get cache hit rate (0.0 to 1.0)
+    #[allow(dead_code)]
     pub fn cache_hit_rate(&self) -> f64 {
         let hits = self.cache_hits_total.get();
         let misses = self.cache_misses_total.get();
@@ -268,21 +276,18 @@ impl RequestMetricsGuard {
         self.cache_status = status.to_string();
     }
 
-    pub fn finish(self, status_code: u16, response_size: usize) {
+    pub fn finish(self, status_code: u16, request_size: usize, response_size: usize) {
         let duration = self.start.elapsed().as_secs_f64();
         self.metrics.requests_in_flight.dec();
         self.metrics
             .requests_total
-            .with_label_values(&[
-                &self.method,
-                &status_code.to_string(),
-                &self.cache_status,
-            ])
+            .with_label_values(&[&self.method, &status_code.to_string(), &self.cache_status])
             .inc();
         self.metrics
             .request_duration_seconds
             .with_label_values(&[&self.method, &self.cache_status])
             .observe(duration);
+        self.metrics.request_size_bytes.observe(request_size as f64);
         self.metrics
             .response_size_bytes
             .observe(response_size as f64);

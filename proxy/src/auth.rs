@@ -168,7 +168,10 @@ pub struct AuthManager {
 
 impl AuthManager {
     pub fn new(config: AuthConfig) -> Self {
-        info!("Authentication manager initialized with backend: {}", config.backend);
+        info!(
+            "Authentication manager initialized with backend: {}",
+            config.backend
+        );
         Self {
             config,
             user_cache: Arc::new(RwLock::new(HashMap::new())),
@@ -225,20 +228,25 @@ impl AuthManager {
             #[cfg(feature = "auth-ldap")]
             AuthBackend::Ldap => self.authenticate_ldap(username, password).await?,
             #[cfg(feature = "auth-ntlm")]
-            AuthBackend::Ntlm => {
-                return Err("NTLM not implemented yet".to_string())
-            }
+            AuthBackend::Ntlm => return Err("NTLM not implemented yet".to_string()),
         };
 
         // Cache successful authentication
         self.cache_user(username, password, user_info.clone()).await;
 
-        info!("User {} authenticated successfully via {}", username, self.config.backend);
+        info!(
+            "User {} authenticated successfully via {}",
+            username, self.config.backend
+        );
         Ok(user_info)
     }
 
     /// Basic authentication (no external validation)
-    async fn authenticate_basic(&self, username: &str, _password: &str) -> Result<UserInfo, String> {
+    async fn authenticate_basic(
+        &self,
+        username: &str,
+        _password: &str,
+    ) -> Result<UserInfo, String> {
         Ok(UserInfo {
             username: username.to_string(),
             display_name: Some(username.to_string()),
@@ -251,12 +259,18 @@ impl AuthManager {
     /// LDAP authentication
     #[cfg(feature = "auth-ldap")]
     async fn authenticate_ldap(&self, username: &str, password: &str) -> Result<UserInfo, String> {
-        let ldap_config = self.config.ldap.as_ref()
+        let ldap_config = self
+            .config
+            .ldap
+            .as_ref()
             .ok_or_else(|| "LDAP not configured".to_string())?;
 
         // Try each LDAP server
         for server in &ldap_config.servers {
-            match self.try_ldap_server(server, ldap_config, username, password).await {
+            match self
+                .try_ldap_server(server, ldap_config, username, password)
+                .await
+            {
                 Ok(user_info) => return Ok(user_info),
                 Err(e) => {
                     warn!("LDAP server {} failed: {}", server, e);
@@ -278,8 +292,7 @@ impl AuthManager {
         password: &str,
     ) -> Result<UserInfo, String> {
         // Connect to LDAP server
-        let settings = LdapConnSettings::new()
-            .set_conn_timeout(config.timeout);
+        let settings = LdapConnSettings::new().set_conn_timeout(config.timeout);
 
         let mut ldap = LdapConn::with_settings(settings, server)
             .map_err(|e| format!("LDAP connection failed: {}", e))?;
@@ -293,10 +306,16 @@ impl AuthManager {
         // Search for user
         let filter = config.user_filter.replace("{username}", username);
         let result = ldap
-            .search(&config.base_dn, Scope::Subtree, &filter, vec!["cn", "mail", "memberOf"])
+            .search(
+                &config.base_dn,
+                Scope::Subtree,
+                &filter,
+                vec!["cn", "mail", "memberOf"],
+            )
             .map_err(|e| format!("LDAP search failed: {}", e))?;
 
-        let (entries, _) = result.success()
+        let (entries, _) = result
+            .success()
             .map_err(|e| format!("LDAP search error: {}", e))?;
 
         if entries.is_empty() {
@@ -311,15 +330,21 @@ impl AuthManager {
             .map_err(|_| "Invalid credentials".to_string())?;
 
         // Extract user information
-        let display_name = entry.attrs.get("cn")
+        let display_name = entry
+            .attrs
+            .get("cn")
             .and_then(|v| v.first())
             .map(|s| s.to_string());
 
-        let email = entry.attrs.get("mail")
+        let email = entry
+            .attrs
+            .get("mail")
             .and_then(|v| v.first())
             .map(|s| s.to_string());
 
-        let groups = entry.attrs.get("memberOf")
+        let groups = entry
+            .attrs
+            .get("memberOf")
             .map(|v| v.iter().map(|s| s.to_string()).collect())
             .unwrap_or_default();
 
@@ -346,7 +371,10 @@ impl AuthManager {
             ttl: self.config.cache_ttl,
         };
 
-        self.user_cache.write().await.insert(username.to_string(), cached);
+        self.user_cache
+            .write()
+            .await
+            .insert(username.to_string(), cached);
     }
 
     /// Create 407 Proxy Authentication Required response
@@ -363,9 +391,7 @@ impl AuthManager {
                 format!("Basic realm=\"{}\"", self.config.realm)
             }
             #[cfg(feature = "auth-ntlm")]
-            AuthBackend::Ntlm => {
-                "NTLM".to_string()
-            }
+            AuthBackend::Ntlm => "NTLM".to_string(),
         };
 
         Response::builder()
@@ -406,7 +432,7 @@ mod tests {
 
         let manager = AuthManager::new(config);
         let result = manager.authenticate("testuser", "testpass").await;
-        
+
         assert!(result.is_ok());
         let user_info = result.unwrap();
         assert_eq!(user_info.username, "testuser");
@@ -422,10 +448,10 @@ mod tests {
         };
 
         let manager = AuthManager::new(config);
-        
+
         // First authentication
         manager.authenticate("testuser", "password").await.unwrap();
-        
+
         // Should be cached
         let cached = manager.get_cached_user("testuser").await;
         assert!(cached.is_some());
@@ -443,10 +469,10 @@ mod tests {
 
         let manager = AuthManager::new(config);
         manager.authenticate("testuser", "password").await.unwrap();
-        
+
         // Wait for expiration
         tokio::time::sleep(Duration::from_millis(150)).await;
-        
+
         let cached = manager.get_cached_user("testuser").await;
         assert!(cached.unwrap().is_expired());
     }

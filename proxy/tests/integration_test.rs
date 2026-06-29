@@ -23,7 +23,7 @@ mod tests {
         // Same input should produce same hash
         let method = "POST";
         let uri = "https://example.com/api/data";
-        
+
         let cache_key1 = format!("{}-{}", method, uri);
         let mut hasher1 = Sha256::new();
         hasher1.update(cache_key1.as_bytes());
@@ -61,14 +61,20 @@ mod tests {
         headers.insert("Cache-Control".to_string(), "max-age=3600".to_string());
 
         assert_eq!(headers.len(), 2);
-        assert_eq!(headers.get("Content-Type"), Some(&"application/json".to_string()));
-        assert_eq!(headers.get("Cache-Control"), Some(&"max-age=3600".to_string()));
+        assert_eq!(
+            headers.get("Content-Type"),
+            Some(&"application/json".to_string())
+        );
+        assert_eq!(
+            headers.get("Cache-Control"),
+            Some(&"max-age=3600".to_string())
+        );
     }
 
     #[test]
     fn test_timestamp_generation() {
         use std::time::{SystemTime, UNIX_EPOCH};
-        
+
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -76,7 +82,7 @@ mod tests {
 
         // Timestamp should be reasonable (after year 2020)
         assert!(timestamp > 1577836800); // 2020-01-01 00:00:00 UTC
-        // And before year 2100
+                                         // And before year 2100
         assert!(timestamp < 4102444800); // 2100-01-01 00:00:00 UTC
     }
 
@@ -91,7 +97,7 @@ mod tests {
     #[test]
     fn test_method_types() {
         let methods = vec!["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"];
-        
+
         for method in methods {
             assert!(!method.is_empty());
             assert!(method.chars().all(|c| c.is_ascii_uppercase()));
@@ -100,8 +106,9 @@ mod tests {
 
     #[test]
     fn test_status_codes() {
-        let valid_codes: Vec<u16> = vec![200, 201, 204, 301, 302, 400, 401, 403, 404, 500, 502, 503];
-        
+        let valid_codes: Vec<u16> =
+            vec![200, 201, 204, 301, 302, 400, 401, 403, 404, 500, 502, 503];
+
         for code in valid_codes {
             assert!(code >= 100);
             assert!(code < 600);
@@ -117,7 +124,7 @@ mod cert_tests {
     fn test_key_pair_generation() {
         let key_pair = KeyPair::generate().unwrap();
         let pem = key_pair.serialize_pem();
-        
+
         assert!(!pem.is_empty());
         assert!(pem.contains("BEGIN PRIVATE KEY"));
         assert!(pem.contains("END PRIVATE KEY"));
@@ -129,7 +136,9 @@ mod cert_tests {
         let mut params = CertificateParams::new(vec![domain.to_string()]).unwrap();
         params.distinguished_name = DistinguishedName::new();
         params.distinguished_name.push(DnType::CommonName, domain);
-        params.distinguished_name.push(DnType::OrganizationName, "Test Org");
+        params
+            .distinguished_name
+            .push(DnType::OrganizationName, "Test Org");
 
         // Verify params were set correctly
         assert!(!params.subject_alt_names.is_empty());

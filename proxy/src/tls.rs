@@ -172,8 +172,7 @@ fn parse_private_key(
     pem: &[u8],
 ) -> Result<PrivateKeyDer<'static>, Box<dyn std::error::Error + Send + Sync>> {
     let mut reader = Cursor::new(pem);
-    rustls_pemfile::private_key(&mut reader)?
-        .ok_or_else(|| "no private key found in PEM".into())
+    rustls_pemfile::private_key(&mut reader)?.ok_or_else(|| "no private key found in PEM".into())
 }
 
 pub fn parse_authority(authority: &str) -> (String, u16) {
