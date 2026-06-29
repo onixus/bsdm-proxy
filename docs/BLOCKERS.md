@@ -17,7 +17,7 @@
 | B3 | [#34](https://github.com/onixus/bsdm-proxy/issues/34) | Implement HTTP fetch from hierarchy peer | ✅ |
 | B4 | [#35](https://github.com/onixus/bsdm-proxy/issues/35) | Start ICP server in proxy runtime | ✅ |
 | B5 | [#36](https://github.com/onixus/bsdm-proxy/issues/36) | Make `ca.key` optional when MITM disabled | ✅ |
-| B6 | [#37](https://github.com/onixus/bsdm-proxy/issues/37) | Implement rate limiting per user/IP | ❌ |
+| B6 | [#37](https://github.com/onixus/bsdm-proxy/issues/37) | Implement rate limiting per user/IP | ✅ |
 
 ## High — M2 / M3
 
@@ -57,6 +57,6 @@
 
 ## Волны разблокировки
 
-1. **Волна 1 (M1):** ~~B5~~ → ~~B1+B2~~ → ~~B3+B4~~ → **B6** → **B7**
+1. **Волна 1 (M1):** ~~B5~~ → ~~B1+B2~~ → ~~B3+B4~~ → ~~**B6**~~ → **B7**
 2. **Волна 2 (M3):** B12 → B11 → B10 → B17
 3. **Волна 3 (M4/M5):** B16 → B15 → B8
