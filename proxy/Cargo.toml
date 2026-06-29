@@ -1,6 +1,6 @@
 [package]
 name = "bsdm-proxy"
-version = "2.1.0"
+version = "0.2.2-b"
 edition = "2021"
 
 # Binary targets
