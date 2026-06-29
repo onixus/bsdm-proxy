@@ -384,6 +384,10 @@ pub async fn handle_connection(
                 };
 
                 let policy_username = proxy_user.as_deref().map(|u| u.username.as_str());
+                let policy_groups: Vec<&str> = proxy_user
+                    .as_deref()
+                    .map(|u| u.groups.iter().map(String::as_str).collect())
+                    .unwrap_or_default();
                 if let Some(resp) = service.check_rate_limit(&client_ip, policy_username) {
                     return Ok::<_, Infallible>(resp);
                 }
@@ -391,7 +395,13 @@ pub async fn handle_connection(
                 let connect_url = format!("https://{}", authority);
                 let connect_domain = parse_authority(&authority).0;
                 let (policy_decision, _) = service
-                    .check_policy(&connect_url, &connect_domain, policy_username, &client_ip)
+                    .check_policy(
+                        &connect_url,
+                        &connect_domain,
+                        policy_username,
+                        &policy_groups,
+                        &client_ip,
+                    )
                     .await;
                 if let Some(decision) = policy_decision {
                     return Ok::<_, Infallible>(ProxyService::policy_response(&decision));

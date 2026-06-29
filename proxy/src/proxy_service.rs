@@ -121,6 +121,7 @@ impl ProxyService {
         url: &str,
         domain: &str,
         username: Option<&str>,
+        groups: &[&str],
         client_ip: &str,
     ) -> (Option<AclDecision>, Vec<String>) {
         let eval_start = Instant::now();
@@ -148,6 +149,7 @@ impl ProxyService {
                 domain,
                 &category_refs,
                 username,
+                groups,
                 Self::parse_client_ip(client_ip),
             )
         };
@@ -377,8 +379,13 @@ impl ProxyService {
 
         let domain = Self::extract_domain(&url);
 
+        let user_groups: Vec<&str> = proxy_user
+            .as_deref()
+            .map(|u| u.groups.iter().map(String::as_str).collect())
+            .unwrap_or_default();
+
         let (policy_decision, categories) = self
-            .check_policy(&url, &domain, username.as_deref(), &client_ip)
+            .check_policy(&url, &domain, username.as_deref(), &user_groups, &client_ip)
             .await;
         if let Some(decision) = policy_decision {
             let response = Self::policy_response(&decision);
