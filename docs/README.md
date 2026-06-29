@@ -14,7 +14,7 @@
 
 | Документ | Описание |
 |----------|----------|
-| [authentication.md](authentication.md) | Аутентификация прокси (Basic, LDAP, NTLM) |
+| [authentication.md](authentication.md) | Аутентификация прокси (Basic, LDAP; NTLM — M2) |
 | [acl.md](acl.md) | Списки контроля доступа (ACL) |
 | [categorization.md](categorization.md) | Категоризация URL и threat intelligence |
 

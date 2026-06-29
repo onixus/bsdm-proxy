@@ -28,16 +28,10 @@ fn parse_backend(value: &str) -> AuthBackend {
             }
         }
         "ntlm" => {
-            #[cfg(feature = "auth-ntlm")]
-            {
-                return AuthBackend::Ntlm;
-            }
-            #[cfg(not(feature = "auth-ntlm"))]
-            {
-                warn!(
-                    "AUTH_BACKEND=ntlm but proxy was built without auth-ntlm feature, using basic"
-                );
-            }
+            warn!(
+                "AUTH_BACKEND=ntlm is not implemented in v0.2.x (planned M2); using basic. \
+                 Use ldap for Active Directory integration."
+            );
         }
         _ => {}
     }

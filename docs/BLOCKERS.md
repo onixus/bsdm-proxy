@@ -29,7 +29,7 @@
 | B10 | [#41](https://github.com/onixus/bsdm-proxy/issues/41) | Kafka reliable delivery (topic env, acks) | ❌ |
 | B11 | [#42](https://github.com/onixus/bsdm-proxy/issues/42) | Indexer: add `categories` to CacheEvent | ❌ |
 | B12 | [#43](https://github.com/onixus/bsdm-proxy/issues/43) | Shared `bsdm-events` crate | ❌ |
-| B13 | [#44](https://github.com/onixus/bsdm-proxy/issues/44) | Implement NTLM or remove from docs | ❌ |
+| B13 | [#44](https://github.com/onixus/bsdm-proxy/issues/44) | Implement NTLM or remove from docs | ✅ docs |
 | B14 | [#45](https://github.com/onixus/bsdm-proxy/issues/45) | ACL TimeWindow + group rules | ❌ |
 
 ## Medium — M3 / M4 / M5

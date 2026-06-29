@@ -210,7 +210,7 @@ Local L1 miss → ICP query siblings → select parent → fetch_via_peer → or
 | **B10** | Kafka `acks=0`, topic hardcoded | `main.rs:361-365` | M3 |
 | **B11** | Schema drift: `categories` не в indexer | `cache-indexer/src/main.rs` | M3 |
 | **B12** | Нет shared event crate | `proxy`, `cache-indexer` | M3 |
-| **B13** | NTLM — заглушка | `auth.rs:231` | M2 |
+| **B13** | NTLM — не реализован (документация исправлена) | `auth.rs` | M2 impl |
 | **B14** | ACL: TimeWindow TODO, groups ignored | `acl.rs:224-236` | M2 |
 
 ### 🟡 Medium — M4 Threat / M5 ML

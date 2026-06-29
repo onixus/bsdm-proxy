@@ -9,7 +9,7 @@
   - General (ports, logging, limits)
   - Cache (capacity, TTL, L2)
   - Kafka (brokers, topics, batching)
-  - Authentication (Basic, LDAP, NTLM)
+  - Authentication (Basic, LDAP; NTLM — planned M2)
   - Monitoring (Prometheus, Grafana, OpenSearch)
 - 📊 **Real-time Validation** - Live feedback
 - 📥 **Export Options**
@@ -70,12 +70,12 @@ docker run -d -p 8080:80 -v $(pwd)/web-config:/usr/share/nginx/html:ro nginx:alp
 
 **Authentication Tab:**
 - Enable/disable
-- Backend selection (Basic/LDAP/NTLM)
+- Backend selection (Basic/LDAP; NTLM shown in generator but **not supported** in proxy v0.2.x — use LDAP for AD)
 - LDAP configuration
   - Servers, Base DN, Bind DN
   - User filter, TLS
-- NTLM configuration
-  - Domain, Workstation
+
+> **NTLM:** not implemented — see [docs/authentication.md](../docs/authentication.md). Do not deploy `AUTH_BACKEND=ntlm`.
 
 **Monitoring Tab:**
 - Prometheus toggle
