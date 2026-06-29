@@ -855,23 +855,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         metrics_port,
     ));
 
-    let ca_key = tokio::fs::read("/certs/ca.key").await.or_else(|_| {
-        warn!("Failed to read /certs/ca.key, trying ./certs/ca.key");
-        std::fs::read("./certs/ca.key")
-    })?;
-
-    let ca_cert = tokio::fs::read("/certs/ca.crt")
-        .await
-        .or_else(|_| {
-            warn!("Failed to read /certs/ca.crt, trying ./certs/ca.crt");
-            std::fs::read("./certs/ca.crt")
-        })
-        .unwrap_or_default();
-
-    let cert_cache = CertCache::from_pem(&ca_key, &ca_cert)?;
     let mitm_enabled = std::env::var("MITM_ENABLED")
         .map(|v| !matches!(v.to_ascii_lowercase().as_str(), "0" | "false" | "no"))
         .unwrap_or(true);
+
+    let cert_cache = CertCache::load_for_startup(mitm_enabled).await?;
     let kafka_brokers = std::env::var("KAFKA_BROKERS").ok();
     let cache_capacity = std::env::var("CACHE_CAPACITY")
         .ok()

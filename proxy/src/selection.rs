@@ -3,7 +3,7 @@
 //! Different algorithms for choosing which parent cache to use
 //! when multiple options are available.
 
-use crate::peers::{CachePeer, PeerType};
+use crate::peers::CachePeer;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -13,7 +13,7 @@ use std::sync::Arc;
 pub trait SelectionStrategy: Send + Sync {
     /// Select a peer from the available list
     fn select<'a>(&self, peers: &'a [Arc<CachePeer>], url: &str) -> Option<&'a Arc<CachePeer>>;
-    
+
     /// Strategy name for logging/metrics
     fn name(&self) -> &'static str;
 }
@@ -75,14 +75,14 @@ impl SelectionStrategy for WeightedStrategy {
 
         // Calculate total score
         let total_score: f64 = peers.iter().map(|p| p.score()).sum();
-        
+
         if total_score == 0.0 {
             return None; // All peers unhealthy
         }
 
         // Weighted random selection
         let mut rng = rand::random::<f64>() * total_score;
-        
+
         for peer in peers {
             let score = peer.score();
             if rng <= score {
@@ -183,6 +183,7 @@ pub fn parse_strategy(name: &str) -> Box<dyn SelectionStrategy> {
 mod tests {
     use super::*;
     use crate::peers::PeerConfig;
+    use crate::PeerType;
     use std::time::Duration;
 
     fn create_test_peer(host: &str, weight: f64, rtt_ms: u64) -> Arc<CachePeer> {

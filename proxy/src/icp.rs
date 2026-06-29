@@ -12,7 +12,6 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::UdpSocket;
-use tokio::sync::mpsc;
 use tokio::time::timeout;
 use tracing::{debug, error, warn};
 
@@ -181,7 +180,7 @@ impl IcpClient {
     pub async fn new(bind_addr: &str) -> Result<Self> {
         let socket = UdpSocket::bind(bind_addr).await?;
         let local_addr = socket.local_addr()?;
-        
+
         Ok(Self {
             socket: Arc::new(socket),
             request_counter: AtomicU32::new(1),
@@ -218,12 +217,18 @@ impl IcpClient {
                     }
                 }
             }
-        }).await;
+        })
+        .await;
 
         match result {
             Ok(Ok(response)) => {
                 let latency = start.elapsed();
-                debug!("ICP response from {}: {} ({}ms)", peer, response.opcode, latency.as_millis());
+                debug!(
+                    "ICP response from {}: {} ({}ms)",
+                    peer,
+                    response.opcode,
+                    latency.as_millis()
+                );
                 Ok(IcpResult {
                     peer,
                     response: response.opcode,
@@ -247,9 +252,10 @@ impl IcpClient {
         for &peer in peers {
             let client = self.clone();
             let url = url.to_string();
-            let task = tokio::spawn(async move {
-                client.query_peer(peer, &url, query_timeout).await.ok()
-            });
+            let task =
+                tokio::spawn(
+                    async move { client.query_peer(peer, &url, query_timeout).await.ok() },
+                );
             tasks.push(task);
         }
 
@@ -271,7 +277,7 @@ impl IcpClient {
         query_timeout: Duration,
     ) -> Option<SocketAddr> {
         let results = self.query_peers(peers, url, query_timeout).await;
-        
+
         results
             .into_iter()
             .find(|r| r.response == IcpOpcode::Hit)
@@ -283,9 +289,7 @@ impl Clone for IcpClient {
     fn clone(&self) -> Self {
         Self {
             socket: self.socket.clone(),
-            request_counter: AtomicU32::new(
-                self.request_counter.load(Ordering::Relaxed)
-            ),
+            request_counter: AtomicU32::new(self.request_counter.load(Ordering::Relaxed)),
             local_addr: self.local_addr,
         }
     }
@@ -299,16 +303,13 @@ pub struct IcpServer {
 
 impl IcpServer {
     /// Create a new ICP server
-    pub async fn new<F>(
-        bind_addr: &str,
-        query_handler: F,
-    ) -> Result<Self>
+    pub async fn new<F>(bind_addr: &str, query_handler: F) -> Result<Self>
     where
         F: Fn(&str) -> bool + Send + Sync + 'static,
     {
         let socket = UdpSocket::bind(bind_addr).await?;
         let local_addr = socket.local_addr()?;
-        
+
         debug!("ICP server listening on {}", local_addr);
 
         Ok(Self {
@@ -326,7 +327,7 @@ impl IcpServer {
                 Ok((len, addr)) => {
                     let data = buf[..len].to_vec();
                     let server = self.clone();
-                    
+
                     tokio::spawn(async move {
                         if let Err(e) = server.handle_query(&data, addr).await {
                             error!("ICP query handling error: {}", e);
@@ -380,12 +381,9 @@ mod tests {
 
         let encoded = msg.encode().unwrap();
         assert!(encoded.len() > 20);
-        
-        let decoded = IcpMessage::decode(
-            &encoded,
-            "127.0.0.1:3130".parse().unwrap()
-        ).unwrap();
-        
+
+        let decoded = IcpMessage::decode(&encoded, "127.0.0.1:3130".parse().unwrap()).unwrap();
+
         assert_eq!(decoded.opcode, IcpOpcode::Query);
         assert_eq!(decoded.request_number, 12345);
         assert_eq!(decoded.url, "http://example.com/test");
@@ -395,10 +393,7 @@ mod tests {
     fn test_hit_miss_encoding() {
         let hit = IcpMessage::hit(999, "127.0.0.1:3130".parse().unwrap());
         let encoded = hit.encode().unwrap();
-        let decoded = IcpMessage::decode(
-            &encoded,
-            "127.0.0.1:3130".parse().unwrap()
-        ).unwrap();
+        let decoded = IcpMessage::decode(&encoded, "127.0.0.1:3130".parse().unwrap()).unwrap();
         assert_eq!(decoded.opcode, IcpOpcode::Hit);
         assert_eq!(decoded.request_number, 999);
     }
@@ -406,14 +401,10 @@ mod tests {
     #[tokio::test]
     async fn test_client_server() {
         // Create server that always returns HIT
-        let server = Arc::new(
-            IcpServer::new("127.0.0.1:0", |_url| true)
-                .await
-                .unwrap()
-        );
-        
+        let server = Arc::new(IcpServer::new("127.0.0.1:0", |_url| true).await.unwrap());
+
         let server_addr = server.socket.local_addr().unwrap();
-        
+
         // Start server
         let server_clone = server.clone();
         tokio::spawn(async move {
