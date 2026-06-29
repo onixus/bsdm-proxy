@@ -1,0 +1,5 @@
+#!/bin/sh
+# Git pre-push hook — runs the same fmt/clippy gates as Rust CI.
+set -e
+ROOT="$(git rev-parse --show-toplevel)"
+exec "$ROOT/scripts/pre-push-check.sh"
