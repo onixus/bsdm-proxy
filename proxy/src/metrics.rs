@@ -54,6 +54,12 @@ pub struct Metrics {
 
     // Rate limit metrics
     pub rate_limit_rejected_total: CounterVec,
+
+    // Hierarchy metrics (M2)
+    pub hierarchy_resolutions_total: CounterVec,
+    pub hierarchy_peer_requests_total: CounterVec,
+    pub hierarchy_icp_queries_total: CounterVec,
+    pub hierarchy_lookup_duration_seconds: Histogram,
 }
 
 impl Metrics {
@@ -237,6 +243,42 @@ impl Metrics {
         )?;
         registry.register(Box::new(rate_limit_rejected_total.clone()))?;
 
+        let hierarchy_resolutions_total = CounterVec::new(
+            Opts::new(
+                "bsdm_proxy_hierarchy_resolutions_total",
+                "Hierarchy source resolution outcomes",
+            ),
+            &["result"],
+        )?;
+        registry.register(Box::new(hierarchy_resolutions_total.clone()))?;
+
+        let hierarchy_peer_requests_total = CounterVec::new(
+            Opts::new(
+                "bsdm_proxy_hierarchy_peer_requests_total",
+                "HTTP fetches to parent/sibling cache peers",
+            ),
+            &["peer_type", "outcome"],
+        )?;
+        registry.register(Box::new(hierarchy_peer_requests_total.clone()))?;
+
+        let hierarchy_icp_queries_total = CounterVec::new(
+            Opts::new(
+                "bsdm_proxy_hierarchy_icp_queries_total",
+                "ICP UDP queries to sibling caches",
+            ),
+            &["outcome"],
+        )?;
+        registry.register(Box::new(hierarchy_icp_queries_total.clone()))?;
+
+        let hierarchy_lookup_duration_seconds = Histogram::with_opts(
+            HistogramOpts::new(
+                "bsdm_proxy_hierarchy_lookup_duration_seconds",
+                "Time to resolve hierarchy source (ICP + parent selection)",
+            )
+            .buckets(vec![0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0]),
+        )?;
+        registry.register(Box::new(hierarchy_lookup_duration_seconds.clone()))?;
+
         Ok(Metrics {
             registry,
             requests_total,
@@ -263,7 +305,34 @@ impl Metrics {
             acl_rules_matched_total,
             acl_eval_duration_seconds,
             rate_limit_rejected_total,
+            hierarchy_resolutions_total,
+            hierarchy_peer_requests_total,
+            hierarchy_icp_queries_total,
+            hierarchy_lookup_duration_seconds,
         })
+    }
+
+    pub fn record_hierarchy_resolution(&self, result: &str) {
+        self.hierarchy_resolutions_total
+            .with_label_values(&[result])
+            .inc();
+    }
+
+    pub fn record_hierarchy_peer_request(&self, peer_type: &str, outcome: &str) {
+        self.hierarchy_peer_requests_total
+            .with_label_values(&[peer_type, outcome])
+            .inc();
+    }
+
+    pub fn record_hierarchy_icp_query(&self, outcome: &str) {
+        self.hierarchy_icp_queries_total
+            .with_label_values(&[outcome])
+            .inc();
+    }
+
+    pub fn observe_hierarchy_lookup(&self, duration_secs: f64) {
+        self.hierarchy_lookup_duration_seconds
+            .observe(duration_secs);
     }
 
     /// Export metrics in Prometheus text format
@@ -292,6 +361,24 @@ impl Metrics {
 impl Default for Metrics {
     fn default() -> Self {
         Self::new().expect("Failed to create metrics")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hierarchy_metrics_exported() {
+        let m = Metrics::new().unwrap();
+        m.record_hierarchy_resolution("parent_hit");
+        m.record_hierarchy_icp_query("hit");
+        m.record_hierarchy_peer_request("parent", "hit");
+        let out = String::from_utf8(m.export().unwrap()).unwrap();
+        assert!(out.contains("bsdm_proxy_hierarchy_resolutions_total"));
+        assert!(out.contains("bsdm_proxy_hierarchy_icp_queries_total"));
+        assert!(out.contains("bsdm_proxy_hierarchy_peer_requests_total"));
+        assert!(out.contains("parent_hit"));
     }
 }
 

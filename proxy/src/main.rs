@@ -84,7 +84,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let hierarchy_config = load_hierarchy_config();
-    let hierarchy = build_hierarchy_manager(&hierarchy_config)
+    let hierarchy = build_hierarchy_manager(&hierarchy_config, metrics.clone())
         .await
         .map_err(|e| -> Box<dyn std::error::Error> { e })?;
 

@@ -111,7 +111,7 @@ TCP accept
 - Вся логика в **binary crate** (`main.rs` ~1300 строк) — `ProxyService` не в `lib.rs` (B7)
 - Categorization с online API на **критическом пути** каждого запроса
 - ACL под глобальным `Mutex` — serializes concurrent ACL checks
-- Hierarchy metrics (`bsdm_proxy_hierarchy_*`) ещё не экспортируются в Prometheus
+- Hierarchy metrics (`bsdm_proxy_hierarchy_*`) экспортируются в Prometheus при `HIERARCHY_ENABLED=true`
 - Нет `docker-compose.hierarchy.yml` для multi-instance E2E
 
 ---

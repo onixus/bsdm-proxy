@@ -1,6 +1,7 @@
 //! Load hierarchical caching configuration from environment variables.
 
 use crate::hierarchy::{HierarchyConfig, HierarchyManager};
+use crate::metrics::Metrics;
 use crate::peers::{PeerConfig, PeerRegistry, PeerType};
 use crate::selection::parse_strategy;
 use std::sync::Arc;
@@ -65,6 +66,7 @@ pub fn load_hierarchy_config() -> HierarchyConfig {
 /// Build hierarchy manager from environment. Returns `None` when disabled.
 pub async fn build_hierarchy_manager(
     config: &HierarchyConfig,
+    metrics: Arc<Metrics>,
 ) -> Result<Option<Arc<HierarchyManager>>, Box<dyn std::error::Error + Send + Sync>> {
     if !config.enabled {
         return Ok(None);
@@ -92,7 +94,7 @@ pub async fn build_hierarchy_manager(
         std::env::var("CACHE_SELECTION_STRATEGY").unwrap_or_else(|_| "round-robin".to_string());
     let strategy = parse_strategy(&strategy_name);
 
-    let mut manager = HierarchyManager::new(config.clone(), registry, strategy);
+    let mut manager = HierarchyManager::new(config.clone(), registry, strategy).with_metrics(metrics);
 
     let client_bind = std::env::var("ICP_CLIENT_BIND").unwrap_or_else(|_| "0.0.0.0:0".to_string());
     manager.init_icp(&client_bind).await?;
