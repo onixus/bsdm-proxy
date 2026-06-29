@@ -99,9 +99,7 @@ mod tests {
     #[test]
     fn test_bulk_action_format() {
         let index_name = "http-cache";
-        let cache_key = "test-key-123";
-        let timestamp = 1700000001_u64;
-        let document_id = format!("{timestamp}:{cache_key}");
+        let document_id = "evt-unique-1".to_string();
 
         let action = json!({
             "index": {
@@ -111,7 +109,7 @@ mod tests {
         });
 
         assert_eq!(action["index"]["_index"], "http-cache");
-        assert_eq!(action["index"]["_id"], "1700000001:test-key-123");
+        assert_eq!(action["index"]["_id"], "evt-unique-1");
     }
 
     #[test]

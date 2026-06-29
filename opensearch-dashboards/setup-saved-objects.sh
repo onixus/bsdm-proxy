@@ -2,7 +2,9 @@
 set -eu
 
 DASHBOARDS_URL="${DASHBOARDS_URL:-http://opensearch-dashboards:5601}"
-INDEX_PATTERN_ID="http-cache-pattern"
+OPENSEARCH_INDEX="${OPENSEARCH_INDEX:-http-cache}"
+INDEX_PATTERN_ID="${OPENSEARCH_INDEX}-pattern"
+INDEX_TITLE="${OPENSEARCH_INDEX}*"
 
 wait_for_dashboards() {
   i=0
@@ -33,24 +35,39 @@ upsert_saved_object() {
   fi
 }
 
+search_body() {
+  title="$1"
+  query="$2"
+  columns="$3"
+  search_source=$(printf '{"index":"%s","query":{"query":"%s","language":"kuery"},"filter":[]}' \
+    "$INDEX_PATTERN_ID" "$query")
+  search_source_escaped=$(printf '%s' "$search_source" | sed 's/"/\\"/g')
+  printf '{"attributes":{"title":"%s","columns":%s,"kibanaSavedObjectMeta":{"searchSourceJSON":"%s"}}}' \
+    "$title" "$columns" "$search_source_escaped"
+}
+
 echo "Waiting for OpenSearch Dashboards..."
 wait_for_dashboards
 
-echo "Creating index pattern http-cache*..."
+echo "Creating index pattern ${INDEX_TITLE}..."
 upsert_saved_object "index-pattern" "${INDEX_PATTERN_ID}" \
-  '{"attributes":{"title":"http-cache*","timeFieldName":"timestamp"}}'
+  "$(printf '{"attributes":{"title":"%s","timeFieldName":"timestamp"}}' "$INDEX_TITLE")"
 
 echo "Creating saved searches..."
 upsert_saved_object "search" "requests-by-user" \
-  '{"attributes":{"title":"Requests by user","columns":["timestamp","username","client_ip","domain","url","method","status","cache_status"],"kibanaSavedObjectMeta":{"searchSourceJSON":"{\"index\":\"http-cache-pattern\",\"query\":{\"query\":\"username:*\",\"language\":\"kuery\"},\"filter\":[]}"}}}'
+  "$(search_body "Requests by user" "username:*" \
+    '["timestamp","username","client_ip","domain","url","method","status","cache_status"]')"
 
 upsert_saved_object "search" "requests-by-domain" \
-  '{"attributes":{"title":"Requests by domain","columns":["timestamp","username","client_ip","domain","url","method","status","cache_status"],"kibanaSavedObjectMeta":{"searchSourceJSON":"{\"index\":\"http-cache-pattern\",\"query\":{\"query\":\"domain:*\",\"language\":\"kuery\"},\"filter\":[]}"}}}'
+  "$(search_body "Requests by domain" "domain:*" \
+    '["timestamp","username","client_ip","domain","url","method","status","cache_status"]')"
 
 upsert_saved_object "search" "blocked-threat-events" \
-  '{"attributes":{"title":"Blocked and threat categories","columns":["timestamp","username","client_ip","domain","url","cache_status","categories"],"kibanaSavedObjectMeta":{"searchSourceJSON":"{\"index\":\"http-cache-pattern\",\"query\":{\"query\":\"cache_status:BYPASS OR categories:*\",\"language\":\"kuery\"},\"filter\":[]}"}}}'
+  "$(search_body "Blocked and threat categories" "cache_status:BYPASS OR categories:*" \
+    '["timestamp","username","client_ip","domain","url","cache_status","categories"]')"
 
 upsert_saved_object "search" "top-domains-overview" \
-  '{"attributes":{"title":"Traffic overview by domain","columns":["timestamp","domain","username","client_ip","url","method","status"],"kibanaSavedObjectMeta":{"searchSourceJSON":"{\"index\":\"http-cache-pattern\",\"query\":{\"query\":\"*\",\"language\":\"kuery\"},\"filter\":[]}"}}}'
+  "$(search_body "Traffic overview by domain" "*" \
+    '["timestamp","domain","username","client_ip","url","method","status"]')"
 
-echo "OpenSearch Dashboards saved objects provisioned."
+echo "OpenSearch Dashboards saved objects provisioned for index ${OPENSEARCH_INDEX}."

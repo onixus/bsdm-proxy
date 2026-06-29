@@ -91,6 +91,8 @@ services:
     depends_on:
       opensearch-dashboards:
         condition: service_healthy
+    environment:
+      - OPENSEARCH_INDEX=http-cache
     networks:
       - bsdm-net
     volumes:

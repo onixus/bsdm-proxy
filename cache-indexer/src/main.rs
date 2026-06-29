@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 use tracing::{error, info, warn};
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct CacheEvent {
     url: String,
     method: String,
@@ -41,10 +41,21 @@ struct CacheEvent {
     user_agent: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     categories: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    event_id: Option<String>,
 }
 
 fn document_id(event: &CacheEvent) -> String {
-    format!("{}:{}", event.timestamp, event.cache_key)
+    if let Some(id) = event.event_id.as_deref() {
+        if !id.is_empty() {
+            return id.to_string();
+        }
+    }
+
+    format!(
+        "{}:{}:{}:{}",
+        event.timestamp, event.request_duration_ms, event.client_ip, event.cache_key
+    )
 }
 
 struct Indexer {
@@ -138,7 +149,8 @@ impl Indexer {
                             }
                         }
                     },
-                    "categories": { "type": "keyword" }
+                    "categories": { "type": "keyword" },
+                    "event_id": { "type": "keyword" }
                 }
             },
             "settings": {
@@ -311,8 +323,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let kafka_topic = std::env::var("KAFKA_TOPIC").unwrap_or_else(|_| "cache-events".to_string());
     let kafka_group =
         std::env::var("KAFKA_GROUP_ID").unwrap_or_else(|_| "cache-indexer-group".to_string());
-    let index_name =
-        std::env::var("OPENSEARCH_INDEX").unwrap_or_else(|_| "http-cache".to_string());
+    let index_name = std::env::var("OPENSEARCH_INDEX").unwrap_or_else(|_| "http-cache".to_string());
 
     info!("🚀 Starting cache-indexer");
     info!("📡 Kafka brokers: {}", kafka_brokers);
@@ -342,7 +353,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn document_id_is_unique_per_event() {
+    fn document_id_prefers_event_id() {
         let event = CacheEvent {
             url: "https://example.com".to_string(),
             method: "GET".to_string(),
@@ -360,9 +371,38 @@ mod tests {
             content_type: None,
             user_agent: None,
             categories: vec!["malware".to_string()],
+            event_id: Some("evt-unique-1".to_string()),
         };
 
-        assert_eq!(document_id(&event), "1700000001:abc123");
+        assert_eq!(document_id(&event), "evt-unique-1");
+    }
+
+    #[test]
+    fn document_id_differs_for_same_second_and_cache_key() {
+        let base = CacheEvent {
+            url: "https://example.com".to_string(),
+            method: "GET".to_string(),
+            status: 200,
+            cache_key: "abc123".to_string(),
+            timestamp: 1700000001,
+            headers: HashMap::new(),
+            cache_status: Some("MISS".to_string()),
+            user_id: None,
+            username: None,
+            client_ip: "127.0.0.1".to_string(),
+            domain: "example.com".to_string(),
+            response_size: 100,
+            request_duration_ms: 5,
+            content_type: None,
+            user_agent: None,
+            categories: vec![],
+            event_id: None,
+        };
+
+        let mut other = base.clone();
+        other.request_duration_ms = 9;
+
+        assert_ne!(document_id(&base), document_id(&other));
     }
 
     #[test]
@@ -379,10 +419,12 @@ mod tests {
             "domain": "example.com",
             "response_size": 512,
             "request_duration_ms": 42,
-            "categories": ["phishing", "malware"]
+            "categories": ["phishing", "malware"],
+            "event_id": "evt-proxy-1"
         }"#;
 
         let event: CacheEvent = serde_json::from_str(json_data).unwrap();
         assert_eq!(event.categories, vec!["phishing", "malware"]);
+        assert_eq!(event.event_id.as_deref(), Some("evt-proxy-1"));
     }
 }

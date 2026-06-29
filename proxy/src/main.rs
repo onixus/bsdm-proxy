@@ -108,6 +108,11 @@ struct CacheEvent {
     user_agent: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     categories: Vec<String>,
+    event_id: String,
+}
+
+fn new_event_id() -> String {
+    hex::encode(rand::random::<u128>().to_be_bytes())
 }
 
 #[derive(Clone)]
@@ -401,7 +406,7 @@ impl ProxyService {
                     Ok(payload) => {
                         let record = FutureRecord::to(&topic)
                             .payload(&payload)
-                            .key(&event.cache_key);
+                            .key(&event.event_id);
                         match producer.send(record, Duration::ZERO).await {
                             Ok(_) => metrics.kafka_events_sent.inc(),
                             Err((e, _)) => {
@@ -495,6 +500,7 @@ impl ProxyService {
                             .map(|(_, v)| v.to_string()),
                         user_agent: None,
                         categories: categories.clone(),
+                        event_id: new_event_id(),
                     };
                     self.send_to_kafka_async(event);
                 }
@@ -628,6 +634,7 @@ impl ProxyService {
                         content_type: headers_map.get("content-type").cloned(),
                         user_agent: headers_map.get("user-agent").cloned(),
                         categories: categories.clone(),
+                        event_id: new_event_id(),
                     };
                     self.send_to_kafka_async(event);
                 }
@@ -917,8 +924,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let cert_cache = CertCache::load_for_startup(mitm_enabled).await?;
     let kafka_brokers = std::env::var("KAFKA_BROKERS").ok();
-    let kafka_topic =
-        std::env::var("KAFKA_TOPIC").unwrap_or_else(|_| "cache-events".to_string());
+    let kafka_topic = std::env::var("KAFKA_TOPIC").unwrap_or_else(|_| "cache-events".to_string());
     let cache_capacity = std::env::var("CACHE_CAPACITY")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -1208,6 +1214,7 @@ async fn handle_connect_tunnel(
                             content_type: None,
                             user_agent: None,
                             categories: vec![],
+                            event_id: new_event_id(),
                         };
                         service.send_to_kafka_async(event);
                     }
