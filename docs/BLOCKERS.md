@@ -23,7 +23,7 @@
 
 | ID | Issue | Блокер | Статус |
 |----|-------|--------|--------|
-| B7 | [#38](https://github.com/onixus/bsdm-proxy/issues/38) | Refactor ProxyService out of `main.rs` | ❌ |
+| B7 | [#38](https://github.com/onixus/bsdm-proxy/issues/38) | Refactor ProxyService out of `main.rs` | ✅ |
 | B8 | [#39](https://github.com/onixus/bsdm-proxy/issues/39) | Move online categorization off hot path | ❌ |
 | B9 | [#40](https://github.com/onixus/bsdm-proxy/issues/40) | Replace ACL global Mutex | ❌ |
 | B10 | [#41](https://github.com/onixus/bsdm-proxy/issues/41) | Kafka reliable delivery (topic env, acks) | ❌ |
@@ -57,6 +57,6 @@
 
 ## Волны разблокировки
 
-1. **Волна 1 (M1):** ~~B5~~ → ~~B1+B2~~ → ~~B3+B4~~ → ~~**B6**~~ → **B7**
+1. **Волна 1 (M1):** ~~B5~~ → ~~B1+B2~~ → ~~B3+B4~~ → ~~**B6**~~ → ~~**B7**~~
 2. **Волна 2 (M3):** B12 → B11 → B10 → B17
 3. **Волна 3 (M4/M5):** B16 → B15 → B8

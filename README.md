@@ -315,7 +315,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 - [x] Release packaging (`0.2.2b`)
 - [x] Hierarchical caching Phase 3 — ICP server, peer fetch, env config
 - [x] Rate limiting per user/IP
-- [ ] Рефакторинг `main.rs` (вынос `ProxyService` в lib)
+- [x] Рефакторинг `main.rs` (вынос `ProxyService` в lib)
 
 ### M2 — Squid parity (v0.3.x)
 
