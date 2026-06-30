@@ -28,9 +28,9 @@
 | B7 | [#38](https://github.com/onixus/bsdm-proxy/issues/38) | Refactor ProxyService out of `main.rs` | ✅ |
 | B8 | [#39](https://github.com/onixus/bsdm-proxy/issues/39) | Move online categorization off hot path | ❌ |
 | B9 | [#40](https://github.com/onixus/bsdm-proxy/issues/40) | Replace ACL global Mutex | ❌ |
-| B10 | [#41](https://github.com/onixus/bsdm-proxy/issues/41) | Kafka reliable delivery (topic env, acks) | ❌ |
-| B11 | [#42](https://github.com/onixus/bsdm-proxy/issues/42) | Indexer: add `categories` to CacheEvent | ❌ |
-| B12 | [#43](https://github.com/onixus/bsdm-proxy/issues/43) | Shared `bsdm-events` crate | ❌ |
+| B10 | [#41](https://github.com/onixus/bsdm-proxy/issues/41) | Kafka reliable delivery (topic env, acks) | ✅ |
+| B11 | [#42](https://github.com/onixus/bsdm-proxy/issues/42) | Indexer: add `categories` to CacheEvent | ✅ |
+| B12 | [#43](https://github.com/onixus/bsdm-proxy/issues/43) | Shared `bsdm-events` crate | ✅ |
 | B13 | [#44](https://github.com/onixus/bsdm-proxy/issues/44) | Implement NTLM or remove from docs | ✅ docs |
 | B14 | [#45](https://github.com/onixus/bsdm-proxy/issues/45) | ACL TimeWindow + group rules | ✅ |
 
@@ -39,8 +39,8 @@
 | ID | Issue | Блокер | Статус |
 |----|-------|--------|--------|
 | B15 | [#46](https://github.com/onixus/bsdm-proxy/issues/46) | Design analytics/ML worker service | ❌ |
-| B16 | [#47](https://github.com/onixus/bsdm-proxy/issues/47) | Extend event schema for threat analytics | ❌ |
-| B17 | [#48](https://github.com/onixus/bsdm-proxy/issues/48) | OpenSearch Dashboards in docker-compose | ❌ |
+| B16 | [#47](https://github.com/onixus/bsdm-proxy/issues/47) | Extend event schema for threat analytics | 🔄 |
+| B17 | [#48](https://github.com/onixus/bsdm-proxy/issues/48) | OpenSearch Dashboards in docker-compose | ✅ |
 | B18 | [#49](https://github.com/onixus/bsdm-proxy/issues/49) | Behavioral threat signals (beyond blocklists) | ❌ |
 | B19 | [#50](https://github.com/onixus/bsdm-proxy/issues/50) | Alerting pipeline to SIEM/webhook | ❌ |
 | B20 | [#51](https://github.com/onixus/bsdm-proxy/issues/51) | Security analytics dashboards (historical) | ❌ |

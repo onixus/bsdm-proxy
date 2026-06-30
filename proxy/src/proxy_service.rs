@@ -25,7 +25,7 @@ use crate::cache::{CacheConfig, CachedResponse, CACHEABLE_METHODS};
 use crate::cache_digest::DigestRegistry;
 use crate::cache_freshness::{evaluate_store, refresh_ttl_from_headers};
 use crate::cache_key::http_cache_key;
-use crate::categorization::{CategorizationEngine, Category};
+use crate::categorization::CategorizationEngine;
 use crate::hierarchy::{HierarchyManager, HierarchyResult};
 use crate::http_types::Body;
 use crate::l2_cache::RedisL2Cache;
@@ -147,6 +147,7 @@ impl ProxyService {
         username: &Option<String>,
         client_ip: &str,
         categories: &[String],
+        threat_sources: &[String],
         request_start: Instant,
     ) {
         if let Ok(timestamp) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
@@ -155,7 +156,7 @@ impl ProxyService {
                 method: method.to_string(),
                 status: cached.status,
                 cache_key: cache_key.to_string(),
-                cache_status,
+                cache_status: cache_status.to_string(),
                 timestamp: timestamp.as_secs(),
                 headers: HashMap::new(),
                 user_id: user_id.clone(),
@@ -171,6 +172,54 @@ impl ProxyService {
                     .map(|(_, v)| v.to_string()),
                 user_agent: None,
                 categories: categories.to_vec(),
+                threat_sources: threat_sources.to_vec(),
+                acl_action: None,
+                event_id: new_event_id(),
+            };
+            self.send_cache_event(event);
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_policy_event(
+        &self,
+        url: &str,
+        method: &str,
+        cache_key: &str,
+        decision: &AclDecision,
+        user_id: &Option<String>,
+        username: &Option<String>,
+        client_ip: &str,
+        domain: &str,
+        categories: &[String],
+        threat_sources: &[String],
+        request_start: Instant,
+    ) {
+        if let Ok(timestamp) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
+            let status = match decision.action {
+                AclAction::Deny => 403,
+                AclAction::Redirect => 302,
+                AclAction::Allow => 200,
+            };
+            let event = CacheEvent {
+                url: url.to_string(),
+                method: method.to_string(),
+                status,
+                cache_key: cache_key.to_string(),
+                cache_status: "BLOCKED".to_string(),
+                timestamp: timestamp.as_secs(),
+                headers: HashMap::new(),
+                user_id: user_id.clone(),
+                username: username.clone(),
+                client_ip: client_ip.to_string(),
+                domain: domain.to_string(),
+                response_size: 0,
+                request_duration_ms: request_start.elapsed().as_millis() as u64,
+                content_type: None,
+                user_agent: None,
+                categories: categories.to_vec(),
+                threat_sources: threat_sources.to_vec(),
+                acl_action: Some(decision.action.to_string()),
                 event_id: new_event_id(),
             };
             self.send_cache_event(event);
@@ -200,17 +249,23 @@ impl ProxyService {
         }
     }
 
-    async fn categorize_url(&self, url: &str) -> Vec<String> {
+    async fn categorize_url(&self, url: &str) -> (Vec<String>, Vec<String>) {
         let Some(engine) = &self.categorization else {
-            return Vec::new();
+            return (Vec::new(), Vec::new());
         };
         let result = engine.categorize(url).await;
-        result
+        let categories: Vec<String> = result
             .categories
             .iter()
-            .map(Category::acl_name)
+            .map(crate::categorization::Category::acl_name)
             .filter(|name| !name.is_empty())
-            .collect()
+            .collect();
+        let threat_sources = if result.source != "unknown" && !categories.is_empty() {
+            vec![result.source]
+        } else {
+            Vec::new()
+        };
+        (categories, threat_sources)
     }
 
     async fn check_acl(
@@ -270,12 +325,12 @@ impl ProxyService {
         username: Option<&str>,
         groups: &[&str],
         client_ip: &str,
-    ) -> (Option<AclDecision>, Vec<String>) {
-        let category_names = self.categorize_url(url).await;
+    ) -> (Option<AclDecision>, Vec<String>, Vec<String>) {
+        let (category_names, threat_sources) = self.categorize_url(url).await;
         let decision = self
             .check_acl(url, domain, &category_names, username, groups, client_ip)
             .await;
-        (decision, category_names)
+        (decision, category_names, threat_sources)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -289,6 +344,7 @@ impl ProxyService {
         username: &Option<String>,
         client_ip: &str,
         categories: &[String],
+        threat_sources: &[String],
         request_start: Instant,
         detailed_metrics: bool,
         guard: &mut Option<RequestMetricsGuard>,
@@ -311,6 +367,7 @@ impl ProxyService {
                 username,
                 client_ip,
                 categories,
+                threat_sources,
                 request_start,
             );
         } else if let Some(scope) = fast_scope.take() {
@@ -356,6 +413,7 @@ impl ProxyService {
         username: &Option<String>,
         client_ip: &str,
         categories: &[String],
+        threat_sources: &[String],
         request_start: Instant,
         detailed_metrics: bool,
         guard: &mut Option<RequestMetricsGuard>,
@@ -415,6 +473,7 @@ impl ProxyService {
                 username,
                 client_ip,
                 categories,
+                threat_sources,
                 request_start,
                 detailed_metrics,
                 guard,
@@ -666,6 +725,7 @@ impl ProxyService {
                         &None,
                         &client_ip,
                         &[],
+                        &[],
                         request_start,
                         false,
                         &mut guard,
@@ -698,10 +758,23 @@ impl ProxyService {
             .unwrap_or_default();
 
         let domain = Self::extract_domain(&url);
-        let (policy_decision, categories) = self
+        let (policy_decision, categories, threat_sources) = self
             .check_policy(&url, &domain, username.as_deref(), &user_groups, &client_ip)
             .await;
         if let Some(decision) = policy_decision {
+            self.emit_policy_event(
+                &url,
+                method,
+                &cache_key,
+                &decision,
+                &user_id,
+                &username,
+                &client_ip,
+                &domain,
+                &categories,
+                &threat_sources,
+                request_start,
+            );
             let response = Self::policy_response(&decision);
             if let Some(g) = guard.take() {
                 g.finish(response.status().as_u16(), 0, 0);
@@ -730,6 +803,7 @@ impl ProxyService {
                     &username,
                     &client_ip,
                     &categories,
+                    &threat_sources,
                     request_start,
                     detailed_metrics,
                     &mut guard,
@@ -750,6 +824,7 @@ impl ProxyService {
                     &username,
                     &client_ip,
                     &categories,
+                    &threat_sources,
                     request_start,
                     detailed_metrics,
                     &mut guard,
@@ -790,6 +865,7 @@ impl ProxyService {
                     &username,
                     &client_ip,
                     &categories,
+                    &threat_sources,
                     request_start,
                 );
             }
@@ -946,7 +1022,7 @@ impl ProxyService {
                         method: method.to_string(),
                         status: status.as_u16(),
                         cache_key: cache_key.to_string(),
-                        cache_status,
+                        cache_status: cache_status.to_string(),
                         timestamp: timestamp.as_secs(),
                         headers: headers_map.clone(),
                         user_id,
@@ -958,6 +1034,8 @@ impl ProxyService {
                         content_type: headers_map.get("content-type").cloned(),
                         user_agent: headers_map.get("user-agent").cloned(),
                         categories: categories.clone(),
+                        threat_sources: threat_sources.clone(),
+                        acl_action: None,
                         event_id: new_event_id(),
                     };
                     self.send_cache_event(event);

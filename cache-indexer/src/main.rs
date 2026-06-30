@@ -1,7 +1,9 @@
+use bsdm_events::{document_id, index_mappings, index_template_body, CacheEvent};
 use opensearch::{
     auth::Credentials,
     cert::CertificateValidation,
     http::transport::{SingleNodeConnectionPool, TransportBuilder},
+    indices::{IndicesCreateParts, IndicesExistsParts},
     BulkParts, OpenSearch,
 };
 use rdkafka::{
@@ -9,59 +11,15 @@ use rdkafka::{
     consumer::{CommitMode, Consumer, StreamConsumer},
     message::Message,
 };
-use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::collections::HashMap;
 use std::time::Duration;
 use tracing::{error, info, warn};
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-struct CacheEvent {
-    url: String,
-    method: String,
-    status: u16,
-    cache_key: String,
-    timestamp: u64,
-    #[serde(default)] // ИСПРАВЛЕНИЕ: делаем поле опциональным
-    headers: HashMap<String, String>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    cache_status: Option<String>,
-    // New fields for user analytics
-    #[serde(skip_serializing_if = "Option::is_none")]
-    user_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    username: Option<String>,
-    client_ip: String,
-    domain: String,
-    response_size: u64,
-    request_duration_ms: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    content_type: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    user_agent: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    categories: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    event_id: Option<String>,
-}
-
-fn document_id(event: &CacheEvent) -> String {
-    if let Some(id) = event.event_id.as_deref() {
-        if !id.is_empty() {
-            return id.to_string();
-        }
-    }
-
-    format!(
-        "{}:{}:{}:{}",
-        event.timestamp, event.request_duration_ms, event.client_ip, event.cache_key
-    )
-}
 
 struct Indexer {
     opensearch: OpenSearch,
     consumer: StreamConsumer,
     index_name: String,
+    index_pattern: String,
 }
 
 impl Indexer {
@@ -87,17 +45,14 @@ impl Indexer {
         consumer.subscribe(&[kafka_topic])?;
         info!("Subscribed to Kafka topic: {}", kafka_topic);
 
-        // Создаём транспорт с аутентификацией
         let mut transport_builder =
             TransportBuilder::new(SingleNodeConnectionPool::new(opensearch_url.parse()?));
 
-        // Добавляем credentials если указаны
         if let (Some(username), Some(password)) = (opensearch_username, opensearch_password) {
             info!("Using authentication for OpenSearch: {}", username);
             transport_builder = transport_builder.auth(Credentials::Basic(username, password));
         }
 
-        // Отключаем проверку SSL если нужно
         if !ssl_verify {
             warn!("SSL certificate verification is disabled!");
             transport_builder = transport_builder.cert_validation(CertificateValidation::None);
@@ -105,54 +60,54 @@ impl Indexer {
 
         let transport = transport_builder.build()?;
         let opensearch = OpenSearch::new(transport);
+        let index_pattern = format!("{index_name}*");
 
         Ok(Self {
             opensearch,
             consumer,
             index_name: index_name.to_string(),
+            index_pattern,
         })
+    }
+
+    async fn ensure_index_template(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let template_name = "bsdm-http-cache";
+        let body = index_template_body(&self.index_pattern);
+
+        match self
+            .opensearch
+            .indices()
+            .put_index_template(opensearch::indices::IndicesPutIndexTemplateParts::Name(
+                template_name,
+            ))
+            .body(body)
+            .send()
+            .await
+        {
+            Ok(response) if response.status_code().is_success() => {
+                info!(
+                    "Index template '{}' applied for pattern '{}'",
+                    template_name, self.index_pattern
+                );
+                Ok(())
+            }
+            Ok(response) => {
+                warn!(
+                    "Index template upsert returned status {}",
+                    response.status_code()
+                );
+                Ok(())
+            }
+            Err(e) => {
+                warn!("Failed to upsert index template: {}", e);
+                Ok(())
+            }
+        }
     }
 
     async fn ensure_index_exists(&self) -> Result<(), Box<dyn std::error::Error>> {
         let index_body = json!({
-            "mappings": {
-                "properties": {
-                    "url": {
-                        "type": "text",
-                        "fields": {
-                            "keyword": {
-                                "type": "keyword",
-                                "ignore_above": 256
-                            }
-                        }
-                    },
-                    "method": { "type": "keyword" },
-                    "status": { "type": "short" },
-                    "cache_key": { "type": "keyword" },
-                    "cache_status": { "type": "keyword" },
-                    "timestamp": { "type": "date", "format": "epoch_second" },
-                    "headers": { "type": "object" },
-                    // New fields for user analytics
-                    "user_id": { "type": "keyword" },
-                    "username": { "type": "keyword" },
-                    "client_ip": { "type": "ip" },
-                    "domain": { "type": "keyword" },
-                    "response_size": { "type": "long" },
-                    "request_duration_ms": { "type": "long" },
-                    "content_type": { "type": "keyword" },
-                    "user_agent": {
-                        "type": "text",
-                        "fields": {
-                            "keyword": {
-                                "type": "keyword",
-                                "ignore_above": 256
-                            }
-                        }
-                    },
-                    "categories": { "type": "keyword" },
-                    "event_id": { "type": "keyword" }
-                }
-            },
+            "mappings": index_mappings(),
             "settings": {
                 "number_of_shards": 1,
                 "number_of_replicas": 0
@@ -162,29 +117,22 @@ impl Indexer {
         match self
             .opensearch
             .indices()
-            .exists(opensearch::indices::IndicesExistsParts::Index(&[
-                &self.index_name
-            ]))
+            .exists(IndicesExistsParts::Index(&[&self.index_name]))
             .send()
             .await
         {
-            Ok(response) => {
-                if response.status_code().is_success() {
-                    info!("Index '{}' already exists", self.index_name);
-                    return Ok(());
-                }
+            Ok(response) if response.status_code().is_success() => {
+                info!("Index '{}' already exists", self.index_name);
+                return Ok(());
             }
-            Err(e) => {
-                warn!("Error checking index existence: {}", e);
-            }
+            Ok(_) => {}
+            Err(e) => warn!("Error checking index existence: {}", e),
         }
 
         match self
             .opensearch
             .indices()
-            .create(opensearch::indices::IndicesCreateParts::Index(
-                &self.index_name,
-            ))
+            .create(IndicesCreateParts::Index(&self.index_name))
             .body(index_body)
             .send()
             .await
@@ -268,12 +216,10 @@ impl Indexer {
                 }
             });
             body_lines.push(serde_json::to_string(&action)?);
-
             body_lines.push(serde_json::to_string(&event)?);
         }
 
         let body_str = body_lines.join("\n") + "\n";
-
         let body = vec![body_str.into_bytes()];
 
         match self
@@ -283,15 +229,15 @@ impl Indexer {
             .send()
             .await
         {
+            Ok(response) if response.status_code().is_success() => {
+                info!("Indexed {} events to OpenSearch", events.len());
+                Ok(())
+            }
             Ok(response) => {
-                if response.status_code().is_success() {
-                    info!("✅ Indexed {} events to OpenSearch", events.len());
-                } else {
-                    warn!(
-                        "Bulk index returned non-success status: {}",
-                        response.status_code()
-                    );
-                }
+                warn!(
+                    "Bulk index returned non-success status: {}",
+                    response.status_code()
+                );
                 Ok(())
             }
             Err(e) => {
@@ -302,6 +248,7 @@ impl Indexer {
     }
 
     async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
+        self.ensure_index_template().await?;
         self.ensure_index_exists().await?;
         self.process_events().await
     }
@@ -330,13 +277,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::var("KAFKA_GROUP_ID").unwrap_or_else(|_| "cache-indexer-group".to_string());
     let index_name = std::env::var("OPENSEARCH_INDEX").unwrap_or_else(|_| "http-cache".to_string());
 
-    info!("🚀 Starting cache-indexer");
-    info!("📡 Kafka brokers: {}", kafka_brokers);
-    info!("🔍 OpenSearch URL: {}", opensearch_url);
-    info!("🔐 SSL verification: {}", ssl_verify);
-    info!("📨 Kafka topic: {}", kafka_topic);
-    info!("👥 Kafka group: {}", kafka_group);
-    info!("📇 OpenSearch index: {}", index_name);
+    info!("Starting cache-indexer");
+    info!("Kafka brokers: {}", kafka_brokers);
+    info!("OpenSearch URL: {}", opensearch_url);
+    info!("SSL verification: {}", ssl_verify);
+    info!("Kafka topic: {}", kafka_topic);
+    info!("Kafka group: {}", kafka_group);
+    info!("OpenSearch index: {}", index_name);
 
     let indexer = Indexer::new(
         &kafka_brokers,
@@ -356,17 +303,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
-    #[test]
-    fn document_id_prefers_event_id() {
-        let event = CacheEvent {
+    fn sample_event(event_id: &str) -> CacheEvent {
+        CacheEvent {
             url: "https://example.com".to_string(),
             method: "GET".to_string(),
             status: 200,
             cache_key: "abc123".to_string(),
+            cache_status: "HIT".to_string(),
             timestamp: 1700000001,
             headers: HashMap::new(),
-            cache_status: Some("HIT".to_string()),
             user_id: None,
             username: None,
             client_ip: "127.0.0.1".to_string(),
@@ -376,37 +323,22 @@ mod tests {
             content_type: None,
             user_agent: None,
             categories: vec!["malware".to_string()],
-            event_id: Some("evt-unique-1".to_string()),
-        };
+            threat_sources: vec!["urlhaus".to_string()],
+            acl_action: None,
+            event_id: event_id.to_string(),
+        }
+    }
 
-        assert_eq!(document_id(&event), "evt-unique-1");
+    #[test]
+    fn document_id_prefers_event_id() {
+        assert_eq!(document_id(&sample_event("evt-unique-1")), "evt-unique-1");
     }
 
     #[test]
     fn document_id_differs_for_same_second_and_cache_key() {
-        let base = CacheEvent {
-            url: "https://example.com".to_string(),
-            method: "GET".to_string(),
-            status: 200,
-            cache_key: "abc123".to_string(),
-            timestamp: 1700000001,
-            headers: HashMap::new(),
-            cache_status: Some("MISS".to_string()),
-            user_id: None,
-            username: None,
-            client_ip: "127.0.0.1".to_string(),
-            domain: "example.com".to_string(),
-            response_size: 100,
-            request_duration_ms: 5,
-            content_type: None,
-            user_agent: None,
-            categories: vec![],
-            event_id: None,
-        };
-
+        let base = sample_event("");
         let mut other = base.clone();
         other.request_duration_ms = 9;
-
         assert_ne!(document_id(&base), document_id(&other));
     }
 
@@ -425,11 +357,15 @@ mod tests {
             "response_size": 512,
             "request_duration_ms": 42,
             "categories": ["phishing", "malware"],
+            "threat_sources": ["phishtank"],
+            "acl_action": "deny",
             "event_id": "evt-proxy-1"
         }"#;
 
         let event: CacheEvent = serde_json::from_str(json_data).unwrap();
         assert_eq!(event.categories, vec!["phishing", "malware"]);
-        assert_eq!(event.event_id.as_deref(), Some("evt-proxy-1"));
+        assert_eq!(event.threat_sources, vec!["phishtank"]);
+        assert_eq!(event.acl_action.as_deref(), Some("deny"));
+        assert_eq!(event.event_id, "evt-proxy-1");
     }
 }

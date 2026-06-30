@@ -253,7 +253,7 @@ async fn handle_connect_tunnel(
                             cache_key: service
                                 .generate_cache_key("CONNECT", &authority)
                                 .to_string(),
-                            cache_status: "BYPASS",
+                            cache_status: "BYPASS".to_string(),
                             timestamp: timestamp.as_secs(),
                             headers: HashMap::new(),
                             user_id,
@@ -265,6 +265,8 @@ async fn handle_connect_tunnel(
                             content_type: None,
                             user_agent: None,
                             categories: vec![],
+                            threat_sources: vec![],
+                            acl_action: None,
                             event_id: new_event_id(),
                         };
                         service.send_cache_event(event);
@@ -408,7 +410,7 @@ pub async fn handle_connection(
 
                 let connect_url = format!("https://{}", authority);
                 let connect_domain = parse_authority(&authority).0;
-                let (policy_decision, _) = service
+                let (policy_decision, _, _) = service
                     .check_policy(
                         &connect_url,
                         &connect_domain,

@@ -40,6 +40,7 @@ pub use auth::KerberosConfig;
 #[cfg(feature = "auth-ntlm")]
 pub use auth::NtlmConfig;
 pub use auth::{AuthBackend, AuthConfig, AuthManager, ProxyAuthOutcome, UserInfo};
+pub use bsdm_events::CacheEvent;
 pub use cache::{CacheConfig, CachedResponse};
 pub use cache_compress::{BodyEncoding, CompressionConfig};
 pub use cache_digest::DigestRegistry;
@@ -58,7 +59,6 @@ pub use peer_discovery::{run_peer_discovery, PeerDiscoveryConfig};
 pub use peer_fetch::{fetch_via_peer, PeerFetchError};
 pub use peers::{CachePeer, PeerConfig, PeerRegistry, PeerType};
 pub use perf::{bind_http_listeners, PerfConfig};
-pub use pipeline::CacheEvent;
 pub use proxy_service::{ProxyPolicy, ProxyService};
 pub use rate_limit::{RateLimitConfig, RateLimitViolation, RateLimiter};
 pub use selection::{parse_strategy, SelectionStrategy};

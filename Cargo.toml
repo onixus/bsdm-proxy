@@ -1,12 +1,14 @@
 [workspace]
 resolver = "2"
 members = [
+    "bsdm-events",
     "proxy",
     "cache-indexer",
     "e2e",
 ]
 
 [workspace.dependencies]
+bsdm-events = { path = "bsdm-events" }
 tokio = { version = "1", features = ["full"] }
 rdkafka = "0.39"
 serde = { version = "1.0", features = ["derive"] }

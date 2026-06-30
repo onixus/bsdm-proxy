@@ -63,8 +63,8 @@ upsert_saved_object "search" "requests-by-domain" \
     '["timestamp","username","client_ip","domain","url","method","status","cache_status"]')"
 
 upsert_saved_object "search" "blocked-threat-events" \
-  "$(search_body "Blocked and threat categories" "cache_status:BYPASS OR categories:*" \
-    '["timestamp","username","client_ip","domain","url","cache_status","categories"]')"
+  "$(search_body "Blocked and threat categories" "acl_action:deny OR acl_action:redirect OR categories:*" \
+    '["timestamp","username","client_ip","domain","url","acl_action","cache_status","categories","threat_sources"]')"
 
 upsert_saved_object "search" "top-domains-overview" \
   "$(search_body "Traffic overview by domain" "*" \
