@@ -4,7 +4,9 @@ use base64::engine::general_purpose;
 use base64::Engine;
 use bytes::Bytes;
 use hyper::body::Incoming;
-use hyper::header::{HeaderName, HeaderValue, AUTHORIZATION, LOCATION};
+use hyper::header::{
+    HeaderName, HeaderValue, AUTHORIZATION, IF_MODIFIED_SINCE, IF_NONE_MATCH, LOCATION,
+};
 use hyper::{Request, Response, StatusCode};
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
@@ -19,7 +21,8 @@ use tracing::{debug, error, info, warn};
 
 use crate::acl::{AclAction, AclDecision, AclEngine};
 use crate::auth::{AuthManager, UserInfo};
-use crate::cache::{is_cacheable, CacheConfig, CachedResponse, CACHEABLE_METHODS};
+use crate::cache::{CacheConfig, CachedResponse, CACHEABLE_METHODS};
+use crate::cache_freshness::{evaluate_store, refresh_ttl_from_headers};
 use crate::cache_key::http_cache_key;
 use crate::categorization::{CategorizationEngine, Category};
 use crate::hierarchy::{HierarchyManager, HierarchyResult};
@@ -279,17 +282,19 @@ impl ProxyService {
         detailed_metrics: bool,
         guard: &mut Option<RequestMetricsGuard>,
         fast_scope: &mut Option<FastRequestScope>,
+        cache_status_label: &'static str,
+        x_cache_status: &str,
     ) -> Response<Body> {
         if detailed_metrics {
             if let Some(g) = guard.as_mut() {
-                g.set_cache_status("HIT");
+                g.set_cache_status(cache_status_label);
             }
             self.metrics.cache_hits_total.inc();
             self.emit_cache_hit_event(
                 url,
                 method,
                 cache_key,
-                "HIT",
+                cache_status_label,
                 cached,
                 user_id,
                 username,
@@ -301,12 +306,116 @@ impl ProxyService {
             scope.finish_cache_hit();
         }
 
-        let response = cached.to_response();
+        let response = cached.to_response_with_cache_status(x_cache_status);
         let body_size = cached.response_body_len();
         if let Some(g) = guard.take() {
             g.finish(cached.status, 0, body_size);
         }
         response
+    }
+
+    fn build_conditional_request(
+        req: &Request<Incoming>,
+        cached: &CachedResponse,
+    ) -> Option<Request<Body>> {
+        let mut builder = Request::builder()
+            .method(req.method())
+            .uri(req.uri().clone());
+        for (name, value) in req.headers() {
+            builder = builder.header(name, value);
+        }
+        if let Some(etag) = &cached.etag {
+            builder = builder.header(IF_NONE_MATCH, etag.as_ref());
+        }
+        if let Some(lm) = &cached.last_modified {
+            builder = builder.header(IF_MODIFIED_SINCE, lm.as_ref());
+        }
+        builder.body(Body::new(Bytes::new())).ok()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn try_revalidate_stale(
+        &self,
+        cached: &CachedResponse,
+        req: &Request<Incoming>,
+        cache_key: &Arc<str>,
+        url: &str,
+        method: &str,
+        user_id: &Option<String>,
+        username: &Option<String>,
+        client_ip: &str,
+        categories: &[String],
+        request_start: Instant,
+        detailed_metrics: bool,
+        guard: &mut Option<RequestMetricsGuard>,
+        fast_scope: &mut Option<FastRequestScope>,
+    ) -> Option<Response<Body>> {
+        if !self.cache_config.honor_cache_control || !cached.has_validators() {
+            return None;
+        }
+
+        let cond_req = Self::build_conditional_request(req, cached)?;
+        let domain = Self::extract_domain(url);
+        let upstream_start = Instant::now();
+
+        let response = match self.http_client.request(cond_req).await {
+            Ok(resp) => resp,
+            Err(e) => {
+                warn!("Revalidation upstream error for {}: {}", url, e);
+                self.metrics
+                    .upstream_errors_total
+                    .with_label_values(&[&domain, "revalidate"])
+                    .inc();
+                return None;
+            }
+        };
+
+        let upstream_duration = upstream_start.elapsed().as_secs_f64();
+        let status = response.status();
+        self.metrics
+            .upstream_requests_total
+            .with_label_values(&[&domain, &status.as_u16().to_string()])
+            .inc();
+        self.metrics
+            .upstream_duration_seconds
+            .with_label_values(&[&domain])
+            .observe(upstream_duration);
+
+        if status == StatusCode::NOT_MODIFIED {
+            let headers_map: HashMap<String, String> = response
+                .headers()
+                .iter()
+                .filter_map(|(k, v)| {
+                    v.to_str()
+                        .ok()
+                        .map(|v| (k.as_str().to_string(), v.to_string()))
+                })
+                .collect();
+            let ttl = refresh_ttl_from_headers(&headers_map, self.cache_config.default_ttl);
+            let refreshed = cached.refreshed_after_not_modified(ttl);
+            self.store_in_l1_and_l2(cache_key.clone(), refreshed.clone());
+            debug!("Cache REVALIDATED (304): {} {}", method, url);
+            return Some(self.serve_l1_hit(
+                &refreshed,
+                cache_key,
+                url,
+                method,
+                user_id,
+                username,
+                client_ip,
+                categories,
+                request_start,
+                detailed_metrics,
+                guard,
+                fast_scope,
+                "REVALIDATED",
+                "REVALIDATED",
+            ));
+        }
+
+        // Changed response: consume body and fall through to normal miss handling upstream.
+        let _ = http_body_util::BodyExt::collect(response.into_body()).await;
+        None
     }
 
     pub(crate) fn policy_response(decision: &AclDecision) -> Response<Body> {
@@ -536,7 +645,7 @@ impl ProxyService {
 
         if self.perf.fast_cache_hit {
             if let Some(cached) = self.http_cache.get(&cache_key) {
-                if !cached.is_expired() {
+                if cached.can_serve_fresh() {
                     debug!("Cache HIT (fast path): {} {}", method, url);
                     return self.serve_l1_hit(
                         &cached,
@@ -551,6 +660,8 @@ impl ProxyService {
                         false,
                         &mut guard,
                         &mut fast_scope,
+                        "HIT",
+                        "HIT",
                     );
                 }
             }
@@ -598,7 +709,7 @@ impl ProxyService {
                     .observe(cache_lookup_start.elapsed().as_secs_f64());
             }
 
-            if !cached.is_expired() {
+            if cached.can_serve_fresh() {
                 debug!("Cache HIT: {} {}", method, url);
                 return self.serve_l1_hit(
                     &cached,
@@ -613,15 +724,48 @@ impl ProxyService {
                     detailed_metrics,
                     &mut guard,
                     &mut fast_scope,
+                    "HIT",
+                    "HIT",
                 );
+            }
+
+            if let Some(resp) = self
+                .try_revalidate_stale(
+                    &cached,
+                    &req,
+                    &cache_key,
+                    &url,
+                    method,
+                    &user_id,
+                    &username,
+                    &client_ip,
+                    &categories,
+                    request_start,
+                    detailed_metrics,
+                    &mut guard,
+                    &mut fast_scope,
+                )
+                .await
+            {
+                return resp;
             }
         }
 
         if let Some(cached) = self.try_l2_cache_get(&cache_key).await {
             debug!("Cache L2 HIT: {} {}", method, url);
             self.http_cache.insert(cache_key.clone(), cached.clone());
+            let hit_label = if cached.is_negative {
+                "NEGATIVE_HIT"
+            } else {
+                "L2_HIT"
+            };
+            let x_status = if cached.is_negative {
+                "NEGATIVE-HIT"
+            } else {
+                "L2-HIT"
+            };
             if let Some(g) = guard.as_mut() {
-                g.set_cache_status("L2_HIT");
+                g.set_cache_status(hit_label);
                 self.metrics.cache_hits_total.inc();
             }
 
@@ -630,7 +774,7 @@ impl ProxyService {
                     &url,
                     method,
                     &cache_key,
-                    "L2_HIT",
+                    hit_label,
                     &cached,
                     &user_id,
                     &username,
@@ -640,7 +784,7 @@ impl ProxyService {
                 );
             }
 
-            let response = cached.to_response_with_cache_status("L2-HIT");
+            let response = cached.to_response_with_cache_status(x_status);
             let body_size = cached.response_body_len();
             if let Some(g) = guard.take() {
                 g.finish(cached.status, 0, body_size);
@@ -741,12 +885,14 @@ impl ProxyService {
                     hierarchy.record_peer_hit(peer, body_size as u64).await;
                 }
 
-                let cache_status = if is_cacheable(
+                let store_decision = evaluate_store(
                     method,
                     status.as_u16(),
+                    &headers_map,
                     body_size,
-                    self.cache_config.max_body_size,
-                ) {
+                    &self.cache_config,
+                );
+                let cache_status = if store_decision.store {
                     let headers_arc: Arc<[(Arc<str>, Arc<str>)]> = headers_map
                         .iter()
                         .map(|(k, v)| (Arc::from(k.as_str()), Arc::from(v.as_str())))
@@ -756,14 +902,26 @@ impl ProxyService {
                         status.as_u16(),
                         headers_arc,
                         body_bytes.clone(),
-                        self.cache_config.default_ttl,
+                        store_decision.ttl,
                         &self.cache_config.compression,
+                        store_decision.etag,
+                        store_decision.last_modified,
+                        store_decision.is_negative,
+                        store_decision.must_revalidate,
                     );
                     self.store_in_l1_and_l2(cache_key.clone(), cached_response);
                     if let Some(g) = guard.as_mut() {
-                        g.set_cache_status("MISS");
+                        g.set_cache_status(if store_decision.is_negative {
+                            "NEGATIVE_MISS"
+                        } else {
+                            "MISS"
+                        });
                     }
-                    "MISS"
+                    if store_decision.is_negative {
+                        "NEGATIVE_MISS"
+                    } else {
+                        "MISS"
+                    }
                 } else {
                     self.metrics.cache_bypasses_total.inc();
                     if let Some(g) = guard.as_mut() {

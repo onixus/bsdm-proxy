@@ -49,6 +49,14 @@ struct CachedResponseWire {
     uncompressed_len: Option<usize>,
     cached_at_secs: u64,
     ttl_secs: u64,
+    #[serde(default)]
+    etag: Option<String>,
+    #[serde(default)]
+    last_modified: Option<String>,
+    #[serde(default)]
+    is_negative: bool,
+    #[serde(default)]
+    must_revalidate: bool,
 }
 
 impl CachedResponseWire {
@@ -71,6 +79,10 @@ impl CachedResponseWire {
             uncompressed_len: Some(value.uncompressed_len),
             cached_at_secs,
             ttl_secs: value.ttl.as_secs(),
+            etag: value.etag.as_ref().map(|v| v.to_string()),
+            last_modified: value.last_modified.as_ref().map(|v| v.to_string()),
+            is_negative: value.is_negative,
+            must_revalidate: value.must_revalidate,
         })
     }
 
@@ -95,6 +107,10 @@ impl CachedResponseWire {
             uncompressed_len,
             cached_at: UNIX_EPOCH + Duration::from_secs(self.cached_at_secs),
             ttl: Duration::from_secs(self.ttl_secs),
+            etag: self.etag.map(Arc::from),
+            last_modified: self.last_modified.map(Arc::from),
+            is_negative: self.is_negative,
+            must_revalidate: self.must_revalidate,
         })
     }
 }
@@ -162,7 +178,7 @@ impl RedisL2Cache {
         };
 
         let cached = match decode_cached_response(&payload) {
-            Some(v) if !v.is_expired() => v,
+            Some(v) if v.can_serve_fresh() => v,
             Some(_) => {
                 debug!("Redis L2 entry expired for {}", key);
                 self.metrics.cache_l2_misses_total.inc();
@@ -211,6 +227,10 @@ mod tests {
             uncompressed_len: 5,
             cached_at: SystemTime::now(),
             ttl: Duration::from_secs(3600),
+            etag: Some(Arc::from("\"v1\"")),
+            last_modified: Some(Arc::from("Mon, 01 Jan 2024 00:00:00 GMT")),
+            is_negative: false,
+            must_revalidate: false,
         };
         let json = encode_cached_response(&original).unwrap();
         let decoded = decode_cached_response(&json).unwrap();
@@ -237,6 +257,10 @@ mod tests {
             body.clone(),
             Duration::from_secs(3600),
             &compression,
+            None,
+            None,
+            false,
+            false,
         );
         assert_eq!(original.body_encoding, BodyEncoding::Zstd);
         let json = encode_cached_response(&original).unwrap();
@@ -263,6 +287,10 @@ mod tests {
             uncompressed_len: 0,
             cached_at: SystemTime::now(),
             ttl: Duration::from_secs(60),
+            etag: None,
+            last_modified: None,
+            is_negative: false,
+            must_revalidate: false,
         };
         assert!(RedisL2Cache::remaining_ttl_secs(&cached) >= 1);
     }

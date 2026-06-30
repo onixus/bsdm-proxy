@@ -4,6 +4,7 @@ pub mod acl;
 pub mod auth;
 pub mod cache;
 pub mod cache_compress;
+pub mod cache_freshness;
 pub mod cache_key;
 pub mod categorization;
 pub mod hierarchy;

@@ -167,7 +167,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let key = http_cache_key("GET", url);
             cache_for_icp
                 .get(&key)
-                .is_some_and(|cached| !cached.is_expired())
+                .is_some_and(|cached| cached.can_serve_fresh())
         })
         .await
         {

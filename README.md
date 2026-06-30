@@ -150,8 +150,11 @@ cargo build --release -p bsdm-proxy --bin proxy -p cache-indexer --bin cache-ind
 | `MITM_ENABLED` | `true` | MITM для портов 443 и 8443 |
 | `KAFKA_BROKERS` | — | Kafka (опционально) |
 | `CACHE_CAPACITY` | `10000` | Размер L1-кеша |
-| `CACHE_TTL_SECONDS` | `3600` | TTL кеша (сек) |
+| `CACHE_TTL_SECONDS` | `3600` | Fallback TTL кеша (сек), если нет `max-age` |
 | `MAX_CACHE_BODY_SIZE` | `10485760` | Макс. размер body (байт) |
+| `NEGATIVE_CACHE_ENABLED` | `true` | Кешировать upstream 403/404 |
+| `NEGATIVE_CACHE_TTL_SECONDS` | `120` | TTL negative cache (сек) |
+| `CACHE_HONOR_CACHE_CONTROL` | `true` | Учитывать `Cache-Control`, ETag, revalidate |
 | `SHUTDOWN_TIMEOUT_SECONDS` | `30` | Таймаут graceful shutdown |
 | `UPSTREAM_CA_CERT` | — | PEM самоподписанного CA для upstream TLS (тесты/lab) |
 | `UPSTREAM_HTTP2_ENABLED` | `false` | HTTP/2 ALPN для upstream HTTPS |
@@ -363,7 +366,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 - [x] ACL TimeWindow + group rules
 - [ ] NTLM auth
 - [ ] Hierarchy Phase 4 (discovery, digest, HTCP)
-- [ ] Negative caching / cache refresh (B22)
+- [x] Negative caching / cache refresh (B22) — `Cache-Control`, ETag revalidate, 403/404 negative cache
 - [ ] REST ACL API (`/api/acl/*`)
 
 ### M3–M5
