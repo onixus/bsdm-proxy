@@ -392,7 +392,7 @@ pub async fn handle_connection(
                     }
                 };
 
-                let proxy_user = match service.authenticate_proxy(&req).await {
+                let proxy_user = match service.authenticate_proxy(&req, &client_ip).await {
                     Ok(user) => user,
                     Err(resp) => return Ok(resp),
                 };
@@ -464,7 +464,7 @@ pub async fn handle_connection(
                 return Ok::<_, Infallible>(response);
             }
 
-            let proxy_user = match service.authenticate_proxy(&req).await {
+            let proxy_user = match service.authenticate_proxy(&req, &client_ip).await {
                 Ok(user) => user,
                 Err(resp) => return Ok(resp),
             };

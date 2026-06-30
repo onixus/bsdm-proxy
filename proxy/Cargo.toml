@@ -43,13 +43,16 @@ hex = "0.4"
 regex = "1.12"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 reqwest = { version = "0.13", features = ["json", "form"] }
+sspi = { version = "0.21.1", optional = true, features = ["network_client"] }
+kerberos_keytab = { version = "0.0.3", optional = true }
 
 [features]
 default = ["auth-basic"]
 auth-basic = []
 auth-ldap = ["ldap3"]
-auth-ntlm = []  # NTLM support - TODO: implement with windows-sys or custom
-auth-all = ["auth-ldap", "auth-ntlm"]
+auth-ntlm = ["sspi"]
+auth-kerberos = ["sspi", "kerberos_keytab"]
+auth-all = ["auth-ldap", "auth-ntlm", "auth-kerberos"]
 acl = []
 categorization = ["acl"]
 

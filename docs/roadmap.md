@@ -91,7 +91,8 @@ gantt
   - [x] TimeWindow rules (`HH:MM`, local time, overnight windows)
   - [x] Group-based Principal rules (LDAP `memberOf` cn matching)
   - [x] REST API управления ACL (`/api/acl/*` на `METRICS_PORT`)
-- [ ] **NTLM auth** — реализация или снятие с roadmap
+- [x] **NTLM auth** — `auth-ntlm` feature, multi-round SSPI + optional `ntlm_auth` helper ([#44](https://github.com/onixus/bsdm-proxy/issues/44))
+- [x] **Kerberos auth** — `auth-kerberos` feature, SPNEGO with keytab
 - [x] **Negative caching** — upstream 403/404 с коротким TTL (`NEGATIVE_CACHE_*`)
 - [x] **Cache refresh / revalidate** — `Cache-Control`, ETag / `If-Modified-Since`, `304` → `REVALIDATED`
 - [x] Hierarchy Prometheus metrics (`bsdm_proxy_hierarchy_*`)
