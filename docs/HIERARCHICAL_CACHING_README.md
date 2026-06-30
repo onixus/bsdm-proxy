@@ -2,9 +2,11 @@
 
 > См. также: [полная документация](hierarchical-caching.md) · [оглавление](README.md) · [architecture.md](architecture.md)
 
-## Статус: Phase 3 интегрирована (v0.2.2b)
+## Статус: Phase 4 интегрирована (v0.3.x)
 
 Иерархический кеш **включён в runtime** и активируется через `HIERARCHY_ENABLED=true` (по умолчанию выключен).
+
+Phase 4 добавляет: **peer discovery** (multicast), **cache digest** (Bloom filter), **HTCP** (опционально вместо ICP).
 
 ## Архитектура
 
@@ -12,7 +14,8 @@
 
 ```
 Level 1: Edge (локальный L1 quick_cache)
-  ↓ ICP query siblings (UDP :3130)
+  ↓ ICP/HTCP query siblings (UDP :3130 / :4827)
+  ↓ cache digest filter (optional)
   ↓ HTTP fetch parent on MISS
 Level 2: Parent caches
   ↓
@@ -25,12 +28,15 @@ Origin Servers
 |--------|------|--------|
 | Peer registry | `peers.rs` | ✅ |
 | ICP v2 UDP | `icp.rs` | ✅ client + server |
+| HTCP UDP | `htcp.rs` | ✅ client + server |
+| Cache digest | `cache_digest.rs` | ✅ Bloom + registry |
+| Peer discovery | `peer_discovery.rs` | ✅ multicast beacons |
 | Selection | `selection.rs` | ✅ round-robin, weighted, closest, hash |
-| Hierarchy manager | `hierarchy.rs` | ✅ `resolve_source()` |
+| Hierarchy manager | `hierarchy.rs` | ✅ `resolve_source()` + digest filter |
 | Env config | `hierarchy_config.rs` | ✅ |
 | Peer HTTP fetch | `peer_fetch.rs` | ✅ `fetch_via_peer()` |
-| Cache key | `cache_key.rs` | ✅ shared proxy + ICP |
-| Runtime wiring | `main.rs` | ✅ request path + ICP spawn |
+| Cache key | `cache_key.rs` | ✅ shared proxy + ICP/HTCP |
+| Runtime wiring | `main.rs` | ✅ ICP/HTCP server + discovery |
 
 ## Поток запроса
 
@@ -40,11 +46,12 @@ Origin Servers
    ├─ HIT → return
    └─ MISS → continue
 3. [HIERARCHY_ENABLED] resolve_source(url)
-   ├─ ICP query siblings (parallel)
+   ├─ filter siblings by cache digest (optional)
+   ├─ ICP/HTCP query siblings (parallel)
    ├─ select parent (strategy)
    └─ fetch_via_peer() on hit
 4. origin fallback (http_client)
-5. cache insert → response
+5. cache insert → digest update → response
 ```
 
 ## Конфигурация
@@ -63,12 +70,24 @@ CACHE_SIBLINGS=sibling1.example.com:1488,sibling2.example.com:1488:1.0:3130
 CACHE_SELECTION_STRATEGY=round-robin   # weighted, closest, hash
 
 ICP_BIND=0.0.0.0:3130                  # локальный ICP server (UDP)
-ICP_CLIENT_BIND=0.0.0.0:0                # ICP client bind
-ICP_PEER_PORT=3130                       # default ICP port для siblings
+ICP_CLIENT_BIND=0.0.0.0:0              # ICP client bind
+ICP_PEER_PORT=3130                     # default ICP port для siblings
 ICP_TIMEOUT_MS=100
-ICP_SERVER_ENABLED=true                  # false — не слушать ICP
-PARENT_TIMEOUT_SECONDS=5                 # HTTP timeout к peer
+ICP_SERVER_ENABLED=true                # false — не слушать ICP
+PARENT_TIMEOUT_SECONDS=5               # HTTP timeout к peer
 ICP_MAX_SIBLING_QUERIES=10
+
+# Phase 4: HTCP (вместо ICP для sibling queries)
+HIERARCHY_USE_HTCP=false
+HTCP_BIND=0.0.0.0:4827
+HTCP_PEER_PORT=4827
+
+# Phase 4: cache digest
+HIERARCHY_DIGEST_ENABLED=true
+
+# Phase 4: multicast discovery
+PEER_DISCOVERY_ENABLED=false
+PEER_DISCOVERY_MULTICAST=239.255.255.1:3131
 ```
 
 Пример в пакете: [packaging/config/bsdm-proxy.env.example](../packaging/config/bsdm-proxy.env.example)
@@ -95,11 +114,16 @@ ICP_BIND=127.0.0.1:3131 \
 curl -x http://127.0.0.1:1489 http://httpbin.org/get
 ```
 
+3-tier demo: `docker compose -f docker-compose.hierarchy.yml up -d --build`
+
 ## Тесты
 
 ```bash
 cargo test -p bsdm-proxy --lib peers
 cargo test -p bsdm-proxy --lib icp
+cargo test -p bsdm-proxy --lib htcp
+cargo test -p bsdm-proxy --lib cache_digest
+cargo test -p bsdm-proxy --lib peer_discovery
 cargo test -p bsdm-proxy --lib hierarchy
 cargo test -p bsdm-proxy --lib peer_fetch
 cargo test -p bsdm-proxy --lib hierarchy_config
@@ -107,19 +131,12 @@ cargo test -p bsdm-proxy --lib hierarchy_config
 
 ## Roadmap (оставшееся)
 
-### Phase 3 — доработки M1
-- [ ] `docker-compose.hierarchy.yml` — 3-tier demo
-- [ ] E2E тест hierarchy peer fetch
-- [ ] Prometheus metrics `bsdm_proxy_hierarchy_*`
-
-### Phase 4 — M2
-- [ ] Peer auto-discovery (multicast)
-- [ ] Cache digest (Bloom filters)
-- [ ] HTCP protocol
 - [ ] mTLS между peers
+- [ ] `HIERARCHY_DIRECT_DOMAINS` — bypass parent для локальных доменов
 
 ## Ссылки
 
 - [Squid Cache Hierarchy](http://www.squid-cache.org/Doc/config/cache_peer/)
 - [RFC 2186: ICP v2](https://datatracker.ietf.org/doc/html/rfc2186)
+- [RFC 2756: HTCP](https://datatracker.ietf.org/doc/html/rfc2756)
 - [roadmap.md](roadmap.md)

@@ -6,15 +6,18 @@ pub mod acl_config;
 pub mod auth;
 pub mod cache;
 pub mod cache_compress;
+pub mod cache_digest;
 pub mod cache_freshness;
 pub mod cache_key;
 pub mod categorization;
 pub mod hierarchy;
 pub mod hierarchy_config;
+pub mod htcp;
 pub mod http_types;
 pub mod icp;
 pub mod l2_cache;
 pub mod metrics;
+pub mod peer_discovery;
 pub mod peer_fetch;
 pub mod peers;
 pub mod perf;
@@ -33,15 +36,19 @@ pub use acl_config::{load_acl_engine_from_file, parse_acl_action};
 pub use auth::{AuthBackend, AuthConfig, AuthManager, UserInfo};
 pub use cache::{CacheConfig, CachedResponse};
 pub use cache_compress::{BodyEncoding, CompressionConfig};
+pub use cache_digest::DigestRegistry;
 pub use cache_key::http_cache_key;
 pub use categorization::{CategorizationConfig, CategorizationEngine, Category};
 pub use hierarchy::{HierarchyConfig, HierarchyManager, HierarchyResult};
 pub use hierarchy_config::{
-    build_hierarchy_manager, icp_server_bind_addr, load_hierarchy_config, should_start_icp_server,
+    build_hierarchy_manager, htcp_peer_port, htcp_server_bind_addr, icp_server_bind_addr,
+    load_hierarchy_config, should_start_htcp_server, should_start_icp_server, HierarchySetup,
 };
+pub use htcp::{HtcpClient, HtcpOpcode, HtcpServer};
 pub use icp::{IcpClient, IcpMessage, IcpOpcode, IcpServer};
 pub use l2_cache::{L2CacheConfig, RedisL2Cache};
 pub use metrics::{FastRequestScope, Metrics, RequestMetricsGuard};
+pub use peer_discovery::{run_peer_discovery, PeerDiscoveryConfig};
 pub use peer_fetch::{fetch_via_peer, PeerFetchError};
 pub use peers::{CachePeer, PeerConfig, PeerRegistry, PeerType};
 pub use perf::{bind_http_listeners, PerfConfig};

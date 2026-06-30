@@ -3,11 +3,12 @@ mod policy_config;
 
 use auth_config::load_auth_config;
 use bsdm_proxy::{
-    bind_http_listeners, build_hierarchy_manager, handle_connection, http_cache_key,
-    icp_server_bind_addr, load_hierarchy_config, metrics_server, should_start_icp_server,
-    wait_shutdown_signal, AclAction, AuthManager, CacheConfig, CertCache, IcpServer, L2CacheConfig,
-    Metrics, PerfConfig, ProxyPolicy, ProxyService, RateLimitConfig, RedisL2Cache,
-    UpstreamTlsConfig,
+    bind_http_listeners, build_hierarchy_manager, handle_connection, htcp_peer_port,
+    htcp_server_bind_addr, http_cache_key, icp_server_bind_addr, load_hierarchy_config,
+    metrics_server, run_peer_discovery, should_start_htcp_server, should_start_icp_server,
+    wait_shutdown_signal, AclAction, AuthManager, CacheConfig, CertCache, HtcpServer, IcpServer,
+    L2CacheConfig, Metrics, PeerDiscoveryConfig, PerfConfig, ProxyPolicy, ProxyService,
+    RateLimitConfig, RedisL2Cache, UpstreamTlsConfig,
 };
 use policy_config::{load_policy_config, reload_acl_engine};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -158,9 +159,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let hierarchy_config = load_hierarchy_config();
-    let hierarchy = build_hierarchy_manager(&hierarchy_config, metrics.clone())
+    let hierarchy_setup = build_hierarchy_manager(&hierarchy_config, metrics.clone())
         .await
         .map_err(|e| -> Box<dyn std::error::Error> { e })?;
+    let hierarchy = hierarchy_setup.as_ref().map(|s| s.manager.clone());
+    let digest_registry = hierarchy_setup.as_ref().map(|s| s.digest_registry.clone());
 
     let rate_limit_config = RateLimitConfig::from_env();
     let upstream_tls = UpstreamTlsConfig::from_env();
@@ -177,6 +180,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         auth,
         &proxy_policy,
         hierarchy.clone(),
+        digest_registry.clone(),
         rate_limit_config.clone(),
         upstream_tls,
         perf.clone(),
@@ -204,9 +208,62 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    if should_start_htcp_server(&hierarchy_config) {
+        let htcp_bind = htcp_server_bind_addr();
+        let cache_for_htcp = service.http_cache();
+        match HtcpServer::new(&htcp_bind, move |url: &str| {
+            let key = http_cache_key("GET", url);
+            cache_for_htcp
+                .get(&key)
+                .is_some_and(|cached| cached.can_serve_fresh())
+        })
+        .await
+        {
+            Ok(server) => {
+                info!("HTCP server listening on {}", htcp_bind);
+                let server = Arc::new(server);
+                tokio::spawn(async move {
+                    server.serve().await;
+                });
+            }
+            Err(e) => warn!("HTCP server disabled: failed to bind {}: {}", htcp_bind, e),
+        }
+    }
+
     if hierarchy_config.enabled {
         if let Some(ref manager) = hierarchy {
             info!("{}", manager.stats_summary().await);
+        }
+    }
+
+    let http_port = std::env::var("HTTP_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1488);
+
+    if let (Some(setup), Some(digest)) = (hierarchy_setup.as_ref(), digest_registry.clone()) {
+        let discovery_config = PeerDiscoveryConfig::from_env(
+            http_port,
+            if hierarchy_config.use_htcp {
+                htcp_peer_port()
+            } else {
+                std::env::var("ICP_BIND")
+                    .ok()
+                    .and_then(|s| s.rsplit(':').next()?.parse().ok())
+                    .unwrap_or(3130)
+            },
+        );
+        if discovery_config.enabled {
+            let peer_registry = setup.manager.peer_registry();
+            let discovery_shutdown = shutdown_rx.clone();
+            tokio::spawn(async move {
+                if let Err(e) =
+                    run_peer_discovery(discovery_config, peer_registry, digest, discovery_shutdown)
+                        .await
+                {
+                    warn!("Peer discovery stopped: {}", e);
+                }
+            });
         }
     }
 
@@ -248,11 +305,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
         }
     }
-
-    let http_port = std::env::var("HTTP_PORT")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(1488);
 
     let listeners = bind_http_listeners(http_port, perf.worker_count).await?;
     let worker_count = listeners.len();

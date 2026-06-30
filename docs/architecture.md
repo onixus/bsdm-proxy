@@ -179,7 +179,7 @@ Local L1 miss → ICP query siblings → select parent → fetch_via_peer → or
 
 Локальный ICP-сервер отвечает HIT/MISS по наличию URL в `http_cache` (ключ `GET:<url>`).
 
-**Ограничения Phase 3:** нет peer discovery, cache digest, HTCP, hierarchy Prometheus metrics, docker-compose demo.
+**Ограничения после Phase 4:** нет mTLS между peers, `HIERARCHY_DIRECT_DOMAINS`.
 
 ---
 

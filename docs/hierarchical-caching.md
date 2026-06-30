@@ -133,14 +133,33 @@ ICP_MAX_SIBLING_QUERIES=10
 
 # Selection strategy: round-robin, weighted, closest, hash
 CACHE_SELECTION_STRATEGY=weighted
+
+# Phase 4: HTCP instead of ICP for sibling queries (default: false)
+HIERARCHY_USE_HTCP=false
+HTCP_BIND=0.0.0.0:4827
+HTCP_CLIENT_BIND=0.0.0.0:0
+HTCP_PEER_PORT=4827
+HTCP_SERVER_ENABLED=true
+
+# Phase 4: cache digest (Bloom filter) — skip sibling queries when peer unlikely to have URL
+HIERARCHY_DIGEST_ENABLED=true
+HIERARCHY_DIGEST_BITS=65536
+HIERARCHY_DIGEST_HASHES=4
+HIERARCHY_DIGEST_REMOTE_TTL_SECONDS=300
+
+# Phase 4: multicast peer discovery (optional)
+PEER_DISCOVERY_ENABLED=false
+PEER_DISCOVERY_MULTICAST=239.255.255.1:3131
+PEER_DISCOVERY_INTERVAL_SECONDS=30
+PEER_DISCOVERY_HOST=10.0.0.5
+PEER_DISCOVERY_NODE_ID=edge-1
+PEER_DISCOVERY_WEIGHT=1.0
+PEER_DISCOVERY_DIGEST_EVERY=5
 ```
 
-### Not yet implemented
+### Planned (not yet implemented)
 
 ```bash
-# Planned for Phase 4 (M2)
-PEER_DISCOVERY_ENABLED=true
-PEER_DISCOVERY_MULTICAST=239.255.255.1:3131
 HIERARCHY_DIRECT_DOMAINS=localhost,127.0.0.1
 ```
 
@@ -166,17 +185,15 @@ TOML config is **planned** for M2. Currently only environment variables are supp
 6. **Configuration** (`proxy/src/hierarchy_config.rs`) — env vars
 7. **Runtime wiring** (`proxy/src/main.rs`) — request path + ICP server spawn
 8. **Cache key** (`proxy/src/cache_key.rs`) — shared L1 + ICP lookup
+9. **Docker-compose** (`docker-compose.hierarchy.yml`) — 3-tier demo
+10. **Hierarchy Prometheus metrics** (`bsdm_proxy_hierarchy_*`)
 
-**Remaining in Phase 3:**
-- Docker-compose multi-instance demo
-- Hierarchy Prometheus metrics
-- E2E tests for peer fetch
+### Phase 4: Discovery & Optimization ✅ (v0.3.x)
 
-### Phase 4: Discovery & Optimization 📅 M2
-
-9. **Peer Discovery** — not started
-10. **Cache Digest** — not started
-11. **Metrics** (`bsdm_proxy_hierarchy_*`) — not started
+11. **Peer Discovery** (`proxy/src/peer_discovery.rs`) — multicast JSON beacons
+12. **Cache Digest** (`proxy/src/cache_digest.rs`) — Bloom filter + remote registry
+13. **HTCP** (`proxy/src/htcp.rs`) — optional sibling query protocol (UDP :4827)
+14. **Digest metric** — `bsdm_proxy_hierarchy_digest_skipped_icp_total`
 
 ## Data Structures
 
