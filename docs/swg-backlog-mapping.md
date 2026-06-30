@@ -239,19 +239,37 @@ gantt
 
 ---
 
-## Конкретные issue-заготовки (для GitHub)
+## GitHub issues
 
-```
-[P0] streaming MISS: tee upstream body to client while populating cache
-[P0] connection-level proxy auth cache (per TcpStream, TTL configurable)
-[P0] policy decision cache: (principal, domain) → AclDecision with TTL
-[P0] spill files: create with mode 0o600
-[P1] PERF_FAST_PATH: document and test matrix (HIT/REVALIDATED/NEGATIVE_HIT)
-[P1] categorization: hot path = Shallalist only; async enrich to Kafka
-[P1] Kafka producer: bounded queue, drop policy, zero await on hot path
-[P2] docs: Squid rock ↔ BSDM spill threshold sizing guide
-[P2] hierarchy: mTLS for peer_fetch
-```
+| ID | Issue | Приоритет |
+|----|-------|-----------|
+| P0-3 | [#94](https://github.com/onixus/bsdm-proxy/issues/94) Streaming MISS | P0 |
+| P0-4 | [#95](https://github.com/onixus/bsdm-proxy/issues/95) Connection-level auth cache | P0 |
+| P0-5 | [#96](https://github.com/onixus/bsdm-proxy/issues/96) Policy decision cache | P0 |
+| P0-6 | [#97](https://github.com/onixus/bsdm-proxy/issues/97) Bench profiles WORKER_COUNT | P0 |
+| P0-7 | [#98](https://github.com/onixus/bsdm-proxy/issues/98) Spill files mode 0o600 | P0 |
+| P1-1 | [#100](https://github.com/onixus/bsdm-proxy/issues/100) PERF fast path matrix | P1 |
+| P1-2 | [#104](https://github.com/onixus/bsdm-proxy/issues/104) Offline categorization | P1 |
+| P1-3 | [#106](https://github.com/onixus/bsdm-proxy/issues/106) Kafka bounded queue | P1 |
+| P1-4 | [#109](https://github.com/onixus/bsdm-proxy/issues/109) ACL read-mostly | P1 |
+| P1-5 | [#111](https://github.com/onixus/bsdm-proxy/issues/111) x-cache-status MISS | P1 |
+| P2-1 | [#101](https://github.com/onixus/bsdm-proxy/issues/101) Squid rock sizing guide | P2 |
+| P2-2 | [#103](https://github.com/onixus/bsdm-proxy/issues/103) Peer mTLS | P2 |
+| P2-3 | [#107](https://github.com/onixus/bsdm-proxy/issues/107) HA deployment guide | P2 |
+| P2-4 | [#110](https://github.com/onixus/bsdm-proxy/issues/110) Search API (M3) | P2 |
+| P2-5 | [#112](https://github.com/onixus/bsdm-proxy/issues/112) Web config ACL UI | P2 |
+| P3-1 | [#99](https://github.com/onixus/bsdm-proxy/issues/99) ICAP adapter | P3 |
+| P3-2 | [#102](https://github.com/onixus/bsdm-proxy/issues/102) Event schema enrichment | P3 |
+| P3-3 | [#105](https://github.com/onixus/bsdm-proxy/issues/105) Categorization metrics | P3 |
+| P3-4 | [#108](https://github.com/onixus/bsdm-proxy/issues/108) DNS sinkhole module | P3 |
+
+P0-1 / P0-2 tracked by PR [#93](https://github.com/onixus/bsdm-proxy/pull/93) and PR [#92](https://github.com/onixus/bsdm-proxy/pull/92).
+
+---
+
+## Конкретные issue-заготовки (архив)
+
+См. таблицу **GitHub issues** выше — все заведены.
 
 ---
 
