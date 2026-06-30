@@ -172,7 +172,7 @@ CA для MITM читается из `/certs/ca.key` и `/certs/ca.crt` (fallbac
 | Переменная | Описание |
 |-----------|----------|
 | `AUTH_ENABLED` | `true` / `false` |
-| `AUTH_BACKEND` | `basic` (default), `ldap` (feature `auth-ldap`). `ntlm` — **не реализован**, см. M2 |
+| `AUTH_BACKEND` | `basic` (default), `ldap` (`auth-ldap`), `ntlm` (`auth-ntlm`), `kerberos` (`auth-kerberos`) |
 | `AUTH_REALM` | Realm для `Proxy-Authenticate` |
 | `AUTH_CACHE_TTL` | TTL кеша сессий (сек) |
 
@@ -318,7 +318,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 | Документ | Содержание |
 |----------|------------|
 | [docs/README.md](docs/README.md) | Оглавление документации |
-| [docs/authentication.md](docs/authentication.md) | LDAP, Basic Auth (NTLM — M2) |
+| [docs/authentication.md](docs/authentication.md) | Basic, LDAP, NTLM, Kerberos |
 | [docs/logging.md](docs/logging.md) | Логирование (`RUST_LOG`, уровни, просмотр) |
 | [docs/acl.md](docs/acl.md) | Правила доступа, приоритеты |
 | [docs/categorization.md](docs/categorization.md) | Shallalist, URLhaus, PhishTank |
@@ -349,7 +349,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 
 - [x] Prometheus + Grafana + health checks
 - [x] Graceful shutdown
-- [x] Proxy authentication (Basic / LDAP; NTLM — в backlog M2)
+- [x] Proxy authentication (Basic / LDAP / NTLM / Kerberos)
 - [x] ACL + URL categorization
 - [x] E2E / smoke test harness
 - [x] Release packaging (`0.2.3-test`)
@@ -357,7 +357,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 - [x] Rate limiting per user/IP
 - [x] Рефакторинг `main.rs` (вынос `ProxyService` в lib)
 - [x] Hierarchy E2E + `docker-compose.hierarchy.yml`
-- [x] NTLM: документация исправлена (M2, не реализован)
+- [x] NTLM + Kerberos (SSPI, multi-round proxy auth)
 
 ### M2 — Squid parity (v0.3.x)
 
@@ -365,7 +365,8 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 - [x] HTTP/2 upstream client — `UPSTREAM_HTTP2_ENABLED`
 - [x] Compression (Brotli/Zstd) — `CACHE_COMPRESSION=zstd|brotli`
 - [x] ACL TimeWindow + group rules
-- [ ] NTLM auth
+- [x] NTLM auth ([#44](https://github.com/onixus/bsdm-proxy/issues/44))
+- [x] Kerberos / SPNEGO auth
 - [ ] Hierarchy Phase 4 (discovery, digest, HTCP)
 - [x] Negative caching / cache refresh (B22) — `Cache-Control`, ETag revalidate, 403/404 negative cache
 - [x] REST ACL API (`/api/acl/*` на порту metrics)

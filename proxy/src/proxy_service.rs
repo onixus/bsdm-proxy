@@ -20,7 +20,7 @@ use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
 use crate::acl::{AclAction, AclDecision, AclEngine};
-use crate::auth::{AuthManager, UserInfo};
+use crate::auth::{AuthManager, ProxyAuthOutcome, UserInfo};
 use crate::cache::{CacheConfig, CachedResponse, CACHEABLE_METHODS};
 use crate::cache_digest::DigestRegistry;
 use crate::cache_freshness::{evaluate_store, refresh_ttl_from_headers};
@@ -460,6 +460,7 @@ impl ProxyService {
     pub(crate) async fn authenticate_proxy(
         &self,
         req: &Request<Incoming>,
+        client_ip: &str,
     ) -> Result<Option<Arc<UserInfo>>, Response<Body>> {
         let Some(auth) = &self.auth else {
             return Ok(None);
@@ -468,16 +469,14 @@ impl ProxyService {
             return Ok(None);
         }
 
-        let Some((username, password)) = auth.extract_credentials(req) else {
-            tracing::debug!("Proxy authentication required, credentials missing");
-            return Err(auth.create_auth_required_response());
-        };
-
-        match auth.authenticate(&username, &password).await {
-            Ok(user) => Ok(Some(Arc::new(user))),
-            Err(e) => {
-                warn!("Proxy authentication failed for {}: {}", username, e);
-                Err(auth.create_auth_required_response())
+        match auth.handle_proxy_auth(client_ip, req).await {
+            ProxyAuthOutcome::Anonymous => Ok(None),
+            ProxyAuthOutcome::Authenticated(user) => Ok(Some(Arc::new(user))),
+            ProxyAuthOutcome::Challenge {
+                authenticate_header,
+            } => {
+                tracing::debug!("Proxy authentication challenge issued");
+                Err(auth.create_auth_challenge_response(authenticate_header))
             }
         }
     }

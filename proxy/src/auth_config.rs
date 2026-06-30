@@ -28,10 +28,28 @@ fn parse_backend(value: &str) -> AuthBackend {
             }
         }
         "ntlm" => {
-            warn!(
-                "AUTH_BACKEND=ntlm is not implemented in v0.2.x (planned M2); using basic. \
-                 Use ldap for Active Directory integration."
-            );
+            #[cfg(feature = "auth-ntlm")]
+            {
+                return AuthBackend::Ntlm;
+            }
+            #[cfg(not(feature = "auth-ntlm"))]
+            {
+                warn!(
+                    "AUTH_BACKEND=ntlm but proxy was built without auth-ntlm feature, using basic"
+                );
+            }
+        }
+        "kerberos" | "negotiate" => {
+            #[cfg(feature = "auth-kerberos")]
+            {
+                return AuthBackend::Kerberos;
+            }
+            #[cfg(not(feature = "auth-kerberos"))]
+            {
+                warn!(
+                    "AUTH_BACKEND=kerberos but proxy was built without auth-kerberos feature, using basic"
+                );
+            }
         }
         _ => {}
     }
@@ -99,6 +117,32 @@ pub fn load_auth_config() -> AuthConfig {
                     domain: std::env::var("NTLM_DOMAIN")
                         .unwrap_or_else(|_| "WORKGROUP".to_string()),
                     workstation: std::env::var("NTLM_WORKSTATION").ok(),
+                    helper_command: std::env::var("NTLM_AUTH_HELPER").ok(),
+                    candidate_users_file: std::env::var("NTLM_USERS_FILE").ok(),
+                })
+            } else {
+                None
+            }
+        },
+        #[cfg(feature = "auth-kerberos")]
+        kerberos: {
+            use bsdm_proxy::KerberosConfig;
+            if enabled && backend == AuthBackend::Kerberos {
+                let max_skew_secs = std::env::var("KRB5_MAX_TIME_SKEW_SECONDS")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(300);
+                let hostname = std::env::var("KRB5_HOSTNAME")
+                    .or_else(|_| std::env::var("HOSTNAME"))
+                    .unwrap_or_else(|_| "localhost".to_string());
+                Some(KerberosConfig {
+                    keytab_path: std::env::var("KRB5_KEYTAB")
+                        .unwrap_or_else(|_| "/etc/krb5.keytab".to_string()),
+                    service_principal: std::env::var("KRB5_SERVICE_PRINCIPAL")
+                        .unwrap_or_else(|_| format!("HTTP/{hostname}@EXAMPLE.COM")),
+                    kdc_url: std::env::var("KRB5_KDC_URL").ok(),
+                    hostname,
+                    max_time_skew: Duration::from_secs(max_skew_secs),
                 })
             } else {
                 None

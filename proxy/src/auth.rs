@@ -3,9 +3,11 @@
 //! Supports multiple authentication backends:
 //! - Basic Auth (username:password in base64)
 //! - LDAP (Active Directory, OpenLDAP) - optional feature
-//! - NTLM (Windows Integrated Authentication) - TODO
+//! - NTLM (Windows Integrated Authentication) - optional feature
+//! - Kerberos / SPNEGO (keytab) - optional feature
 
 use base64::engine::general_purpose;
+use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
 use hyper::header::{PROXY_AUTHENTICATE, PROXY_AUTHORIZATION};
 use hyper::{Request, Response, StatusCode};
@@ -15,13 +17,16 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 #[cfg(feature = "auth-ldap")]
-use tracing::warn;
+use tracing::warn as ldap_warn;
 
 #[cfg(feature = "auth-ldap")]
 use ldap3::{LdapConn, LdapConnSettings, Scope, SearchEntry};
+
+#[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]
+use crate::auth_sspi::{SspiAuthEngine, SspiBackendConfig, SspiSession, SspiStepResult};
 
 /// Authentication backend type
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -34,6 +39,9 @@ pub enum AuthBackend {
     /// NTLM (Windows Integrated)
     #[cfg(feature = "auth-ntlm")]
     Ntlm,
+    /// Kerberos via SPNEGO / Negotiate (service keytab)
+    #[cfg(feature = "auth-kerberos")]
+    Kerberos,
 }
 
 impl std::fmt::Display for AuthBackend {
@@ -44,6 +52,8 @@ impl std::fmt::Display for AuthBackend {
             AuthBackend::Ldap => write!(f, "ldap"),
             #[cfg(feature = "auth-ntlm")]
             AuthBackend::Ntlm => write!(f, "ntlm"),
+            #[cfg(feature = "auth-kerberos")]
+            AuthBackend::Kerberos => write!(f, "kerberos"),
         }
     }
 }
@@ -120,6 +130,8 @@ impl Default for LdapConfig {
 pub struct NtlmConfig {
     pub domain: String,
     pub workstation: Option<String>,
+    pub helper_command: Option<String>,
+    pub candidate_users_file: Option<String>,
 }
 
 #[cfg(feature = "auth-ntlm")]
@@ -128,8 +140,32 @@ impl Default for NtlmConfig {
         Self {
             domain: "WORKGROUP".to_string(),
             workstation: None,
+            helper_command: None,
+            candidate_users_file: None,
         }
     }
+}
+
+/// Kerberos configuration (service keytab)
+#[cfg(feature = "auth-kerberos")]
+#[derive(Debug, Clone)]
+pub struct KerberosConfig {
+    pub keytab_path: String,
+    pub service_principal: String,
+    pub kdc_url: Option<String>,
+    pub hostname: String,
+    pub max_time_skew: Duration,
+}
+
+/// Outcome of proxy authentication for one HTTP request.
+#[derive(Debug)]
+pub enum ProxyAuthOutcome {
+    /// Auth disabled or not required.
+    Anonymous,
+    /// Authenticated user.
+    Authenticated(UserInfo),
+    /// Multi-round challenge (407 with optional token in Proxy-Authenticate).
+    Challenge { authenticate_header: String },
 }
 
 /// Authentication configuration
@@ -143,6 +179,8 @@ pub struct AuthConfig {
     pub ldap: Option<LdapConfig>,
     #[cfg(feature = "auth-ntlm")]
     pub ntlm: Option<NtlmConfig>,
+    #[cfg(feature = "auth-kerberos")]
+    pub kerberos: Option<KerberosConfig>,
 }
 
 impl Default for AuthConfig {
@@ -156,14 +194,28 @@ impl Default for AuthConfig {
             ldap: None,
             #[cfg(feature = "auth-ntlm")]
             ntlm: None,
+            #[cfg(feature = "auth-kerberos")]
+            kerberos: None,
         }
     }
+}
+
+#[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]
+struct HandshakeSession {
+    session: SspiSession,
+    created_at: Instant,
 }
 
 /// Authentication manager
 pub struct AuthManager {
     config: AuthConfig,
     user_cache: Arc<RwLock<HashMap<String, CachedUser>>>,
+    #[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]
+    handshake_sessions: Arc<RwLock<HashMap<String, HandshakeSession>>>,
+    #[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]
+    sspi_engine: Option<Arc<SspiAuthEngine>>,
+    #[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]
+    principal_cache: Arc<RwLock<HashMap<String, UserInfo>>>,
 }
 
 impl AuthManager {
@@ -172,10 +224,25 @@ impl AuthManager {
             "Authentication manager initialized with backend: {}",
             config.backend
         );
+
+        #[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]
+        let sspi_engine = build_sspi_engine(&config).map(Arc::new);
+
         Self {
             config,
             user_cache: Arc::new(RwLock::new(HashMap::new())),
+            #[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]
+            handshake_sessions: Arc::new(RwLock::new(HashMap::new())),
+            #[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]
+            sspi_engine,
+            #[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]
+            principal_cache: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    #[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]
+    fn uses_sspi_handshake(&self) -> bool {
+        self.sspi_engine.is_some()
     }
 
     /// Check if authentication is enabled
@@ -207,6 +274,137 @@ impl AuthManager {
             }
             #[cfg(feature = "auth-ntlm")]
             AuthBackend::Ntlm => None,
+            #[cfg(feature = "auth-kerberos")]
+            AuthBackend::Kerberos => None,
+        }
+    }
+
+    /// Parse `Proxy-Authorization` scheme and base64 payload for SSPI backends.
+    pub fn extract_proxy_token<T>(&self, req: &Request<T>) -> Option<(String, Vec<u8>)> {
+        let auth_header = req.headers().get(PROXY_AUTHORIZATION)?;
+        let auth_str = auth_header.to_str().ok()?;
+        let (scheme, encoded) = auth_str.split_once(' ')?;
+        let decoded = B64.decode(encoded.trim()).ok()?;
+        Some((scheme.to_string(), decoded))
+    }
+
+    /// Handle proxy authentication including multi-round NTLM / Kerberos.
+    pub async fn handle_proxy_auth<T>(
+        &self,
+        #[allow(unused_variables)] client_key: &str,
+        req: &Request<T>,
+    ) -> ProxyAuthOutcome {
+        #[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]
+        if self.uses_sspi_handshake() {
+            return self.handle_sspi_auth(client_key, req).await;
+        }
+
+        let Some((username, password)) = self.extract_credentials(req) else {
+            return ProxyAuthOutcome::Challenge {
+                authenticate_header: self.initial_auth_header(),
+            };
+        };
+
+        match self.authenticate(&username, &password).await {
+            Ok(user) => ProxyAuthOutcome::Authenticated(user),
+            Err(e) => {
+                warn!("Proxy authentication failed for {}: {}", username, e);
+                ProxyAuthOutcome::Challenge {
+                    authenticate_header: self.initial_auth_header(),
+                }
+            }
+        }
+    }
+
+    #[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]
+    async fn handle_sspi_auth<T>(&self, client_key: &str, req: &Request<T>) -> ProxyAuthOutcome {
+        let Some(engine) = &self.sspi_engine else {
+            return ProxyAuthOutcome::Challenge {
+                authenticate_header: self.initial_auth_header(),
+            };
+        };
+
+        let token = self
+            .extract_proxy_token(req)
+            .filter(|(scheme, _)| scheme.eq_ignore_ascii_case(engine.scheme()))
+            .map(|(_, bytes)| bytes);
+
+        if token.is_none() {
+            if let Some(cached) = self.principal_cache.read().await.get(client_key).cloned() {
+                if cached.authenticated_at.elapsed() < self.config.cache_ttl {
+                    return ProxyAuthOutcome::Authenticated(cached);
+                }
+            }
+        }
+
+        let token_slice = token.as_deref();
+        let step_result = {
+            let mut sessions = self.handshake_sessions.write().await;
+            if !sessions.contains_key(client_key) {
+                match engine.begin_session() {
+                    Ok(session) => {
+                        sessions.insert(
+                            client_key.to_string(),
+                            HandshakeSession {
+                                session,
+                                created_at: Instant::now(),
+                            },
+                        );
+                    }
+                    Err(e) => {
+                        warn!("Failed to start SSPI session: {}", e);
+                        return ProxyAuthOutcome::Challenge {
+                            authenticate_header: self.initial_auth_header(),
+                        };
+                    }
+                }
+            }
+
+            let Some(entry) = sessions.get_mut(client_key) else {
+                return ProxyAuthOutcome::Challenge {
+                    authenticate_header: self.initial_auth_header(),
+                };
+            };
+
+            tokio::task::block_in_place(|| engine.process_token(&mut entry.session, token_slice))
+        };
+
+        match step_result {
+            Ok(SspiStepResult::Complete {
+                username,
+                display_name,
+            }) => {
+                self.handshake_sessions.write().await.remove(client_key);
+                let user = UserInfo {
+                    username: username.clone(),
+                    display_name,
+                    email: None,
+                    groups: vec![],
+                    authenticated_at: Instant::now(),
+                };
+                self.principal_cache
+                    .write()
+                    .await
+                    .insert(client_key.to_string(), user.clone());
+                ProxyAuthOutcome::Authenticated(user)
+            }
+            Ok(SspiStepResult::Challenge { token_b64 }) => ProxyAuthOutcome::Challenge {
+                authenticate_header: format!("{} {}", engine.scheme(), token_b64),
+            },
+            Ok(SspiStepResult::Failed(reason)) => {
+                self.handshake_sessions.write().await.remove(client_key);
+                warn!("SSPI authentication failed for {}: {}", client_key, reason);
+                ProxyAuthOutcome::Challenge {
+                    authenticate_header: self.initial_auth_header(),
+                }
+            }
+            Err(e) => {
+                self.handshake_sessions.write().await.remove(client_key);
+                warn!("SSPI error for {}: {}", client_key, e);
+                ProxyAuthOutcome::Challenge {
+                    authenticate_header: self.initial_auth_header(),
+                }
+            }
         }
     }
 
@@ -228,7 +426,15 @@ impl AuthManager {
             #[cfg(feature = "auth-ldap")]
             AuthBackend::Ldap => self.authenticate_ldap(username, password).await?,
             #[cfg(feature = "auth-ntlm")]
-            AuthBackend::Ntlm => return Err("NTLM not implemented yet".to_string()),
+            AuthBackend::Ntlm => {
+                return Err("NTLM uses multi-round handshake; call handle_proxy_auth()".to_string());
+            }
+            #[cfg(feature = "auth-kerberos")]
+            AuthBackend::Kerberos => {
+                return Err(
+                    "Kerberos uses multi-round handshake; call handle_proxy_auth()".to_string(),
+                );
+            }
         };
 
         // Cache successful authentication
@@ -273,7 +479,7 @@ impl AuthManager {
             {
                 Ok(user_info) => return Ok(user_info),
                 Err(e) => {
-                    warn!("LDAP server {} failed: {}", server, e);
+                    ldap_warn!("LDAP server {} failed: {}", server, e);
                     continue;
                 }
             }
@@ -377,26 +583,34 @@ impl AuthManager {
             .insert(username.to_string(), cached);
     }
 
+    fn initial_auth_header(&self) -> String {
+        match self.config.backend {
+            AuthBackend::Basic => format!("Basic realm=\"{}\"", self.config.realm),
+            #[cfg(feature = "auth-ldap")]
+            AuthBackend::Ldap => format!("Basic realm=\"{}\"", self.config.realm),
+            #[cfg(feature = "auth-ntlm")]
+            AuthBackend::Ntlm => "NTLM".to_string(),
+            #[cfg(feature = "auth-kerberos")]
+            AuthBackend::Kerberos => "Negotiate".to_string(),
+        }
+    }
+
     /// Create 407 Proxy Authentication Required response
     pub fn create_auth_required_response<T>(&self) -> Response<T>
     where
         T: Default,
     {
-        let auth_header = match self.config.backend {
-            AuthBackend::Basic => {
-                format!("Basic realm=\"{}\"", self.config.realm)
-            }
-            #[cfg(feature = "auth-ldap")]
-            AuthBackend::Ldap => {
-                format!("Basic realm=\"{}\"", self.config.realm)
-            }
-            #[cfg(feature = "auth-ntlm")]
-            AuthBackend::Ntlm => "NTLM".to_string(),
-        };
+        self.create_auth_challenge_response(self.initial_auth_header())
+    }
 
+    /// Create 407 with a specific `Proxy-Authenticate` value (may include challenge token).
+    pub fn create_auth_challenge_response<T>(&self, authenticate_header: String) -> Response<T>
+    where
+        T: Default,
+    {
         Response::builder()
             .status(StatusCode::PROXY_AUTHENTICATION_REQUIRED)
-            .header(PROXY_AUTHENTICATE, auth_header)
+            .header(PROXY_AUTHENTICATE, authenticate_header)
             .body(T::default())
             .unwrap()
     }
@@ -405,6 +619,58 @@ impl AuthManager {
     pub async fn cleanup_cache(&self) {
         let mut cache = self.user_cache.write().await;
         cache.retain(|_, user| !user.is_expired());
+        #[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]
+        {
+            let mut sessions = self.handshake_sessions.write().await;
+            sessions.retain(|_, s| s.created_at.elapsed() < self.config.cache_ttl);
+            let mut principals = self.principal_cache.write().await;
+            principals.retain(|_, u| u.authenticated_at.elapsed() < self.config.cache_ttl);
+        }
+    }
+}
+
+#[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]
+fn build_sspi_engine(config: &AuthConfig) -> Option<SspiAuthEngine> {
+    use crate::auth_sspi::{KerberosAuthConfig, NtlmAuthConfig};
+
+    let backend = match config.backend {
+        #[cfg(feature = "auth-ntlm")]
+        AuthBackend::Ntlm => {
+            let ntlm = config.ntlm.as_ref()?;
+            let mut candidates = Vec::new();
+            if let Some(path) = &ntlm.candidate_users_file {
+                match crate::auth_sspi::load_ntlm_user_file(path) {
+                    Ok(ids) => candidates = ids,
+                    Err(e) => warn!("Failed to load NTLM users file: {}", e),
+                }
+            }
+            SspiBackendConfig::Ntlm(NtlmAuthConfig {
+                domain: ntlm.domain.clone(),
+                workstation: ntlm.workstation.clone(),
+                helper_command: ntlm.helper_command.clone(),
+                candidate_identities: candidates,
+            })
+        }
+        #[cfg(feature = "auth-kerberos")]
+        AuthBackend::Kerberos => {
+            let krb = config.kerberos.as_ref()?;
+            SspiBackendConfig::Kerberos(KerberosAuthConfig {
+                keytab_path: krb.keytab_path.clone(),
+                service_principal: krb.service_principal.clone(),
+                kdc_url: krb.kdc_url.clone(),
+                hostname: krb.hostname.clone(),
+                max_time_skew: krb.max_time_skew,
+            })
+        }
+        _ => return None,
+    };
+
+    match SspiAuthEngine::new(backend) {
+        Ok(engine) => Some(engine),
+        Err(e) => {
+            warn!("SSPI auth engine disabled: {}", e);
+            None
+        }
     }
 }
 
