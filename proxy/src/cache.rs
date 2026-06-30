@@ -3,10 +3,12 @@
 use bytes::Bytes;
 use hyper::header::{HeaderName, HeaderValue};
 use hyper::{Response, StatusCode};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tracing::warn;
 
+use crate::cache_body::CachedBody;
 use crate::cache_compress::{decode_body, prepare_body_for_cache, BodyEncoding, CompressionConfig};
 use crate::http_types::Body;
 
@@ -17,7 +19,7 @@ pub const CACHEABLE_STATUS_CODES: &[u16] = &[200, 203, 204, 206, 300, 301, 404, 
 pub struct CachedResponse {
     pub status: u16,
     pub headers: Arc<[(Arc<str>, Arc<str>)]>,
-    pub body: Bytes,
+    pub body: CachedBody,
     pub body_encoding: BodyEncoding,
     /// Logical response body size (uncompressed) for clients and metrics.
     pub uncompressed_len: usize,
@@ -59,8 +61,13 @@ impl CachedResponse {
         self.uncompressed_len
     }
 
+    pub fn stored_body_bytes(&self) -> Bytes {
+        self.body.to_bytes()
+    }
+
     pub fn decoded_body(&self) -> Option<Bytes> {
-        match decode_body(&self.body, self.body_encoding) {
+        let stored = self.body.to_bytes();
+        match decode_body(&stored, self.body_encoding) {
             Ok(body) => Some(body),
             Err(e) => {
                 warn!(
@@ -78,8 +85,8 @@ impl CachedResponse {
 
     pub fn response_body(&self) -> Bytes {
         match self.body_encoding {
-            BodyEncoding::Raw => self.body.clone(),
-            _ => self.decoded_body().unwrap_or_else(|| self.body.clone()),
+            BodyEncoding::Raw => self.body.to_bytes(),
+            _ => self.decoded_body().unwrap_or_else(|| self.body.to_bytes()),
         }
     }
 
@@ -115,16 +122,30 @@ impl CachedResponse {
         body: Bytes,
         ttl: Duration,
         compression: &CompressionConfig,
+        spill_threshold: usize,
+        spill_dir: &std::path::Path,
         etag: Option<Arc<str>>,
         last_modified: Option<Arc<str>>,
         is_negative: bool,
         must_revalidate: bool,
     ) -> Self {
         let prepared = prepare_body_for_cache(body, headers, compression);
+        let body_bytes = prepared.body;
+        let cached_body = if spill_threshold > 0 && body_bytes.len() >= spill_threshold {
+            match CachedBody::spill(body_bytes.as_ref(), spill_dir) {
+                Ok(mmap) => mmap,
+                Err(e) => {
+                    warn!("cache spill failed, keeping inline body: {e}");
+                    CachedBody::inline(body_bytes)
+                }
+            }
+        } else {
+            CachedBody::inline(body_bytes)
+        };
         Self {
             status,
             headers: prepared.headers,
-            body: prepared.body,
+            body: cached_body,
             body_encoding: prepared.encoding,
             uncompressed_len: prepared.uncompressed_len,
             cached_at: SystemTime::now(),
@@ -146,6 +167,10 @@ pub struct CacheConfig {
     pub negative_cache_enabled: bool,
     pub negative_cache_ttl: Duration,
     pub honor_cache_control: bool,
+    /// Bodies at or above this size are stored in mmap spill files (0 = inline only).
+    pub spill_threshold_bytes: usize,
+    pub spill_dir: PathBuf,
+    pub shard_count: usize,
 }
 
 impl Default for CacheConfig {
@@ -158,6 +183,9 @@ impl Default for CacheConfig {
             negative_cache_enabled: true,
             negative_cache_ttl: Duration::from_secs(120),
             honor_cache_control: true,
+            spill_threshold_bytes: 256 * 1024,
+            spill_dir: std::env::temp_dir().join("bsdm-cache-spill"),
+            shard_count: 16,
         }
     }
 }
@@ -186,6 +214,17 @@ impl CacheConfig {
         let honor_cache_control = std::env::var("CACHE_HONOR_CACHE_CONTROL")
             .map(|v| !matches!(v.to_ascii_lowercase().as_str(), "0" | "false" | "no"))
             .unwrap_or(true);
+        let spill_threshold_bytes = std::env::var("CACHE_SPILL_THRESHOLD_BYTES")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(256 * 1024);
+        let spill_dir = std::env::var("CACHE_SPILL_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| std::env::temp_dir().join("bsdm-cache-spill"));
+        let shard_count = std::env::var("CACHE_SHARDS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(16);
 
         Self {
             capacity,
@@ -195,6 +234,9 @@ impl CacheConfig {
             negative_cache_enabled,
             negative_cache_ttl: Duration::from_secs(negative_cache_ttl_secs),
             honor_cache_control,
+            spill_threshold_bytes,
+            spill_dir,
+            shard_count,
         }
     }
 }
@@ -209,6 +251,7 @@ pub fn is_cacheable(method: &str, status: u16, body_size: usize, max_body_size: 
 mod tests {
     use super::*;
     use crate::cache_compress::CompressionConfig;
+    use tempfile::tempdir;
 
     #[test]
     fn response_body_raw_skips_decode() {
@@ -216,7 +259,7 @@ mod tests {
         let cached = CachedResponse {
             status: 200,
             headers: Arc::from([]),
-            body: payload.clone(),
+            body: CachedBody::inline(payload.clone()),
             body_encoding: BodyEncoding::Raw,
             uncompressed_len: payload.len(),
             cached_at: SystemTime::now(),
@@ -228,11 +271,34 @@ mod tests {
         };
         let served = cached.response_body();
         assert_eq!(served, payload);
-        assert_eq!(served.as_ptr(), cached.body.as_ptr());
+        assert_eq!(served.as_ptr(), cached.body.to_bytes().as_ptr());
+    }
+
+    #[test]
+    fn from_upstream_spills_large_body() {
+        let dir = tempdir().unwrap();
+        let body = Bytes::from(vec![0u8; 300_000]);
+        let headers: Arc<[(Arc<str>, Arc<str>)]> = Arc::from([]);
+        let cached = CachedResponse::from_upstream(
+            200,
+            headers,
+            body.clone(),
+            Duration::from_secs(60),
+            &CompressionConfig::default(),
+            256 * 1024,
+            dir.path(),
+            None,
+            None,
+            false,
+            false,
+        );
+        assert!(cached.body.is_mmap());
+        assert_eq!(cached.response_body(), body);
     }
 
     #[test]
     fn cached_response_serves_decompressed_body() {
+        let dir = tempdir().unwrap();
         let body = Bytes::from("y".repeat(2048));
         let headers: Arc<[(Arc<str>, Arc<str>)]> =
             Arc::from([(Arc::from("content-type"), Arc::from("text/plain"))]);
@@ -247,6 +313,8 @@ mod tests {
             body.clone(),
             Duration::from_secs(60),
             &compression,
+            usize::MAX,
+            dir.path(),
             None,
             None,
             false,
@@ -265,7 +333,7 @@ mod tests {
         let cached = CachedResponse {
             status: 200,
             headers: Arc::from([]),
-            body: Bytes::new(),
+            body: CachedBody::inline(Bytes::new()),
             body_encoding: BodyEncoding::Raw,
             uncompressed_len: 0,
             cached_at: SystemTime::now(),
