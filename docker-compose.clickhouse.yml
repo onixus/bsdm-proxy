@@ -1,0 +1,152 @@
+# ClickHouse analytics stack for BSDM-Proxy
+#
+# Kafka → (cache-indexer with INDEXER_BACKEND=clickhouse) → ClickHouse
+# Until CH indexer lands (see GitHub issue), use OpenSearch stack for end-to-end indexing:
+#   docker compose up -d
+#
+# This compose validates ClickHouse schema + proxy event production:
+#   docker compose -f docker-compose.clickhouse.yml up -d --build
+#   curl -x http://127.0.0.1:1488 http://httpbin.org/get
+#   curl 'http://127.0.0.1:8123/?query=SELECT+count()+FROM+bsdm.http_cache'
+#
+# ADR: docs/adr/0002-clickhouse-analytics.md
+
+x-bake:
+  no-cache: false
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.9.8
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - bsdm-ch-net
+    restart: unless-stopped
+
+  kafka:
+    image: confluentinc/cp-kafka:7.9.8
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    networks:
+      - bsdm-ch-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.12
+    ports:
+      - "8123:8123"   # HTTP
+      - "9000:9000"   # native
+    environment:
+      CLICKHOUSE_DB: bsdm
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./scripts/clickhouse/http_cache.sql:/docker-entrypoint-initdb.d/01-http_cache.sql:ro
+    networks:
+      - bsdm-ch-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --query 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+  proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: proxy
+    ports:
+      - "1488:1488"
+      - "9090:9090"
+    environment:
+      - KAFKA_BROKERS=kafka:9092
+      - KAFKA_TOPIC=cache-events
+      - HTTP_PORT=1488
+      - METRICS_PORT=9090
+      - MITM_ENABLED=false
+      - AUTH_ENABLED=false
+      - ACL_ENABLED=false
+      - CATEGORIZATION_ENABLED=false
+      - CACHE_CAPACITY=10000
+      - CACHE_SHARDS=16
+      - WORKER_COUNT=1
+      - RUST_LOG=info,bsdm_proxy=info
+    depends_on:
+      kafka:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    networks:
+      - bsdm-ch-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:9090/health | grep -q ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # cache-indexer with INDEXER_BACKEND=clickhouse — see ADR 0002 / GitHub issue
+  # cache-indexer-ch:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #     target: cache-indexer
+  #   environment:
+  #     - INDEXER_BACKEND=clickhouse
+  #     - KAFKA_BROKERS=kafka:9092
+  #     - CLICKHOUSE_URL=http://clickhouse:8123
+  #     - CLICKHOUSE_DATABASE=bsdm
+  #     - CLICKHOUSE_TABLE=http_cache
+  #   depends_on:
+  #     kafka:
+  #       condition: service_healthy
+  #     clickhouse:
+  #       condition: service_healthy
+  #   networks:
+  #     - bsdm-ch-net
+
+  grafana:
+    image: grafana/grafana:12.3.8
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-ch-data:/var/lib/grafana
+    networks:
+      - bsdm-ch-net
+    restart: unless-stopped
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+
+networks:
+  bsdm-ch-net:
+    driver: bridge
+
+volumes:
+  clickhouse-data:
+  grafana-ch-data:
