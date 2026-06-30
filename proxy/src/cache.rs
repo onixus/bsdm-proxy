@@ -131,11 +131,17 @@ impl CachedResponse {
     ) -> Self {
         let prepared = prepare_body_for_cache(body, headers, compression);
         let body_bytes = prepared.body;
-        let cached_body = CachedBody::maybe_spill(body_bytes.clone(), spill_dir, spill_threshold)
-            .unwrap_or_else(|e| {
-                warn!("cache spill failed, keeping inline body: {e}");
-                CachedBody::inline(body_bytes)
-            });
+        let cached_body = if spill_threshold > 0 && body_bytes.len() >= spill_threshold {
+            match CachedBody::spill(body_bytes.as_ref(), spill_dir) {
+                Ok(mmap) => mmap,
+                Err(e) => {
+                    warn!("cache spill failed, keeping inline body: {e}");
+                    CachedBody::inline(body_bytes)
+                }
+            }
+        } else {
+            CachedBody::inline(body_bytes)
+        };
         Self {
             status,
             headers: prepared.headers,

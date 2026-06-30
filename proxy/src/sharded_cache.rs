@@ -49,6 +49,10 @@ impl HttpL1Cache {
         self.shards.iter().map(|s| s.len()).sum()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn weight(&self) -> u64 {
         self.shards.iter().map(|s| s.weight()).sum()
     }

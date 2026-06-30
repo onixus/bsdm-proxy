@@ -59,23 +59,29 @@ impl CachedBody {
         fs::create_dir_all(spill_dir)?;
         let id = SPILL_SEQ.fetch_add(1, Ordering::Relaxed);
         let path = spill_dir.join(format!("body-{id:016x}.bin"));
-        {
-            let mut file = OpenOptions::new()
-                .create_new(true)
-                .write(true)
-                .open(&path)?;
-            file.write_all(data)?;
-            file.sync_all()?;
+        let spill_result: std::io::Result<Self> = (|| {
+            {
+                let mut file = OpenOptions::new()
+                    .create_new(true)
+                    .write(true)
+                    .open(&path)?;
+                file.write_all(data)?;
+                file.sync_all()?;
+            }
+            let file = OpenOptions::new().read(true).open(&path)?;
+            // SAFETY: file is not mutated after mmap; we own the file handle.
+            let mmap = unsafe { Mmap::map(&file)? };
+            let owner = MmapOwner {
+                _file: file,
+                mmap,
+                path: path.clone(),
+            };
+            Ok(Self::Mmap(Bytes::from_owner(owner)))
+        })();
+        if spill_result.is_err() {
+            let _ = fs::remove_file(&path);
         }
-        let file = OpenOptions::new().read(true).open(&path)?;
-        // SAFETY: file is not mutated after mmap; we own the file handle.
-        let mmap = unsafe { Mmap::map(&file)? };
-        let owner = MmapOwner {
-            _file: file,
-            mmap,
-            path,
-        };
-        Ok(Self::Mmap(Bytes::from_owner(owner)))
+        spill_result
     }
 
     pub fn maybe_spill(data: Bytes, spill_dir: &Path, threshold: usize) -> std::io::Result<Self> {
