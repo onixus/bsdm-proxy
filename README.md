@@ -7,10 +7,10 @@
 [![Build Status](https://github.com/onixus/bsdm-proxy/actions/workflows/rust.yml/badge.svg)](https://github.com/onixus/bsdm-proxy/actions/workflows/rust.yml)
 [![E2E Tests](https://github.com/onixus/bsdm-proxy/actions/workflows/e2e.yml/badge.svg)](https://github.com/onixus/bsdm-proxy/actions/workflows/e2e.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.2.3--test-blue.svg)](https://github.com/onixus/bsdm-proxy/releases)
+[![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](https://github.com/onixus/bsdm-proxy/releases)
 [![Rust](https://img.shields.io/badge/rust-1.85+-orange.svg)](https://www.rust-lang.org)
 
-> **Текущая версия:** `0.2.3-test` (тестовый pre-release) — см. [Releases](https://github.com/onixus/bsdm-proxy/releases) · [release notes](docs/releases/v0.2.3-test.md)
+> **Текущая версия:** `0.3.0` (M2 — Squid parity) — см. [Releases](https://github.com/onixus/bsdm-proxy/releases) · [CHANGELOG](CHANGELOG.md) · [release notes](docs/releases/v0.3.0.md)
 
 ⚠️ **MITM-прокси для HTTPS.** Используйте только в корпоративной среде с согласия пользователей и в рамках законодательства.
 
@@ -18,8 +18,8 @@
 
 | Область | Возможности |
 |---------|-------------|
-| **Прокси** | HTTP/HTTPS forward proxy, MITM TLS (порты 443/8443), HTTP CONNECT, кеш **L1 + Redis L2**, **иерархический кеш** (ICP + parent/sibling peers), **HTTP/2 upstream** (опц.) |
-| **Безопасность** | Proxy-аутентификация (Basic / LDAP), ACL, категоризация URL, rate limiting |
+| **Прокси** | HTTP/HTTPS forward proxy, MITM TLS (порты 443/8443), HTTP CONNECT, кеш **L1 + Redis L2**, **иерархический кеш** (ICP/HTCP, discovery, digest), **HTTP/2 upstream** (опц.) |
+| **Безопасность** | Proxy-аутентификация (Basic / LDAP / NTLM / Kerberos), ACL + REST API, категоризация URL, rate limiting |
 | **Наблюдаемость** | Prometheus (20+ метрик), Grafana, `/health`, `/ready`, `/metrics` |
 | **Аналитика** | Kafka → cache-indexer → OpenSearch |
 | **Эксплуатация** | Graceful shutdown, настраиваемые порты, release-пакет + systemd |
@@ -114,13 +114,13 @@ curl http://localhost:9090/metrics | grep bsdm_proxy
 ./scripts/build-package.sh
 ```
 
-Архив: `dist/bsdm-proxy-0.2.3test-linux-<arch>.tar.gz`
+Архив: `dist/bsdm-proxy-0.3.0-linux-<arch>.tar.gz`
 
 Установка:
 
 ```bash
-tar xzf dist/bsdm-proxy-0.2.3test-linux-x86_64.tar.gz
-cd bsdm-proxy-0.2.3test-linux-x86_64
+tar xzf dist/bsdm-proxy-0.3.0-linux-x86_64.tar.gz
+cd bsdm-proxy-0.3.0-linux-x86_64
 sudo ./install.sh --create-user --systemd
 sudo cp certs/ca.key certs/ca.crt /certs/
 sudo systemctl start bsdm-proxy
@@ -326,7 +326,8 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 | [docs/architecture.md](docs/architecture.md) | Архитектура и блокеры |
 | [docs/roadmap.md](docs/roadmap.md) | Roadmap и milestones |
 | [docs/capacity-planning.md](docs/capacity-planning.md) | Планирование ёмкости (корп. сценарии) |
-| [docs/releases/v0.2.3-test.md](docs/releases/v0.2.3-test.md) | Release notes 0.2.3-test |
+| [CHANGELOG.md](CHANGELOG.md) | История изменений |
+| [docs/releases/v0.3.0.md](docs/releases/v0.3.0.md) | Release notes 0.3.0 |
 | [packaging/README.md](packaging/README.md) | Release-пакет и systemd |
 | [OPTIMIZATIONS.md](OPTIMIZATIONS.md) | Оптимизации v2.0 |
 | [docker-compose.yml](docker-compose.yml) | Полный стек |
@@ -340,7 +341,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 | Milestone | Версия | Фокус | Статус |
 |-----------|--------|-------|--------|
 | **M1** Foundation | v0.2.x | Прокси, ACL, категоризация, observability, иерархия | ✅ Done |
-| **M2** Squid parity | v0.3.x | L2 Redis, HTTP/2, compression, полный ACL, hierarchy Phase 4 | ~45% |
+| **M2** Squid parity | v0.3.x | L2, ACL API, NTLM/Kerberos, hierarchy Phase 4 | ✅ Done |
 | **M3** Retro-search | v0.4.x | OpenSearch dashboards, поиск по истории | Planned |
 | **M4** Threat analytics | v0.5.x | Rule-based алерты, C&C heuristics | Planned |
 | **M5** ML security | v1.0.x | ML anomaly, phishing, C&C detection | Planned |
@@ -352,7 +353,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 - [x] Proxy authentication (Basic / LDAP / NTLM / Kerberos)
 - [x] ACL + URL categorization
 - [x] E2E / smoke test harness
-- [x] Release packaging (`0.2.3-test`)
+- [x] Release packaging (`0.3.0`)
 - [x] Hierarchical caching Phase 3 — ICP server, peer fetch, env config
 - [x] Rate limiting per user/IP
 - [x] Рефакторинг `main.rs` (вынос `ProxyService` в lib)
@@ -367,7 +368,8 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 - [x] ACL TimeWindow + group rules
 - [x] NTLM auth ([#44](https://github.com/onixus/bsdm-proxy/issues/44))
 - [x] Kerberos / SPNEGO auth
-- [ ] Hierarchy Phase 4 (discovery, digest, HTCP)
+- [x] Hierarchy Phase 4 (discovery, digest, HTCP)
+- [x] LDAP group enrichment after NTLM/Kerberos
 - [x] Negative caching / cache refresh (B22) — `Cache-Control`, ETag revalidate, 403/404 negative cache
 - [x] REST ACL API (`/api/acl/*` на порту metrics)
 

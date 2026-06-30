@@ -12,7 +12,7 @@
 | **Ретропоиск** | Поиск и аналитика по историческому HTTP-трафику |
 | **ML-безопасность** | Аномалии, фишинг и C&C поверх логов и поведенческих сигналов |
 
-Текущая версия: **0.2.3-test** · [Releases](https://github.com/onixus/bsdm-proxy/releases) · [release notes](releases/v0.2.3-test.md)
+Текущая версия: **0.3.0** · [Releases](https://github.com/onixus/bsdm-proxy/releases) · [CHANGELOG](../CHANGELOG.md) · [release notes](releases/v0.3.0.md)
 
 ---
 
@@ -21,7 +21,7 @@
 | Milestone | Версия | Фокус | Готовность |
 |-----------|--------|-------|------------|
 | [M1 — Foundation](#m1--foundation-v02x) | v0.2.x | Ядро прокси, ACL, категоризация, observability, иерархия | ✅ Done |
-| [M2 — Squid parity](#m2--squid-parity-v03x) | v0.3.x | L2, rate limit, полный ACL, hierarchy Phase 4 | ~45% |
+| [M2 — Squid parity](#m2--squid-parity-v03x) | v0.3.x | L2, rate limit, полный ACL, hierarchy Phase 4, NTLM/Kerberos | ✅ Done |
 | [M3 — Retro-search](#m3--retro-search-v04x) | v0.4.x | Индексация, дашборды, поиск по истории | ~15% |
 | [M4 — Threat analytics](#m4--threat-analytics-v05x) | v0.5.x | Rule-based угрозы, алерты, C&C heuristics | ~5% |
 | [M5 — ML security](#m5--ml-security-v10x) | v1.0.x | ML anomaly, phishing ML, C&C beacon detection | ~0% |
@@ -87,17 +87,18 @@ gantt
 - [x] **Redis L2 cache** — распределённый кеш между инстансами (`docker-compose.redis-l2.yml`)
 - [x] **HTTP/2 upstream client** — `UPSTREAM_HTTP2_ENABLED` + ALPN h2
 - [x] **Compression** — Brotli/Zstd at-rest for cacheable responses (`CACHE_COMPRESSION`)
-- [ ] **ACL completeness**
+- [x] **ACL completeness**
   - [x] TimeWindow rules (`HH:MM`, local time, overnight windows)
   - [x] Group-based Principal rules (LDAP `memberOf` cn matching)
   - [x] REST API управления ACL (`/api/acl/*` на `METRICS_PORT`)
 - [x] **NTLM auth** — `auth-ntlm` feature, multi-round SSPI + optional `ntlm_auth` helper ([#44](https://github.com/onixus/bsdm-proxy/issues/44))
 - [x] **Kerberos auth** — `auth-kerberos` feature, SPNEGO with keytab
+- [x] **LDAP groups after SSO** — `memberOf` enrichment after NTLM/Kerberos (service bind)
 - [x] **Negative caching** — upstream 403/404 с коротким TTL (`NEGATIVE_CACHE_*`)
 - [x] **Cache refresh / revalidate** — `Cache-Control`, ETag / `If-Modified-Since`, `304` → `REVALIDATED`
 - [x] Hierarchy Prometheus metrics (`bsdm_proxy_hierarchy_*`)
 
-**Критерий завершения M2:** 3-tier cache hierarchy в docker-compose, hit rate sibling/parent измеряется, Redis L2 работает.
+**Критерий завершения M2:** 3-tier cache hierarchy в docker-compose, hit rate sibling/parent измеряется, Redis L2 работает — **выполнен** (v0.3.0).
 
 **Зависимости:** M1 (B6 rate limit, B7 refactor).
 
@@ -191,12 +192,12 @@ ML-слой для аномалий, фишинга и C&C.
 
 ## Матрица зрелости
 
-| Столп | Сейчас (0.2.3-test) | После M2 | После M3 | После M5 |
-|-------|-----------------|----------|----------|----------|
-| Squid parity | ~55% | ~85% | ~85% | ~90% |
-| Ретропоиск | ~15% | ~15% | ~80% | ~90% |
-| ML / C&C / phishing | ~5% | ~5% | ~10% | ~75% |
-| **Целевое состояние** | **~25%** | **~35%** | **~60%** | **~85%** |
+| Столп | Сейчас (0.3.0) | После M3 | После M5 |
+|-------|----------------|----------|----------|
+| Squid parity | ~85% | ~85% | ~90% |
+| Ретропоиск | ~15% | ~80% | ~90% |
+| ML / C&C / phishing | ~5% | ~10% | ~75% |
+| **Целевое состояние** | **~35%** | **~60%** | **~85%** |
 
 ---
 
@@ -225,4 +226,4 @@ Issues привязывайте к milestones:
 
 ---
 
-*Последнее обновление: v0.2.3-test (M2 in progress — L2, HTTP/2, compression)*
+*Последнее обновление: v0.3.0 (M2 done — hierarchy Phase 4, NTLM/Kerberos, ACL API)*

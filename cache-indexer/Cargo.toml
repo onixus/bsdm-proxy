@@ -1,6 +1,6 @@
 [package]
 name = "cache-indexer"
-version = "0.2.3-test"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
 authors = ["BSDM-Proxy Contributors"]

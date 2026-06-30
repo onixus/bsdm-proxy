@@ -301,4 +301,4 @@ flowchart LR
 
 ---
 
-*Версия документа: 0.2.3-test · M1 done, M2 ~45% (L2, HTTP/2, compression)*
+*Версия документа: 0.3.0 · M1 done, M2 done (hierarchy Phase 4, NTLM/Kerberos, ACL API)*

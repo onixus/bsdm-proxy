@@ -2,7 +2,7 @@
 
 Установка из готового release-архива. Общая документация: [README.md](../README.md) · [docs/README.md](../docs/README.md)
 
-**Текущая версия пакета:** `0.2.3-test` — [release notes](../docs/releases/v0.2.3-test.md)
+**Текущая версия пакета:** `0.3.0` — [release notes](../docs/releases/v0.3.0.md) · [CHANGELOG](../CHANGELOG.md)
 
 ## Contents
 
@@ -19,8 +19,8 @@
 ## Quick start
 
 ```bash
-tar xzf bsdm-proxy-0.2.3test-linux-x86_64.tar.gz
-cd bsdm-proxy-0.2.3test-linux-x86_64
+tar xzf bsdm-proxy-0.3.0-linux-x86_64.tar.gz
+cd bsdm-proxy-0.3.0-linux-x86_64
 sudo ./install.sh --create-user --systemd
 ```
 
@@ -65,7 +65,7 @@ cat VERSION
 
 ```bash
 ./scripts/build-package.sh
-# → dist/bsdm-proxy-0.2.3test-linux-<arch>.tar.gz
+# → dist/bsdm-proxy-0.3.0-linux-<arch>.tar.gz
 ```
 
 См. также [docs/development.md](../docs/development.md).

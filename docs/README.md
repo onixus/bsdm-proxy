@@ -9,14 +9,16 @@
 | [README.md](../README.md) | Обзор, быстрый старт, конфигурация |
 | [packaging/README.md](../packaging/README.md) | Установка из release-пакета |
 | [development.md](development.md) | Сборка, тесты, CI, релиз |
-| [releases/v0.2.3-test.md](releases/v0.2.3-test.md) | **Release notes 0.2.3-test** |
+| [CHANGELOG.md](../CHANGELOG.md) | История изменений |
+| [releases/v0.3.0.md](releases/v0.3.0.md) | **Release notes 0.3.0** |
+| [releases/v0.2.3-test.md](releases/v0.2.3-test.md) | Release notes 0.2.3-test (superseded) |
 | [capacity-planning.md](capacity-planning.md) | **Планирование ёмкости (корп. сценарии)** |
 
 ## Функциональность
 
 | Документ | Описание |
 |----------|----------|
-| [authentication.md](authentication.md) | Аутентификация прокси (Basic, LDAP; NTLM — M2) |
+| [authentication.md](authentication.md) | Аутентификация (Basic, LDAP, NTLM, Kerberos, LDAP groups) |
 | [logging.md](logging.md) | Логирование (`RUST_LOG`, уровни, troubleshooting) |
 | [performance.md](performance.md) | Тюнинг RPS (`PERF_FAST_CACHE_HIT`, `WORKER_COUNT`, bench) |
 | [acl.md](acl.md) | Списки контроля доступа (ACL) |
@@ -56,7 +58,8 @@
 
 | Версия | Тип | Описание |
 |--------|-----|----------|
-| **0.2.3-test** | test pre-release | M2: L2 Redis, HTTP/2 upstream, at-rest compression — [notes](releases/v0.2.3-test.md) |
+| **0.3.0** | stable | M2 Squid parity — [notes](releases/v0.3.0.md) · [CHANGELOG](../CHANGELOG.md) |
+| 0.2.3-test | test pre-release | M2 partial (L2, HTTP/2, compression) — [notes](releases/v0.2.3-test.md) |
 | 0.2.2b | beta | Иерархический кеш, optional MITM CA — [GitHub Releases](https://github.com/onixus/bsdm-proxy/releases/tag/v0.2.2b) |
 
-**Новое в 0.2.3-test:** Redis L2, `UPSTREAM_HTTP2_ENABLED`, `CACHE_COMPRESSION` (zstd/brotli), ACL TimeWindow/group, rate limiting, `ProxyService` в lib.
+**Новое в 0.3.0:** Hierarchy Phase 4 (discovery, digest, HTCP), NTLM/Kerberos, LDAP group enrichment, REST ACL API, negative caching.

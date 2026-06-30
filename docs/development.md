@@ -164,7 +164,45 @@ cargo test -p bsdm-proxy-e2e --test e2e e2e_mitm_https_with_self_signed_ca -- --
 - примерами конфигурации и systemd unit-файлами
 - `install.sh` и `SHA256SUMS`
 
-Версия берётся из `proxy/Cargo.toml` (например `0.2.3-test` → пакет `0.2.3test`, `0.2.2-b` → `0.2.2b`).
+Версия берётся из `proxy/Cargo.toml` (например `0.3.0` → пакет `0.3.0`, `0.2.3-test` → `0.2.3test`, `0.2.2-b` → `0.2.2b`).
+
+## GitHub Release (CI)
+
+Workflow [release.yml](../.github/workflows/release.yml) публикует release при push тега `v*`.
+
+### Порядок релиза
+
+1. Убедиться, что версия в `proxy/Cargo.toml` и `cache-indexer/Cargo.toml` совпадает с тегом
+2. Обновить `CHANGELOG.md` и `docs/releases/vX.Y.Z.md`
+3. Merge PR с bump версии в `main`
+4. Создать и push тег:
+
+```bash
+git checkout main && git pull
+git tag -a v0.3.0 -m "BSDM-Proxy v0.3.0"
+git push origin v0.3.0
+```
+
+5. GitHub Actions: **Validate** → **Build** (linux x86_64 + aarch64) → **Publish GitHub Release** с tar.gz
+
+Текст release notes берётся из `docs/releases/vX.Y.Z.md` (fallback — секция в `CHANGELOG.md`):
+
+```bash
+./scripts/extract-release-notes.sh v0.3.0
+```
+
+### Dry-run (без публикации)
+
+Actions → **Release** → **Run workflow** — собирает пакеты и загружает artifacts, **без** создания GitHub Release (только при `workflow_dispatch`; публикация — только при push тега).
+
+### Артефакты
+
+| Платформа | Архив |
+|-----------|--------|
+| linux x86_64 | `bsdm-proxy-<version>-linux-x86_64.tar.gz` |
+| linux aarch64 | `bsdm-proxy-<version>-linux-aarch64.tar.gz` (если arm runner доступен) |
+
+Теги с `-` в имени (например `v0.2.3-test`) помечаются как **prerelease** автоматически.
 
 ## Roadmap и milestones
 
@@ -222,6 +260,7 @@ cargo test -p bsdm-proxy-e2e --test e2e e2e_mitm_https_with_self_signed_ca -- --
 | [e2e.yml](../.github/workflows/e2e.yml) | push/PR → main | smoke + e2e |
 | [close-blockers.yml](../.github/workflows/close-blockers.yml) | PR merged / manual | auto-close B1–B25 issues |
 | [pr-blocker-hint.yml](../.github/workflows/pr-blocker-hint.yml) | PR opened/edited | комментарий со ссылками на issue |
+| [release.yml](../.github/workflows/release.yml) | push tag `v*` / manual | test, build packages, GitHub Release |
 
 ## Локальный запуск proxy
 
