@@ -1,0 +1,11 @@
+[package]
+name = "bsdm-events"
+version = "0.3.0"
+edition = "2021"
+license = "MIT"
+description = "Shared HTTP cache event schema for BSDM-Proxy Kafka pipeline"
+repository = "https://github.com/onixus/bsdm-proxy"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
