@@ -1,8 +1,14 @@
-use bsdm_events::{document_id, index_mappings, index_template_body, CacheEvent};
+use bsdm_events::{
+    document_id, index_mappings, index_template_body, ism_policy_body, CacheEvent,
+    DEFAULT_ISM_DELETE_DAYS, DEFAULT_ISM_HOT_DAYS, DEFAULT_ISM_POLICY_ID,
+};
 use opensearch::{
     auth::Credentials,
     cert::CertificateValidation,
+    http::headers::HeaderMap,
+    http::request::JsonBody,
     http::transport::{SingleNodeConnectionPool, TransportBuilder},
+    http::Method,
     indices::{IndicesCreateParts, IndicesExistsParts},
     BulkParts, OpenSearch,
 };
@@ -15,11 +21,19 @@ use serde_json::json;
 use std::time::Duration;
 use tracing::{error, info, warn};
 
+struct IndexerConfig {
+    index_name: String,
+    index_pattern: String,
+    ism_enabled: bool,
+    ism_policy_id: String,
+    ism_hot_days: u32,
+    ism_delete_days: u32,
+}
+
 struct Indexer {
     opensearch: OpenSearch,
     consumer: StreamConsumer,
-    index_name: String,
-    index_pattern: String,
+    config: IndexerConfig,
 }
 
 impl Indexer {
@@ -33,6 +47,10 @@ impl Indexer {
         kafka_topic: &str,
         kafka_group: &str,
         index_name: &str,
+        ism_enabled: bool,
+        ism_policy_id: String,
+        ism_hot_days: u32,
+        ism_delete_days: u32,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let consumer: StreamConsumer = ClientConfig::new()
             .set("group.id", kafka_group)
@@ -65,14 +83,38 @@ impl Indexer {
         Ok(Self {
             opensearch,
             consumer,
-            index_name: index_name.to_string(),
-            index_pattern,
+            config: IndexerConfig {
+                index_name: index_name.to_string(),
+                index_pattern,
+                ism_enabled,
+                ism_policy_id,
+                ism_hot_days,
+                ism_delete_days,
+            },
         })
+    }
+
+    async fn send_json(
+        &self,
+        method: Method,
+        path: &str,
+        body: serde_json::Value,
+    ) -> Result<opensearch::http::response::Response, opensearch::Error> {
+        self.opensearch
+            .send(
+                method,
+                path,
+                HeaderMap::new(),
+                None::<&()>,
+                Some(JsonBody::new(body)),
+                None,
+            )
+            .await
     }
 
     async fn ensure_index_template(&self) -> Result<(), Box<dyn std::error::Error>> {
         let template_name = "bsdm-http-cache";
-        let body = index_template_body(&self.index_pattern);
+        let body = index_template_body(&self.config.index_pattern);
 
         match self
             .opensearch
@@ -87,7 +129,7 @@ impl Indexer {
             Ok(response) if response.status_code().is_success() => {
                 info!(
                     "Index template '{}' applied for pattern '{}'",
-                    template_name, self.index_pattern
+                    template_name, self.config.index_pattern
                 );
                 Ok(())
             }
@@ -105,24 +147,101 @@ impl Indexer {
         }
     }
 
+    async fn ensure_ism_policy(&self) -> Result<(), Box<dyn std::error::Error>> {
+        if !self.config.ism_enabled {
+            info!("OpenSearch ISM disabled");
+            return Ok(());
+        }
+
+        let policy = ism_policy_body(
+            &self.config.index_pattern,
+            &self.config.ism_policy_id,
+            self.config.ism_hot_days,
+            self.config.ism_delete_days,
+        );
+        let path = format!("/_plugins/_ism/policies/{}", self.config.ism_policy_id);
+
+        match self.send_json(Method::Put, &path, policy).await {
+            Ok(response) if response.status_code().is_success() => {
+                info!(
+                    "ISM policy '{}' applied (hot={}d, delete={}d)",
+                    self.config.ism_policy_id,
+                    self.config.ism_hot_days,
+                    self.config.ism_delete_days
+                );
+                Ok(())
+            }
+            Ok(response) => {
+                warn!(
+                    "ISM policy upsert returned status {}",
+                    response.status_code()
+                );
+                Ok(())
+            }
+            Err(e) => {
+                warn!("Failed to upsert ISM policy: {}", e);
+                Ok(())
+            }
+        }
+    }
+
+    async fn attach_ism_policy_to_index(&self) -> Result<(), Box<dyn std::error::Error>> {
+        if !self.config.ism_enabled {
+            return Ok(());
+        }
+
+        let path = format!("/_plugins/_ism/add/{}", self.config.index_name);
+        let body = json!({ "policy_id": self.config.ism_policy_id });
+
+        match self.send_json(Method::Post, &path, body).await {
+            Ok(response) if response.status_code().is_success() => {
+                info!(
+                    "ISM policy '{}' attached to index '{}'",
+                    self.config.ism_policy_id, self.config.index_name
+                );
+                Ok(())
+            }
+            Ok(response) => {
+                warn!(
+                    "ISM attach for index '{}' returned status {}",
+                    self.config.index_name,
+                    response.status_code()
+                );
+                Ok(())
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to attach ISM policy to index '{}': {}",
+                    self.config.index_name, e
+                );
+                Ok(())
+            }
+        }
+    }
+
     async fn ensure_index_exists(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let mut settings = json!({
+            "number_of_shards": 1,
+            "number_of_replicas": 0
+        });
+        if self.config.ism_enabled {
+            settings["plugins.index_state_management.policy_id"] = json!(self.config.ism_policy_id);
+        }
+
         let index_body = json!({
             "mappings": index_mappings(),
-            "settings": {
-                "number_of_shards": 1,
-                "number_of_replicas": 0
-            }
+            "settings": settings
         });
 
         match self
             .opensearch
             .indices()
-            .exists(IndicesExistsParts::Index(&[&self.index_name]))
+            .exists(IndicesExistsParts::Index(&[&self.config.index_name]))
             .send()
             .await
         {
             Ok(response) if response.status_code().is_success() => {
-                info!("Index '{}' already exists", self.index_name);
+                info!("Index '{}' already exists", self.config.index_name);
                 return Ok(());
             }
             Ok(_) => {}
@@ -132,13 +251,13 @@ impl Indexer {
         match self
             .opensearch
             .indices()
-            .create(IndicesCreateParts::Index(&self.index_name))
+            .create(IndicesCreateParts::Index(&self.config.index_name))
             .body(index_body)
             .send()
             .await
         {
             Ok(_) => {
-                info!("Created index '{}'", self.index_name);
+                info!("Created index '{}'", self.config.index_name);
                 Ok(())
             }
             Err(e) => {
@@ -211,7 +330,7 @@ impl Indexer {
         for event in events {
             let action = json!({
                 "index": {
-                    "_index": &self.index_name,
+                    "_index": &self.config.index_name,
                     "_id": document_id(event)
                 }
             });
@@ -248,10 +367,26 @@ impl Indexer {
     }
 
     async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
+        self.ensure_ism_policy().await?;
         self.ensure_index_template().await?;
         self.ensure_index_exists().await?;
+        self.attach_ism_policy_to_index().await?;
         self.process_events().await
     }
+}
+
+fn parse_env_u32(name: &str, default: u32) -> u32 {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(default)
+}
+
+fn parse_env_bool(name: &str, default: bool) -> bool {
+    std::env::var(name)
+        .ok()
+        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+        .unwrap_or(default)
 }
 
 #[tokio::main]
@@ -276,6 +411,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let kafka_group =
         std::env::var("KAFKA_GROUP_ID").unwrap_or_else(|_| "cache-indexer-group".to_string());
     let index_name = std::env::var("OPENSEARCH_INDEX").unwrap_or_else(|_| "http-cache".to_string());
+    let ism_enabled = parse_env_bool("OPENSEARCH_ISM_ENABLED", true);
+    let ism_policy_id = std::env::var("OPENSEARCH_ISM_POLICY_ID")
+        .unwrap_or_else(|_| DEFAULT_ISM_POLICY_ID.to_string());
+    let ism_hot_days = parse_env_u32("OPENSEARCH_ISM_HOT_DAYS", DEFAULT_ISM_HOT_DAYS);
+    let ism_delete_days = parse_env_u32("OPENSEARCH_ISM_DELETE_DAYS", DEFAULT_ISM_DELETE_DAYS);
 
     info!("Starting cache-indexer");
     info!("Kafka brokers: {}", kafka_brokers);
@@ -284,6 +424,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Kafka topic: {}", kafka_topic);
     info!("Kafka group: {}", kafka_group);
     info!("OpenSearch index: {}", index_name);
+    info!(
+        "OpenSearch ISM: enabled={}, policy={}, hot={}d, delete={}d",
+        ism_enabled, ism_policy_id, ism_hot_days, ism_delete_days
+    );
 
     let indexer = Indexer::new(
         &kafka_brokers,
@@ -294,6 +438,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &kafka_topic,
         &kafka_group,
         &index_name,
+        ism_enabled,
+        ism_policy_id,
+        ism_hot_days,
+        ism_delete_days,
     )
     .await?;
 
@@ -367,5 +515,11 @@ mod tests {
         assert_eq!(event.threat_sources, vec!["phishtank"]);
         assert_eq!(event.acl_action.as_deref(), Some("deny"));
         assert_eq!(event.event_id, "evt-proxy-1");
+    }
+
+    #[test]
+    fn parse_env_bool_defaults() {
+        assert!(parse_env_bool("MISSING_VAR", true));
+        assert!(!parse_env_bool("MISSING_VAR", false));
     }
 }

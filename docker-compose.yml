@@ -153,6 +153,9 @@ services:
       - KAFKA_BROKERS=kafka:9092
       - OPENSEARCH_URL=http://opensearch:9200
       - OPENSEARCH_INDEX=http-cache
+      - OPENSEARCH_ISM_ENABLED=true
+      - OPENSEARCH_ISM_HOT_DAYS=14
+      - OPENSEARCH_ISM_DELETE_DAYS=42
       - KAFKA_TOPIC=cache-events
       - KAFKA_GROUP_ID=cache-indexer-group
       - RUST_LOG=info,cache_indexer=debug
