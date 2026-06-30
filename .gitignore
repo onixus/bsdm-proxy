@@ -29,4 +29,6 @@ docker-compose.override.yml
 logs/
 
 # Release artifacts
-dist/
+dist/dump.rdb
+scripts/__pycache__/
+__pycache__/
