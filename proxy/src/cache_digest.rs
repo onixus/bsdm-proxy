@@ -120,7 +120,11 @@ impl DigestRegistry {
     }
 
     pub fn with_defaults() -> Self {
-        Self::new(DEFAULT_BIT_COUNT, DEFAULT_HASH_COUNT, Duration::from_secs(300))
+        Self::new(
+            DEFAULT_BIT_COUNT,
+            DEFAULT_HASH_COUNT,
+            Duration::from_secs(300),
+        )
     }
 
     pub async fn insert_cache_key(&self, cache_key: &str) {
@@ -188,12 +192,8 @@ mod tests {
         let mut digest = CacheDigest::with_defaults();
         digest.insert("digest-key");
         let encoded = digest.encode_base64();
-        let decoded = CacheDigest::decode_base64(
-            &encoded,
-            digest.bit_count(),
-            DEFAULT_HASH_COUNT,
-        )
-        .unwrap();
+        let decoded =
+            CacheDigest::decode_base64(&encoded, digest.bit_count(), DEFAULT_HASH_COUNT).unwrap();
         assert!(decoded.might_contain("digest-key"));
     }
 

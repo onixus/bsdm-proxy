@@ -142,7 +142,9 @@ pub async fn build_hierarchy_manager(
         manager.init_htcp(&client_bind).await?;
         info!(
             "Hierarchy enabled (strategy={}, HTCP client bind={}, peer port={})",
-            strategy_name, client_bind, htcp_peer_port()
+            strategy_name,
+            client_bind,
+            htcp_peer_port()
         );
     } else {
         let client_bind =

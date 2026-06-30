@@ -179,9 +179,7 @@ pub async fn run_peer_discovery(
             };
             let peer = listen_registry.upsert_sibling(peer_config).await;
             if let Some(digest_b64) = announcement.digest_b64 {
-                listen_digest
-                    .update_remote(&peer.id, &digest_b64)
-                    .await;
+                listen_digest.update_remote(&peer.id, &digest_b64).await;
             }
         }
     });

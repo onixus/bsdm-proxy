@@ -248,9 +248,7 @@ impl HtcpServer {
         } else {
             HtcpMessage::miss(query.request_number)
         };
-        self.socket
-            .send_to(&response.encode()?, sender)
-            .await?;
+        self.socket.send_to(&response.encode()?, sender).await?;
         Ok(())
     }
 }
@@ -281,7 +279,11 @@ mod tests {
 
         let client = HtcpClient::new("127.0.0.1:0").await.unwrap();
         let result = client
-            .query_peer(server_addr, "http://example.com", Duration::from_millis(200))
+            .query_peer(
+                server_addr,
+                "http://example.com",
+                Duration::from_millis(200),
+            )
             .await
             .unwrap();
         assert_eq!(result.response, HtcpOpcode::Hit);

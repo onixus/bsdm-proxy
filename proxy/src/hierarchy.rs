@@ -4,9 +4,9 @@
 //! Local cache → Siblings (ICP) → Parents → Origin
 
 use crate::cache_digest::DigestRegistry;
+use crate::cache_key::http_cache_key;
 use crate::htcp::{HtcpClient, HtcpOpcode};
 use crate::icp::{IcpClient, IcpOpcode};
-use crate::cache_key::http_cache_key;
 use crate::metrics::Metrics;
 use crate::peers::{CachePeer, PeerRegistry};
 use crate::selection::SelectionStrategy;
@@ -201,8 +201,9 @@ impl HierarchyManager {
         for sibling in siblings {
             if self.config.digest_enabled {
                 if let Some(registry) = &self.digest_registry {
-                    if let Some(false) =
-                        registry.peer_might_have_url(&sibling.id, cache_key.as_ref()).await
+                    if let Some(false) = registry
+                        .peer_might_have_url(&sibling.id, cache_key.as_ref())
+                        .await
                     {
                         digest_skipped += 1;
                         continue;
@@ -271,7 +272,11 @@ impl HierarchyManager {
         let htcp_client = self.htcp_client.as_ref()?;
         let sibling_addrs: Vec<_> = siblings
             .iter()
-            .filter_map(|s| format!("{}:{}", s.config.host, self.htcp_peer_port).parse().ok())
+            .filter_map(|s| {
+                format!("{}:{}", s.config.host, self.htcp_peer_port)
+                    .parse()
+                    .ok()
+            })
             .take(self.config.max_sibling_queries)
             .collect();
 

@@ -3,13 +3,12 @@ mod policy_config;
 
 use auth_config::load_auth_config;
 use bsdm_proxy::{
-    bind_http_listeners, build_hierarchy_manager, handle_connection, http_cache_key,
-    htcp_server_bind_addr, icp_server_bind_addr, load_hierarchy_config, metrics_server,
-    run_peer_discovery, should_start_htcp_server, should_start_icp_server, wait_shutdown_signal,
-    htcp_peer_port,
-    AclAction, AuthManager, CacheConfig, CertCache, HtcpServer, IcpServer, L2CacheConfig, Metrics,
-    PeerDiscoveryConfig, PerfConfig, ProxyPolicy, ProxyService, RateLimitConfig, RedisL2Cache,
-    UpstreamTlsConfig,
+    bind_http_listeners, build_hierarchy_manager, handle_connection, htcp_peer_port,
+    htcp_server_bind_addr, http_cache_key, icp_server_bind_addr, load_hierarchy_config,
+    metrics_server, run_peer_discovery, should_start_htcp_server, should_start_icp_server,
+    wait_shutdown_signal, AclAction, AuthManager, CacheConfig, CertCache, HtcpServer, IcpServer,
+    L2CacheConfig, Metrics, PeerDiscoveryConfig, PerfConfig, ProxyPolicy, ProxyService,
+    RateLimitConfig, RedisL2Cache, UpstreamTlsConfig,
 };
 use policy_config::{load_policy_config, reload_acl_engine};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -258,13 +257,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let peer_registry = setup.manager.peer_registry();
             let discovery_shutdown = shutdown_rx.clone();
             tokio::spawn(async move {
-                if let Err(e) = run_peer_discovery(
-                    discovery_config,
-                    peer_registry,
-                    digest,
-                    discovery_shutdown,
-                )
-                .await
+                if let Err(e) =
+                    run_peer_discovery(discovery_config, peer_registry, digest, discovery_shutdown)
+                        .await
                 {
                     warn!("Peer discovery stopped: {}", e);
                 }
