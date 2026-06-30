@@ -2,7 +2,7 @@
 
 Цель — удвоить пропускную способность на том же железе за счёт оптимизации userspace hot path и multi-worker accept, без kernel bypass (DPDK).
 
-## Baseline (0.2.3-test, 4 vCPU)
+## Baseline (0.3.0, 4 vCPU)
 
 | Сценарий | ~RPS |
 |----------|------|
