@@ -219,6 +219,7 @@ Issues привязывайте к milestones:
 
 - [architecture.md](architecture.md) — архитектура и блокеры B1–B25
 - [swg-backlog-mapping.md](swg-backlog-mapping.md) — mapping vs Zscaler/Netskope/Palo Alto + Squid rock
+- [k8s-architecture.md](k8s-architecture.md) — Kubernetes deployment guide
 - [hierarchical-caching.md](hierarchical-caching.md) — дизайн ICP/HTCP (M2)
 - [logging.md](logging.md) — `RUST_LOG` и профили логирования
 - [categorization.md](categorization.md) — threat intel feeds (M1/M4)

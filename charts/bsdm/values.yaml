@@ -1,0 +1,132 @@
+# Default values for bsdm-proxy on Kubernetes.
+# See docs/k8s-architecture.md and values-prod.yaml.
+
+replicaCount: 2
+
+image:
+  repository: ghcr.io/onixus/bsdm-proxy
+  tag: "0.3.0"
+  pullPolicy: IfNotPresent
+
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: ClusterIP
+  proxyPort: 1488
+  metricsPort: 9090
+  sessionAffinity: None
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  fsGroup: 65532
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+resources:
+  requests:
+    cpu: "2"
+    memory: 4Gi
+  limits:
+    cpu: "4"
+    memory: 8Gi
+
+# emptyDir for mmap spill — do not use shared RWX PVC
+spill:
+  enabled: true
+  sizeLimit: 20Gi
+  mountPath: /var/cache/bsdm-spill
+
+mitm:
+  enabled: true
+  existingSecret: ""          # if set, mount /certs from secret keys ca.crt, ca.key
+  certMountPath: /certs
+
+acl:
+  enabled: false
+  existingConfigMap: ""       # if set, mount acl-rules.json
+  mountPath: /etc/bsdm-proxy
+  defaultAction: allow
+
+# Proxy environment — maps to packaging/config/bsdm-proxy.env.example
+proxy:
+  workerCount: 1
+  cacheCapacity: 10000
+  cacheShards: 16
+  cacheTtlSeconds: 3600
+  maxCacheBodySize: 10485760
+  spillThresholdBytes: 262144
+  redisL2Enabled: false
+  redisUrl: "redis://redis-master:6379"
+  redisKeyPrefix: "bsdm:http:"
+  kafkaBrokers: ""
+  kafkaTopic: cache-events
+  kafkaSampleRate: 10
+  metricsSampleRate: 100
+  perfFastCacheHit: false
+  mitmEnabled: true
+  authEnabled: false
+  aclEnabled: false
+  categorizationEnabled: false
+  hierarchyEnabled: false
+  rustLog: "info,bsdm_proxy=info"
+  shutdownTimeoutSeconds: 30
+  extraEnv: []
+
+probes:
+  liveness:
+    path: /health
+    initialDelaySeconds: 10
+    periodSeconds: 10
+  readiness:
+    path: /ready
+    initialDelaySeconds: 5
+    periodSeconds: 5
+  startup:
+    path: /health
+    failureThreshold: 30
+    periodSeconds: 5
+
+lifecycle:
+  preStopSleepSeconds: 15
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 8
+  targetCPUUtilizationPercentage: 70
+
+pdb:
+  enabled: true
+  minAvailable: 1
+
+networkPolicy:
+  enabled: false
+  proxyIngressCidrs:
+    - 10.0.0.0/8
+  allowEgressInternet: true
+  redisNamespace: ""
+  kafkaNamespace: ""
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  labels: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

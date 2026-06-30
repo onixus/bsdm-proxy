@@ -255,7 +255,7 @@ gantt
 | P1-5 | [#111](https://github.com/onixus/bsdm-proxy/issues/111) x-cache-status MISS | P1 |
 | P2-1 | [#101](https://github.com/onixus/bsdm-proxy/issues/101) Squid rock sizing guide | P2 |
 | P2-2 | [#103](https://github.com/onixus/bsdm-proxy/issues/103) Peer mTLS | P2 |
-| P2-3 | [#107](https://github.com/onixus/bsdm-proxy/issues/107) HA deployment guide | P2 |
+| P2-3 | [#107](https://github.com/onixus/bsdm-proxy/issues/107) HA / k8s deployment | P2 | [k8s-architecture.md](k8s-architecture.md) |
 | P2-4 | [#110](https://github.com/onixus/bsdm-proxy/issues/110) Search API (M3) | P2 |
 | P2-5 | [#112](https://github.com/onixus/bsdm-proxy/issues/112) Web config ACL UI | P2 |
 | P3-1 | [#99](https://github.com/onixus/bsdm-proxy/issues/99) ICAP adapter | P3 |

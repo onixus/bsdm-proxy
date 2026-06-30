@@ -1,0 +1,274 @@
+# BSDM-Proxy on Kubernetes
+
+Рекомендуемая архитектура развёртывания BSDM на Kubernetes: data plane (proxy + Redis L2) и analytics plane (Kafka → indexer → OpenSearch).
+
+См. также: [capacity-planning.md](capacity-planning.md) · [swg-backlog-mapping.md](swg-backlog-mapping.md) · [helm chart](../charts/bsdm/README.md)
+
+---
+
+## Принципы
+
+| Принцип | Обоснование |
+|---------|-------------|
+| Горизонтальный scale proxy pods | Bench: `WORKER_COUNT=4` + shared L1 хуже, чем N реплик с `WORKER_COUNT=1` |
+| Redis L2 обязателен для HA | L1 локален; без L2 — sticky sessions и cache miss storm |
+| Spill локальный per pod | mmap spill (`CACHE_SPILL_DIR`) не шарить через NFS |
+| Analytics в отдельном namespace | Kafka/OpenSearch не конкурируют с proxy за CPU |
+| `sessionAffinity: None` | Когерентность через L2, не через LB stickiness |
+
+---
+
+## Топология (corporate medium)
+
+```mermaid
+flowchart TB
+  subgraph clients [Clients]
+    B[Browsers PAC]
+    S[Servers]
+  end
+
+  subgraph ingress [Ingress]
+    LB[LB / Gateway :1488]
+  end
+
+  subgraph ns_proxy [namespace bsdm-proxy]
+    P[proxy Deployment N replicas]
+    R[(Redis L2)]
+  end
+
+  subgraph ns_analytics [namespace bsdm-analytics]
+    K[Kafka]
+    I[cache-indexer]
+    OS[(OpenSearch)]
+    PM[Prometheus]
+  end
+
+  B --> LB --> P
+  S --> LB
+  P --> R
+  P -.->|async| K --> I --> OS
+  P -->|/metrics| PM
+```
+
+### Референс sizing (5k users, ~350 peak RPS)
+
+| Компонент | K8s | Replicas | CPU/pod | RAM/pod |
+|-----------|-----|----------|---------|---------|
+| bsdm-proxy | Deployment | 4 | 4 req / 8 lim | 8 Gi / 16 Gi |
+| Redis L2 | StatefulSet / Helm | 2+1 sentinel | 2 / 4 | 16 Gi / 32 Gi |
+| cache-indexer | Deployment | 2 | 1 / 2 | 512 Mi / 1 Gi |
+| Kafka | Strimzi / external | 3 | 2 / 4 | 8 Gi |
+| OpenSearch | StatefulSet / managed | 3+2 | 8 / 8 | 64 Gi |
+
+Полные цифры: [capacity-planning.md](capacity-planning.md).
+
+---
+
+## Data plane: proxy Deployment
+
+### Workload type
+
+- **Deployment** (не StatefulSet) — pods взаимозаменяемы
+- **RollingUpdate** + **PodDisruptionBudget** `minAvailable: 1`
+- **Не использовать** `sessionAffinity: ClientIP`
+
+### Рекомендуемый env (k8s-prod)
+
+```bash
+WORKER_COUNT=1
+CACHE_SHARDS=16
+CACHE_CAPACITY=25000              # per pod; 4× = 100k суммарно
+CACHE_SPILL_DIR=/var/cache/bsdm-spill
+CACHE_SPILL_THRESHOLD_BYTES=262144
+REDIS_L2_ENABLED=true
+REDIS_URL=redis://redis-master:6379
+KAFKA_SAMPLE_RATE=10
+METRICS_SAMPLE_RATE=100
+SHUTDOWN_TIMEOUT_SECONDS=30
+```
+
+Corporate profile: `MAX_CACHE_BODY_SIZE=2097152`, `CACHE_COMPRESSION=zstd`, `CACHE_COMPRESS_MIN_BYTES=1048576`.
+
+### Volumes
+
+| Volume | Тип | Назначение |
+|--------|-----|------------|
+| `mitm-certs` | Secret | `ca.crt`, `ca.key` → `/certs` |
+| `acl-rules` | ConfigMap | `/etc/bsdm-proxy/acl-rules.json` |
+| `spill` | emptyDir (sizeLimit 30Gi) | mmap spill; prefer nodes with local SSD |
+| `shallalist` | ConfigMap / initContainer | categorization DB |
+
+### Probes
+
+| Probe | Path | Port |
+|-------|------|------|
+| liveness | `/health` | 9090 |
+| readiness | `/ready` | 9090 |
+| startup | `/health` | 9090 (failureThreshold высокий) |
+
+`lifecycle.preStop`: `sleep 15` + graceful shutdown в proxy.
+
+### securityContext
+
+```yaml
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  fsGroup: 65532
+```
+
+Spill files: `mode 0o600` (см. [#98](https://github.com/onixus/bsdm-proxy/issues/98)).
+
+---
+
+## Service & networking
+
+```yaml
+# bsdm-proxy — user traffic
+ports:
+  - name: proxy
+    port: 1488
+  - name: metrics
+    port: 9090
+sessionAffinity: None
+```
+
+| Трафик | Доступ |
+|--------|--------|
+| Proxy :1488 | Internal LB / ClusterIP из corporate CIDR |
+| Metrics :9090 | NetworkPolicy: только `monitoring` namespace |
+| ACL API `/api/acl/*` | Тот же :9090 + `ACL_API_TOKEN` |
+
+**NetworkPolicy (минимум):**
+- Ingress → proxy:1488 from `corporate` CIDR
+- Egress: internet :80/:443, Redis, Kafka, LDAP
+- Deny all else
+
+---
+
+## Redis L2
+
+Обязателен при `replicas > 1`.
+
+| Вариант | Когда |
+|---------|-------|
+| Bitnami Redis + Sentinel (subchart) | on-prem k8s, lab |
+| Redis Cluster | >100k L2 keys |
+| Managed (ElastiCache, Azure) | cloud k8s |
+
+Поведение: pod-A кеширует MISS → L1+L2 → pod-B после restart получает **L2-HIT**.
+
+Демо без k8s: `docker compose -f docker-compose.redis-l2.yml`.
+
+---
+
+## Analytics plane (`bsdm-analytics` namespace)
+
+| Компонент | Назначение |
+|-----------|------------|
+| Kafka topic `cache-events` | 12 partitions, RF=3, retention 7d |
+| cache-indexer | Consumer group, HPA по lag |
+| OpenSearch | Index `http-cache`, ILM 14d hot |
+| Prometheus + Grafana | Scrape `/metrics` всех proxy pods |
+
+Proxy **не должен** блокироваться на Kafka (см. [#106](https://github.com/onixus/bsdm-proxy/issues/106)).
+
+---
+
+## Autoscaling
+
+**HPA** на proxy Deployment:
+
+- CPU utilization 70%
+- Custom: `bsdm_proxy_requests_total` rate (Prometheus Adapter)
+
+**Не масштабировать** по memory L1 — фиксируйте `CACHE_CAPACITY` per pod, добавляйте replicas.
+
+---
+
+## Hierarchy (optional)
+
+ICP/HTCP (UDP) в k8s сложен. Рекомендация на старте:
+
+- `HIERARCHY_ENABLED=true`
+- Parent fetch через internal Service
+- ICP/HTCP: dedicated node pool + `hostNetwork: true` или отключить siblings
+
+См. [hierarchical-caching.md](hierarchical-caching.md).
+
+---
+
+## Deployment profiles
+
+### A. Edge (minimal)
+
+```
+bsdm-proxy (4 pods) + Redis Sentinel
+Prometheus Agent → remote_write
+Kafka external / small cluster
+```
+
+### B. Full stack
+
+```
+bsdm-proxy + Redis + Kafka + OpenSearch + indexer + Grafana
+```
+
+См. `docker-compose.yml` как reference stack; в k8s — разнести по namespace.
+
+---
+
+## GitOps layout
+
+```
+gitops/
+├── bsdm-proxy/          # Helm release, values-prod.yaml
+├── bsdm-analytics/      # Kafka, OS, indexer
+└── secrets/             # External Secrets → mitm-ca, ldap-bind
+```
+
+| Артефакт | Источник |
+|----------|----------|
+| Env defaults | Helm `values.yaml` → ConfigMap |
+| ACL rules | ConfigMap + `ACL_AUTO_RELOAD=true` |
+| MITM CA | cert-manager Certificate → Secret |
+
+---
+
+## Антипаттерны
+
+| ❌ | ✅ |
+|----|-----|
+| 1 pod × WORKER_COUNT=4 × 32 CPU | 4 pods × WORKER_COUNT=1 |
+| Shared PVC/NFS для spill | emptyDir local per pod |
+| sessionAffinity для cache | Redis L2 |
+| Kafka в том же pod | Отдельный namespace |
+| MITM CA baked in image | Secret mount |
+
+---
+
+## Helm chart
+
+Скелет: [`charts/bsdm/`](../charts/bsdm/README.md)
+
+```bash
+helm install bsdm ./charts/bsdm \
+  -f charts/bsdm/values-prod.yaml \
+  -n bsdm-proxy --create-namespace
+```
+
+---
+
+## Backlog → k8s
+
+| Issue | K8s impact |
+|-------|------------|
+| [#94](https://github.com/onixus/bsdm-proxy/issues/94) Streaming MISS | Lower memory limits per pod |
+| [#95](https://github.com/onixus/bsdm-proxy/issues/95) Conn auth cache | Less LDAP load behind LB keep-alive |
+| [#96](https://github.com/onixus/bsdm-proxy/issues/96) Policy cache | Lower CPU → fewer replicas |
+| [#97](https://github.com/onixus/bsdm-proxy/issues/97) WORKER_COUNT profiles | `values-prod.yaml`: `workerCount: 1` |
+| [#107](https://github.com/onixus/bsdm-proxy/issues/107) HA guide | This document |
+
+---
+
+*Последнее обновление: 2026-06 · BSDM v0.3.0*
