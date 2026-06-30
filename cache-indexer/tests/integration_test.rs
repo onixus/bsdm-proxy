@@ -95,7 +95,7 @@ mod tests {
                 client_ip: "127.0.0.1".to_string(),
                 domain: format!("example{i}.com"),
                 response_size: 0,
-                request_duration_ms: i as u64,
+                request_duration_ms: i,
                 content_type: None,
                 user_agent: None,
                 categories: vec![],
