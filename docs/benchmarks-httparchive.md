@@ -62,6 +62,7 @@ cargo build --release -p bsdm-proxy --bin proxy
 - `BENCH_SITES` — число сайтов (default **70**)
 - `PAGE_CONCURRENCY` — параллелизм (default **12**)
 - `BENCH_WARM_REPEATS` — warm-повторы (default **20**)
+- `WORKER_COUNT` — default **4** в `run-httparchive-benchmark.sh` / compare
 - `BENCH_SITE_SEED` — seed выбора сайтов (default **42**)
 - `HTTPARCHIVE_DEVICE` — `desktop` или `mobile`
 - `PERF_FAST_CACHE_HIT`, `WORKER_COUNT` — как в [performance.md](performance.md)

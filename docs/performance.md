@@ -30,7 +30,8 @@ cargo install oha   # или бинарь с https://github.com/hatoo/oha
 |------------|---------|----------|
 | `PERF_FAST_CACHE_HIT` | `false` | L1 HIT до ACL: без policy/Kafka/heavy metrics |
 | `BSM_PERF_MODE` | `false` | Алиас `PERF_FAST_CACHE_HIT=true` |
-| `WORKER_COUNT` | `1` | Число accept-loop с SO_REUSEPORT (Linux) |
+| `WORKER_COUNT` | `1` | Число accept-loop с SO_REUSEPORT (Linux); **4** для sites/large-object bench |
+| `TCP_SNDBUF_BYTES` | `524288` | SO_SNDBUF на клиентских соединениях (`0` = не менять) |
 | `HTTP_PRESERVE_HEADER_CASE` | `true` | `false` убирает preserve/title-case в http1 (bench) |
 | `KAFKA_SAMPLE_RATE` | `0` | `N` → 1 из N cache events в Kafka (`0` = все) |
 | `METRICS_SAMPLE_RATE` | `0` | `N` → histograms для 1 из N запросов (`0` = все) |
@@ -42,8 +43,9 @@ cargo build --release -p bsdm-proxy --bin proxy
 
 HTTP_PORT=12788 METRICS_PORT=19190 \
   MITM_ENABLED=false HIERARCHY_ENABLED=false RUST_LOG=warn \
-  PERF_FAST_CACHE_HIT=true WORKER_COUNT=1 \
+  PERF_FAST_CACHE_HIT=true WORKER_COUNT=4 \
   METRICS_SAMPLE_RATE=100 HTTP_PRESERVE_HEADER_CASE=false \
+  TCP_SNDBUF_BYTES=524288 \
   ./target/release/proxy
 ```
 

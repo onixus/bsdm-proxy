@@ -78,7 +78,7 @@ start_bsdm() {
   sleep 1
   local env_cmd="MITM_ENABLED=false HIERARCHY_ENABLED=false RUST_LOG=warn"
   env_cmd+=" PERF_FAST_CACHE_HIT=${PERF_FAST_CACHE_HIT:-true}"
-  env_cmd+=" WORKER_COUNT=${WORKER_COUNT:-1}"
+  env_cmd+=" WORKER_COUNT=${WORKER_COUNT:-4}"
   env_cmd+=" METRICS_SAMPLE_RATE=${METRICS_SAMPLE_RATE:-100}"
   env_cmd+=" HTTP_PRESERVE_HEADER_CASE=${HTTP_PRESERVE_HEADER_CASE:-false}"
   tmux -f /exec-daemon/tmux.portal.conf new-session -d -s ha-compare-bsdm -c "$ROOT" -- \
