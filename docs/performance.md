@@ -4,15 +4,27 @@
 
 ## Baseline (0.3.0, 4 vCPU)
 
-| Сценарий | ~RPS |
-|----------|------|
-| wrk L1 HIT | 56k |
-| wrk L1 MISS | 6.1k |
-| curl HIT | 888 |
+| Сценарий | Инструмент | ~RPS | Примечание |
+|----------|------------|------|------------|
+| L1 HIT | wrk | 52–72k | sustained load, keep-alive |
+| L1 MISS | wrk | 6–8k | уникальные URL (lua) |
+| L1 HIT | **oha** | 50–72k | browser-like keep-alive |
+| L1 MISS | **oha** | 3–6k | `--rand-regex-url`, уникальные path |
+| L1 HIT | ~~curl xargs~~ | ~900 | **устарело** — потолок harness, не прокси |
 
 Цель после perf-режима: **≥110k wrk L1 HIT**.
 
-## Переменные окружения
+### Зависимости бенчмарка
+
+```bash
+# Debian/Ubuntu
+sudo apt install wrk curl
+cargo install oha   # или бинарь с https://github.com/hatoo/oha
+```
+
+Старый curl+xargs harness: `BENCH_LEGACY_CURL=1 ./scripts/run-proxy-benchmark.sh ...`
+
+## Переменные окружения (прокси)
 
 | Переменная | Default | Описание |
 |------------|---------|----------|
@@ -38,9 +50,24 @@ HTTP_PORT=12788 METRICS_PORT=19190 \
 ## Бенчмарк
 
 ```bash
-./scripts/compare-squid-bsdm.sh          # Squid vs BSDM, стандартный wrk/curl
+./scripts/compare-squid-bsdm.sh              # Squid vs BSDM (wrk + oha)
 ./scripts/run-proxy-benchmark.sh HOST:PORT LABEL
+./scripts/run-profile-benchmark.sh           # baseline / perf / corporate
+
+# Corporate auth для wrk/oha:
+export WRK_PROXY_AUTH_HEADER="Proxy-Authorization: Basic $(printf '%s' 'user:pass' | base64 -w0)"
+export CURL_PROXY_USER='user:pass'           # альтернатива
 ```
+
+### Сценарии `run-proxy-benchmark.sh`
+
+| Шаг | Что измеряет |
+|-----|----------------|
+| wrk L1 HIT/MISS | максимальный sustained RPS |
+| oha L1 HIT | keep-alive, N соединений (ближе к браузеру) |
+| oha L1 MISS | уникальные URL, cache cold path |
+
+Переменные: `OHA_CONN_HIT`, `OHA_CONN_MISS`, `OHA_DURATION` (по умолчанию = wrk).
 
 ## Профилирование
 
