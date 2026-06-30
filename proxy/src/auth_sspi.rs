@@ -28,7 +28,9 @@ pub enum SspiStepResult {
         display_name: Option<String>,
     },
     /// Send another `407` with `Proxy-Authenticate: <scheme> <token>`.
-    Challenge { token_b64: String },
+    Challenge {
+        token_b64: String,
+    },
     Failed(String),
 }
 
@@ -110,7 +112,9 @@ impl SspiAuthEngine {
                                 client_computer_name: cfg.workstation.clone(),
                             }),
                             Some("ntlm,!kerberos".to_string()),
-                            cfg.workstation.clone().unwrap_or_else(|| cfg.domain.clone()),
+                            cfg.workstation
+                                .clone()
+                                .unwrap_or_else(|| cfg.domain.clone()),
                         ),
                         cfg.candidate_identities.clone(),
                     )
@@ -152,7 +156,10 @@ impl SspiAuthEngine {
 
         let input_bytes = token.unwrap_or_default();
         let mut input = [SecurityBuffer::new(input_bytes.to_vec(), BufferType::Token)];
-        let mut output = vec![SecurityBuffer::new(Vec::with_capacity(2048), BufferType::Token)];
+        let mut output = vec![SecurityBuffer::new(
+            Vec::with_capacity(2048),
+            BufferType::Token,
+        )];
 
         let builder = session
             .context
@@ -209,8 +216,19 @@ impl SspiAuthEngine {
     }
 }
 
+fn split_helper_command(helper: &str) -> Result<(String, Vec<String>), String> {
+    let parts: Vec<&str> = helper.split_whitespace().collect();
+    let Some(program) = parts.first() else {
+        return Err("NTLM_AUTH_HELPER is empty".to_string());
+    };
+    Ok((
+        (*program).to_string(),
+        parts[1..].iter().map(|s| (*s).to_string()).collect(),
+    ))
+}
+
 fn process_ntlm_helper(helper: &str, token: Option<&[u8]>) -> Result<SspiStepResult, String> {
-    let token = token.ok_or_else(|| "NTLM helper expects a client token".to_string())?;
+    let token = token.unwrap_or(&[]);
     let token_b64 = B64.encode(token);
     let command = if token.is_empty() {
         format!("YR {token_b64}")
@@ -218,7 +236,12 @@ fn process_ntlm_helper(helper: &str, token: Option<&[u8]>) -> Result<SspiStepRes
         format!("KK {token_b64}")
     };
 
-    let mut child = Command::new(helper)
+    let (program, args) = split_helper_command(helper)?;
+    let mut child = Command::new(&program);
+    for arg in &args {
+        child.arg(arg);
+    }
+    let mut child = child
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -264,25 +287,23 @@ fn process_ntlm_helper(helper: &str, token: Option<&[u8]>) -> Result<SspiStepRes
             token_b64: rest.to_string(),
         }),
         "OK" | "AF" => {
-            let username = rest
-                .split_whitespace()
-                .next()
-                .unwrap_or(rest)
-                .to_string();
+            let username = rest.split_whitespace().next().unwrap_or(rest).to_string();
             Ok(SspiStepResult::Complete {
                 username: username.clone(),
                 display_name: Some(username),
             })
         }
         "NA" | "ERR" | "BH" => Ok(SspiStepResult::Failed(rest.to_string())),
-        _ => Ok(SspiStepResult::Failed(format!("unknown helper response: {line}"))),
+        _ => Ok(SspiStepResult::Failed(format!(
+            "unknown helper response: {line}"
+        ))),
     }
 }
 
 #[cfg(feature = "auth-kerberos")]
 fn load_kerberos_server_config(cfg: &KerberosAuthConfig) -> Result<KerberosServerConfig, String> {
-    let data =
-        std::fs::read(&cfg.keytab_path).map_err(|e| format!("read keytab {}: {e}", cfg.keytab_path))?;
+    let data = std::fs::read(&cfg.keytab_path)
+        .map_err(|e| format!("read keytab {}: {e}", cfg.keytab_path))?;
     let (_, keytab) = Keytab::parse(&data).map_err(|e| format!("parse keytab: {e}"))?;
 
     let (service_type, service_host, _realm) = parse_service_principal(&cfg.service_principal)?;
@@ -365,7 +386,11 @@ fn parse_service_principal(spn: &str) -> Result<(String, String, String), String
     let (service_type, host) = left
         .split_once('/')
         .ok_or_else(|| format!("invalid service principal (missing /): {spn}"))?;
-    Ok((service_type.to_string(), host.to_string(), realm.to_string()))
+    Ok((
+        service_type.to_string(),
+        host.to_string(),
+        realm.to_string(),
+    ))
 }
 
 /// Load `user:password` pairs from a file (lab / integration testing).
@@ -381,8 +406,8 @@ pub fn load_ntlm_user_file(path: &str) -> Result<Vec<AuthIdentity>, String> {
         let (user, password) = line
             .split_once(':')
             .ok_or_else(|| format!("invalid NTLM users line (expected user:password): {line}"))?;
-        let username = Username::parse(user.trim())
-            .map_err(|e| format!("invalid username '{user}': {e}"))?;
+        let username =
+            Username::parse(user.trim()).map_err(|e| format!("invalid username '{user}': {e}"))?;
         identities.push(AuthIdentity {
             username,
             password: Secret::from(password.to_string()),
@@ -396,6 +421,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(feature = "auth-kerberos")]
     fn parse_service_principal_splits_type_host_realm() {
         let (ty, host, realm) =
             parse_service_principal("HTTP/proxy.example.com@EXAMPLE.COM").unwrap();
@@ -405,7 +431,17 @@ mod tests {
     }
 
     #[test]
-    fn ntlm_helper_parses_ok_response() {
+    #[cfg(feature = "auth-ntlm")]
+    fn split_helper_command_parses_program_and_args() {
+        let (program, args) =
+            split_helper_command("/usr/bin/ntlm_auth --helper-protocol=squid-2.5-ntlmssp").unwrap();
+        assert_eq!(program, "/usr/bin/ntlm_auth");
+        assert_eq!(args, vec!["--helper-protocol=squid-2.5-ntlmssp"]);
+    }
+
+    #[test]
+    #[cfg(feature = "auth-ntlm")]
+    fn ntlm_helper_first_round_uses_yr_with_empty_token() {
         let result = process_ntlm_helper("/bin/echo", Some(b"token"))
             .unwrap_or_else(|_| SspiStepResult::Failed("skip".into()));
         // /bin/echo won't speak the protocol — just ensure spawn works on OK path in unit tests

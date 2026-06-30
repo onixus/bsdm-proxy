@@ -138,9 +138,8 @@ pub fn load_auth_config() -> AuthConfig {
                 Some(KerberosConfig {
                     keytab_path: std::env::var("KRB5_KEYTAB")
                         .unwrap_or_else(|_| "/etc/krb5.keytab".to_string()),
-                    service_principal: std::env::var("KRB5_SERVICE_PRINCIPAL").unwrap_or_else(
-                        |_| format!("HTTP/{hostname}@EXAMPLE.COM"),
-                    ),
+                    service_principal: std::env::var("KRB5_SERVICE_PRINCIPAL")
+                        .unwrap_or_else(|_| format!("HTTP/{hostname}@EXAMPLE.COM")),
                     kdc_url: std::env::var("KRB5_KDC_URL").ok(),
                     hostname,
                     max_time_skew: Duration::from_secs(max_skew_secs),

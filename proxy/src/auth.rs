@@ -240,15 +240,9 @@ impl AuthManager {
         }
     }
 
+    #[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]
     fn uses_sspi_handshake(&self) -> bool {
-        #[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]
-        {
-            self.sspi_engine.is_some()
-        }
-        #[cfg(not(any(feature = "auth-ntlm", feature = "auth-kerberos")))]
-        {
-            false
-        }
+        self.sspi_engine.is_some()
     }
 
     /// Check if authentication is enabled
@@ -297,9 +291,10 @@ impl AuthManager {
     /// Handle proxy authentication including multi-round NTLM / Kerberos.
     pub async fn handle_proxy_auth<T>(
         &self,
-        client_key: &str,
+        #[allow(unused_variables)] client_key: &str,
         req: &Request<T>,
     ) -> ProxyAuthOutcome {
+        #[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]
         if self.uses_sspi_handshake() {
             return self.handle_sspi_auth(client_key, req).await;
         }
@@ -371,9 +366,7 @@ impl AuthManager {
                 };
             };
 
-            tokio::task::block_in_place(|| {
-                engine.process_token(&mut entry.session, token_slice)
-            })
+            tokio::task::block_in_place(|| engine.process_token(&mut entry.session, token_slice))
         };
 
         match step_result {
@@ -381,10 +374,7 @@ impl AuthManager {
                 username,
                 display_name,
             }) => {
-                self.handshake_sessions
-                    .write()
-                    .await
-                    .remove(client_key);
+                self.handshake_sessions.write().await.remove(client_key);
                 let user = UserInfo {
                     username: username.clone(),
                     display_name,
@@ -437,9 +427,7 @@ impl AuthManager {
             AuthBackend::Ldap => self.authenticate_ldap(username, password).await?,
             #[cfg(feature = "auth-ntlm")]
             AuthBackend::Ntlm => {
-                return Err(
-                    "NTLM uses multi-round handshake; call handle_proxy_auth()".to_string(),
-                );
+                return Err("NTLM uses multi-round handshake; call handle_proxy_auth()".to_string());
             }
             #[cfg(feature = "auth-kerberos")]
             AuthBackend::Kerberos => {

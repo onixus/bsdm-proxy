@@ -32,11 +32,11 @@ pub mod upstream;
 pub use acl::{AclAction, AclDecision, AclEngine, AclRule};
 pub use acl_api::{AclApiConfig, AclApiState};
 pub use acl_config::{load_acl_engine_from_file, parse_acl_action};
-pub use auth::{AuthBackend, AuthConfig, AuthManager, ProxyAuthOutcome, UserInfo};
 #[cfg(feature = "auth-kerberos")]
 pub use auth::KerberosConfig;
 #[cfg(feature = "auth-ntlm")]
 pub use auth::NtlmConfig;
+pub use auth::{AuthBackend, AuthConfig, AuthManager, ProxyAuthOutcome, UserInfo};
 pub use cache::{CacheConfig, CachedResponse};
 pub use cache_compress::{BodyEncoding, CompressionConfig};
 pub use cache_key::http_cache_key;
