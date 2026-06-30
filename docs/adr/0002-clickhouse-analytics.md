@@ -67,3 +67,4 @@ Do not migrate Kafka and OpenSearch simultaneously.
 - [clickhouse-analytics.md](../clickhouse-analytics.md)
 - [roadmap.md](../roadmap.md) M3–M5
 - `bsdm-events::CacheEvent`
+- Implementation: [#114](https://github.com/onixus/bsdm-proxy/issues/114) — cache-indexer ClickHouse backend
