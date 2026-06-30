@@ -206,6 +206,22 @@ impl AclEngine {
         self.rules.sort_by_key(|b| std::cmp::Reverse(b.priority));
     }
 
+    pub fn rule_count(&self) -> usize {
+        self.rules.len()
+    }
+
+    pub fn default_action(&self) -> AclAction {
+        self.default_action
+    }
+
+    pub fn rules(&self) -> &[AclRule] {
+        &self.rules
+    }
+
+    pub fn has_rule(&self, id: &str) -> bool {
+        self.rules.iter().any(|r| r.id == id)
+    }
+
     /// Check if request is allowed (read-mostly; safe under `RwLock` read guard).
     pub fn check_access(
         &self,

@@ -1,8 +1,8 @@
 //! Load ACL and categorization configuration from environment variables.
 
-use bsdm_proxy::acl::{AclAction, AclEngine, AclRule};
+use bsdm_proxy::acl::{AclAction, AclEngine};
+use bsdm_proxy::acl_config::{load_acl_engine_from_file, parse_acl_action};
 use bsdm_proxy::categorization::{CategorizationConfig, CategorizationEngine};
-use serde::Deserialize;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
@@ -22,39 +22,6 @@ fn env_flag(name: &str) -> bool {
     std::env::var(name)
         .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
         .unwrap_or(false)
-}
-
-fn parse_acl_action(value: &str) -> AclAction {
-    match value.to_ascii_lowercase().as_str() {
-        "deny" => AclAction::Deny,
-        "redirect" => AclAction::Redirect,
-        _ => AclAction::Allow,
-    }
-}
-
-#[derive(Debug, Deserialize)]
-struct AclRulesFile {
-    #[serde(default)]
-    default_action: Option<String>,
-    #[serde(default)]
-    rules: Vec<AclRule>,
-}
-
-fn load_acl_rules(path: &str, fallback_default: AclAction) -> Result<AclEngine, String> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("failed to read ACL rules file: {}", e))?;
-    let file: AclRulesFile = serde_json::from_str(&content)
-        .map_err(|e| format!("failed to parse ACL rules JSON: {}", e))?;
-
-    let default_action = file
-        .default_action
-        .as_deref()
-        .map(parse_acl_action)
-        .unwrap_or(fallback_default);
-
-    let mut engine = AclEngine::new(default_action);
-    engine.load_rules(file.rules);
-    Ok(engine)
 }
 
 fn load_categorization_config() -> CategorizationConfig {
@@ -94,7 +61,7 @@ pub fn load_policy_config() -> PolicyConfig {
 
     let acl_engine = if acl_enabled {
         let engine = if let Some(ref path) = rules_path {
-            match load_acl_rules(path, default_action) {
+            match load_acl_engine_from_file(path, default_action) {
                 Ok(engine) => engine,
                 Err(e) => {
                     warn!("Failed to load ACL rules from {}: {}", path, e);
@@ -129,7 +96,7 @@ pub fn load_policy_config() -> PolicyConfig {
 }
 
 pub fn reload_acl_engine(path: &str, fallback_default: AclAction) -> Result<AclEngine, String> {
-    load_acl_rules(path, fallback_default)
+    load_acl_engine_from_file(path, fallback_default)
 }
 
 #[cfg(test)]

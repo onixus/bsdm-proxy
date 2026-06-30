@@ -1,0 +1,368 @@
+//! REST API for runtime ACL management on the metrics/admin port.
+
+use bytes::Bytes;
+use http_body_util::BodyExt;
+use hyper::body::Incoming;
+use hyper::header::AUTHORIZATION;
+use hyper::{HeaderMap, Method, Request, Response, StatusCode};
+use serde::Serialize;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use tracing::{info, warn};
+
+use crate::acl::{AclAction, AclEngine, AclRule};
+use crate::acl_config::{load_acl_engine_from_file, parse_acl_action};
+use crate::http_types::Body;
+
+#[derive(Clone)]
+pub struct AclApiConfig {
+    pub default_action: AclAction,
+    pub rules_path: Option<String>,
+    pub api_token: Option<String>,
+}
+
+impl AclApiConfig {
+    pub fn from_env(rules_path: Option<String>) -> Self {
+        let default_action = std::env::var("ACL_DEFAULT_ACTION")
+            .map(|v| parse_acl_action(&v))
+            .unwrap_or(AclAction::Allow);
+        let api_token = std::env::var("ACL_API_TOKEN")
+            .ok()
+            .filter(|t| !t.is_empty());
+        Self {
+            default_action,
+            rules_path,
+            api_token,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct AclApiState {
+    engine: Arc<RwLock<AclEngine>>,
+    config: AclApiConfig,
+}
+
+impl AclApiState {
+    pub fn new(engine: Arc<RwLock<AclEngine>>, config: AclApiConfig) -> Self {
+        Self { engine, config }
+    }
+
+    pub async fn handle_request(&self, req: Request<Incoming>) -> Response<Body> {
+        let (parts, body) = req.into_parts();
+        let body = match BodyExt::collect(body).await {
+            Ok(collected) => collected.to_bytes(),
+            Err(e) => {
+                warn!("Failed to read ACL API body: {}", e);
+                Bytes::new()
+            }
+        };
+        self.dispatch(&parts.method, parts.uri.path(), body, &parts.headers)
+            .await
+    }
+
+    async fn dispatch(
+        &self,
+        method: &Method,
+        path: &str,
+        body: Bytes,
+        headers: &HeaderMap,
+    ) -> Response<Body> {
+        if !self.is_authorized(headers) {
+            return json_response(StatusCode::UNAUTHORIZED, r#"{"error":"unauthorized"}"#);
+        }
+
+        match (method, path) {
+            (&Method::GET, "/api/acl/rules") => self.list_rules().await,
+            (&Method::POST, "/api/acl/rules") => self.add_rule_body(body).await,
+            (&Method::POST, "/api/acl/reload") => self.reload_rules().await,
+            _ => json_response(StatusCode::NOT_FOUND, r#"{"error":"not found"}"#),
+        }
+    }
+
+    fn is_authorized(&self, headers: &HeaderMap) -> bool {
+        let Some(expected) = &self.config.api_token else {
+            return true;
+        };
+        headers
+            .get(AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "))
+            .is_some_and(|token| token == expected)
+    }
+
+    async fn list_rules(&self) -> Response<Body> {
+        let engine = self.engine.read().await;
+        let payload = ListRulesResponse {
+            count: engine.rule_count(),
+            default_action: engine.default_action(),
+            rules: engine.rules().to_vec(),
+        };
+        match serde_json::to_string(&payload) {
+            Ok(body) => json_response(StatusCode::OK, &body),
+            Err(e) => {
+                warn!("Failed to serialize ACL rules: {}", e);
+                json_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    r#"{"error":"serialization failed"}"#,
+                )
+            }
+        }
+    }
+
+    async fn add_rule_body(&self, body: Bytes) -> Response<Body> {
+        let rule: AclRule = match serde_json::from_slice(&body) {
+            Ok(rule) => rule,
+            Err(e) => {
+                warn!("Invalid ACL rule JSON: {}", e);
+                return json_response(
+                    StatusCode::BAD_REQUEST,
+                    &format!(
+                        r#"{{"error":"invalid json: {}"}}"#,
+                        escape_json(&e.to_string())
+                    ),
+                );
+            }
+        };
+
+        if rule.id.trim().is_empty() {
+            return json_response(
+                StatusCode::BAD_REQUEST,
+                r#"{"error":"rule id is required"}"#,
+            );
+        }
+
+        let mut engine = self.engine.write().await;
+        if engine.has_rule(&rule.id) {
+            return json_response(
+                StatusCode::CONFLICT,
+                &format!(
+                    r#"{{"error":"rule id already exists: {}"}}"#,
+                    escape_json(&rule.id)
+                ),
+            );
+        }
+
+        info!("ACL API: adding rule {} ({})", rule.id, rule.name);
+        engine.add_rule(rule.clone());
+        match serde_json::to_string(&rule) {
+            Ok(body) => json_response(StatusCode::CREATED, &body),
+            Err(_) => json_response(StatusCode::CREATED, r#"{"status":"created"}"#),
+        }
+    }
+
+    async fn reload_rules(&self) -> Response<Body> {
+        let Some(path) = &self.config.rules_path else {
+            return json_response(
+                StatusCode::BAD_REQUEST,
+                r#"{"error":"ACL_RULES_PATH is not configured"}"#,
+            );
+        };
+
+        match load_acl_engine_from_file(path, self.config.default_action) {
+            Ok(loaded) => {
+                let count = loaded.rule_count();
+                let mut engine = self.engine.write().await;
+                *engine = loaded;
+                info!("ACL API: reloaded {} rules from {}", count, path);
+                json_response(
+                    StatusCode::OK,
+                    &format!(r#"{{"status":"reloaded","count":{count}}}"#),
+                )
+            }
+            Err(e) => {
+                warn!("ACL API reload failed: {}", e);
+                json_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    &format!(r#"{{"error":"{}"}}"#, escape_json(&e)),
+                )
+            }
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct ListRulesResponse {
+    count: usize,
+    default_action: AclAction,
+    rules: Vec<AclRule>,
+}
+
+fn json_response(status: StatusCode, body: &str) -> Response<Body> {
+    Response::builder()
+        .status(status)
+        .header("Content-Type", "application/json; charset=utf-8")
+        .body(Body::new(Bytes::from(body.to_string())))
+        .unwrap_or_else(|_| {
+            Response::new(Body::new(Bytes::from_static(b"500 Internal Server Error")))
+        })
+}
+
+fn escape_json(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::acl::AclEngine;
+    use http_body_util::BodyExt;
+    use hyper::body::Bytes;
+    use hyper::{Method, StatusCode};
+
+    fn test_state() -> AclApiState {
+        let engine = Arc::new(RwLock::new(AclEngine::new(AclAction::Allow)));
+        AclApiState::new(
+            engine,
+            AclApiConfig {
+                default_action: AclAction::Allow,
+                rules_path: None,
+                api_token: None,
+            },
+        )
+    }
+
+    fn test_state_with_token() -> AclApiState {
+        let engine = Arc::new(RwLock::new(AclEngine::new(AclAction::Allow)));
+        AclApiState::new(
+            engine,
+            AclApiConfig {
+                default_action: AclAction::Allow,
+                rules_path: None,
+                api_token: Some("secret-token".to_string()),
+            },
+        )
+    }
+
+    #[tokio::test]
+    async fn list_rules_empty() {
+        let state = test_state();
+        let resp = state
+            .dispatch(
+                &Method::GET,
+                "/api/acl/rules",
+                Bytes::new(),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = BodyExt::collect(resp.into_body()).await.unwrap().to_bytes();
+        let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(parsed["count"], 0);
+    }
+
+    #[tokio::test]
+    async fn add_rule_via_api() {
+        let state = test_state();
+        let rule_json = br#"{
+            "id": "api-rule",
+            "name": "API rule",
+            "enabled": true,
+            "priority": 50,
+            "action": "deny",
+            "rule_type": { "Domain": "blocked.test" },
+            "redirect_url": null,
+            "comment": null
+        }"#;
+        let resp = state
+            .dispatch(
+                &Method::POST,
+                "/api/acl/rules",
+                Bytes::from_static(rule_json),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::CREATED);
+
+        let list_resp = state
+            .dispatch(
+                &Method::GET,
+                "/api/acl/rules",
+                Bytes::new(),
+                &HeaderMap::new(),
+            )
+            .await;
+        let body = BodyExt::collect(list_resp.into_body())
+            .await
+            .unwrap()
+            .to_bytes();
+        let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(parsed["count"], 1);
+    }
+
+    #[tokio::test]
+    async fn duplicate_rule_returns_conflict() {
+        let state = test_state();
+        let rule_json = br#"{
+            "id": "dup",
+            "name": "dup",
+            "enabled": true,
+            "priority": 1,
+            "action": "deny",
+            "rule_type": { "Domain": "x.test" },
+            "redirect_url": null,
+            "comment": null
+        }"#;
+        let resp = state
+            .dispatch(
+                &Method::POST,
+                "/api/acl/rules",
+                Bytes::from_static(rule_json),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::CREATED);
+
+        let resp = state
+            .dispatch(
+                &Method::POST,
+                "/api/acl/rules",
+                Bytes::from_static(rule_json),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn reload_without_path_returns_bad_request() {
+        let state = test_state();
+        let resp = state
+            .dispatch(
+                &Method::POST,
+                "/api/acl/reload",
+                Bytes::new(),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn api_token_required_when_configured() {
+        let state = test_state_with_token();
+        let resp = state
+            .dispatch(
+                &Method::GET,
+                "/api/acl/rules",
+                Bytes::new(),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            AUTHORIZATION,
+            hyper::header::HeaderValue::from_static("Bearer secret-token"),
+        );
+        let resp = state
+            .dispatch(&Method::GET, "/api/acl/rules", Bytes::new(), &headers)
+            .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+}

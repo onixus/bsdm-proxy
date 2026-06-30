@@ -80,11 +80,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|s| s.parse().ok())
         .unwrap_or(9090);
 
+    let policy_config = load_policy_config();
+    if policy_config.acl_enabled {
+        info!("ACL enabled");
+    }
+    if policy_config.categorization.is_some() {
+        info!("URL categorization enabled");
+    }
+
+    let acl_api = policy_config.acl_engine.as_ref().map(|engine| {
+        Arc::new(bsdm_proxy::AclApiState::new(
+            engine.clone(),
+            bsdm_proxy::AclApiConfig::from_env(policy_config.acl_rules_path.clone()),
+        ))
+    });
+    if acl_api.is_some() {
+        info!("ACL REST API enabled on :{}/api/acl/*", metrics_port);
+    }
+
     tokio::spawn(metrics_server(
         metrics.clone(),
         draining.clone(),
         shutdown_rx.clone(),
         metrics_port,
+        acl_api,
     ));
 
     let mitm_enabled = std::env::var("MITM_ENABLED")
@@ -121,14 +140,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         None
     };
-
-    let policy_config = load_policy_config();
-    if policy_config.acl_enabled {
-        info!("ACL enabled");
-    }
-    if policy_config.categorization.is_some() {
-        info!("URL categorization enabled");
-    }
 
     let proxy_policy = ProxyPolicy {
         acl_engine: policy_config.acl_engine.clone(),

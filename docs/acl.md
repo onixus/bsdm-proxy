@@ -435,6 +435,15 @@ curl http://localhost:9090/api/acl/rules
 curl -X POST http://localhost:9090/api/acl/reload
 ```
 
+Responses:
+- `GET /api/acl/rules` → `{ "count", "default_action", "rules": [...] }`
+- `POST /api/acl/rules` → `201 Created` with rule JSON (or `409` if `id` exists)
+- `POST /api/acl/reload` → `{ "status": "reloaded", "count": N }` (requires `ACL_RULES_PATH`)
+
+When `ACL_API_TOKEN` is set, pass `Authorization: Bearer <token>` on all `/api/acl/*` requests.
+
+The API is available when `ACL_ENABLED=true` on the metrics port (`METRICS_PORT`, default `9090`).
+
 ---
 
 **See also:**

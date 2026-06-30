@@ -22,6 +22,7 @@ use tokio_rustls::TlsAcceptor;
 use tokio_util::task::TaskTracker;
 use tracing::{debug, error, info, warn};
 
+use crate::acl_api::AclApiState;
 use crate::auth::UserInfo;
 use crate::http_types::Body;
 use crate::metrics::Metrics;
@@ -34,6 +35,7 @@ pub async fn metrics_server(
     draining: Arc<AtomicBool>,
     mut shutdown_rx: watch::Receiver<bool>,
     metrics_port: u16,
+    acl_api: Option<Arc<AclApiState>>,
 ) {
     let bind_addr = format!("0.0.0.0:{}", metrics_port);
     let listener = match TcpListener::bind(&bind_addr).await {
@@ -59,14 +61,22 @@ pub async fn metrics_server(
 
                 let metrics = metrics.clone();
                 let draining = draining.clone();
+                let acl_api = acl_api.clone();
                 tokio::spawn(async move {
                     let io = TokioIo::new(stream);
                     let service = service_fn(move |req: Request<Incoming>| {
                         let metrics = metrics.clone();
                         let draining = draining.clone();
+                        let acl_api = acl_api.clone();
                         async move {
                             let path = req.uri().path();
                             debug!("Metrics request from {}: {}", addr, path);
+
+                            if let Some(api) = &acl_api {
+                                if path.starts_with("/api/acl/") {
+                                    return Ok::<_, Infallible>(api.handle_request(req).await);
+                                }
+                            }
 
                             let response = match path {
                                 "/metrics" => {

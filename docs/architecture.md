@@ -232,7 +232,7 @@ Local L1 miss → ICP query siblings → select parent → fetch_via_peer → or
 | **B22** | Negative caching + `Cache-Control` revalidate | `cache_freshness.rs`, `proxy_service.rs` | ✅ |
 | **B23** | HTTP/2 upstream — `UPSTREAM_HTTP2_ENABLED` | `upstream.rs` | ✅ |
 | **B24** | Healthcheck curl vs wget — исправлено (`wget` в compose) | `docker-compose.yml`, `Dockerfile` |
-| **B25** | REST ACL API документирован, не реализован | `docs/acl.md`, `main.rs` metrics server |
+| **B25** | REST ACL API на metrics port | `acl_api.rs`, `server.rs` | ✅ |
 
 ---
 

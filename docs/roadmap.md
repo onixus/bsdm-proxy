@@ -90,7 +90,7 @@ gantt
 - [ ] **ACL completeness**
   - [x] TimeWindow rules (`HH:MM`, local time, overnight windows)
   - [x] Group-based Principal rules (LDAP `memberOf` cn matching)
-  - [ ] REST API управления ACL (`/api/acl/*` из docs)
+  - [x] REST API управления ACL (`/api/acl/*` на `METRICS_PORT`)
 - [ ] **NTLM auth** — реализация или снятие с roadmap
 - [x] **Negative caching** — upstream 403/404 с коротким TTL (`NEGATIVE_CACHE_*`)
 - [x] **Cache refresh / revalidate** — `Cache-Control`, ETag / `If-Modified-Since`, `304` → `REVALIDATED`
