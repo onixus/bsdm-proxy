@@ -23,6 +23,10 @@ pub struct CachedResponse {
     pub uncompressed_len: usize,
     pub cached_at: SystemTime,
     pub ttl: Duration,
+    pub etag: Option<Arc<str>>,
+    pub last_modified: Option<Arc<str>>,
+    pub is_negative: bool,
+    pub must_revalidate: bool,
 }
 
 impl CachedResponse {
@@ -31,6 +35,24 @@ impl CachedResponse {
         SystemTime::now()
             .duration_since(self.cached_at)
             .map_or(true, |age| age > self.ttl)
+    }
+
+    #[inline]
+    pub fn can_serve_fresh(&self) -> bool {
+        !self.must_revalidate && !self.is_expired()
+    }
+
+    pub fn has_validators(&self) -> bool {
+        self.etag.is_some() || self.last_modified.is_some()
+    }
+
+    /// Refresh metadata after a `304 Not Modified` revalidation.
+    pub fn refreshed_after_not_modified(&self, ttl: Duration) -> Self {
+        let mut updated = self.clone();
+        updated.cached_at = SystemTime::now();
+        updated.ttl = ttl;
+        updated.must_revalidate = false;
+        updated
     }
 
     pub fn response_body_len(&self) -> usize {
@@ -79,12 +101,17 @@ impl CachedResponse {
         response
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn from_upstream(
         status: u16,
         headers: Arc<[(Arc<str>, Arc<str>)]>,
         body: Bytes,
         ttl: Duration,
         compression: &CompressionConfig,
+        etag: Option<Arc<str>>,
+        last_modified: Option<Arc<str>>,
+        is_negative: bool,
+        must_revalidate: bool,
     ) -> Self {
         let prepared = prepare_body_for_cache(body, headers, compression);
         Self {
@@ -95,6 +122,10 @@ impl CachedResponse {
             uncompressed_len: prepared.uncompressed_len,
             cached_at: SystemTime::now(),
             ttl,
+            etag,
+            last_modified,
+            is_negative,
+            must_revalidate,
         }
     }
 }
@@ -105,6 +136,9 @@ pub struct CacheConfig {
     pub default_ttl: Duration,
     pub max_body_size: usize,
     pub compression: CompressionConfig,
+    pub negative_cache_enabled: bool,
+    pub negative_cache_ttl: Duration,
+    pub honor_cache_control: bool,
 }
 
 impl Default for CacheConfig {
@@ -114,6 +148,9 @@ impl Default for CacheConfig {
             default_ttl: Duration::from_secs(3600),
             max_body_size: 10 * 1024 * 1024,
             compression: CompressionConfig::default(),
+            negative_cache_enabled: true,
+            negative_cache_ttl: Duration::from_secs(120),
+            honor_cache_control: true,
         }
     }
 }
@@ -132,12 +169,25 @@ impl CacheConfig {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(10 * 1024 * 1024);
+        let negative_cache_enabled = std::env::var("NEGATIVE_CACHE_ENABLED")
+            .map(|v| !matches!(v.to_ascii_lowercase().as_str(), "0" | "false" | "no"))
+            .unwrap_or(true);
+        let negative_cache_ttl_secs = std::env::var("NEGATIVE_CACHE_TTL_SECONDS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(120);
+        let honor_cache_control = std::env::var("CACHE_HONOR_CACHE_CONTROL")
+            .map(|v| !matches!(v.to_ascii_lowercase().as_str(), "0" | "false" | "no"))
+            .unwrap_or(true);
 
         Self {
             capacity,
             default_ttl: Duration::from_secs(cache_ttl_secs),
             max_body_size,
             compression: CompressionConfig::from_env(),
+            negative_cache_enabled,
+            negative_cache_ttl: Duration::from_secs(negative_cache_ttl_secs),
+            honor_cache_control,
         }
     }
 }
@@ -169,6 +219,10 @@ mod tests {
             body.clone(),
             Duration::from_secs(60),
             &compression,
+            None,
+            None,
+            false,
+            false,
         );
         assert_eq!(cached.body_encoding, BodyEncoding::Zstd);
         let response = cached.to_response();
@@ -176,5 +230,23 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let bytes = rt.block_on(collected).unwrap().to_bytes();
         assert_eq!(bytes, body);
+    }
+
+    #[test]
+    fn can_serve_fresh_respects_must_revalidate() {
+        let cached = CachedResponse {
+            status: 200,
+            headers: Arc::from([]),
+            body: Bytes::new(),
+            body_encoding: BodyEncoding::Raw,
+            uncompressed_len: 0,
+            cached_at: SystemTime::now(),
+            ttl: Duration::from_secs(3600),
+            etag: Some(Arc::from("\"x\"")),
+            last_modified: None,
+            is_negative: false,
+            must_revalidate: true,
+        };
+        assert!(!cached.can_serve_fresh());
     }
 }

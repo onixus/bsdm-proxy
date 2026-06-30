@@ -92,8 +92,8 @@ gantt
   - [x] Group-based Principal rules (LDAP `memberOf` cn matching)
   - [ ] REST API управления ACL (`/api/acl/*` из docs)
 - [ ] **NTLM auth** — реализация или снятие с roadmap
-- [ ] **Negative caching** coordination
-- [ ] **Cache refresh / revalidate** — Squid-style freshness
+- [x] **Negative caching** — upstream 403/404 с коротким TTL (`NEGATIVE_CACHE_*`)
+- [x] **Cache refresh / revalidate** — `Cache-Control`, ETag / `If-Modified-Since`, `304` → `REVALIDATED`
 - [x] Hierarchy Prometheus metrics (`bsdm_proxy_hierarchy_*`)
 
 **Критерий завершения M2:** 3-tier cache hierarchy в docker-compose, hit rate sibling/parent измеряется, Redis L2 работает.
