@@ -96,6 +96,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     if acl_api.is_some() {
         info!("ACL REST API enabled on :{}/api/acl/*", metrics_port);
+        if std::env::var("ACL_API_TOKEN")
+            .ok()
+            .filter(|t| !t.is_empty())
+            .is_none()
+        {
+            warn!(
+                "ACL_API_TOKEN is not set — REST API on :{}/api/acl/* is unauthenticated; \
+                set ACL_API_TOKEN or restrict access to METRICS_PORT",
+                metrics_port
+            );
+        }
     }
 
     tokio::spawn(metrics_server(
