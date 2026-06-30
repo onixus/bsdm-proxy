@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -68,6 +69,30 @@ def device_summary(profile: dict[str, Any], device: str) -> dict[str, int]:
         "expected_requests": int(profile["devices"][device]["total_requests"]),
         "expected_bytes": int(profile["devices"][device]["total_bytes"]),
     }
+
+
+def site_page_path(site_id: int, device: str = "desktop") -> str:
+    return f"/httparchive/site/{site_id:04d}/{device}/page.html"
+
+
+def site_page_bytes(profile: dict[str, Any], device: str) -> int:
+    return int(profile["devices"][device]["total_bytes"])
+
+
+def random_site_ids(
+    count: int,
+    pool: int = 1000,
+    seed: int | None = 42,
+) -> list[int]:
+    if count > pool:
+        raise ValueError(f"cannot pick {count} sites from pool of {pool}")
+    rng = random.Random(seed)
+    return sorted(rng.sample(range(1, pool + 1), count))
+
+
+def site_urls(upstream: str, profile: dict[str, Any], site_ids: list[int], device: str) -> list[str]:
+    base = upstream.rstrip("/")
+    return [f"{base}{site_page_path(site_id, device)}" for site_id in site_ids]
 
 
 def validate_profile(profile: dict[str, Any]) -> None:
