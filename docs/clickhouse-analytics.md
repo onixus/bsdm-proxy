@@ -45,7 +45,9 @@ ORDER BY requests DESC
 LIMIT 50;
 ```
 
-## Миграция с OpenSearch
+## Реализация indexer
+
+Отслеживается в [#114](https://github.com/onixus/bsdm-proxy/issues/114) — `INDEXER_BACKEND=clickhouse` в cache-indexer.
 
 | Фаза | Действие |
 |------|----------|
