@@ -106,6 +106,8 @@ pub struct LdapConfig {
     pub group_filter: Option<String>,
     pub timeout: Duration,
     pub use_tls: bool,
+    /// Resolve group membership after NTLM/Kerberos (service bind only; no user password).
+    pub group_enrichment: bool,
 }
 
 #[cfg(feature = "auth-ldap")]
@@ -120,8 +122,29 @@ impl Default for LdapConfig {
             group_filter: Some("(member={user_dn})".to_string()),
             timeout: Duration::from_secs(5),
             use_tls: false,
+            group_enrichment: false,
         }
     }
+}
+
+/// Attributes loaded from LDAP (auth or group enrichment).
+#[cfg(feature = "auth-ldap")]
+#[derive(Debug, Clone, Default)]
+struct LdapUserAttrs {
+    display_name: Option<String>,
+    email: Option<String>,
+    groups: Vec<String>,
+}
+
+/// Account name for LDAP `{username}` filter from an SSO principal (`user@REALM`, `DOMAIN\user`, …).
+#[cfg(feature = "auth-ldap")]
+pub(crate) fn ldap_account_name_from_principal(principal: &str) -> &str {
+    if let Some((_domain, user)) = principal.split_once('\\') {
+        return user;
+    }
+    principal
+        .split_once('@')
+        .map_or(principal, |(user, _)| user)
 }
 
 /// NTLM configuration
@@ -224,6 +247,23 @@ impl AuthManager {
             "Authentication manager initialized with backend: {}",
             config.backend
         );
+
+        #[cfg(feature = "auth-ldap")]
+        if config.enabled && Self::should_enrich_groups_from_ldap_static(&config) {
+            if let Some(ldap) = &config.ldap {
+                if ldap.bind_dn.is_none() || ldap.bind_password.is_none() {
+                    warn!(
+                        "LDAP group enrichment enabled but LDAP_BIND_DN / LDAP_BIND_PASSWORD \
+                         not set — AD lookups may fail"
+                    );
+                }
+            } else {
+                warn!(
+                    "NTLM/Kerberos backend with LDAP_GROUP_ENRICHMENT but no LDAP_SERVERS — \
+                     groups will not be resolved"
+                );
+            }
+        }
 
         #[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]
         let sspi_engine = build_sspi_engine(&config).map(Arc::new);
@@ -375,13 +415,15 @@ impl AuthManager {
                 display_name,
             }) => {
                 self.handshake_sessions.write().await.remove(client_key);
-                let user = UserInfo {
+                let mut user = UserInfo {
                     username: username.clone(),
                     display_name,
                     email: None,
                     groups: vec![],
                     authenticated_at: Instant::now(),
                 };
+                #[cfg(feature = "auth-ldap")]
+                self.apply_ldap_group_enrichment(&mut user).await;
                 self.principal_cache
                     .write()
                     .await
@@ -497,70 +539,102 @@ impl AuthManager {
         username: &str,
         password: &str,
     ) -> Result<UserInfo, String> {
-        // Connect to LDAP server
         let settings = LdapConnSettings::new().set_conn_timeout(config.timeout);
 
         let mut ldap = LdapConn::with_settings(settings, server)
             .map_err(|e| format!("LDAP connection failed: {}", e))?;
 
-        // Bind with service account if configured
-        if let (Some(bind_dn), Some(bind_password)) = (&config.bind_dn, &config.bind_password) {
-            ldap.simple_bind(bind_dn, bind_password)
-                .map_err(|e| format!("LDAP bind failed: {}", e))?;
-        }
+        ldap_service_bind(&mut ldap, config)?;
 
-        // Search for user
-        let filter = config.user_filter.replace("{username}", username);
-        let result = ldap
-            .search(
-                &config.base_dn,
-                Scope::Subtree,
-                &filter,
-                vec!["cn", "mail", "memberOf"],
-            )
-            .map_err(|e| format!("LDAP search failed: {}", e))?;
+        let entry = ldap_search_user_entry(&mut ldap, config, username, Some(username))?;
 
-        let (entries, _) = result
-            .success()
-            .map_err(|e| format!("LDAP search error: {}", e))?;
-
-        if entries.is_empty() {
-            return Err("User not found".to_string());
-        }
-
-        let entry = SearchEntry::construct(entries[0].clone());
         let user_dn = entry.dn.clone();
-
-        // Authenticate user by binding with their credentials
         ldap.simple_bind(&user_dn, password)
             .map_err(|_| "Invalid credentials".to_string())?;
 
-        // Extract user information
-        let display_name = entry
-            .attrs
-            .get("cn")
-            .and_then(|v| v.first())
-            .map(|s| s.to_string());
-
-        let email = entry
-            .attrs
-            .get("mail")
-            .and_then(|v| v.first())
-            .map(|s| s.to_string());
-
-        let groups = entry
-            .attrs
-            .get("memberOf")
-            .map(|v| v.iter().map(|s| s.to_string()).collect())
-            .unwrap_or_default();
+        let attrs = ldap_attrs_from_entry(&entry);
 
         Ok(UserInfo {
             username: username.to_string(),
-            display_name,
-            email,
-            groups,
+            display_name: attrs.display_name,
+            email: attrs.email,
+            groups: attrs.groups,
             authenticated_at: Instant::now(),
         })
+    }
+
+    /// Merge LDAP `memberOf` (and optional profile fields) after NTLM/Kerberos auth.
+    #[cfg(feature = "auth-ldap")]
+    async fn apply_ldap_group_enrichment(&self, user: &mut UserInfo) {
+        if !self.should_enrich_groups_from_ldap() {
+            return;
+        }
+        let Some(ldap_config) = self.config.ldap.as_ref() else {
+            return;
+        };
+
+        match self
+            .lookup_ldap_user_attrs(ldap_config, &user.username)
+            .await
+        {
+            Ok(attrs) => {
+                if user.display_name.is_none() {
+                    user.display_name = attrs.display_name;
+                }
+                if user.email.is_none() {
+                    user.email = attrs.email;
+                }
+                user.groups = attrs.groups;
+                debug!(
+                    "LDAP enrichment for {}: {} group(s)",
+                    user.username,
+                    user.groups.len()
+                );
+            }
+            Err(e) => {
+                warn!("LDAP group enrichment failed for {}: {}", user.username, e);
+            }
+        }
+    }
+
+    #[cfg(feature = "auth-ldap")]
+    fn should_enrich_groups_from_ldap(&self) -> bool {
+        Self::should_enrich_groups_from_ldap_static(&self.config)
+    }
+
+    #[cfg(feature = "auth-ldap")]
+    fn should_enrich_groups_from_ldap_static(config: &AuthConfig) -> bool {
+        if !config.enabled {
+            return false;
+        }
+        let ldap_enabled = config.ldap.as_ref().is_some_and(|l| l.group_enrichment);
+        if !ldap_enabled {
+            return false;
+        }
+        match config.backend {
+            #[cfg(feature = "auth-ntlm")]
+            AuthBackend::Ntlm => true,
+            #[cfg(feature = "auth-kerberos")]
+            AuthBackend::Kerberos => true,
+            _ => false,
+        }
+    }
+
+    #[cfg(feature = "auth-ldap")]
+    async fn lookup_ldap_user_attrs(
+        &self,
+        config: &LdapConfig,
+        principal: &str,
+    ) -> Result<LdapUserAttrs, String> {
+        for server in &config.servers {
+            match try_ldap_lookup_server(server, config, principal).await {
+                Ok(attrs) => return Ok(attrs),
+                Err(e) => {
+                    ldap_warn!("LDAP lookup on {} failed: {}", server, e);
+                }
+            }
+        }
+        Err("All LDAP servers failed for group enrichment".to_string())
     }
 
     /// Get cached user
@@ -629,6 +703,99 @@ impl AuthManager {
     }
 }
 
+#[cfg(feature = "auth-ldap")]
+fn ldap_service_bind(ldap: &mut LdapConn, config: &LdapConfig) -> Result<(), String> {
+    if let (Some(bind_dn), Some(bind_password)) = (&config.bind_dn, &config.bind_password) {
+        ldap.simple_bind(bind_dn, bind_password)
+            .map_err(|e| format!("LDAP bind failed: {}", e))?;
+    }
+    Ok(())
+}
+
+#[cfg(feature = "auth-ldap")]
+fn ldap_attrs_from_entry(entry: &SearchEntry) -> LdapUserAttrs {
+    LdapUserAttrs {
+        display_name: entry
+            .attrs
+            .get("cn")
+            .and_then(|v| v.first())
+            .map(|s| s.to_string()),
+        email: entry
+            .attrs
+            .get("mail")
+            .and_then(|v| v.first())
+            .map(|s| s.to_string()),
+        groups: entry
+            .attrs
+            .get("memberOf")
+            .map(|v| v.iter().map(|s| s.to_string()).collect())
+            .unwrap_or_default(),
+    }
+}
+
+#[cfg(feature = "auth-ldap")]
+fn ldap_search_user_entry(
+    ldap: &mut LdapConn,
+    config: &LdapConfig,
+    principal: &str,
+    filter_username: Option<&str>,
+) -> Result<SearchEntry, String> {
+    let account = filter_username.unwrap_or_else(|| ldap_account_name_from_principal(principal));
+    let filter = config.user_filter.replace("{username}", account);
+    let mut entry = ldap_search_first(ldap, config, &filter)?;
+
+    if entry.is_none() && principal.contains('@') {
+        let upn_filter = format!("(userPrincipalName={principal})");
+        entry = ldap_search_first(ldap, config, &upn_filter)?;
+    }
+
+    entry.ok_or_else(|| format!("User not found in LDAP for principal '{principal}'"))
+}
+
+#[cfg(feature = "auth-ldap")]
+fn ldap_search_first(
+    ldap: &mut LdapConn,
+    config: &LdapConfig,
+    filter: &str,
+) -> Result<Option<SearchEntry>, String> {
+    let result = ldap
+        .search(
+            &config.base_dn,
+            Scope::Subtree,
+            filter,
+            vec!["cn", "mail", "memberOf"],
+        )
+        .map_err(|e| format!("LDAP search failed: {}", e))?;
+
+    let (entries, _) = result
+        .success()
+        .map_err(|e| format!("LDAP search error: {}", e))?;
+
+    Ok(entries.first().map(|e| SearchEntry::construct(e.clone())))
+}
+
+#[cfg(feature = "auth-ldap")]
+async fn try_ldap_lookup_server(
+    server: &str,
+    config: &LdapConfig,
+    principal: &str,
+) -> Result<LdapUserAttrs, String> {
+    let settings = LdapConnSettings::new().set_conn_timeout(config.timeout);
+    let server = server.to_string();
+    let config = config.clone();
+    let principal = principal.to_string();
+
+    tokio::task::spawn_blocking(move || {
+        let mut ldap = LdapConn::with_settings(settings, &server)
+            .map_err(|e| format!("LDAP connection failed: {}", e))?;
+        ldap_service_bind(&mut ldap, &config)?;
+        let entry = ldap_search_user_entry(&mut ldap, &config, &principal, None)?;
+        Ok(ldap_attrs_from_entry(&entry))
+    })
+    .await
+    .map_err(|e| format!("LDAP lookup task failed: {}", e))?
+}
+
 #[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]
 fn build_sspi_engine(config: &AuthConfig) -> Option<SspiAuthEngine> {
     use crate::auth_sspi::{KerberosAuthConfig, NtlmAuthConfig};
@@ -692,6 +859,17 @@ mod tests {
 
         let hash3 = CachedUser::hash_password("different");
         assert_ne!(hash1, hash3);
+    }
+
+    #[cfg(feature = "auth-ldap")]
+    #[test]
+    fn ldap_account_name_from_principal_formats() {
+        assert_eq!(ldap_account_name_from_principal("alice"), "alice");
+        assert_eq!(
+            ldap_account_name_from_principal("alice@CORP.EXAMPLE.COM"),
+            "alice"
+        );
+        assert_eq!(ldap_account_name_from_principal("CORP\\alice"), "alice");
     }
 
     #[tokio::test]

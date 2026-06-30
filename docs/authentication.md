@@ -100,7 +100,23 @@ NTLM/Kerberos sessions are also keyed by client IP for the handshake duration.
 
 ### Group Membership (LDAP)
 
-LDAP backend extracts user group membership for ACL and analytics. NTLM/Kerberos populate `username`; optional LDAP enrichment can be added in a future release.
+LDAP password backend (`AUTH_BACKEND=ldap`) loads `memberOf` during bind.
+
+For **NTLM** and **Kerberos**, set the same `LDAP_*` variables plus a **service account** (`LDAP_BIND_DN`, `LDAP_BIND_PASSWORD`). After SSO handshake the proxy resolves groups via LDAP (no user password required):
+
+```bash
+export AUTH_BACKEND=ntlm   # or kerberos
+export LDAP_GROUP_ENRICHMENT=true   # default when LDAP_SERVERS is set
+export LDAP_SERVERS=ldaps://dc.corp.local:636
+export LDAP_BASE_DN=dc=corp,dc=local
+export LDAP_BIND_DN=cn=proxy-ldap,ou=services,dc=corp,dc=local
+export LDAP_BIND_PASSWORD=service_secret
+export LDAP_USER_FILTER="(sAMAccountName={username})"
+```
+
+Build with `auth-ldap` plus your SSO feature (or `auth-all`). Principal `user@REALM` is mapped to `sAMAccountName=user`; UPN lookup is tried as fallback.
+
+Enrichment failures are logged; authentication still succeeds with empty groups.
 
 ### Security
 
@@ -137,7 +153,7 @@ services:
       - KRB5_HOSTNAME=proxy.corp.local
 ```
 
-### Active Directory — NTLM (fallback)
+### Active Directory — NTLM with LDAP groups
 
 ```yaml
 services:
@@ -147,11 +163,18 @@ services:
       - AUTH_BACKEND=ntlm
       - NTLM_DOMAIN=CORP
       - NTLM_AUTH_HELPER=/usr/bin/ntlm_auth --helper-protocol=squid-2.5-ntlmssp
+      - LDAP_SERVERS=ldaps://dc.corp.local:636
+      - LDAP_BASE_DN=dc=corp,dc=local
+      - LDAP_BIND_DN=cn=proxy-ldap,ou=services,dc=corp,dc=local
+      - LDAP_BIND_PASSWORD=${LDAP_SERVICE_PASSWORD}
+      - LDAP_USER_FILTER=(sAMAccountName={username})
 ```
+
+Build with `--features auth-all` (or `auth-ntlm,auth-ldap`).
 
 ## Roadmap
 
 - [x] NTLM auth — [#44](https://github.com/onixus/bsdm-proxy/issues/44)
 - [x] Kerberos / SPNEGO with keytab
-- [ ] LDAP group lookup after NTLM/Kerberos principal resolution
+- [x] LDAP group lookup after NTLM/Kerberos principal resolution
 - [ ] Auth Prometheus metrics (`bsdm_proxy_auth_*`)
