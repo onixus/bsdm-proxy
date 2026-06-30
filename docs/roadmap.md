@@ -22,7 +22,7 @@
 |-----------|--------|-------|------------|
 | [M1 — Foundation](#m1--foundation-v02x) | v0.2.x | Ядро прокси, ACL, категоризация, observability, иерархия | ✅ Done |
 | [M2 — Squid parity](#m2--squid-parity-v03x) | v0.3.x | L2, rate limit, полный ACL, hierarchy Phase 4, NTLM/Kerberos | ✅ Done |
-| [M3 — Retro-search](#m3--retro-search-v04x) | v0.4.x | Индексация, дашборды, поиск по истории | ~30% |
+| [M3 — Retro-search](#m3--retro-search-v04x) | v0.4.x | Индексация, дашборды, поиск по истории | ~55% |
 | [M4 — Threat analytics](#m4--threat-analytics-v05x) | v0.5.x | Rule-based угрозы, алерты, C&C heuristics | ~5% |
 | [M5 — ML security](#m5--ml-security-v10x) | v1.0.x | ML anomaly, phishing ML, C&C beacon detection | ~0% |
 
@@ -112,8 +112,6 @@ gantt
 
 Pipeline Kafka → OpenSearch работает; в v0.3.0+ добавлены `bsdm-events`, `acl_action`, `threat_sources`, события ACL block.
 Остаётся:
-- ILM / retention policy
-- saved searches + dashboard objects (базовые saved searches есть)
 - search API и session correlation
 
 ### Задачи
@@ -122,11 +120,12 @@ Pipeline Kafka → OpenSearch работает; в v0.3.0+ добавлены `b
   - [x] `categories` в indexer (`bsdm-events`)
   - [x] `acl_action`, `threat_sources` в proxy + indexer
   - [x] События при ACL deny/redirect
-  - [ ] OpenSearch ILM / retention policy
+  - [x] OpenSearch ISM / retention policy (14d hot → warm, delete 42d)
 - [x] **OpenSearch Dashboards** в `docker-compose.yml`
 - [ ] **Saved searches / playbooks**
   - [x] Базовые saved searches (user, domain, blocked/threat)
-  - [ ] Dashboard visualizations
+  - [x] Playbook: traffic to domain
+  - [x] Dashboard visualizations + **BSDM HTTP Traffic** dashboard
 - [ ] **Search API** (опционально) — thin REST поверх OpenSearch
 - [ ] **Session correlation** — `session_id`, redirect chains
 - [ ] **Экспорт** — CSV/JSON для SOC
@@ -195,9 +194,9 @@ ML-слой для аномалий, фишинга и C&C.
 | Столп | Сейчас (0.3.0) | После M3 | После M5 |
 |-------|----------------|----------|----------|
 | Squid parity | ~85% | ~85% | ~90% |
-| Ретропоиск | ~30% | ~80% | ~90% |
+| Ретропоиск | ~55% | ~80% | ~90% |
 | ML / C&C / phishing | ~5% | ~10% | ~75% |
-| **Целевое состояние** | **~40%** | **~60%** | **~85%** |
+| **Целевое состояние** | **~48%** | **~60%** | **~85%** |
 
 ---
 
@@ -226,4 +225,4 @@ Issues привязывайте к milestones:
 
 ---
 
-*Последнее обновление: M3 in progress — `bsdm-events`, acl_action/threat_sources, index template*
+*Последнее обновление: M3 — ISM retention + BSDM HTTP Traffic dashboard*

@@ -43,7 +43,7 @@
 | B17 | [#48](https://github.com/onixus/bsdm-proxy/issues/48) | OpenSearch Dashboards in docker-compose | ✅ |
 | B18 | [#49](https://github.com/onixus/bsdm-proxy/issues/49) | Behavioral threat signals (beyond blocklists) | ❌ |
 | B19 | [#50](https://github.com/onixus/bsdm-proxy/issues/50) | Alerting pipeline to SIEM/webhook | ❌ |
-| B20 | [#51](https://github.com/onixus/bsdm-proxy/issues/51) | Security analytics dashboards (historical) | ❌ |
+| B20 | [#51](https://github.com/onixus/bsdm-proxy/issues/51) | Security analytics dashboards (historical) | 🔄 |
 
 ## Structural
 
