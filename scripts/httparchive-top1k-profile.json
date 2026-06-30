@@ -1,0 +1,125 @@
+{
+  "schema_version": 1,
+  "lens": "top1k",
+  "period": {
+    "start": "2023-07-01",
+    "end": "2024-07-01"
+  },
+  "sources": [
+    "https://httparchive.org/reports/page-weight?lens=top1k&start=2023_07_01&end=2024_07_01&view=grid",
+    "https://almanac.httparchive.org/en/2024/page-weight"
+  ],
+  "notes": "Median transfer sizes and request counts for the HTTP Archive Top 1,000 lens (Jul 2023–Jul 2024). Byte totals match Web Almanac 2024 medians (October 2024 crawl); Top 1k grid tracks the same metrics on the popularity subset.",
+  "devices": {
+    "desktop": {
+      "total_bytes": 2713088,
+      "total_requests": 71,
+      "percentiles_total_bytes": {
+        "p10": 562176,
+        "p25": 1165312,
+        "p50": 2208768,
+        "p75": 4269056,
+        "p90": 8576000
+      },
+      "resource_types": [
+        {
+          "type": "html",
+          "requests": 2,
+          "bytes": 18432,
+          "mime": "text/html",
+          "extension": "html"
+        },
+        {
+          "type": "css",
+          "requests": 8,
+          "bytes": 79872,
+          "mime": "text/css",
+          "extension": "css"
+        },
+        {
+          "type": "js",
+          "requests": 24,
+          "bytes": 627712,
+          "mime": "application/javascript",
+          "extension": "js"
+        },
+        {
+          "type": "image",
+          "requests": 18,
+          "bytes": 1079296,
+          "mime": "image/jpeg",
+          "extension": "jpg"
+        },
+        {
+          "type": "font",
+          "requests": 4,
+          "bytes": 134144,
+          "mime": "font/woff2",
+          "extension": "woff2"
+        },
+        {
+          "type": "other",
+          "requests": 15,
+          "bytes": 773632,
+          "mime": "application/octet-stream",
+          "extension": "bin"
+        }
+      ]
+    },
+    "mobile": {
+      "total_bytes": 2366464,
+      "total_requests": 66,
+      "percentiles_total_bytes": {
+        "p10": 481280,
+        "p25": 1018880,
+        "p50": 1984512,
+        "p75": 3852288,
+        "p90": 7864320
+      },
+      "resource_types": [
+        {
+          "type": "html",
+          "requests": 2,
+          "bytes": 18432,
+          "mime": "text/html",
+          "extension": "html"
+        },
+        {
+          "type": "css",
+          "requests": 8,
+          "bytes": 74752,
+          "mime": "text/css",
+          "extension": "css"
+        },
+        {
+          "type": "js",
+          "requests": 22,
+          "bytes": 571392,
+          "mime": "application/javascript",
+          "extension": "js"
+        },
+        {
+          "type": "image",
+          "requests": 16,
+          "bytes": 921600,
+          "mime": "image/jpeg",
+          "extension": "jpg"
+        },
+        {
+          "type": "font",
+          "requests": 3,
+          "bytes": 113664,
+          "mime": "font/woff2",
+          "extension": "woff2"
+        },
+        {
+          "type": "other",
+          "requests": 15,
+          "bytes": 666624,
+          "mime": "application/octet-stream",
+          "extension": "bin"
+        }
+      ]
+    }
+  }
+}

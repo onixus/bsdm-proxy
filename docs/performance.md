@@ -69,6 +69,15 @@ export CURL_PROXY_USER='user:pass'           # альтернатива
 
 Переменные: `OHA_CONN_HIT`, `OHA_CONN_MISS`, `OHA_DURATION` (по умолчанию = wrk).
 
+### HTTP Archive Top 1k page load
+
+```bash
+./scripts/run-httparchive-benchmark.sh
+cargo test -p bsdm-proxy-e2e --test httparchive
+```
+
+См. [benchmarks-httparchive.md](benchmarks-httparchive.md).
+
 ## Профилирование
 
 ```bash

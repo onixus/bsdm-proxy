@@ -1,5 +1,11 @@
 //! Shared harness for BSDM-Proxy smoke and E2E tests.
 
+pub mod httparchive;
+
+pub use httparchive::{
+    expand_device, load_profile, validate_profile, HttpArchiveProfile, HttpArchiveResource,
+};
+
 use anyhow::{bail, Context, Result};
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
@@ -42,6 +48,8 @@ pub struct HarnessConfig {
     /// Trust workspace test CA for upstream TLS (sets UPSTREAM_CA_CERT in proxy).
     pub upstream_ca_cert: bool,
     pub kafka_brokers: Option<String>,
+    /// When set, spawn HTTP Archive median-page mock upstream (`desktop` or `mobile`).
+    pub httparchive_device: Option<String>,
     /// Additional environment variables passed to the proxy process.
     pub extra_env: HashMap<String, String>,
 }
@@ -82,7 +90,9 @@ impl ProxyHarness {
         let workspace = workspace_path("");
         ensure_test_ca()?;
 
-        let upstream_task = if let Some(port) = config.https_upstream_port {
+        let upstream_task = if let Some(device) = &config.httparchive_device {
+            spawn_httparchive_upstream(device).await?
+        } else if let Some(port) = config.https_upstream_port {
             spawn_mock_https_upstream(port).await?
         } else {
             spawn_mock_upstream().await?
@@ -320,6 +330,72 @@ pub async fn spawn_mock_upstream() -> Result<UpstreamServer> {
                     Ok::<_, hyper::Error>(Response::new(Full::new(Bytes::from(body))))
                 });
                 let _ = http1::Builder::new().serve_connection(io, service).await;
+            });
+        }
+    });
+
+    Ok(UpstreamServer { port, handle })
+}
+
+pub async fn spawn_httparchive_upstream(device: &str) -> Result<UpstreamServer> {
+    use httparchive::{body_for, expand_device, load_profile, HttpArchiveResource};
+
+    let profile = load_profile()?;
+    let resources = expand_device(&profile, device)?;
+    let routes: Arc<HashMap<String, (String, Bytes)>> = Arc::new(
+        resources
+            .into_iter()
+            .map(|r: HttpArchiveResource| {
+                let body = Bytes::from(body_for(&r));
+                (r.path, (r.mime, body))
+            })
+            .collect(),
+    );
+
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .context("bind httparchive mock upstream")?;
+    let port = listener.local_addr()?.port();
+
+    let handle = tokio::spawn(async move {
+        loop {
+            let Ok((stream, _)) = listener.accept().await else {
+                break;
+            };
+            let routes = Arc::clone(&routes);
+            tokio::spawn(async move {
+                let io = TokioIo::new(stream);
+                let service = service_fn(move |req: Request<Incoming>| {
+                    let routes = Arc::clone(&routes);
+                    async move {
+                        let path = req.uri().path().to_string();
+                        if path == "/ping" {
+                            return Ok::<_, hyper::Error>(Response::new(Full::new(Bytes::from(
+                                "pong",
+                            ))));
+                        }
+                        let Some((mime, body)) = routes.get(&path) else {
+                            return Ok(Response::builder()
+                                .status(404)
+                                .body(Full::new(Bytes::new()))
+                                .unwrap());
+                        };
+                        let mut resp = Response::new(Full::new(body.clone()));
+                        *resp.status_mut() = hyper::StatusCode::OK;
+                        resp.headers_mut().insert(
+                            hyper::header::CONTENT_TYPE,
+                            mime.parse().unwrap(),
+                        );
+                        resp.headers_mut().insert(
+                            hyper::header::CACHE_CONTROL,
+                            "public, max-age=3600".parse().unwrap(),
+                        );
+                        Ok(resp)
+                    }
+                });
+                let _ = http1::Builder::new()
+                    .serve_connection(io, service)
+                    .await;
             });
         }
     });
