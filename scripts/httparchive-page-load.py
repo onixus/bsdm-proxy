@@ -17,6 +17,28 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from httparchive_profile import device_summary, expand_device, load_profile, validate_profile  # noqa: E402
 
 
+def cache_label(headers) -> str:
+    """Normalize cache status from BSDM (x-cache-status) or Squid (Cache-Status / X-Cache)."""
+    xcs = headers.get("x-cache-status")
+    if xcs:
+        return xcs
+    cache_status = headers.get("Cache-Status") or headers.get("cache-status")
+    if cache_status:
+        lower = cache_status.lower()
+        if "hit" in lower:
+            return "HIT"
+        if "miss" in lower:
+            return "MISS"
+    x_cache = headers.get("X-Cache") or headers.get("x-cache")
+    if x_cache:
+        lower = x_cache.lower()
+        if "hit" in lower:
+            return "HIT"
+        if "miss" in lower:
+            return "MISS"
+    return "-"
+
+
 def fetch(
     proxy: str,
     url: str,
@@ -36,7 +58,7 @@ def fetch(
     with opener.open(req, timeout=timeout) as resp:
         data = resp.read()
         elapsed = time.perf_counter() - start
-        cache = resp.headers.get("x-cache-status", "-")
+        cache = cache_label(resp.headers)
         return cache, len(data), elapsed
 
 
