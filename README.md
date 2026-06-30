@@ -187,6 +187,7 @@ CA для MITM читается из `/certs/ca.key` и `/certs/ca.crt` (fallbac
 | `ACL_RULES_PATH` | Путь к JSON с правилами |
 | `ACL_AUTO_RELOAD` | Автоперезагрузка правил |
 | `ACL_RELOAD_INTERVAL` | Интервал перезагрузки (сек) |
+| `ACL_API_TOKEN` | Bearer-токен для REST API `/api/acl/*` (опционально) |
 | `CATEGORIZATION_ENABLED` | Категоризация URL |
 | `SHALLALIST_PATH` | Путь к Shallalist |
 | `CUSTOM_DB_PATH` | Пользовательская БД категорий |
@@ -367,7 +368,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 - [ ] NTLM auth
 - [ ] Hierarchy Phase 4 (discovery, digest, HTCP)
 - [x] Negative caching / cache refresh (B22) — `Cache-Control`, ETag revalidate, 403/404 negative cache
-- [ ] REST ACL API (`/api/acl/*`)
+- [x] REST ACL API (`/api/acl/*` на порту metrics)
 
 ### M3–M5
 

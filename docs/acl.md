@@ -435,6 +435,19 @@ curl http://localhost:9090/api/acl/rules
 curl -X POST http://localhost:9090/api/acl/reload
 ```
 
+Responses:
+- `GET /api/acl/rules` → `{ "count", "default_action", "rules": [...] }`
+- `POST /api/acl/rules` → `201 Created` with rule JSON (or `409` if `id` exists)
+- `POST /api/acl/reload` → `{ "status": "reloaded", "count": N }` (requires `ACL_RULES_PATH`)
+
+When `ACL_API_TOKEN` is set, pass `Authorization: Bearer <token>` on all `/api/acl/*` requests.
+
+The API is available when `ACL_ENABLED=true` on the metrics port (`METRICS_PORT`, default `9090`).
+
+**Security:** in production set `ACL_API_TOKEN` or restrict network access to `METRICS_PORT` (the API listens on `0.0.0.0`).
+
+**Persistence:** `POST /api/acl/rules` updates the in-memory engine only; rules are not written to `ACL_RULES_PATH`. A subsequent `POST /api/acl/reload` (or `ACL_AUTO_RELOAD`) replaces in-memory rules from the file and drops API-added rules. To make changes permanent, edit the JSON file and call reload.
+
 ---
 
 **See also:**

@@ -1,6 +1,8 @@
 //! BSDM-Proxy library
 
 pub mod acl;
+pub mod acl_api;
+pub mod acl_config;
 pub mod auth;
 pub mod cache;
 pub mod cache_compress;
@@ -26,6 +28,8 @@ pub mod upstream;
 
 // Re-export commonly used types
 pub use acl::{AclAction, AclDecision, AclEngine, AclRule};
+pub use acl_api::{AclApiConfig, AclApiState};
+pub use acl_config::{load_acl_engine_from_file, parse_acl_action};
 pub use auth::{AuthBackend, AuthConfig, AuthManager, UserInfo};
 pub use cache::{CacheConfig, CachedResponse};
 pub use cache_compress::{BodyEncoding, CompressionConfig};
