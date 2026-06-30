@@ -83,8 +83,10 @@ def main() -> int:
                     total_bytes += nbytes
                     if cache == "HIT":
                         hits += 1
-                    elif cache == "MISS":
+                    elif cache in ("MISS", "NEGATIVE_MISS", "BYPASS"):
                         misses += 1
+                    elif cache in ("-", ""):
+                        misses += 1  # proxy omits header on first upstream fetch
                 except urllib.error.URLError as exc:
                     print(f"FAIL {url}: {exc}", file=sys.stderr)
                     return 1
@@ -101,9 +103,11 @@ def main() -> int:
     print(f"Bytes:        {total_bytes} ({total_bytes / 1_048_576:.2f} MiB)")
     if total_bytes != expected_bytes:
         print(
-            f"WARNING:      expected {expected_bytes} bytes — check upstream mock on {upstream}",
+            f"ERROR:       expected {expected_bytes} bytes, got {total_bytes} "
+            f"— check upstream mock on {upstream}",
             file=sys.stderr,
         )
+        return 1
     print(f"Goodput:      {mbps:.1f} Mbit/s")
     print(f"Cache HIT:    {hits}")
     print(f"Cache MISS:   {misses}")

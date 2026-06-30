@@ -62,7 +62,10 @@ fn split_bytes(total: u64, count: u32) -> Vec<u64> {
         .collect()
 }
 
-pub fn expand_device(profile: &HttpArchiveProfile, device: &str) -> Result<Vec<HttpArchiveResource>> {
+pub fn expand_device(
+    profile: &HttpArchiveProfile,
+    device: &str,
+) -> Result<Vec<HttpArchiveResource>> {
     let dev = profile
         .devices
         .get(device)
@@ -73,10 +76,7 @@ pub fn expand_device(profile: &HttpArchiveProfile, device: &str) -> Result<Vec<H
         let sizes = split_bytes(group.bytes, group.requests);
         for (idx, size) in sizes.into_iter().enumerate() {
             let rid = format!("{}-{:02}", group.resource_type, idx);
-            let path = format!(
-                "/httparchive/{device}/{seq:03}-{rid}.{}",
-                group.extension
-            );
+            let path = format!("/httparchive/{device}/{seq:03}-{rid}.{}", group.extension);
             resources.push(HttpArchiveResource {
                 resource_id: rid,
                 resource_type: group.resource_type.clone(),
@@ -92,7 +92,10 @@ pub fn expand_device(profile: &HttpArchiveProfile, device: &str) -> Result<Vec<H
 
 pub fn validate_profile(profile: &HttpArchiveProfile) -> Result<()> {
     if profile.schema_version != 1 {
-        bail!("unsupported httparchive profile schema {}", profile.schema_version);
+        bail!(
+            "unsupported httparchive profile schema {}",
+            profile.schema_version
+        );
     }
     if profile.lens != "top1k" {
         bail!("expected top1k lens, got {}", profile.lens);
@@ -118,10 +121,7 @@ pub fn validate_profile(profile: &HttpArchiveProfile) -> Result<()> {
 }
 
 pub fn body_for(resource: &HttpArchiveResource) -> Vec<u8> {
-    let prefix = format!(
-        "ha:{}:{}:",
-        resource.resource_type, resource.size_bytes
-    );
+    let prefix = format!("ha:{}:{}:", resource.resource_type, resource.size_bytes);
     let mut body = prefix.into_bytes();
     if body.len() < resource.size_bytes {
         body.resize(resource.size_bytes, 0);

@@ -1,8 +1,6 @@
 //! HTTP Archive Top 1k median page load — cache behaviour at realistic sizes.
 
-use bsdm_proxy_e2e::{
-    expand_device, load_profile, proxy_test_guard, HarnessConfig, ProxyHarness,
-};
+use bsdm_proxy_e2e::{expand_device, load_profile, proxy_test_guard, HarnessConfig, ProxyHarness};
 
 #[tokio::test]
 async fn e2e_httparchive_desktop_page_cold_then_warm() {

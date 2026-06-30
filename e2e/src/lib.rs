@@ -382,10 +382,8 @@ pub async fn spawn_httparchive_upstream(device: &str) -> Result<UpstreamServer> 
                         };
                         let mut resp = Response::new(Full::new(body.clone()));
                         *resp.status_mut() = hyper::StatusCode::OK;
-                        resp.headers_mut().insert(
-                            hyper::header::CONTENT_TYPE,
-                            mime.parse().unwrap(),
-                        );
+                        resp.headers_mut()
+                            .insert(hyper::header::CONTENT_TYPE, mime.parse().unwrap());
                         resp.headers_mut().insert(
                             hyper::header::CACHE_CONTROL,
                             "public, max-age=3600".parse().unwrap(),
@@ -393,9 +391,7 @@ pub async fn spawn_httparchive_upstream(device: &str) -> Result<UpstreamServer> 
                         Ok(resp)
                     }
                 });
-                let _ = http1::Builder::new()
-                    .serve_connection(io, service)
-                    .await;
+                let _ = http1::Builder::new().serve_connection(io, service).await;
             });
         }
     });
