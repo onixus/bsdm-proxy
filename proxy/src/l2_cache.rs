@@ -70,7 +70,7 @@ impl CachedResponseWire {
         Some(Self {
             status: value.status,
             headers,
-            body_b64: B64.encode(value.body.as_ref()),
+            body_b64: B64.encode(value.stored_body_bytes().as_ref()),
             body_encoding: if value.body_encoding == BodyEncoding::Raw {
                 None
             } else {
@@ -102,7 +102,7 @@ impl CachedResponseWire {
         Some(CachedResponse {
             status: self.status,
             headers,
-            body,
+            body: crate::cache_body::CachedBody::inline(body),
             body_encoding,
             uncompressed_len,
             cached_at: UNIX_EPOCH + Duration::from_secs(self.cached_at_secs),
@@ -222,7 +222,7 @@ mod tests {
         let original = CachedResponse {
             status: 200,
             headers: Arc::from([(Arc::from("content-type"), Arc::from("text/plain"))]),
-            body: Bytes::from_static(b"hello"),
+            body: crate::cache_body::CachedBody::inline(Bytes::from_static(b"hello")),
             body_encoding: BodyEncoding::Raw,
             uncompressed_len: 5,
             cached_at: SystemTime::now(),
@@ -235,7 +235,7 @@ mod tests {
         let json = encode_cached_response(&original).unwrap();
         let decoded = decode_cached_response(&json).unwrap();
         assert_eq!(decoded.status, 200);
-        assert_eq!(decoded.body, original.body);
+        assert_eq!(decoded.stored_body_bytes(), original.stored_body_bytes());
         assert_eq!(decoded.headers.len(), 1);
     }
 
@@ -257,6 +257,8 @@ mod tests {
             body.clone(),
             Duration::from_secs(3600),
             &compression,
+            usize::MAX,
+            std::env::temp_dir().join("bsdm-test-spill").as_path(),
             None,
             None,
             false,
@@ -282,7 +284,7 @@ mod tests {
         let cached = CachedResponse {
             status: 200,
             headers: Arc::from([]),
-            body: Bytes::new(),
+            body: crate::cache_body::CachedBody::inline(Bytes::new()),
             body_encoding: BodyEncoding::Raw,
             uncompressed_len: 0,
             cached_at: SystemTime::now(),

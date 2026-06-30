@@ -17,12 +17,12 @@
 
 ## Рекомендуемые лимиты кеша
 
-| Профиль | `CACHE_CAPACITY` | `MAX_CACHE_BODY_SIZE` | `CACHE_TTL` | `CACHE_COMPRESSION` | `REDIS_L2` |
-|---------|------------------|----------------------|-------------|---------------------|------------|
-| Lab / dev (defaults) | 10 000 | 10 MB | 3600 | off | off |
-| Малый prod | 50 000 | 4 MB | 3600 | zstd | optional |
-| **Corporate medium** | **100 000** | **2 MB** | **7200** | **zstd** | **on** |
-| Экономия RAM | 5 000 | 512 KB | 600 | off | off |
+| Профиль | `CACHE_CAPACITY` | `MAX_CACHE_BODY_SIZE` | `CACHE_TTL` | `CACHE_COMPRESSION` | `REDIS_L2` | `CACHE_SHARDS` | `CACHE_SPILL_THRESHOLD` |
+|---------|------------------|----------------------|-------------|---------------------|------------|----------------|-------------------------|
+| Lab / dev (defaults) | 10 000 | 10 MB | 3600 | off | off | 16 | 256 KB |
+| Малый prod | 50 000 | 4 MB | 3600 | zstd | optional | 16 | 256 KB |
+| **Corporate medium** | **100 000** | **2 MB** | **7200** | **zstd** | **on** | **16–32** | **256 KB** |
+| Экономия RAM | 5 000 | 512 KB | 600 | off | off | 8 | 128 KB |
 
 ```bash
 # Corporate medium — см. packaging/config/bsdm-proxy.env.example
@@ -31,6 +31,8 @@ MAX_CACHE_BODY_SIZE=2097152
 CACHE_TTL_SECONDS=7200
 CACHE_COMPRESSION=zstd
 CACHE_COMPRESS_MIN_BYTES=1048576
+CACHE_SHARDS=16
+CACHE_SPILL_THRESHOLD_BYTES=262144
 REDIS_L2_ENABLED=true
 ```
 

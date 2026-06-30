@@ -342,8 +342,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("⏱️  Rate limit: disabled");
     }
     info!(
-        "📦 Cache: {} entries, TTL: {:?}, max body: {}MB",
+        "📦 Cache: capacity={}, shards={}, spill≥{}KB, TTL: {:?}, max body: {}MB",
         service.http_cache().capacity(),
+        service.http_cache().shard_count(),
+        cache_config.spill_threshold_bytes / 1024,
         cache_config.default_ttl,
         cache_config.max_body_size / 1024 / 1024
     );

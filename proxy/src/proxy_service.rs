@@ -10,7 +10,6 @@ use hyper::header::{
 use hyper::{Request, Response, StatusCode};
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
-use quick_cache::sync::Cache;
 use rdkafka::producer::FutureProducer;
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -37,6 +36,7 @@ use crate::pipeline::{
     create_kafka_producer, flush_kafka, new_event_id, send_to_kafka_async, CacheEvent,
 };
 use crate::rate_limit::{RateLimitViolation, RateLimiter};
+use crate::sharded_cache::HttpL1Cache;
 use crate::tls::CertCache;
 use crate::upstream::{build_upstream_https_connector, UpstreamTlsConfig};
 
@@ -47,7 +47,7 @@ pub struct ProxyPolicy {
 
 pub struct ProxyService {
     pub(crate) cert_cache: CertCache,
-    http_cache: Arc<Cache<Arc<str>, CachedResponse>>,
+    http_cache: Arc<HttpL1Cache>,
     l2_cache: Option<RedisL2Cache>,
     cache_config: CacheConfig,
     kafka_producer: Option<Arc<FutureProducer>>,
@@ -66,7 +66,7 @@ pub struct ProxyService {
 }
 
 impl ProxyService {
-    pub fn http_cache(&self) -> Arc<Cache<Arc<str>, CachedResponse>> {
+    pub fn http_cache(&self) -> Arc<HttpL1Cache> {
         self.http_cache.clone()
     }
 
@@ -101,7 +101,10 @@ impl ProxyService {
     ) -> Self {
         let kafka_producer = kafka_brokers.as_deref().and_then(create_kafka_producer);
 
-        let http_cache = Arc::new(Cache::new(cache_config.capacity));
+        let http_cache = Arc::new(HttpL1Cache::new(
+            cache_config.capacity,
+            cache_config.shard_count,
+        ));
 
         let https = build_upstream_https_connector(&upstream_tls)
             .expect("failed to build upstream HTTPS connector");
@@ -914,6 +917,8 @@ impl ProxyService {
                         body_bytes.clone(),
                         store_decision.ttl,
                         &self.cache_config.compression,
+                        self.cache_config.spill_threshold_bytes,
+                        &self.cache_config.spill_dir,
                         store_decision.etag,
                         store_decision.last_modified,
                         store_decision.is_negative,

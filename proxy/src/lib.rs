@@ -7,6 +7,7 @@ pub mod auth;
 #[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]
 pub mod auth_sspi;
 pub mod cache;
+pub mod cache_body;
 pub mod cache_compress;
 pub mod cache_digest;
 pub mod cache_freshness;
@@ -28,6 +29,7 @@ pub mod proxy_service;
 pub mod rate_limit;
 pub mod selection;
 pub mod server;
+pub mod sharded_cache;
 pub mod tls;
 pub mod upstream;
 
@@ -41,6 +43,7 @@ pub use auth::KerberosConfig;
 pub use auth::NtlmConfig;
 pub use auth::{AuthBackend, AuthConfig, AuthManager, ProxyAuthOutcome, UserInfo};
 pub use cache::{CacheConfig, CachedResponse};
+pub use cache_body::CachedBody;
 pub use cache_compress::{BodyEncoding, CompressionConfig};
 pub use cache_digest::DigestRegistry;
 pub use cache_key::http_cache_key;
@@ -63,6 +66,7 @@ pub use proxy_service::{ProxyPolicy, ProxyService};
 pub use rate_limit::{RateLimitConfig, RateLimitViolation, RateLimiter};
 pub use selection::{parse_strategy, SelectionStrategy};
 pub use server::{handle_connection, metrics_server, wait_shutdown_signal};
+pub use sharded_cache::HttpL1Cache;
 pub use tls::CertCache;
 pub use upstream::{build_upstream_https_connector, UpstreamTlsConfig};
 
