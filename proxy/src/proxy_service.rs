@@ -23,6 +23,7 @@ use crate::acl::{AclAction, AclDecision, AclEngine};
 use crate::auth::{AuthManager, UserInfo};
 use crate::cache::{CacheConfig, CachedResponse, CACHEABLE_METHODS};
 use crate::cache_freshness::{evaluate_store, refresh_ttl_from_headers};
+use crate::cache_digest::DigestRegistry;
 use crate::cache_key::http_cache_key;
 use crate::categorization::{CategorizationEngine, Category};
 use crate::hierarchy::{HierarchyManager, HierarchyResult};
@@ -59,6 +60,7 @@ pub struct ProxyService {
     acl_engine: Option<Arc<RwLock<AclEngine>>>,
     categorization: Option<Arc<CategorizationEngine>>,
     hierarchy: Option<Arc<HierarchyManager>>,
+    digest_registry: Option<Arc<DigestRegistry>>,
     rate_limiter: Arc<RateLimiter>,
     perf: PerfConfig,
 }
@@ -92,6 +94,7 @@ impl ProxyService {
         auth: Option<Arc<AuthManager>>,
         policy: &ProxyPolicy,
         hierarchy: Option<Arc<HierarchyManager>>,
+        digest_registry: Option<Arc<DigestRegistry>>,
         rate_limit_config: crate::rate_limit::RateLimitConfig,
         upstream_tls: UpstreamTlsConfig,
         perf: PerfConfig,
@@ -122,6 +125,7 @@ impl ProxyService {
             acl_engine: policy.acl_engine.clone(),
             categorization: policy.categorization.clone(),
             hierarchy,
+            digest_registry,
             rate_limiter: Arc::new(RateLimiter::new(rate_limit_config)),
             perf,
         }
@@ -181,6 +185,13 @@ impl ProxyService {
     fn store_in_l1_and_l2(&self, cache_key: Arc<str>, cached_response: CachedResponse) {
         self.http_cache
             .insert(cache_key.clone(), cached_response.clone());
+        if let Some(registry) = &self.digest_registry {
+            let key = cache_key.to_string();
+            let reg = registry.clone();
+            tokio::spawn(async move {
+                reg.insert_cache_key(&key).await;
+            });
+        }
         if let Some(l2) = &self.l2_cache {
             let l2 = l2.clone();
             tokio::spawn(async move {

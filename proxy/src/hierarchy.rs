@@ -3,7 +3,10 @@
 //! Coordinates request flow through cache hierarchy:
 //! Local cache → Siblings (ICP) → Parents → Origin
 
+use crate::cache_digest::DigestRegistry;
+use crate::htcp::{HtcpClient, HtcpOpcode};
 use crate::icp::{IcpClient, IcpOpcode};
+use crate::cache_key::http_cache_key;
 use crate::metrics::Metrics;
 use crate::peers::{CachePeer, PeerRegistry};
 use crate::selection::SelectionStrategy;
@@ -37,6 +40,10 @@ pub struct HierarchyConfig {
     pub max_sibling_queries: usize,
     /// Retry parent on failure
     pub retry_parents: bool,
+    /// Use HTCP instead of ICP for sibling queries
+    pub use_htcp: bool,
+    /// Use cache digests to skip sibling ICP/HTCP queries
+    pub digest_enabled: bool,
 }
 
 impl Default for HierarchyConfig {
@@ -47,6 +54,8 @@ impl Default for HierarchyConfig {
             parent_timeout: Duration::from_secs(5),
             max_sibling_queries: 10,
             retry_parents: true,
+            use_htcp: false,
+            digest_enabled: true,
         }
     }
 }
@@ -57,6 +66,9 @@ pub struct HierarchyManager {
     peer_registry: PeerRegistry,
     selection_strategy: Box<dyn SelectionStrategy>,
     icp_client: Option<Arc<IcpClient>>,
+    htcp_client: Option<Arc<HtcpClient>>,
+    digest_registry: Option<Arc<DigestRegistry>>,
+    htcp_peer_port: u16,
     metrics: Option<Arc<Metrics>>,
 }
 
@@ -71,8 +83,25 @@ impl HierarchyManager {
             peer_registry,
             selection_strategy,
             icp_client: None,
+            htcp_client: None,
+            digest_registry: None,
+            htcp_peer_port: 4827,
             metrics: None,
         }
+    }
+
+    pub fn with_digest_registry(mut self, registry: Arc<DigestRegistry>) -> Self {
+        self.digest_registry = Some(registry);
+        self
+    }
+
+    pub fn with_htcp_peer_port(mut self, port: u16) -> Self {
+        self.htcp_peer_port = port;
+        self
+    }
+
+    pub fn peer_registry(&self) -> PeerRegistry {
+        self.peer_registry.clone()
     }
 
     pub fn with_metrics(mut self, metrics: Arc<Metrics>) -> Self {
@@ -80,11 +109,22 @@ impl HierarchyManager {
         self
     }
 
-    /// Initialize ICP client
+    /// Initialize ICP client (skipped when HTCP is selected for sibling queries).
     pub async fn init_icp(&mut self, bind_addr: &str) -> Result<(), std::io::Error> {
+        if self.config.use_htcp {
+            return Ok(());
+        }
         let client = IcpClient::new(bind_addr).await?;
         self.icp_client = Some(Arc::new(client));
         info!("ICP client initialized on {}", bind_addr);
+        Ok(())
+    }
+
+    /// Initialize HTCP client for sibling queries.
+    pub async fn init_htcp(&mut self, bind_addr: &str) -> Result<(), std::io::Error> {
+        let client = HtcpClient::new(bind_addr).await?;
+        self.htcp_client = Some(Arc::new(client));
+        info!("HTCP client initialized on {}", bind_addr);
         Ok(())
     }
 
@@ -147,16 +187,54 @@ impl HierarchyManager {
         }
     }
 
-    /// Query sibling caches via ICP
+    /// Query sibling caches via ICP or HTCP (with optional cache-digest filtering).
     async fn query_siblings(&self, url: &str) -> Option<Arc<CachePeer>> {
-        let icp_client = self.icp_client.as_ref()?;
         let siblings = self.peer_registry.sibling_caches().await;
-
         if siblings.is_empty() {
             return None;
         }
 
-        // Collect sibling addresses with ICP ports
+        let cache_key = http_cache_key("GET", url);
+        let mut candidates: Vec<Arc<CachePeer>> = Vec::new();
+        let mut digest_skipped = 0usize;
+
+        for sibling in siblings {
+            if self.config.digest_enabled {
+                if let Some(registry) = &self.digest_registry {
+                    if let Some(false) =
+                        registry.peer_might_have_url(&sibling.id, cache_key.as_ref()).await
+                    {
+                        digest_skipped += 1;
+                        continue;
+                    }
+                }
+            }
+            candidates.push(sibling);
+        }
+
+        if let Some(metrics) = &self.metrics {
+            for _ in 0..digest_skipped {
+                metrics.record_hierarchy_digest_skip();
+            }
+        }
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        if self.config.use_htcp {
+            return self.query_siblings_htcp(url, &candidates).await;
+        }
+        self.query_siblings_icp(url, &candidates).await
+    }
+
+    async fn query_siblings_icp(
+        &self,
+        url: &str,
+        siblings: &[Arc<CachePeer>],
+    ) -> Option<Arc<CachePeer>> {
+        let icp_client = self.icp_client.as_ref()?;
+
         let sibling_addrs: Vec<_> = siblings
             .iter()
             .filter_map(|s| {
@@ -178,13 +256,50 @@ impl HierarchyManager {
             url
         );
 
-        // Query siblings in parallel
         let results = icp_client
             .query_peers(&sibling_addrs, url, self.config.icp_timeout)
             .await;
 
+        self.process_sibling_results(siblings, &results, IcpOpcode::Hit)
+    }
+
+    async fn query_siblings_htcp(
+        &self,
+        url: &str,
+        siblings: &[Arc<CachePeer>],
+    ) -> Option<Arc<CachePeer>> {
+        let htcp_client = self.htcp_client.as_ref()?;
+        let sibling_addrs: Vec<_> = siblings
+            .iter()
+            .filter_map(|s| format!("{}:{}", s.config.host, self.htcp_peer_port).parse().ok())
+            .take(self.config.max_sibling_queries)
+            .collect();
+
+        if sibling_addrs.is_empty() {
+            return None;
+        }
+
+        debug!(
+            "Querying {} siblings via HTCP for {}",
+            sibling_addrs.len(),
+            url
+        );
+
+        let results = htcp_client
+            .query_peers(&sibling_addrs, url, self.config.icp_timeout)
+            .await;
+
+        self.map_htcp_results(siblings, &results)
+    }
+
+    fn process_sibling_results(
+        &self,
+        siblings: &[Arc<CachePeer>],
+        results: &[crate::icp::IcpResult],
+        hit_opcode: IcpOpcode,
+    ) -> Option<Arc<CachePeer>> {
         let responded = results.len();
-        for result in &results {
+        for result in results {
             if let Some(metrics) = &self.metrics {
                 let outcome = match result.response {
                     IcpOpcode::Hit => "hit",
@@ -195,18 +310,16 @@ impl HierarchyManager {
                 metrics.record_hierarchy_icp_query(outcome);
             }
         }
-        let unanswered = sibling_addrs.len().saturating_sub(responded);
         if let Some(metrics) = &self.metrics {
-            for _ in 0..unanswered {
+            let total = siblings.len().min(self.config.max_sibling_queries);
+            for _ in 0..total.saturating_sub(responded) {
                 metrics.record_hierarchy_icp_query("timeout");
             }
         }
 
-        // Find first HIT
         for result in results {
-            if result.response == IcpOpcode::Hit {
-                // Find corresponding peer
-                for sibling in &siblings {
+            if result.response == hit_opcode {
+                for sibling in siblings {
                     if let Some(icp_port) = sibling.config.icp_port {
                         let addr = format!("{}:{}", sibling.config.host, icp_port);
                         if addr == result.peer.to_string() {
@@ -217,7 +330,37 @@ impl HierarchyManager {
                 }
             }
         }
+        None
+    }
 
+    fn map_htcp_results(
+        &self,
+        siblings: &[Arc<CachePeer>],
+        results: &[crate::htcp::HtcpResult],
+    ) -> Option<Arc<CachePeer>> {
+        for result in results {
+            if let Some(metrics) = &self.metrics {
+                let outcome = match result.response {
+                    HtcpOpcode::Hit => "hit",
+                    HtcpOpcode::Miss => "miss",
+                    HtcpOpcode::Error => "error",
+                    _ => "error",
+                };
+                metrics.record_hierarchy_icp_query(outcome);
+            }
+        }
+
+        for result in results {
+            if result.response == HtcpOpcode::Hit {
+                for sibling in siblings {
+                    let addr = format!("{}:{}", sibling.config.host, self.htcp_peer_port);
+                    if addr == result.peer.to_string() {
+                        sibling.update_rtt(result.latency);
+                        return Some(sibling.clone());
+                    }
+                }
+            }
+        }
         None
     }
 

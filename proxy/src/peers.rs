@@ -230,6 +230,19 @@ impl PeerRegistry {
         peer
     }
 
+    /// Add or update a sibling peer (used by multicast peer discovery).
+    pub async fn upsert_sibling(&self, config: PeerConfig) -> Arc<CachePeer> {
+        assert_eq!(
+            config.peer_type,
+            PeerType::Sibling,
+            "upsert_sibling requires PeerType::Sibling"
+        );
+        let peer = Arc::new(CachePeer::new(config));
+        let id = peer.id.clone();
+        let mut peers = self.peers.write().await;
+        peers.entry(id).or_insert(peer).clone()
+    }
+
     /// Remove a peer from the registry
     pub async fn remove_peer(&self, id: &str) -> bool {
         self.peers.write().await.remove(id).is_some()

@@ -67,6 +67,7 @@ pub struct Metrics {
     pub hierarchy_resolutions_total: CounterVec,
     pub hierarchy_peer_requests_total: CounterVec,
     pub hierarchy_icp_queries_total: CounterVec,
+    pub hierarchy_digest_skipped_total: Counter,
     pub hierarchy_lookup_duration_seconds: Histogram,
 }
 
@@ -302,6 +303,12 @@ impl Metrics {
         )?;
         registry.register(Box::new(hierarchy_icp_queries_total.clone()))?;
 
+        let hierarchy_digest_skipped_total = Counter::new(
+            "bsdm_proxy_hierarchy_digest_skipped_icp_total",
+            "Sibling ICP/HTCP queries skipped by cache digest filter",
+        )?;
+        registry.register(Box::new(hierarchy_digest_skipped_total.clone()))?;
+
         let hierarchy_lookup_duration_seconds = Histogram::with_opts(
             HistogramOpts::new(
                 "bsdm_proxy_hierarchy_lookup_duration_seconds",
@@ -344,6 +351,7 @@ impl Metrics {
             hierarchy_resolutions_total,
             hierarchy_peer_requests_total,
             hierarchy_icp_queries_total,
+            hierarchy_digest_skipped_total,
             hierarchy_lookup_duration_seconds,
         })
     }
@@ -364,6 +372,10 @@ impl Metrics {
         self.hierarchy_icp_queries_total
             .with_label_values(&[outcome])
             .inc();
+    }
+
+    pub fn record_hierarchy_digest_skip(&self) {
+        self.hierarchy_digest_skipped_total.inc();
     }
 
     pub fn observe_hierarchy_lookup(&self, duration_secs: f64) {
