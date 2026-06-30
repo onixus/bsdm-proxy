@@ -30,6 +30,33 @@ use crate::pipeline::{new_event_id, CacheEvent};
 use crate::proxy_service::ProxyService;
 use crate::tls::{parse_authority, rewrite_mitm_request, should_mitm_port};
 
+fn tune_client_tcp(stream: &TcpStream, addr: SocketAddr) {
+    if let Err(e) = stream.set_nodelay(true) {
+        debug!("set_nodelay failed for {}: {}", addr, e);
+    }
+    let sndbuf = std::env::var("TCP_SNDBUF_BYTES")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(512 * 1024);
+    if sndbuf == 0 {
+        return;
+    }
+    #[cfg(unix)]
+    {
+        use socket2::SockRef;
+        if let Err(e) = SockRef::from(stream).set_send_buffer_size(sndbuf) {
+            debug!(
+                "set_send_buffer_size({}) failed for {}: {}",
+                sndbuf, addr, e
+            );
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = sndbuf;
+    }
+}
+
 pub async fn metrics_server(
     metrics: Arc<Metrics>,
     draining: Arc<AtomicBool>,
@@ -369,9 +396,7 @@ pub async fn handle_connection(
     client_ip: String,
     tasks: TaskTracker,
 ) {
-    if let Err(e) = stream.set_nodelay(true) {
-        debug!("set_nodelay failed for {}: {}", addr, e);
-    }
+    tune_client_tcp(&stream, addr);
     let io = TokioIo::new(stream);
     let preserve_headers = service.http_preserve_header_case();
 

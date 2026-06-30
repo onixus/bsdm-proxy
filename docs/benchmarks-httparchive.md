@@ -25,9 +25,20 @@
 |------|------------|
 | `scripts/httparchive_profile.py` | Загрузка JSON, разбиение байт по ресурсам, валидация |
 | `scripts/mock-upstream-httparchive.py` | Mock upstream с телами нужного размера |
-| `scripts/httparchive-page-load.py` | Симуляция загрузки страницы через прокси (6 параллельных соединений) |
-| `scripts/run-httparchive-benchmark.sh` | Полный прогон cold + warm page load |
+| `scripts/httparchive-sites-bench.py` | **Основная методика**: 70 случайных сайтов Top 1k, 12 conn, 20 warm-повторов |
+| `scripts/httparchive-page-load.py` | Legacy: одна медианная страница (71 ресурс) |
+| `scripts/run-httparchive-benchmark.sh` | Полный прогон sites bench (BSDM) |
+| `scripts/compare-squid-bsdm-httparchive.sh` | Squid vs BSDM (sites bench) |
 | `e2e/tests/httparchive.rs` | E2E: 71/66 запросов, MISS → HIT, проверка объёма |
+
+## Методика (sites bench)
+
+1. Из пула **Top 1 000** случайно выбираются **70 сайтов** (`seed=42` для воспроизводимости).
+2. Каждый сайт — одна страница медианного веса (desktop 2.59 MiB / mobile 2.26 MiB).
+3. **Cold**: 70 запросов с **12 параллельными** соединениями.
+4. **Warm**: те же 70 сайтов повторяются **20 раз** (12 conn).
+
+Итого: **1 470 запросов** (70 cold + 70×20 warm) на прогон.
 
 ## Быстрый старт
 
@@ -38,19 +49,30 @@ python3 scripts/httparchive_profile.py
 # E2E (без внешних сервисов)
 cargo test -p bsdm-proxy-e2e --test httparchive
 
-# Бенчмарк (mock + proxy + 2 прохода страницы)
+# Sites bench (mock + proxy)
 cargo build --release -p bsdm-proxy --bin proxy
 ./scripts/run-httparchive-benchmark.sh
 
-# Mobile-профиль
-HTTPARCHIVE_DEVICE=mobile ./scripts/run-httparchive-benchmark.sh ha-mobile
+# Squid vs BSDM
+./scripts/compare-squid-bsdm-httparchive.sh
 ```
 
 Переменные:
 
-- `HTTPARCHIVE_DEVICE` — `desktop` (default) или `mobile`
-- `PAGE_CONCURRENCY` — параллелизм загрузки (default 6, как у браузера)
+- `BENCH_SITES` — число сайтов (default **70**)
+- `PAGE_CONCURRENCY` — параллелизм (default **12**)
+- `BENCH_WARM_REPEATS` — warm-повторы (default **20**)
+- `WORKER_COUNT` — default **4** в `run-httparchive-benchmark.sh` / compare
+- `BENCH_SITE_SEED` — seed выбора сайтов (default **42**)
+- `HTTPARCHIVE_DEVICE` — `desktop` или `mobile`
 - `PERF_FAST_CACHE_HIT`, `WORKER_COUNT` — как в [performance.md](performance.md)
+
+### Legacy: одна страница (71 ресурс)
+
+```bash
+PAGE_CONCURRENCY=6 python3 scripts/httparchive-page-load.py \
+  --proxy http://127.0.0.1:12788 --upstream http://127.0.0.1:18080
+```
 
 ## Отличие от wrk/oha
 

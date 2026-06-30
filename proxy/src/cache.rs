@@ -76,8 +76,15 @@ impl CachedResponse {
         self.to_response_with_cache_status("HIT")
     }
 
+    pub fn response_body(&self) -> Bytes {
+        match self.body_encoding {
+            BodyEncoding::Raw => self.body.clone(),
+            _ => self.decoded_body().unwrap_or_else(|| self.body.clone()),
+        }
+    }
+
     pub fn to_response_with_cache_status(&self, cache_status: &str) -> Response<Body> {
-        let body = self.decoded_body().unwrap_or_else(|| self.body.clone());
+        let body = self.response_body();
         let mut response = Response::new(Body::new(body));
         *response.status_mut() = StatusCode::from_u16(self.status).unwrap_or(StatusCode::OK);
 
@@ -202,6 +209,27 @@ pub fn is_cacheable(method: &str, status: u16, body_size: usize, max_body_size: 
 mod tests {
     use super::*;
     use crate::cache_compress::CompressionConfig;
+
+    #[test]
+    fn response_body_raw_skips_decode() {
+        let payload = Bytes::from_static(b"cached-payload");
+        let cached = CachedResponse {
+            status: 200,
+            headers: Arc::from([]),
+            body: payload.clone(),
+            body_encoding: BodyEncoding::Raw,
+            uncompressed_len: payload.len(),
+            cached_at: SystemTime::now(),
+            ttl: Duration::from_secs(60),
+            etag: None,
+            last_modified: None,
+            is_negative: false,
+            must_revalidate: false,
+        };
+        let served = cached.response_body();
+        assert_eq!(served, payload);
+        assert_eq!(served.as_ptr(), cached.body.as_ptr());
+    }
 
     #[test]
     fn cached_response_serves_decompressed_body() {

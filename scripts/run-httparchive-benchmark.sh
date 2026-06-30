@@ -13,6 +13,10 @@ PROXY="http://127.0.0.1:${PROXY_PORT}"
 UPSTREAM="http://127.0.0.1:${MOCK_PORT}"
 LABEL="${1:-httparchive-${DEVICE}}"
 BSDM_BIN="${BSDM_BIN:-$ROOT/target/release/proxy}"
+PAGE_CONCURRENCY="${PAGE_CONCURRENCY:-12}"
+BENCH_SITES="${BENCH_SITES:-70}"
+BENCH_WARM_REPEATS="${BENCH_WARM_REPEATS:-20}"
+BENCH_SITE_SEED="${BENCH_SITE_SEED:-42}"
 
 kill_all() {
   tmux -f /exec-daemon/tmux.portal.conf kill-session -t ha-bench-proxy 2>/dev/null || true
@@ -34,7 +38,7 @@ start_mock() {
     "HTTPARCHIVE_DEVICE=${DEVICE} MOCK_PORT=${MOCK_PORT} python3 ${ROOT}/scripts/mock-upstream-httparchive.py"
   for _ in 1 2 3 4 5; do
     if curl -sf "${UPSTREAM}/ping" >/dev/null 2>&1 \
-      && curl -sf "${UPSTREAM}/httparchive/manifest" | grep -q 'httparchive'; then
+      && curl -sf -r 0-15 "${UPSTREAM}/httparchive/site/0001/${DEVICE}/page.html" -o /dev/null; then
       echo "HTTP Archive mock ready (${DEVICE})"
       return 0
     fi
@@ -48,7 +52,7 @@ start_proxy() {
   tmux -f /exec-daemon/tmux.portal.conf kill-session -t ha-bench-proxy 2>/dev/null || true
   local env_cmd="MITM_ENABLED=false HIERARCHY_ENABLED=false RUST_LOG=warn"
   env_cmd+=" PERF_FAST_CACHE_HIT=${PERF_FAST_CACHE_HIT:-true}"
-  env_cmd+=" WORKER_COUNT=${WORKER_COUNT:-1}"
+  env_cmd+=" WORKER_COUNT=${WORKER_COUNT:-4}"
   env_cmd+=" METRICS_SAMPLE_RATE=${METRICS_SAMPLE_RATE:-100}"
   env_cmd+=" HTTP_PRESERVE_HEADER_CASE=${HTTP_PRESERVE_HEADER_CASE:-false}"
   tmux -f /exec-daemon/tmux.portal.conf new-session -d -s ha-bench-proxy -c "$ROOT" -- \
@@ -69,17 +73,17 @@ validate_profile() {
   python3 "${ROOT}/scripts/httparchive_profile.py"
 }
 
-run_page_load() {
-  local mode="$1"
-  local repeat="${2:-1}"
+run_sites_bench() {
   echo ""
-  echo "==> page load ${mode} (device=${DEVICE}, concurrency=${PAGE_CONCURRENCY:-6})"
-  python3 "${ROOT}/scripts/httparchive-page-load.py" \
+  echo "==> sites bench (sites=${BENCH_SITES}, concurrency=${PAGE_CONCURRENCY}, warm=${BENCH_WARM_REPEATS})"
+  python3 "${ROOT}/scripts/httparchive-sites-bench.py" \
     --proxy "${PROXY}" \
     --upstream "${UPSTREAM}" \
     --device "${DEVICE}" \
-    --concurrency "${PAGE_CONCURRENCY:-6}" \
-    --repeat "${repeat}" \
+    --sites "${BENCH_SITES}" \
+    --concurrency "${PAGE_CONCURRENCY}" \
+    --warm-repeats "${BENCH_WARM_REPEATS}" \
+    --seed "${BENCH_SITE_SEED}" \
     ${CURL_PROXY_USER:+--proxy-user "${CURL_PROXY_USER}"}
 }
 
@@ -94,16 +98,10 @@ start_proxy
 echo "############################################"
 echo "# HTTP Archive benchmark: ${LABEL}"
 echo "# lens=top1k device=${DEVICE}"
+echo "# sites=${BENCH_SITES} concurrency=${PAGE_CONCURRENCY} warm=${BENCH_WARM_REPEATS}"
 echo "############################################"
 
-run_page_load "cold (1st visit)" 1
-run_page_load "warm (2nd visit)" 1
-
-if [[ "${RUN_P90_STRESS:-0}" == "1" ]]; then
-  echo ""
-  echo "==> P90 stress note: profile percentiles in scripts/httparchive-top1k-profile.json"
-  echo "    Scale mock bodies with HTTPARCHIVE_SCALE=3.9 for ~P90 desktop weight."
-fi
+run_sites_bench
 
 echo ""
 echo "Done (${LABEL})"

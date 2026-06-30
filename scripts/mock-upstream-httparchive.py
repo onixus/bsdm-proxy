@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 from functools import lru_cache
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -20,7 +21,17 @@ DEVICE = os.environ.get("HTTPARCHIVE_DEVICE", "desktop")
 PROFILE = load_profile()
 validate_profile(PROFILE)
 RESOURCES = {r.path: r for r in expand_device(PROFILE, DEVICE)}
+SITE_PAGE_BYTES = int(PROFILE["devices"][DEVICE]["total_bytes"])
 BODY_CACHE: dict[str, bytes] = {}
+
+
+def site_body(site_id: int) -> bytes:
+    key = f"site:{site_id}"
+    if key not in BODY_CACHE:
+        prefix = f"ha:site:{site_id}:{SITE_PAGE_BYTES}:".encode()
+        pad = max(0, SITE_PAGE_BYTES - len(prefix))
+        BODY_CACHE[key] = prefix + (b"\x00" * pad)
+    return BODY_CACHE[key]
 
 
 def body_for(path: str) -> bytes:
@@ -33,6 +44,9 @@ def body_for(path: str) -> bytes:
     return BODY_CACHE[path]
 
 
+SITE_PATH_RE = re.compile(r"^/httparchive/site/(\d{4})/([^/]+)/page\.html$")
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -43,6 +57,22 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/httparchive/manifest":
             manifest = "\n".join(sorted(RESOURCES)).encode()
             self._respond(200, manifest, "text/plain")
+            return
+        site_match = SITE_PATH_RE.match(self.path)
+        if site_match:
+            site_id = int(site_match.group(1))
+            device = site_match.group(2)
+            if device != DEVICE:
+                self.send_error(404)
+                return
+            payload = site_body(site_id)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Cache-Control", "public, max-age=3600")
+            self.send_header("Connection", "keep-alive")
+            self.end_headers()
+            self.wfile.write(payload)
             return
         resource = RESOURCES.get(self.path)
         if resource is None:
