@@ -189,6 +189,42 @@
                     </div>
                 </div>
             </section>
+
+            <!-- Monitoring Tab -->
+            <section id="monitoring" class="tab-content">
+                <h2>📊 Monitoring &amp; Analytics</h2>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="prometheus_enabled" checked>
+                        Enable Prometheus
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="grafana_enabled" checked>
+                        Enable Grafana
+                    </label>
+                </div>
+
+                <h3>ClickHouse (cache-indexer backend)</h3>
+
+                <div class="form-group">
+                    <label for="clickhouse_url">ClickHouse URL</label>
+                    <input type="text" id="clickhouse_url" value="http://clickhouse:8123">
+                </div>
+
+                <div class="form-group">
+                    <label for="clickhouse_database">Database</label>
+                    <input type="text" id="clickhouse_database" value="bsdm">
+                </div>
+
+                <div class="form-group">
+                    <label for="clickhouse_table">Table</label>
+                    <input type="text" id="clickhouse_table" value="http_cache">
+                </div>
+            </section>
         </main>
 
         <footer>

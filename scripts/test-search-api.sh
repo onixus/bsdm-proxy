@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smoke test for cache-indexer Search API (requires docker-compose.clickhouse.yml stack).
+# Smoke test for cache-indexer Search API (requires docker compose up stack).
 set -euo pipefail
 
 BASE_URL="${SEARCH_API_URL:-http://127.0.0.1:8080}"

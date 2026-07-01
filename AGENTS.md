@@ -4,8 +4,9 @@
 
 BSDM-Proxy is a single Rust/Cargo product: a caching HTTPS forward proxy with MITM
 TLS, auth, ACL, Prometheus metrics, and an optional Kafka → cache-indexer → ClickHouse
-analytics pipeline. The Cargo workspace has three crates: `proxy/` (bin `proxy`),
-`cache-indexer/` (bin `cache-indexer`), and `e2e/` (test harness). Standard build,
+analytics pipeline. The Cargo workspace has four crates: `proxy/` (bin `proxy`),
+`cache-indexer/` (bin `cache-indexer`), `bsdm-events/` (shared event types), and
+`e2e/` (test harness). Standard build,
 lint, test, and run commands live in `README.md` and `docs/development.md` — use those
 as the source of truth.
 
@@ -20,7 +21,7 @@ Rust toolchain are baked into the VM image):
 Running and testing:
 
 - `cargo test --workspace` (plus the `smoke`/`e2e` suites) needs **no** Docker, Kafka, or
-  OpenSearch — the e2e harness spawns `proxy` as a subprocess with an in-process mock
+  ClickHouse — the e2e harness spawns `proxy` as a subprocess with an in-process mock
   upstream (`e2e/src/lib.rs`). The test suites do require outbound localhost networking.
 - To run the proxy with `MITM_ENABLED=true` (the default), a CA keypair must exist at
   `./certs/ca.key` and `./certs/ca.crt`. These are git-ignored and NOT in the repo, so

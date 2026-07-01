@@ -128,7 +128,9 @@ function collectConfig() {
         // Monitoring
         PROMETHEUS_ENABLED: document.getElementById('prometheus_enabled').checked.toString(),
         GRAFANA_ENABLED: document.getElementById('grafana_enabled').checked.toString(),
-        OPENSEARCH_URL: document.getElementById('opensearch_url').value,
+        CLICKHOUSE_URL: document.getElementById('clickhouse_url').value,
+        CLICKHOUSE_DATABASE: document.getElementById('clickhouse_database').value,
+        CLICKHOUSE_TABLE: document.getElementById('clickhouse_table').value,
     };
     
     return config;
@@ -248,14 +250,17 @@ services:
     networks:
       - bsdm-network
 
-  opensearch:
-    image: opensearchproject/opensearch:2.3.0
-    environment:
-      - discovery.type=single-node
-      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
-      - DISABLE_SECURITY_PLUGIN=true
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.12
     ports:
-      - "9200:9200"
+      - "8123:8123"
+      - "9000:9000"
+    environment:
+      CLICKHOUSE_DB: ${config.CLICKHOUSE_DATABASE}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./scripts/clickhouse/http_cache.sql:/docker-entrypoint-initdb.d/01-http_cache.sql:ro
     networks:
       - bsdm-network
 ${config.PROMETHEUS_ENABLED === 'true' ? `
@@ -336,14 +341,19 @@ ${config.SHALLALIST_ENABLED === 'true' ? `      - ${config.SHALLALIST_PATH}:${co
     environment:
       - KAFKA_BROKERS=${config.KAFKA_BROKERS}
       - KAFKA_TOPIC=${config.KAFKA_TOPIC}
-      - OPENSEARCH_URL=${config.OPENSEARCH_URL}
+      - CLICKHOUSE_URL=${config.CLICKHOUSE_URL}
+      - CLICKHOUSE_DATABASE=${config.CLICKHOUSE_DATABASE}
+      - CLICKHOUSE_TABLE=${config.CLICKHOUSE_TABLE}
       - KAFKA_BATCH_SIZE=${config.KAFKA_BATCH_SIZE}
       - KAFKA_BATCH_TIMEOUT=${config.KAFKA_BATCH_TIMEOUT}
     depends_on:
       - kafka
-      - opensearch
+      - clickhouse
     networks:
       - bsdm-network
+
+volumes:
+  clickhouse-data:
 
 networks:
   bsdm-network:

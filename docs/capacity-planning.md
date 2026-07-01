@@ -10,7 +10,7 @@
 |----------|----------|
 | Пользователи | 5 000 |
 | Серверы | 300 |
-| Hot logs (OpenSearch) | 14 дней |
+| Hot logs (ClickHouse) | 42 дня (TTL) |
 | Cold logs | 28 дней (4 недели) |
 | Events/day (medium) | ~4M |
 | Peak RPS | ~330–350 |
@@ -43,8 +43,7 @@ REDIS_L2_ENABLED=true
 | bsdm-proxy | 4 | 8 | 16 GB | 50 GB SSD |
 | Redis L2 | 2 | 4 | 32 GB | 100 GB |
 | Kafka | 3 | 4 | 16 GB | 200 GB |
-| OpenSearch hot | 3 | 8 | 64 GB | 300 GB NVMe |
-| OpenSearch cold | 2 | 4 | 32 GB | 500 GB |
+| ClickHouse | 1–3 | 8 | 32 GB | 500 GB NVMe |
 | **Итого** | — | ~80 | ~350 GB | ~1.3 TB |
 
 Полные формулы, модели нагрузки и риски — на [wiki](https://github.com/onixus/bsdm-proxy/wiki/Capacity-Planning).

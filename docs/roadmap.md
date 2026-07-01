@@ -130,7 +130,7 @@ proxy → Kafka → cache-indexer → ClickHouse
 - [x] **Схема событий** — `bsdm-events`: `categories`, `acl_action`, `threat_sources`, ACL deny events
 - [x] **OpenSearch retention** — ISM 14d hot → delete 42d ([#91](https://github.com/onixus/bsdm-proxy/pull/91))
 - [x] **OpenSearch Dashboards** — saved searches, playbook «traffic to domain», **BSDM HTTP Traffic** dashboard
-- [x] **ClickHouse foundation** — schema, `docker-compose.clickhouse.yml` ([#115](https://github.com/onixus/bsdm-proxy/pull/115))
+- [x] **ClickHouse foundation** — schema + slim compose (merged into main `docker-compose.yml`) ([#115](https://github.com/onixus/bsdm-proxy/pull/115))
 - [x] **ClickHouse indexer** — `INDEXER_BACKEND=clickhouse`, JSONEachRow INSERT ([#114](https://github.com/onixus/bsdm-proxy/issues/114))
 - [x] **Grafana + Search API** — CH dashboards, `/api/search` ([#129](https://github.com/onixus/bsdm-proxy/issues/129), [#130](https://github.com/onixus/bsdm-proxy/issues/130))
 - [x] **Default compose on ClickHouse** — `docker compose up` ([#132](https://github.com/onixus/bsdm-proxy/issues/132))

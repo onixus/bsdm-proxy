@@ -12,6 +12,7 @@
 | [kubernetes.md](kubernetes.md) | Kubernetes: манифесты, probes, managed services |
 | [packaging/README.md](../packaging/README.md) | Установка из release-пакета (systemd) |
 | [development.md](development.md) | Сборка, тесты, CI, релиз |
+| [structure.md](structure.md) | **Структура репозитория** |
 | [CHANGELOG.md](../CHANGELOG.md) | История изменений |
 | [releases/v0.3.0.md](releases/v0.3.0.md) | **Release notes 0.3.0** |
 | [releases/v0.2.3-test.md](releases/v0.2.3-test.md) | Release notes 0.2.3-test (superseded) |
@@ -56,7 +57,7 @@
 | [packaging/config/bsdm-proxy.env.example](../packaging/config/bsdm-proxy.env.example) | Переменные окружения proxy |
 | [prometheus/prometheus.yml](../prometheus/prometheus.yml) | Scrape config для Prometheus |
 | [grafana/dashboards/bsdm-proxy.json](../grafana/dashboards/bsdm-proxy.json) | Grafana dashboard (Prometheus) |
-| [grafana/clickhouse/dashboards/bsdm-http-traffic-ch.json](../grafana/clickhouse/dashboards/bsdm-http-traffic-ch.json) | Grafana HTTP Traffic (ClickHouse) |
+| [grafana/dashboards/bsdm-http-traffic-ch.json](../grafana/dashboards/bsdm-http-traffic-ch.json) | Grafana HTTP Traffic (ClickHouse) |
 
 ## Версии и тесты
 

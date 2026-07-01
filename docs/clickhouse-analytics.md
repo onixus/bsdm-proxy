@@ -77,8 +77,6 @@ LIMIT 50;
 
 Epic: [#125](https://github.com/onixus/bsdm-proxy/issues/125).
 
-Slim lab stack: `docker-compose.clickhouse.yml` (deprecated, см. заголовок файла).
-
 ## k8s
 
 См. [k8s-architecture.md](k8s-architecture.md) — ClickHouse Operator / Altinity chart в analytics namespace.

@@ -15,7 +15,6 @@
 | `docker-compose.redis-l2.yml` | Два proxy + Redis L2 |
 | `docker-compose.hierarchy.yml` | Multi-instance + ICP |
 | `docker-compose.ha.yml` | HA lab |
-| `docker-compose.clickhouse.yml` | Урезанный CH-lab (deprecated) |
 
 ---
 

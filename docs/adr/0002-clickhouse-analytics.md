@@ -43,7 +43,7 @@ OpenSearch was RAM-heavy and optimized for full-text search; BSDM queries are **
 
 ### 3. Migration (completed)
 
-1. `docker-compose.clickhouse.yml` + schema
+1. ClickHouse schema (`scripts/clickhouse/http_cache.sql`)
 2. cache-indexer ClickHouse backend + dual-write validation
 3. Search API + Grafana CH dashboards
 4. Default compose on ClickHouse
