@@ -425,6 +425,7 @@ dependencies = [
  "bsdm-events",
  "bytes",
  "opensearch",
+ "prometheus",
  "rdkafka",
  "reqwest 0.13.4",
  "serde",

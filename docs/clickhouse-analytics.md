@@ -60,7 +60,9 @@ curl 'http://127.0.0.1:8123/?query=SELECT+count()+FROM+bsdm.http_cache'
 
 | Переменная | Default | Описание |
 |------------|---------|----------|
-| `INDEXER_BACKEND` | `opensearch` | `clickhouse` или `ch` для CH backend |
+| `INDEXER_BACKEND` | `opensearch` | `clickhouse`, `ch`, или `dual` (OS+CH) |
+| `DUAL_WRITE_CH_FAIL_POLICY` | `warn` | `fail` — прерывать batch при ошибке CH |
+| `METRICS_PORT` | `8080` | `/metrics`, `/health` cache-indexer |
 | `CLICKHOUSE_URL` | `http://clickhouse:8123` | HTTP interface |
 | `CLICKHOUSE_DATABASE` | `bsdm` | База |
 | `CLICKHOUSE_TABLE` | `http_cache` | Таблица |
@@ -70,10 +72,32 @@ curl 'http://127.0.0.1:8123/?query=SELECT+count()+FROM+bsdm.http_cache'
 |------|----------|
 | 1 | Этот compose + ADR 0002 |
 | 2 | ✅ `INDEXER_BACKEND=clickhouse` в cache-indexer |
+| 2b | ✅ `INDEXER_BACKEND=dual` + reconciliation script |
 | 3 | Grafana SQL dashboards (замена OSD) |
 | 4 | Search API на ClickHouse HTTP |
 
 Kafka остаётся bus на фазе 1–2; NATS — опционально позже (ADR 0002).
+
+## Миграция (dual-write)
+
+Пока default compose на OpenSearch, для валидации CH:
+
+```bash
+# cache-indexer с dual-write (нужны OS + CH + Kafka)
+export INDEXER_BACKEND=dual
+export DUAL_WRITE_CH_FAIL_POLICY=warn   # CH ошибки — warn, Kafka commit если OS OK
+
+# Метрики indexer
+curl -s http://127.0.0.1:8080/metrics | grep cache_indexer_
+
+# Сверка count за 24h (после трафика)
+chmod +x scripts/reconcile-os-ch-events.sh
+./scripts/reconcile-os-ch-events.sh
+```
+
+Метрики: `cache_indexer_inserts_total{backend}`, `cache_indexer_insert_errors_total{backend}`, `cache_indexer_batch_duration_seconds`.
+
+Epic: [#125](https://github.com/onixus/bsdm-proxy/issues/125).
 
 ## k8s
 
