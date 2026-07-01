@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 use std::panic;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Instant, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use bytes::Bytes;
 use hyper::body::Incoming;
@@ -23,6 +23,7 @@ use tokio_util::task::TaskTracker;
 use tracing::{debug, error, info, warn};
 
 use crate::acl_api::AclApiState;
+use crate::auth::ConnAuthCache;
 use crate::auth::UserInfo;
 use crate::http_types::{empty, full};
 use crate::metrics::Metrics;
@@ -399,12 +400,18 @@ pub async fn handle_connection(
     tune_client_tcp(&stream, addr);
     let io = TokioIo::new(stream);
     let preserve_headers = service.http_preserve_header_case();
+    let conn_auth_ttl = service
+        .auth()
+        .map(|auth| auth.conn_cache_ttl())
+        .unwrap_or(Duration::ZERO);
+    let conn_auth = Arc::new(ConnAuthCache::new(conn_auth_ttl));
 
     let svc = service_fn(move |req: Request<Incoming>| {
         let service = service.clone();
         let client_ip = client_ip.clone();
         let request_start = Instant::now();
         let tasks = tasks.clone();
+        let conn_auth = conn_auth.clone();
 
         async move {
             if req.method() == Method::CONNECT {
@@ -418,7 +425,10 @@ pub async fn handle_connection(
                     }
                 };
 
-                let proxy_user = match service.authenticate_proxy(&req, &client_ip).await {
+                let proxy_user = match service
+                    .authenticate_proxy(&req, &client_ip, Some(&conn_auth))
+                    .await
+                {
                     Ok(user) => user,
                     Err(resp) => return Ok(resp),
                 };
@@ -490,7 +500,10 @@ pub async fn handle_connection(
                 return Ok::<_, Infallible>(response);
             }
 
-            let proxy_user = match service.authenticate_proxy(&req, &client_ip).await {
+            let proxy_user = match service
+                .authenticate_proxy(&req, &client_ip, Some(&conn_auth))
+                .await
+            {
                 Ok(user) => user,
                 Err(resp) => return Ok(resp),
             };

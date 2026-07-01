@@ -33,7 +33,7 @@
 | Tiered body storage (inline + spill) | cloud object store | bare-metal optimized | cloud store | ✅ mmap spill (PR #93) | merge #93 |
 | Zero-copy large HIT serve | yes | yes | yes | ✅ `Bytes::from_owner` | — |
 | Streaming MISS (tee upstream→client) | yes | yes | yes | ✅ `TeeMissBody` + `STREAMING_MISS_ENABLED` | merge #94 |
-| Connection-level auth cache | session at edge | identity on tunnel | GP session | ❌ auth per request | **P0** `conn_auth_cache` |
+| Connection-level auth cache | session at edge | identity on tunnel | GP session | ✅ `ConnAuthCache` + `AUTH_CONN_CACHE_TTL_SECONDS` | merge #95 |
 | Policy decision cache | context cached at edge | unified policy engine | forwarding profiles | ❌ ACL+cat every request | **P0** `policy_decision_cache` |
 | PERF_FAST_CACHE_HIT (skip policy on HIT) | implicit | implicit | implicit | ✅ env flag | default on bench |
 | Multi-worker accept (SO_REUSEPORT) | internal | internal | internal | ✅ `WORKER_COUNT` | tune 1 vs 4 profiles |

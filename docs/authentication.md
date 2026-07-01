@@ -94,7 +94,11 @@ Successful authentications are cached to reduce load on authentication servers:
 
 ```bash
 export AUTH_CACHE_TTL=300  # seconds (default: 5 minutes)
+# Per-TCP-connection auth cache for HTTP keep-alive (0 = disabled)
+export AUTH_CONN_CACHE_TTL_SECONDS=300
 ```
+
+On keep-alive connections, a successful `Proxy-Authorization` is reused for subsequent requests on the same TCP socket without re-running LDAP/crypto. Set `AUTH_CONN_CACHE_TTL_SECONDS=0` to disable.
 
 NTLM/Kerberos sessions are also keyed by client IP for the handshake duration.
 

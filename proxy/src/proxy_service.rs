@@ -697,6 +697,7 @@ impl ProxyService {
         &self,
         req: &Request<Incoming>,
         client_ip: &str,
+        conn_auth: Option<&crate::auth::ConnAuthCache>,
     ) -> Result<Option<Arc<UserInfo>>, Response<Body>> {
         let Some(auth) = &self.auth else {
             return Ok(None);
@@ -705,12 +706,15 @@ impl ProxyService {
             return Ok(None);
         }
 
-        match auth.handle_proxy_auth(client_ip, req).await {
+        match auth.handle_proxy_auth(client_ip, req, conn_auth).await {
             ProxyAuthOutcome::Anonymous => Ok(None),
             ProxyAuthOutcome::Authenticated(user) => Ok(Some(Arc::new(user))),
             ProxyAuthOutcome::Challenge {
                 authenticate_header,
             } => {
+                if let Some(cache) = conn_auth {
+                    cache.invalidate().await;
+                }
                 tracing::debug!("Proxy authentication challenge issued");
                 Err(auth.create_auth_challenge_response(authenticate_header))
             }
