@@ -15,7 +15,8 @@
 | [structure.md](structure.md) | **Структура репозитория** |
 | [licensing.md](licensing.md) | **Лицензии и third-party компоненты** |
 | [CHANGELOG.md](../CHANGELOG.md) | История изменений |
-| [releases/v0.3.0.md](releases/v0.3.0.md) | **Release notes 0.3.0** |
+| [releases/v0.3.1.md](releases/v0.3.1.md) | **Release notes 0.3.1** |
+| [releases/v0.3.0.md](releases/v0.3.0.md) | Release notes 0.3.0 (M2) |
 | [releases/v0.2.3-test.md](releases/v0.2.3-test.md) | Release notes 0.2.3-test (superseded) |
 | [capacity-planning.md](capacity-planning.md) | **Планирование ёмкости (корп. сценарии)** |
 
@@ -64,7 +65,7 @@
 
 | Параметр | Значение |
 |----------|----------|
-| Текущая версия | **0.3.0** — [release notes](releases/v0.3.0.md) · [CHANGELOG](../CHANGELOG.md) |
+| Текущая версия | **0.3.1** — [release notes](releases/v0.3.1.md) · [CHANGELOG](../CHANGELOG.md) |
 | Rust (минимум) | `1.88+` |
 | Тестов в workspace | `cargo test --workspace --all-targets` |
 | Analytics backend | ClickHouse (`bsdm.http_cache`) |
