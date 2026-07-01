@@ -1,6 +1,6 @@
 # ClickHouse analytics (M3+)
 
-Стек ретропоиска на ClickHouse вместо OpenSearch. См. [ADR 0002](adr/0002-clickhouse-analytics.md).
+Стек ретропоиска на ClickHouse. См. [ADR 0002](adr/0002-clickhouse-analytics.md) (Accepted).
 
 ## Быстрый старт
 
@@ -17,7 +17,7 @@ curl 'http://127.0.0.1:8123/?query=SELECT+count()+FROM+bsdm.http_cache'
 curl 'http://127.0.0.1:8080/api/search?limit=5'
 ```
 
-Grafana: http://localhost:3000 (admin/admin) — datasource ClickHouse и dashboard **BSDM HTTP Traffic (ClickHouse)** поднимаются автоматически из `grafana/clickhouse/`.
+Grafana: http://localhost:3000 (admin/admin) — **BSDM HTTP Traffic (ClickHouse)** + proxy metrics dashboards.
 
 Search API: `http://localhost:8080/api/search` — см. [search-api.md](search-api.md).
 
@@ -47,25 +47,14 @@ ORDER BY requests DESC
 LIMIT 50;
 ```
 
-## Реализация indexer
+## cache-indexer
 
-Реализовано в cache-indexer: `INDEXER_BACKEND=clickhouse` ([#114](https://github.com/onixus/bsdm-proxy/issues/114)).
-
-```bash
-# Полный стек (proxy → Kafka → cache-indexer → ClickHouse)
-docker compose -f docker-compose.clickhouse.yml up -d --build
-
-curl -x http://127.0.0.1:1488 http://httpbin.org/get
-sleep 5
-curl 'http://127.0.0.1:8123/?query=SELECT+count()+FROM+bsdm.http_cache'
-```
+`cache-indexer` пишет только в ClickHouse (Kafka → JSONEachRow INSERT).
 
 | Переменная | Default | Описание |
 |------------|---------|----------|
-| `INDEXER_BACKEND` | `opensearch` | `clickhouse`, `ch`, или `dual` (OS+CH) |
-| `DUAL_WRITE_CH_FAIL_POLICY` | `warn` | `fail` — прерывать batch при ошибке CH |
-| `METRICS_PORT` | `8080` | `/metrics`, `/health`, `/api/search` (cache-indexer) |
-| `SEARCH_API_ENABLED` | auto for CH/dual | REST search over ClickHouse |
+| `METRICS_PORT` | `8080` | `/metrics`, `/health`, `/api/search` |
+| `SEARCH_API_ENABLED` | `true` | REST search over ClickHouse |
 | `SEARCH_API_TOKEN` | — | Bearer auth for `/api/search` |
 | `SEARCH_API_MAX_LIMIT` | `10000` | Max rows per search |
 | `SEARCH_API_DEFAULT_DAYS` | `30` | Default lookback |
@@ -74,51 +63,22 @@ curl 'http://127.0.0.1:8123/?query=SELECT+count()+FROM+bsdm.http_cache'
 | `CLICKHOUSE_TABLE` | `http_cache` | Таблица |
 | `CLICKHOUSE_USER` / `CLICKHOUSE_PASSWORD` | — | Basic auth (опц.) |
 
-| Фаза | Действие |
-|------|----------|
-| 1 | Этот compose + ADR 0002 |
-| 2 | ✅ `INDEXER_BACKEND=clickhouse` в cache-indexer |
-| 2b | ✅ `INDEXER_BACKEND=dual` + reconciliation script |
-| 2 | ✅ Grafana CH dashboards + Search API ([#129](https://github.com/onixus/bsdm-proxy/issues/129), [#130](https://github.com/onixus/bsdm-proxy/issues/130)) |
-| 3 | ✅ Default `docker compose up` на ClickHouse ([#132](https://github.com/onixus/bsdm-proxy/issues/132)) |
-| 4 | Legacy OpenSearch profile (removal v0.5.0) |
+Метрики: `cache_indexer_inserts_total{backend="clickhouse"}`, `cache_indexer_insert_errors_total{backend}`, `cache_indexer_batch_duration_seconds`.
 
-Kafka остаётся bus на фазе 1–2; NATS — опционально позже (ADR 0002).
+## Миграция OpenSearch → ClickHouse (завершена)
 
-## Миграция (dual-write)
-
-Для валидации CH перед cutover (нужны OS + CH + Kafka):
-
-```bash
-# cache-indexer с dual-write (нужны OS + CH + Kafka)
-export INDEXER_BACKEND=dual
-export DUAL_WRITE_CH_FAIL_POLICY=warn   # CH ошибки — warn, Kafka commit если OS OK
-
-# Метрики indexer
-curl -s http://127.0.0.1:8080/metrics | grep cache_indexer_
-
-# Сверка count за 24h (после трафика)
-chmod +x scripts/reconcile-os-ch-events.sh
-./scripts/reconcile-os-ch-events.sh
-```
-
-Метрики: `cache_indexer_inserts_total{backend}`, `cache_indexer_insert_errors_total{backend}`, `cache_indexer_batch_duration_seconds`.
+| Фаза | Статус |
+|------|--------|
+| 0 | CH schema + indexer ([#114](https://github.com/onixus/bsdm-proxy/issues/114)) |
+| 1 | Dual-write + reconciliation |
+| 2 | Grafana + Search API ([#129](https://github.com/onixus/bsdm-proxy/issues/129), [#130](https://github.com/onixus/bsdm-proxy/issues/130)) |
+| 3 | Default compose ([#132](https://github.com/onixus/bsdm-proxy/issues/132)) |
+| 4 | Remove OpenSearch code ([#134](https://github.com/onixus/bsdm-proxy/issues/134)) |
 
 Epic: [#125](https://github.com/onixus/bsdm-proxy/issues/125).
 
-## Legacy OpenSearch (deprecated)
-
-Default compose использует ClickHouse. OpenSearch + Dashboards доступны один релизный цикл:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.legacy-opensearch.yml \
-  --profile legacy-opensearch up -d --build
-```
-
-Env: `packaging/config/cache-indexer.legacy-opensearch.env`. **Планируемое удаление: v0.5.0** (Phase 4 — [#134](https://github.com/onixus/bsdm-proxy/issues/134)).
-
-Slim CH-only lab: `docker-compose.clickhouse.yml` (deprecated, см. заголовок файла).
+Slim lab stack: `docker-compose.clickhouse.yml` (deprecated, см. заголовок файла).
 
 ## k8s
 
-См. [k8s-architecture.md](k8s-architecture.md) — в analytics namespace заменить OpenSearch StatefulSet на ClickHouse Operator / Altinity chart.
+См. [k8s-architecture.md](k8s-architecture.md) — ClickHouse Operator / Altinity chart в analytics namespace.

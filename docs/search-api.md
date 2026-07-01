@@ -6,16 +6,11 @@ Part of OpenSearch → ClickHouse migration ([#125](https://github.com/onixus/bs
 
 ## Enable
 
-Enabled by default when `INDEXER_BACKEND=clickhouse` or `dual`. For other backends:
-
-```bash
-export SEARCH_API_ENABLED=true
-# Requires ClickHouse connection vars (CLICKHOUSE_URL, etc.)
-```
+Enabled by default on cache-indexer admin port.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SEARCH_API_ENABLED` | auto (`true` for CH/dual) | `true` / `false` |
+| `SEARCH_API_ENABLED` | `true` | `true` / `false` |
 | `SEARCH_API_TOKEN` | — | Bearer token; if set, `Authorization: Bearer <token>` required |
 | `SEARCH_API_MAX_LIMIT` | `10000` | Max rows per request |
 | `SEARCH_API_DEFAULT_DAYS` | `30` | Default lookback when `from` omitted |

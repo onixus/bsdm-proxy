@@ -1,5 +1,4 @@
 use bsdm_events::CacheEvent;
-use serde_json::json;
 use std::collections::HashMap;
 
 #[cfg(test)]
@@ -94,18 +93,32 @@ mod tests {
     }
 
     #[test]
-    fn test_opensearch_index_mapping() {
-        let mapping = json!({
-            "mappings": bsdm_events::index_mappings(),
-            "settings": {
-                "number_of_shards": 1,
-                "number_of_replicas": 0
-            }
-        });
+    fn test_clickhouse_row_has_policy_fields() {
+        let event = CacheEvent {
+            url: "https://blocked.example".to_string(),
+            method: "GET".to_string(),
+            status: 403,
+            cache_key: "k".to_string(),
+            cache_status: "BLOCKED".to_string(),
+            timestamp: 1,
+            headers: HashMap::new(),
+            user_id: None,
+            username: Some("bob".to_string()),
+            client_ip: "10.0.0.3".to_string(),
+            domain: "blocked.example".to_string(),
+            response_size: 0,
+            request_duration_ms: 2,
+            content_type: None,
+            user_agent: None,
+            categories: vec!["malware".to_string()],
+            threat_sources: vec!["shallalist".to_string()],
+            acl_action: Some("deny".to_string()),
+            event_id: "evt-block".to_string(),
+        };
 
-        assert!(mapping["mappings"]["properties"]["categories"].is_object());
-        assert!(mapping["mappings"]["properties"]["acl_action"].is_object());
-        assert!(mapping["mappings"]["properties"]["threat_sources"].is_object());
+        let row = bsdm_events::cache_event_to_row(&event);
+        assert_eq!(row.acl_action.as_deref(), Some("deny"));
+        assert_eq!(row.threat_sources, vec!["shallalist"]);
     }
 
     #[test]

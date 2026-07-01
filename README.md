@@ -114,13 +114,6 @@ curl 'http://localhost:8080/api/search?limit=5'
 
 Grafana: http://localhost:3000 → **BSDM HTTP Traffic (ClickHouse)** и **BSDM Proxy Dashboard**.
 
-**Legacy OpenSearch** (deprecated, removal target v0.5.0):
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.legacy-opensearch.yml \
-  --profile legacy-opensearch up -d --build
-```
-
 ## Установка (native package)
 
 Сборка пакета из исходников:
@@ -306,7 +299,6 @@ BENCH_PROFILE=cold ./scripts/compare-squid-bsdm-httparchive.sh
 | `KAFKA_BROKERS` | `kafka:9092` | Брокеры Kafka |
 | `KAFKA_TOPIC` | `cache-events` | Топик |
 | `KAFKA_GROUP_ID` | `cache-indexer-group` | Consumer group |
-| `INDEXER_BACKEND` | `clickhouse` (compose) | `clickhouse`, `dual`, `opensearch` (legacy) |
 | `CLICKHOUSE_URL` | `http://clickhouse:8123` | HTTP interface ClickHouse |
 | `METRICS_PORT` | `8080` | `/metrics`, `/health`, `/api/search` |
 
