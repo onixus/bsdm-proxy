@@ -1,0 +1,164 @@
+# Auto-close architecture blocker issues when a merged PR references B1–B25.
+# Mapping: issue_number = 31 + blocker_id (B6 → #37).
+# B13 (#44) is skipped unless the PR body contains "Closes #44" / "Fixes #44"
+# (docs-only NTLM work must not close the implementation issue).
+
+name: Close blocker issues
+
+on:
+  pull_request:
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      blocker_id:
+        description: "Blocker id (1–25), e.g. 6 for B6 → #37"
+        required: true
+        type: string
+      pr_number:
+        description: "Related merged PR number (optional, for comment text)"
+        required: false
+        type: string
+
+permissions:
+  issues: write
+  pull-requests: read
+
+jobs:
+  manual-close:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const base = 31;
+            const n = parseInt(core.getInput('blocker_id'), 10);
+            if (Number.isNaN(n) || n < 1 || n > 25) {
+              core.setFailed(`Invalid blocker_id: ${core.getInput('blocker_id')}`);
+              return;
+            }
+            const issue_number = base + n;
+            const prNum = core.getInput('pr_number');
+            const prRef = prNum ? `PR #${prNum}` : 'manual workflow_dispatch';
+
+            const { data: issue } = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+            });
+
+            if (issue.state === 'closed') {
+              core.info(`Issue #${issue_number} (B${n}) already closed`);
+              return;
+            }
+
+            const body = [
+              `Closed via **${prRef}** (workflow: close-blockers).`,
+              '',
+              `Blocker **B${n}** marked completed.`,
+              '',
+              'See [docs/BLOCKERS.md](https://github.com/' + context.repo.owner + '/' + context.repo.repo + '/blob/main/docs/BLOCKERS.md).',
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+              body,
+            });
+
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+              state: 'closed',
+              state_reason: 'completed',
+            });
+
+            core.info(`Closed #${issue_number} (B${n})`);
+
+  on-pr-merge:
+    if: github.event_name == 'pull_request' && github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const text = `${pr.title}\n${pr.body || ''}`;
+            const base = 31;
+            const skipUnlessExplicit = new Set([13]); // B13: NTLM impl vs docs-only
+
+            const blockers = new Set();
+            for (const m of text.matchAll(/\bB(\d{1,2})\b/gi)) {
+              const n = parseInt(m[1], 10);
+              if (n >= 1 && n <= 25) blockers.add(n);
+            }
+
+            const explicitIssues = new Set();
+            for (const m of (pr.body || '').matchAll(
+              /(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\s+#(\d+)/gi
+            )) {
+              explicitIssues.add(parseInt(m[1], 10));
+            }
+
+            const toClose = new Set();
+
+            for (const n of blockers) {
+              const issue_number = base + n;
+              if (skipUnlessExplicit.has(n) && !explicitIssues.has(issue_number)) {
+                core.info(
+                  `Skip B${n} (#${issue_number}): partial blocker — needs "Closes #${issue_number}" in PR body`
+                );
+                continue;
+              }
+              toClose.add(issue_number);
+            }
+
+            for (const issue_number of explicitIssues) {
+              if (issue_number >= 32 && issue_number <= 56) {
+                toClose.add(issue_number);
+              }
+            }
+
+            for (const issue_number of [...toClose].sort((a, b) => a - b)) {
+              const n = issue_number - base;
+
+              const { data: issue } = await github.rest.issues.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number,
+              });
+
+              if (issue.state === 'closed') {
+                core.info(`Issue #${issue_number} already closed`);
+                continue;
+              }
+
+              const comment = [
+                `Auto-closed by merge of PR #${pr.number}: ${pr.title}`,
+                '',
+                n >= 1 && n <= 25
+                  ? `Blocker **B${n}** referenced in PR (title/body) or \`Closes #${issue_number}\`.`
+                  : `Referenced via \`Closes #${issue_number}\` in PR body.`,
+                '',
+                `PR: ${pr.html_url}`,
+              ].join('\n');
+
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number,
+                body: comment,
+              });
+
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number,
+                state: 'closed',
+                state_reason: 'completed',
+              });
+
+              core.info(`Closed #${issue_number} (B${n})`);
+            }

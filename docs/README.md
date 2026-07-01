@@ -12,14 +12,21 @@
 | [kubernetes.md](kubernetes.md) | Kubernetes: манифесты, probes, managed services |
 | [packaging/README.md](../packaging/README.md) | Установка из release-пакета (systemd) |
 | [development.md](development.md) | Сборка, тесты, CI, релиз |
+| [CHANGELOG.md](../CHANGELOG.md) | История изменений |
+| [releases/v0.3.0.md](releases/v0.3.0.md) | **Release notes 0.3.0** |
+| [releases/v0.2.3-test.md](releases/v0.2.3-test.md) | Release notes 0.2.3-test (superseded) |
+| [capacity-planning.md](capacity-planning.md) | **Планирование ёмкости (корп. сценарии)** |
 
 ## Функциональность
 
 | Документ | Описание |
 |----------|----------|
-| [authentication.md](authentication.md) | Аутентификация прокси (Basic, LDAP; NTLM — backlog) |
+| [authentication.md](authentication.md) | Аутентификация (Basic, LDAP, NTLM, Kerberos, LDAP groups) |
+| [logging.md](logging.md) | Логирование (`RUST_LOG`, уровни, troubleshooting) |
+| [performance.md](performance.md) | Тюнинг RPS (`PERF_FAST_CACHE_HIT`, `WORKER_COUNT`, bench) |
 | [acl.md](acl.md) | Списки контроля доступа (ACL) |
-| [categorization.md](categorization.md) | Категоризация URL и threat intelligence |
+| [clickhouse-analytics.md](clickhouse-analytics.md) | ClickHouse analytics (ADR 0002) |
+| [search-api.md](search-api.md) | REST Search API over ClickHouse |
 
 ## Архитектура и roadmap
 
@@ -36,9 +43,8 @@
 
 | Документ | Описание |
 |----------|----------|
-| [docker-compose.yml](../docker-compose.yml) | Полный стек (proxy, Kafka, OpenSearch, monitoring) |
-| [docker-compose.test.yml](../docker-compose.test.yml) | Минимальный стек для smoke-тестов |
-| [OPENSEARCH_UPGRADE.md](../OPENSEARCH_UPGRADE.md) | Обновление OpenSearch |
+| [docker-compose.yml](../docker-compose.yml) | Полный стек (proxy, Kafka, ClickHouse, monitoring) |
+| [docker-compose.redis-l2.yml](../docker-compose.redis-l2.yml) | Демо Redis L2 (2 proxy + Redis) |
 | [web-config/README.md](../web-config/README.md) | Web UI для генерации конфигурации |
 
 ## Конфигурационные файлы
@@ -49,21 +55,18 @@
 | [config/acl-rules.test.json](../config/acl-rules.test.json) | ACL для тестового compose |
 | [packaging/config/bsdm-proxy.env.example](../packaging/config/bsdm-proxy.env.example) | Переменные окружения proxy |
 | [prometheus/prometheus.yml](../prometheus/prometheus.yml) | Scrape config для Prometheus |
-| [grafana/dashboards/bsdm-proxy.json](../grafana/dashboards/bsdm-proxy.json) | Grafana dashboard |
+| [grafana/dashboards/bsdm-proxy.json](../grafana/dashboards/bsdm-proxy.json) | Grafana dashboard (Prometheus) |
+| [grafana/clickhouse/dashboards/bsdm-http-traffic-ch.json](../grafana/clickhouse/dashboards/bsdm-http-traffic-ch.json) | Grafana HTTP Traffic (ClickHouse) |
 
 ## Версии и тесты
 
 | Параметр | Значение |
 |----------|----------|
-| Версия в Cargo | `0.2.3-test` |
-| Последний release tag | `0.2.2b` |
+| Текущая версия | **0.3.0** — [release notes](releases/v0.3.0.md) · [CHANGELOG](../CHANGELOG.md) |
 | Rust (минимум) | `1.88+` |
-| Тестов в workspace | 75 (`cargo test --workspace --all-targets`) |
-| OpenSearch в compose | `3.7.0` |
-
-**Новое в dev (`0.2.3-test`):** документация deployment/docker/k8s, исправлен Dockerfile (workspace `e2e`, Rust stable), актуализированы блокеры B11/B17.
-
-**В `0.2.2b`:** иерархический кеш (ICP + peer fetch), optional MITM CA, pre-push hook.
+| Тестов в workspace | `cargo test --workspace --all-targets` |
+| Analytics backend | ClickHouse (`bsdm.http_cache`) |
+| Helm chart | `charts/bsdm/` |
 
 ## Быстрые команды
 

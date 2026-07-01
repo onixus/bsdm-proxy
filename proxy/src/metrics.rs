@@ -35,6 +35,11 @@ pub struct Metrics {
     pub cache_evictions_total: Counter,
     pub cache_lookup_duration_seconds: Histogram,
 
+    // L2 Redis cache metrics
+    pub cache_l2_hits_total: Counter,
+    pub cache_l2_misses_total: Counter,
+    pub cache_l2_errors_total: Counter,
+
     // Upstream metrics
     pub upstream_requests_total: CounterVec,
     pub upstream_duration_seconds: HistogramVec,
@@ -51,6 +56,20 @@ pub struct Metrics {
     pub acl_decisions_total: CounterVec,
     pub acl_rules_matched_total: CounterVec,
     pub acl_eval_duration_seconds: Histogram,
+    pub policy_cache_hit_total: Counter,
+
+    // Rate limit metrics
+    pub rate_limit_rejected_total: CounterVec,
+
+    /// Requests that used the lightweight metrics fast path (no histograms).
+    pub requests_fast_total: Counter,
+
+    // Hierarchy metrics (M2)
+    pub hierarchy_resolutions_total: CounterVec,
+    pub hierarchy_peer_requests_total: CounterVec,
+    pub hierarchy_icp_queries_total: CounterVec,
+    pub hierarchy_digest_skipped_total: Counter,
+    pub hierarchy_lookup_duration_seconds: Histogram,
 }
 
 impl Metrics {
@@ -147,6 +166,24 @@ impl Metrics {
         )?;
         registry.register(Box::new(cache_lookup_duration_seconds.clone()))?;
 
+        let cache_l2_hits_total = Counter::new(
+            "bsdm_proxy_cache_l2_hits_total",
+            "Total Redis L2 cache hits",
+        )?;
+        registry.register(Box::new(cache_l2_hits_total.clone()))?;
+
+        let cache_l2_misses_total = Counter::new(
+            "bsdm_proxy_cache_l2_misses_total",
+            "Total Redis L2 cache misses",
+        )?;
+        registry.register(Box::new(cache_l2_misses_total.clone()))?;
+
+        let cache_l2_errors_total = Counter::new(
+            "bsdm_proxy_cache_l2_errors_total",
+            "Total Redis L2 cache errors",
+        )?;
+        registry.register(Box::new(cache_l2_errors_total.clone()))?;
+
         // Upstream metrics
         let upstream_requests_total = CounterVec::new(
             Opts::new(
@@ -225,6 +262,69 @@ impl Metrics {
         )?;
         registry.register(Box::new(acl_eval_duration_seconds.clone()))?;
 
+        let policy_cache_hit_total = Counter::new(
+            "bsdm_proxy_policy_cache_hit_total",
+            "Policy decision cache hits (ACL+categorization skipped)",
+        )?;
+        registry.register(Box::new(policy_cache_hit_total.clone()))?;
+
+        let rate_limit_rejected_total = CounterVec::new(
+            Opts::new(
+                "bsdm_proxy_rate_limit_rejected_total",
+                "Total requests rejected by rate limiting",
+            ),
+            &["limit_type"],
+        )?;
+        registry.register(Box::new(rate_limit_rejected_total.clone()))?;
+
+        let requests_fast_total = Counter::new(
+            "bsdm_proxy_requests_fast_total",
+            "HTTP requests completed on the lightweight metrics fast path",
+        )?;
+        registry.register(Box::new(requests_fast_total.clone()))?;
+
+        let hierarchy_resolutions_total = CounterVec::new(
+            Opts::new(
+                "bsdm_proxy_hierarchy_resolutions_total",
+                "Hierarchy source resolution outcomes",
+            ),
+            &["result"],
+        )?;
+        registry.register(Box::new(hierarchy_resolutions_total.clone()))?;
+
+        let hierarchy_peer_requests_total = CounterVec::new(
+            Opts::new(
+                "bsdm_proxy_hierarchy_peer_requests_total",
+                "HTTP fetches to parent/sibling cache peers",
+            ),
+            &["peer_type", "outcome"],
+        )?;
+        registry.register(Box::new(hierarchy_peer_requests_total.clone()))?;
+
+        let hierarchy_icp_queries_total = CounterVec::new(
+            Opts::new(
+                "bsdm_proxy_hierarchy_icp_queries_total",
+                "ICP UDP queries to sibling caches",
+            ),
+            &["outcome"],
+        )?;
+        registry.register(Box::new(hierarchy_icp_queries_total.clone()))?;
+
+        let hierarchy_digest_skipped_total = Counter::new(
+            "bsdm_proxy_hierarchy_digest_skipped_icp_total",
+            "Sibling ICP/HTCP queries skipped by cache digest filter",
+        )?;
+        registry.register(Box::new(hierarchy_digest_skipped_total.clone()))?;
+
+        let hierarchy_lookup_duration_seconds = Histogram::with_opts(
+            HistogramOpts::new(
+                "bsdm_proxy_hierarchy_lookup_duration_seconds",
+                "Time to resolve hierarchy source (ICP + parent selection)",
+            )
+            .buckets(vec![0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0]),
+        )?;
+        registry.register(Box::new(hierarchy_lookup_duration_seconds.clone()))?;
+
         Ok(Metrics {
             registry,
             requests_total,
@@ -239,6 +339,9 @@ impl Metrics {
             cache_size_bytes,
             cache_evictions_total,
             cache_lookup_duration_seconds,
+            cache_l2_hits_total,
+            cache_l2_misses_total,
+            cache_l2_errors_total,
             upstream_requests_total,
             upstream_duration_seconds,
             upstream_errors_total,
@@ -250,7 +353,42 @@ impl Metrics {
             acl_decisions_total,
             acl_rules_matched_total,
             acl_eval_duration_seconds,
+            policy_cache_hit_total,
+            rate_limit_rejected_total,
+            requests_fast_total,
+            hierarchy_resolutions_total,
+            hierarchy_peer_requests_total,
+            hierarchy_icp_queries_total,
+            hierarchy_digest_skipped_total,
+            hierarchy_lookup_duration_seconds,
         })
+    }
+
+    pub fn record_hierarchy_resolution(&self, result: &str) {
+        self.hierarchy_resolutions_total
+            .with_label_values(&[result])
+            .inc();
+    }
+
+    pub fn record_hierarchy_peer_request(&self, peer_type: &str, outcome: &str) {
+        self.hierarchy_peer_requests_total
+            .with_label_values(&[peer_type, outcome])
+            .inc();
+    }
+
+    pub fn record_hierarchy_icp_query(&self, outcome: &str) {
+        self.hierarchy_icp_queries_total
+            .with_label_values(&[outcome])
+            .inc();
+    }
+
+    pub fn record_hierarchy_digest_skip(&self) {
+        self.hierarchy_digest_skipped_total.inc();
+    }
+
+    pub fn observe_hierarchy_lookup(&self, duration_secs: f64) {
+        self.hierarchy_lookup_duration_seconds
+            .observe(duration_secs);
     }
 
     /// Export metrics in Prometheus text format
@@ -320,5 +458,47 @@ impl RequestMetricsGuard {
         self.metrics
             .response_size_bytes
             .observe(response_size as f64);
+    }
+}
+
+/// Lightweight in-flight tracking without per-request histograms.
+pub struct FastRequestScope {
+    metrics: Arc<Metrics>,
+}
+
+impl FastRequestScope {
+    pub fn begin(metrics: Arc<Metrics>) -> Self {
+        metrics.requests_in_flight.inc();
+        Self { metrics }
+    }
+
+    pub fn finish_cache_hit(self) {
+        self.metrics.requests_in_flight.dec();
+        self.metrics.cache_hits_total.inc();
+        self.metrics.requests_fast_total.inc();
+    }
+
+    pub fn finish(self, status_code: u16) {
+        self.metrics.requests_in_flight.dec();
+        let _ = status_code;
+        self.metrics.requests_fast_total.inc();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hierarchy_metrics_exported() {
+        let m = Metrics::new().unwrap();
+        m.record_hierarchy_resolution("parent_hit");
+        m.record_hierarchy_icp_query("hit");
+        m.record_hierarchy_peer_request("parent", "hit");
+        let out = String::from_utf8(m.export().unwrap()).unwrap();
+        assert!(out.contains("bsdm_proxy_hierarchy_resolutions_total"));
+        assert!(out.contains("bsdm_proxy_hierarchy_icp_queries_total"));
+        assert!(out.contains("bsdm_proxy_hierarchy_peer_requests_total"));
+        assert!(out.contains("parent_hit"));
     }
 }

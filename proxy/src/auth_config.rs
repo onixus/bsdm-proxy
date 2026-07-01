@@ -2,7 +2,6 @@
 
 use bsdm_proxy::{AuthBackend, AuthConfig};
 use std::time::Duration;
-use tracing::warn;
 
 #[cfg(feature = "auth-ldap")]
 use bsdm_proxy::LdapConfig;
@@ -11,6 +10,13 @@ fn env_flag(name: &str) -> bool {
     std::env::var(name)
         .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
         .unwrap_or(false)
+}
+
+#[cfg(feature = "auth-ldap")]
+fn env_flag_default_true(name: &str) -> bool {
+    std::env::var(name)
+        .map(|v| !matches!(v.to_ascii_lowercase().as_str(), "0" | "false" | "no"))
+        .unwrap_or(true)
 }
 
 fn parse_backend(value: &str) -> AuthBackend {
@@ -22,7 +28,7 @@ fn parse_backend(value: &str) -> AuthBackend {
             }
             #[cfg(not(feature = "auth-ldap"))]
             {
-                warn!(
+                tracing::warn!(
                     "AUTH_BACKEND=ldap but proxy was built without auth-ldap feature, using basic"
                 );
             }
@@ -34,8 +40,20 @@ fn parse_backend(value: &str) -> AuthBackend {
             }
             #[cfg(not(feature = "auth-ntlm"))]
             {
-                warn!(
+                tracing::warn!(
                     "AUTH_BACKEND=ntlm but proxy was built without auth-ntlm feature, using basic"
+                );
+            }
+        }
+        "kerberos" | "negotiate" => {
+            #[cfg(feature = "auth-kerberos")]
+            {
+                return AuthBackend::Kerberos;
+            }
+            #[cfg(not(feature = "auth-kerberos"))]
+            {
+                tracing::warn!(
+                    "AUTH_BACKEND=kerberos but proxy was built without auth-kerberos feature, using basic"
                 );
             }
         }
@@ -45,11 +63,7 @@ fn parse_backend(value: &str) -> AuthBackend {
 }
 
 #[cfg(feature = "auth-ldap")]
-fn load_ldap_config(enabled: bool, backend: AuthBackend) -> Option<LdapConfig> {
-    if !enabled || backend != AuthBackend::Ldap {
-        return None;
-    }
-
+fn read_ldap_settings_from_env(group_enrichment: bool) -> LdapConfig {
     let servers = std::env::var("LDAP_SERVERS")
         .unwrap_or_else(|_| "ldap://localhost:389".to_string())
         .split(',')
@@ -63,7 +77,7 @@ fn load_ldap_config(enabled: bool, backend: AuthBackend) -> Option<LdapConfig> {
         .and_then(|s| s.parse().ok())
         .unwrap_or(5);
 
-    Some(LdapConfig {
+    LdapConfig {
         servers,
         base_dn: std::env::var("LDAP_BASE_DN").unwrap_or_else(|_| "dc=example,dc=com".to_string()),
         bind_dn: std::env::var("LDAP_BIND_DN").ok(),
@@ -75,7 +89,39 @@ fn load_ldap_config(enabled: bool, backend: AuthBackend) -> Option<LdapConfig> {
             .or_else(|| Some("(member={user_dn})".to_string())),
         timeout: Duration::from_secs(timeout_secs),
         use_tls: env_flag("LDAP_USE_TLS"),
-    })
+        group_enrichment,
+    }
+}
+
+#[cfg(feature = "auth-ldap")]
+fn is_sso_backend(backend: AuthBackend) -> bool {
+    match backend {
+        #[cfg(feature = "auth-ntlm")]
+        AuthBackend::Ntlm => true,
+        #[cfg(feature = "auth-kerberos")]
+        AuthBackend::Kerberos => true,
+        _ => false,
+    }
+}
+
+#[cfg(feature = "auth-ldap")]
+fn load_ldap_config(enabled: bool, backend: AuthBackend) -> Option<LdapConfig> {
+    if !enabled {
+        return None;
+    }
+
+    if backend == AuthBackend::Ldap {
+        return Some(read_ldap_settings_from_env(false));
+    }
+
+    if is_sso_backend(backend)
+        && env_flag_default_true("LDAP_GROUP_ENRICHMENT")
+        && std::env::var("LDAP_SERVERS").is_ok()
+    {
+        return Some(read_ldap_settings_from_env(true));
+    }
+
+    None
 }
 
 pub fn load_auth_config() -> AuthConfig {
@@ -89,12 +135,17 @@ pub fn load_auth_config() -> AuthConfig {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(300);
+    let conn_cache_ttl_secs = std::env::var("AUTH_CONN_CACHE_TTL_SECONDS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(300);
 
     AuthConfig {
         enabled,
         backend,
         realm,
         cache_ttl: Duration::from_secs(cache_ttl_secs),
+        conn_cache_ttl: Duration::from_secs(conn_cache_ttl_secs),
         #[cfg(feature = "auth-ldap")]
         ldap: load_ldap_config(enabled, backend),
         #[cfg(feature = "auth-ntlm")]
@@ -105,6 +156,32 @@ pub fn load_auth_config() -> AuthConfig {
                     domain: std::env::var("NTLM_DOMAIN")
                         .unwrap_or_else(|_| "WORKGROUP".to_string()),
                     workstation: std::env::var("NTLM_WORKSTATION").ok(),
+                    helper_command: std::env::var("NTLM_AUTH_HELPER").ok(),
+                    candidate_users_file: std::env::var("NTLM_USERS_FILE").ok(),
+                })
+            } else {
+                None
+            }
+        },
+        #[cfg(feature = "auth-kerberos")]
+        kerberos: {
+            use bsdm_proxy::KerberosConfig;
+            if enabled && backend == AuthBackend::Kerberos {
+                let max_skew_secs = std::env::var("KRB5_MAX_TIME_SKEW_SECONDS")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(300);
+                let hostname = std::env::var("KRB5_HOSTNAME")
+                    .or_else(|_| std::env::var("HOSTNAME"))
+                    .unwrap_or_else(|_| "localhost".to_string());
+                Some(KerberosConfig {
+                    keytab_path: std::env::var("KRB5_KEYTAB")
+                        .unwrap_or_else(|_| "/etc/krb5.keytab".to_string()),
+                    service_principal: std::env::var("KRB5_SERVICE_PRINCIPAL")
+                        .unwrap_or_else(|_| format!("HTTP/{hostname}@EXAMPLE.COM")),
+                    kdc_url: std::env::var("KRB5_KDC_URL").ok(),
+                    hostname,
+                    max_time_skew: Duration::from_secs(max_skew_secs),
                 })
             } else {
                 None
@@ -123,5 +200,22 @@ mod tests {
         let config = load_auth_config();
         assert!(!config.enabled);
         assert_eq!(config.backend, AuthBackend::Basic);
+    }
+
+    #[cfg(all(feature = "auth-ldap", feature = "auth-ntlm"))]
+    #[test]
+    fn sso_backend_loads_ldap_when_enrichment_servers_set() {
+        std::env::set_var("AUTH_ENABLED", "true");
+        std::env::set_var("AUTH_BACKEND", "ntlm");
+        std::env::set_var("LDAP_SERVERS", "ldap://dc.example.com");
+        std::env::remove_var("LDAP_GROUP_ENRICHMENT");
+
+        let config = load_auth_config();
+        assert!(config.ldap.is_some());
+        assert!(config.ldap.unwrap().group_enrichment);
+
+        std::env::remove_var("AUTH_ENABLED");
+        std::env::remove_var("AUTH_BACKEND");
+        std::env::remove_var("LDAP_SERVERS");
     }
 }

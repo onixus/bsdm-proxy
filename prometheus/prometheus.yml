@@ -13,6 +13,13 @@ scrape_configs:
           service: 'proxy'
           component: 'bsdm-proxy'
     
+  - job_name: 'cache-indexer'
+    static_configs:
+      - targets: ['cache-indexer:8080']
+        labels:
+          service: 'cache-indexer'
+          component: 'bsdm-indexer'
+
   - job_name: 'prometheus'
     static_configs:
       - targets: ['localhost:9090']

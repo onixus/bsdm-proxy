@@ -1,19 +1,39 @@
-use serde_json::json;
+use bsdm_events::CacheEvent;
 use std::collections::HashMap;
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
-    struct CacheEvent {
-        url: String,
-        method: String,
-        status: u16,
-        cache_key: String,
-        timestamp: u64,
-        headers: HashMap<String, String>,
-        body: String,
+    #[test]
+    fn test_clickhouse_row_mapping() {
+        let event = CacheEvent {
+            url: "https://example.com/api".to_string(),
+            method: "GET".to_string(),
+            status: 200,
+            cache_key: "abc123".to_string(),
+            cache_status: "MISS".to_string(),
+            timestamp: 1234567890,
+            headers: HashMap::new(),
+            user_id: None,
+            username: Some("alice".to_string()),
+            client_ip: "10.0.0.1".to_string(),
+            domain: "example.com".to_string(),
+            response_size: 128,
+            request_duration_ms: 12,
+            content_type: Some("application/json".to_string()),
+            user_agent: None,
+            categories: vec!["malware".to_string()],
+            threat_sources: vec!["urlhaus".to_string()],
+            acl_action: None,
+            event_id: "evt-1".to_string(),
+        };
+
+        let row = bsdm_events::cache_event_to_row(&event);
+        assert_eq!(row.event_id, "evt-1");
+        assert_eq!(row.username.as_deref(), Some("alice"));
+        let lines = bsdm_events::json_each_row_lines(&[event]).unwrap();
+        assert!(lines.contains("\"domain\":\"example.com\""));
     }
 
     #[test]
@@ -26,15 +46,26 @@ mod tests {
             method: "GET".to_string(),
             status: 200,
             cache_key: "abc123".to_string(),
+            cache_status: "MISS".to_string(),
             timestamp: 1234567890,
             headers,
-            body: "test body".to_string(),
+            user_id: None,
+            username: Some("alice".to_string()),
+            client_ip: "10.0.0.1".to_string(),
+            domain: "example.com".to_string(),
+            response_size: 128,
+            request_duration_ms: 12,
+            content_type: Some("application/json".to_string()),
+            user_agent: None,
+            categories: vec!["malware".to_string()],
+            threat_sources: vec!["urlhaus".to_string()],
+            acl_action: None,
+            event_id: "evt-1".to_string(),
         };
 
         let json_str = serde_json::to_string(&event).unwrap();
         assert!(json_str.contains("https://example.com/api"));
-        assert!(json_str.contains("GET"));
-        assert!(json_str.contains("200"));
+        assert!(json_str.contains("\"threat_sources\":[\"urlhaus\"]"));
     }
 
     #[test]
@@ -44,9 +75,14 @@ mod tests {
             "method": "POST",
             "status": 201,
             "cache_key": "key123",
+            "cache_status": "MISS",
             "timestamp": 9876543210,
             "headers": {"X-Custom": "value"},
-            "body": "response body"
+            "client_ip": "10.0.0.2",
+            "domain": "example.com",
+            "response_size": 64,
+            "request_duration_ms": 8,
+            "event_id": "evt-2"
         }"#;
 
         let event: CacheEvent = serde_json::from_str(json_data).unwrap();
@@ -57,98 +93,63 @@ mod tests {
     }
 
     #[test]
-    fn test_opensearch_index_mapping() {
-        let mapping = json!({
-            "mappings": {
-                "properties": {
-                    "url": {
-                        "type": "text",
-                        "fields": {
-                            "keyword": {
-                                "type": "keyword",
-                                "ignore_above": 256
-                            }
-                        }
-                    },
-                    "method": { "type": "keyword" },
-                    "status": { "type": "short" },
-                    "cache_key": { "type": "keyword" },
-                    "cache_status": { "type": "keyword" },
-                    "timestamp": { "type": "date", "format": "epoch_second" },
-                    "headers": { "type": "object" },
-                    "user_id": { "type": "keyword" },
-                    "username": { "type": "keyword" },
-                    "client_ip": { "type": "ip" },
-                    "domain": { "type": "keyword" },
-                    "response_size": { "type": "long" },
-                    "request_duration_ms": { "type": "long" },
-                    "content_type": { "type": "keyword" },
-                    "categories": { "type": "keyword" }
-                }
-            }
-        });
+    fn test_clickhouse_row_has_policy_fields() {
+        let event = CacheEvent {
+            url: "https://blocked.example".to_string(),
+            method: "GET".to_string(),
+            status: 403,
+            cache_key: "k".to_string(),
+            cache_status: "BLOCKED".to_string(),
+            timestamp: 1,
+            headers: HashMap::new(),
+            user_id: None,
+            username: Some("bob".to_string()),
+            client_ip: "10.0.0.3".to_string(),
+            domain: "blocked.example".to_string(),
+            response_size: 0,
+            request_duration_ms: 2,
+            content_type: None,
+            user_agent: None,
+            categories: vec!["malware".to_string()],
+            threat_sources: vec!["shallalist".to_string()],
+            acl_action: Some("deny".to_string()),
+            event_id: "evt-block".to_string(),
+        };
 
-        assert!(mapping["mappings"]["properties"]["url"]["type"].is_string());
-        assert_eq!(
-            mapping["mappings"]["properties"]["method"]["type"],
-            "keyword"
-        );
-        assert_eq!(mapping["mappings"]["properties"]["status"]["type"], "short");
+        let row = bsdm_events::cache_event_to_row(&event);
+        assert_eq!(row.acl_action.as_deref(), Some("deny"));
+        assert_eq!(row.threat_sources, vec!["shallalist"]);
     }
 
     #[test]
-    fn test_bulk_action_format() {
-        let index_name = "http-cache";
-        let document_id = "evt-unique-1".to_string();
-
-        let action = json!({
-            "index": {
-                "_index": index_name,
-                "_id": document_id
-            }
-        });
-
-        assert_eq!(action["index"]["_index"], "http-cache");
-        assert_eq!(action["index"]["_id"], "evt-unique-1");
-    }
-
-    #[test]
-    fn test_ndjson_format() {
-        let mut lines: Vec<String> = Vec::new();
-
-        let action = json!({"index": {"_index": "test"}});
-        let document = json!({"field": "value"});
-
-        lines.push(serde_json::to_string(&action).unwrap());
-        lines.push(serde_json::to_string(&document).unwrap());
-
-        let ndjson = lines.join("\n") + "\n";
-
-        assert!(ndjson.contains("{\"index\":"));
-        assert!(ndjson.contains("{\"field\":"));
-        assert!(ndjson.ends_with("\n"));
-        assert_eq!(ndjson.matches('\n').count(), 2);
-    }
-
-    #[test]
-    fn test_batch_processing() {
-        let batch_size = 50;
+    fn test_batch_processing_logic() {
         let mut batch: Vec<CacheEvent> = Vec::new();
 
-        for i in 0..30 {
+        for i in 0..5 {
             batch.push(CacheEvent {
-                url: format!("https://example.com/api/{}", i),
+                url: format!("https://example{i}.com"),
                 method: "GET".to_string(),
                 status: 200,
-                cache_key: format!("key-{}", i),
+                cache_key: format!("key{i}"),
+                cache_status: "MISS".to_string(),
                 timestamp: 1234567890 + i,
                 headers: HashMap::new(),
-                body: String::new(),
+                user_id: None,
+                username: None,
+                client_ip: "127.0.0.1".to_string(),
+                domain: format!("example{i}.com"),
+                response_size: 0,
+                request_duration_ms: i,
+                content_type: None,
+                user_agent: None,
+                categories: vec![],
+                threat_sources: vec![],
+                acl_action: None,
+                event_id: format!("evt-{i}"),
             });
         }
 
-        assert_eq!(batch.len(), 30);
-        assert!(batch.len() < batch_size);
+        assert_eq!(batch.len(), 5);
     }
 
     #[test]
@@ -158,39 +159,31 @@ mod tests {
     }
 
     #[test]
-    fn test_event_timestamp_validation() {
+    fn test_policy_event_fields() {
         let event = CacheEvent {
-            url: "https://test.com".to_string(),
+            url: "https://blocked.example".to_string(),
             method: "GET".to_string(),
-            status: 200,
-            cache_key: "key".to_string(),
-            timestamp: 1700000000, // Nov 2023
+            status: 403,
+            cache_key: "k".to_string(),
+            cache_status: "BLOCKED".to_string(),
+            timestamp: 1,
             headers: HashMap::new(),
-            body: String::new(),
+            user_id: None,
+            username: Some("bob".to_string()),
+            client_ip: "10.0.0.3".to_string(),
+            domain: "blocked.example".to_string(),
+            response_size: 0,
+            request_duration_ms: 2,
+            content_type: None,
+            user_agent: None,
+            categories: vec!["malware".to_string()],
+            threat_sources: vec!["shallalist".to_string()],
+            acl_action: Some("deny".to_string()),
+            event_id: "evt-block".to_string(),
         };
 
-        // Timestamp should be after 2020
-        assert!(event.timestamp > 1577836800);
-    }
-
-    #[test]
-    fn test_status_code_ranges() {
-        let success_codes = vec![200, 201, 204];
-        let redirect_codes = vec![301, 302, 307];
-        let client_error_codes = vec![400, 401, 404];
-        let server_error_codes = vec![500, 502, 503];
-
-        for code in success_codes {
-            assert!((200..300).contains(&code));
-        }
-        for code in redirect_codes {
-            assert!((300..400).contains(&code));
-        }
-        for code in client_error_codes {
-            assert!((400..500).contains(&code));
-        }
-        for code in server_error_codes {
-            assert!((500..600).contains(&code));
-        }
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"acl_action\":\"deny\""));
+        assert!(json.contains("\"cache_status\":\"BLOCKED\""));
     }
 }

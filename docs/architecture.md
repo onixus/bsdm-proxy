@@ -39,7 +39,7 @@ flowchart TB
   subgraph pipeline [Analytics pipeline]
     KAFKA[Kafka cache-events]
     IDX[cache-indexer]
-    OS[(OpenSearch http-cache)]
+    CH[(ClickHouse http_cache)]
   end
 
   subgraph observability [Observability]
@@ -57,7 +57,7 @@ flowchart TB
   PEER --> UP
   CACHE --> UP
   MAIN --> TLS
-  MAIN --> KPROD --> KAFKA --> IDX --> OS
+  MAIN --> KPROD --> KAFKA --> IDX --> CH
   MET --> PROM --> GRAF
 ```
 
@@ -111,7 +111,7 @@ TCP accept
 - Вся логика в **binary crate** (`main.rs` ~1300 строк) — `ProxyService` не в `lib.rs` (B7)
 - Categorization с online API на **критическом пути** каждого запроса
 - ACL под глобальным `Mutex` — serializes concurrent ACL checks
-- Hierarchy metrics (`bsdm_proxy_hierarchy_*`) ещё не экспортируются в Prometheus
+- Hierarchy metrics (`bsdm_proxy_hierarchy_*`) экспортируются в Prometheus при `HIERARCHY_ENABLED=true`
 - Нет `docker-compose.hierarchy.yml` для multi-instance E2E
 
 ---
@@ -122,7 +122,7 @@ TCP accept
 CacheEvent (main.rs)
   → Kafka topic "cache-events" (hardcoded, acks=0)
   → cache-indexer consumer
-  → OpenSearch bulk index "http-cache"
+  → ClickHouse INSERT `bsdm.http_cache`
 ```
 
 ```mermaid
@@ -130,21 +130,19 @@ sequenceDiagram
   participant P as proxy
   participant K as Kafka
   participant I as cache-indexer
-  participant O as OpenSearch
+  participant C as ClickHouse
 
   P->>P: handle_request completes
   P-->>K: CacheEvent JSON (async, acks=0)
   Note over P,K: categories sent by proxy
   K->>I: consume batch
-  I->>O: bulk index
-  Note over I,O: categories indexed (B11 ✅)
+  I->>C: JSONEachRow insert
+  Note over I,C: full CacheEvent schema in CH
 ```
 
 **Поля `CacheEvent` (proxy):** url, method, status, cache_key, cache_status, user, client_ip, domain, timing, UA, content_type, **categories**
 
-**Поля indexer:** url, method, status, cache_key, cache_status, user, client_ip, domain, timing, UA, content_type, **categories**, event_id
-
-> B11 закрыт: `categories` в схеме OpenSearch и в `CacheEvent` indexer.
+**Поля indexer:** полная схема `CacheEvent` в ClickHouse (`categories`, `threat_sources`, `acl_action`).
 
 ---
 
@@ -167,7 +165,7 @@ proxy/
 │   ├── policy_config.rs ← env loading
 │   └── auth_config.rs
 cache-indexer/
-└── src/main.rs          ← Kafka → OpenSearch
+└── src/main.rs          ← Kafka → ClickHouse
 e2e/                     ← smoke + E2E harness
 ```
 
@@ -181,7 +179,7 @@ Local L1 miss → ICP query siblings → select parent → fetch_via_peer → or
 
 Локальный ICP-сервер отвечает HIT/MISS по наличию URL в `http_cache` (ключ `GET:<url>`).
 
-**Ограничения Phase 3:** нет peer discovery, cache digest, HTCP, hierarchy Prometheus metrics, docker-compose demo.
+**Ограничения после Phase 4:** нет mTLS между peers, `HIERARCHY_DIRECT_DOMAINS`.
 
 ---
 
@@ -212,8 +210,8 @@ Local L1 miss → ICP query siblings → select parent → fetch_via_peer → or
 | **B10** | Kafka `acks=0`, topic hardcoded | `main.rs:361-365` | M3 |
 | **B11** | Schema drift: `categories` в indexer | ✅ Done | `cache-indexer/src/main.rs` | M3 |
 | **B12** | Нет shared event crate | `proxy`, `cache-indexer` | M3 |
-| **B13** | NTLM — заглушка | `auth.rs:231` | M2 |
-| **B14** | ACL: TimeWindow TODO, groups ignored | `acl.rs:224-236` | M2 |
+| **B13** | NTLM — не реализован (документация исправлена) | `auth.rs` | M2 impl |
+| **B14** | ACL TimeWindow + group rules — реализовано | `acl.rs` | M2 ✅ |
 
 ### 🟡 Medium — M4 Threat / M5 ML
 
@@ -231,11 +229,11 @@ Local L1 miss → ICP query siblings → select parent → fetch_via_peer → or
 | ID | Блокер | Файлы |
 |----|--------|-------|
 | **B21** | Feature flags не в main | `Cargo.toml` features |
-| **B22** | Нет negative caching / refresh | `main.rs` |
-| **B23** | HTTP/1 only upstream | `build_upstream_https_connector` |
-| **B24** | Healthcheck curl vs wget | ✅ Done | `docker-compose.yml`, `Dockerfile` |
-| **B25** | REST ACL API документирован, не реализован | `docs/acl.md`, `main.rs` |
-| **B26** | Dockerfile: workspace `e2e`, Rust ≥1.88 | ✅ Done | `Dockerfile` |
+| **B22** | Negative caching + `Cache-Control` revalidate | `cache_freshness.rs`, `proxy_service.rs` | ✅ |
+| **B23** | HTTP/2 upstream — `UPSTREAM_HTTP2_ENABLED` | `upstream.rs` | ✅ |
+| **B24** | Healthcheck curl vs wget — исправлено (`wget` в compose) | `docker-compose.yml`, `Dockerfile` |
+| **B25** | REST ACL API на metrics port | `acl_api.rs`, `server.rs` | ✅ |
+| **B26** | Dockerfile: workspace `e2e`, Rust stable | `Dockerfile` | ✅ |
 
 ---
 
@@ -304,4 +302,4 @@ flowchart LR
 
 ---
 
-*Версия документа: 0.2.3-test · B1–B5, B11, B17, B24, B26 resolved · B6–B10, B12–B16, B18–B25 open*
+*Версия документа: 0.3.0 · M1–M2 done · M3 ClickHouse retro-search в работе*

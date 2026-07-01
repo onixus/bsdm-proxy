@@ -2,11 +2,24 @@
 
 > См. также: [оглавление документации](README.md) · [конфигурация в README](../README.md#конфигурация)
 
-> ⚠️ **NTLM:** описан в конфигурации, но **не реализован** (`auth.rs` возвращает ошибку). Используйте Basic или LDAP. См. блокер [B13](BLOCKERS.md).
-
-BSDM-Proxy supports multiple authentication backends for proxy access control.
+BSDM-Proxy supports proxy authentication backends for access control.
 
 ## Supported Backends
+
+| Backend | Status | Build feature | Header |
+|---------|--------|---------------|--------|
+| **Basic** | ✅ | `auth-basic` (default) | `Proxy-Authorization: Basic` |
+| **LDAP** | ✅ | `auth-ldap` | `Basic` (username/password) |
+| **NTLM** | ✅ | `auth-ntlm` | `NTLM` (multi-round) |
+| **Kerberos** | ✅ | `auth-kerberos` | `Negotiate` / SPNEGO (multi-round) |
+
+Build with SSO backends:
+
+```bash
+cargo build -p bsdm-proxy --features auth-ntlm,auth-kerberos
+# or all auth backends:
+cargo build -p bsdm-proxy --features auth-all
+```
 
 ### 1. Basic Authentication
 
@@ -20,14 +33,13 @@ export AUTH_REALM="BSDM-Proxy"
 
 ### 2. LDAP / Active Directory
 
-Authenticate against LDAP or Active Directory servers.
+Authenticate against LDAP or Active Directory servers (username/password).
 
 ```bash
 export AUTH_ENABLED=true
 export AUTH_BACKEND=ldap
 export AUTH_REALM="Corporate Network"
 
-# LDAP Configuration
 export LDAP_SERVERS="ldap://dc1.example.com:389,ldap://dc2.example.com:389"
 export LDAP_BASE_DN="dc=example,dc=com"
 export LDAP_BIND_DN="cn=proxy-service,ou=services,dc=example,dc=com"
@@ -38,18 +50,41 @@ export LDAP_USE_TLS=true
 export LDAP_TIMEOUT=5
 ```
 
-### 3. NTLM (Windows Integrated Authentication) — ⚠️ NOT IMPLEMENTED
+### 3. NTLM (Windows Integrated)
 
-> Feature flag `auth-ntlm` существует, но backend возвращает `"NTLM not implemented yet"`. Планируется в M2.
-
-Challenge-response authentication for Windows environments.
+Multi-round NTLM handshake via `sspi`. For Active Directory validation use Samba **`ntlm_auth`** helper (recommended).
 
 ```bash
 export AUTH_ENABLED=true
 export AUTH_BACKEND=ntlm
 export NTLM_DOMAIN="CORPORATE"
 export NTLM_WORKSTATION="PROXY01"
+
+# Recommended for AD: Squid-style helper (Samba winbind)
+export NTLM_AUTH_HELPER="/usr/bin/ntlm_auth --helper-protocol=squid-2.5-ntlmssp"
+
+# Optional lab/testing without AD: user:password file
+# export NTLM_USERS_FILE=/etc/bsdm-proxy/ntlm-users.txt
 ```
+
+Flow: client receives `407 Proxy-Authenticate: NTLM`, then exchanges Type 1/2/3 messages until authenticated.
+
+### 4. Kerberos (SPNEGO)
+
+Service accepts Kerberos tickets using a **keytab** (standard `HTTP/proxy@REALM` SPN).
+
+```bash
+export AUTH_ENABLED=true
+export AUTH_BACKEND=kerberos   # alias: negotiate
+
+export KRB5_KEYTAB=/etc/krb5.keytab
+export KRB5_SERVICE_PRINCIPAL="HTTP/proxy.corp.example.com@CORP.EXAMPLE.COM"
+export KRB5_HOSTNAME=proxy.corp.example.com
+export KRB5_KDC_URL=tcp://dc.corp.example.com:88   # optional
+export KRB5_MAX_TIME_SKEW_SECONDS=300
+```
+
+Clients must obtain a TGT (e.g. `kinit`) and send `Proxy-Authorization: Negotiate <token>`.
 
 ## Features
 
@@ -59,34 +94,44 @@ Successful authentications are cached to reduce load on authentication servers:
 
 ```bash
 export AUTH_CACHE_TTL=300  # seconds (default: 5 minutes)
+# Per-TCP-connection auth cache for HTTP keep-alive (0 = disabled)
+export AUTH_CONN_CACHE_TTL_SECONDS=300
 ```
+
+On keep-alive connections, a successful `Proxy-Authorization` is reused for subsequent requests on the same TCP socket without re-running LDAP/crypto. Set `AUTH_CONN_CACHE_TTL_SECONDS=0` to disable.
+
+NTLM/Kerberos sessions are also keyed by client IP for the handshake duration.
 
 ### Group Membership (LDAP)
 
-LDAP backend extracts user group membership for analytics:
+LDAP password backend (`AUTH_BACKEND=ldap`) loads `memberOf` during bind.
 
-```json
-{
-  "username": "john.doe",
-  "display_name": "John Doe",
-  "email": "john.doe@example.com",
-  "groups": [
-    "CN=Engineering,OU=Groups,DC=example,DC=com",
-    "CN=VPN Users,OU=Groups,DC=example,DC=com"
-  ]
-}
+For **NTLM** and **Kerberos**, set the same `LDAP_*` variables plus a **service account** (`LDAP_BIND_DN`, `LDAP_BIND_PASSWORD`). After SSO handshake the proxy resolves groups via LDAP (no user password required):
+
+```bash
+export AUTH_BACKEND=ntlm   # or kerberos
+export LDAP_GROUP_ENRICHMENT=true   # default when LDAP_SERVERS is set
+export LDAP_SERVERS=ldaps://dc.corp.local:636
+export LDAP_BASE_DN=dc=corp,dc=local
+export LDAP_BIND_DN=cn=proxy-ldap,ou=services,dc=corp,dc=local
+export LDAP_BIND_PASSWORD=service_secret
+export LDAP_USER_FILTER="(sAMAccountName={username})"
 ```
+
+Build with `auth-ldap` plus your SSO feature (or `auth-all`). Principal `user@REALM` is mapped to `sAMAccountName=user`; UPN lookup is tried as fallback.
+
+Enrichment failures are logged; authentication still succeeds with empty groups.
 
 ### Security
 
-- Passwords are never stored in plaintext
-- Cache uses SHA-256 password hashing
-- LDAP connections support TLS/SSL
+- Passwords are never stored in plaintext (Basic/LDAP cache uses SHA-256)
+- LDAP connections support TLS/SSL (`ldaps://` in `LDAP_SERVERS`)
+- Kerberos uses keytab (no password on disk for service)
 - Failed auth attempts are logged
 
 ## Configuration Examples
 
-### Active Directory (Windows)
+### Active Directory — LDAP (password)
 
 ```yaml
 services:
@@ -94,30 +139,25 @@ services:
     environment:
       - AUTH_ENABLED=true
       - AUTH_BACKEND=ldap
-      - AUTH_REALM=Corporate
       - LDAP_SERVERS=ldaps://dc.corp.local:636
       - LDAP_BASE_DN=dc=corp,dc=local
-      - LDAP_BIND_DN=CN=ProxyService,CN=Users,DC=corp,DC=local
-      - LDAP_BIND_PASSWORD=${LDAP_PASSWORD}
       - LDAP_USER_FILTER=(sAMAccountName={username})
-      - LDAP_USE_TLS=true
 ```
 
-### OpenLDAP
+### Active Directory — Kerberos (domain-joined clients)
 
 ```yaml
 services:
   proxy:
     environment:
       - AUTH_ENABLED=true
-      - AUTH_BACKEND=ldap
-      - LDAP_SERVERS=ldap://ldap.example.com:389
-      - LDAP_BASE_DN=ou=users,dc=example,dc=com
-      - LDAP_USER_FILTER=(uid={username})
-      - LDAP_USE_TLS=false
+      - AUTH_BACKEND=kerberos
+      - KRB5_KEYTAB=/etc/krb5.keytab
+      - KRB5_SERVICE_PRINCIPAL=HTTP/proxy.corp.local@CORP.LOCAL
+      - KRB5_HOSTNAME=proxy.corp.local
 ```
 
-### NTLM (Windows Domain)
+### Active Directory — NTLM with LDAP groups
 
 ```yaml
 services:
@@ -125,99 +165,20 @@ services:
     environment:
       - AUTH_ENABLED=true
       - AUTH_BACKEND=ntlm
-      - NTLM_DOMAIN=CORPORATE
-      - NTLM_WORKSTATION=PROXY01
+      - NTLM_DOMAIN=CORP
+      - NTLM_AUTH_HELPER=/usr/bin/ntlm_auth --helper-protocol=squid-2.5-ntlmssp
+      - LDAP_SERVERS=ldaps://dc.corp.local:636
+      - LDAP_BASE_DN=dc=corp,dc=local
+      - LDAP_BIND_DN=cn=proxy-ldap,ou=services,dc=corp,dc=local
+      - LDAP_BIND_PASSWORD=${LDAP_SERVICE_PASSWORD}
+      - LDAP_USER_FILTER=(sAMAccountName={username})
 ```
 
-## Client Configuration
-
-### cURL with Basic Auth
-
-```bash
-curl -x http://username:password@localhost:1488 https://example.com
-```
-
-### Browser (Chrome/Firefox)
-
-1. Configure proxy: `localhost:1488`
-2. Enable "Use proxy authentication"
-3. Enter credentials when prompted
-
-### NTLM (Windows)
-
-Windows will automatically use current user credentials:
-
-```bash
-# PowerShell
-$proxy = [System.Net.WebProxy]::new('http://localhost:1488')
-$proxy.UseDefaultCredentials = $true
-[System.Net.WebRequest]::DefaultWebProxy = $proxy
-```
-
-## Metrics
-
-Authentication metrics are exported to Prometheus:
-
-```promql
-# Authentication attempts
-bsdm_proxy_auth_attempts_total{backend="ldap",result="success"}
-bsdm_proxy_auth_attempts_total{backend="ldap",result="failure"}
-
-# Cache statistics
-bsdm_proxy_auth_cache_hits_total
-bsdm_proxy_auth_cache_misses_total
-bsdm_proxy_auth_cache_entries
-
-# LDAP-specific
-bsdm_proxy_auth_ldap_requests_total{server="dc1.example.com"}
-bsdm_proxy_auth_ldap_duration_seconds
-```
-
-## Troubleshooting
-
-### LDAP Connection Failed
-
-```bash
-# Test LDAP connectivity
-ldapsearch -H ldap://dc.example.com -D "cn=admin,dc=example,dc=com" -W -b "dc=example,dc=com"
-
-# Check logs
-docker-compose logs -f proxy | grep -i ldap
-```
-
-### User Not Found
-
-```bash
-# Verify user filter
-ldapsearch -H ldap://dc.example.com -b "dc=example,dc=com" "(sAMAccountName=username)"
-```
-
-### NTLM Challenge Failed
-
-Ensure:
-1. Domain is correctly configured
-2. Client supports NTLM (Windows)
-3. Proxy is joined to domain (if required)
-
-## Security Best Practices
-
-1. **Use TLS for LDAP** (`LDAP_USE_TLS=true`)
-2. **Strong service account password**
-3. **Limit service account permissions** (read-only)
-4. **Short cache TTL** for sensitive environments
-5. **Monitor failed auth attempts**
-6. **Rotate service credentials regularly**
-
-## Performance
-
-- **Cache hit**: <0.1ms (local hash verification)
-- **LDAP auth**: 50-200ms (depending on network)
-- **NTLM auth**: 100-300ms (challenge-response)
+Build with `--features auth-all` (or `auth-ntlm,auth-ldap`).
 
 ## Roadmap
 
-- [ ] OAuth2/OIDC support
-- [ ] RADIUS authentication
-- [ ] Multi-factor authentication (MFA)
-- [ ] IP-based authentication bypass
-- [ ] Rate limiting per user
+- [x] NTLM auth — [#44](https://github.com/onixus/bsdm-proxy/issues/44)
+- [x] Kerberos / SPNEGO with keytab
+- [x] LDAP group lookup after NTLM/Kerberos principal resolution
+- [ ] Auth Prometheus metrics (`bsdm_proxy_auth_*`)

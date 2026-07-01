@@ -2,7 +2,7 @@
 
 Обзор способов запуска: Docker Compose, native package, Kubernetes.
 
-> См. также: [docker.md](docker.md) · [kubernetes.md](kubernetes.md) · [packaging/README.md](../packaging/README.md)
+> См. также: [docker.md](docker.md) · [kubernetes.md](kubernetes.md) · [k8s-architecture.md](k8s-architecture.md) · [packaging/README.md](../packaging/README.md)
 
 ---
 
@@ -11,8 +11,8 @@
 | Вариант | Когда использовать | Плюсы | Минусы |
 |---------|-------------------|-------|--------|
 | **Docker Compose** | Dev, lab, небольшой прод | Быстрый старт, полный стек | Нужна сборка образов, один хост |
-| **Native package** | Bare metal / VM без Docker | systemd, минимум зависимостей | Ручная настройка Kafka/OS |
-| **Kubernetes** | Прод, HA, масштабирование | Оркестрация, probes, rolling update | Сложнее, образы всё равно нужны |
+| **Native package** | Bare metal / VM без Docker | systemd, минимум зависимостей | Ручная настройка Kafka/CH |
+| **Kubernetes + Helm** | Прод, HA, масштабирование | Оркестрация, probes, chart `charts/bsdm/` | Сложнее, образы всё равно нужны |
 
 ---
 
@@ -33,9 +33,9 @@ docker compose up -d --build
 docker compose ps
 ```
 
-**Сервисы:** proxy, cache-indexer, Kafka, Zookeeper, OpenSearch, OpenSearch Dashboards, Prometheus, Grafana.
+**Сервисы:** proxy, cache-indexer, Kafka, Zookeeper, ClickHouse, Prometheus, Grafana.
 
-Подробнее: [docker.md](docker.md)
+Дополнительные compose-файлы: [docker.md](docker.md#compose-файлы).
 
 ### Минимальный тестовый стек
 
@@ -51,18 +51,16 @@ docker compose -f docker-compose.test.yml up -d --build
 ## Native package (systemd)
 
 ```bash
-# Сборка пакета
 ./scripts/build-package.sh
 
-# Установка (версия из proxy/Cargo.toml)
-tar xzf dist/bsdm-proxy-0.2.3test-linux-x86_64.tar.gz
-cd bsdm-proxy-0.2.3test-linux-x86_64
+tar xzf dist/bsdm-proxy-0.3.0-linux-x86_64.tar.gz
+cd bsdm-proxy-0.3.0-linux-x86_64
 sudo ./install.sh --create-user --systemd
 sudo cp /path/to/ca.key /path/to/ca.crt /certs/
 sudo systemctl enable --now bsdm-proxy
 ```
 
-Порты по умолчанию: proxy `1488`, metrics `9090`, ICP `3130/udp` (при `HIERARCHY_ENABLED=true`).
+Порты: proxy `1488`, metrics `9090`, cache-indexer admin `8080`, ICP `3130/udp` (opt-in).
 
 Подробнее: [packaging/README.md](../packaging/README.md)
 
@@ -72,17 +70,20 @@ sudo systemctl enable --now bsdm-proxy
 
 k8s решает оркестрацию и сетевое взаимодействие между сервисами, но **не заменяет** сборку образов и настройку приложения.
 
-Минимальная схема:
+```bash
+helm install bsdm ./charts/bsdm -n bsdm-proxy --create-namespace
+# prod:
+helm install bsdm ./charts/bsdm -f charts/bsdm/values-prod.yaml -n bsdm-proxy --create-namespace
+```
 
 | Ресурс | Компонент | Примечание |
 |--------|-----------|------------|
-| Deployment + Service | `proxy` | порты 1488, 9090; readiness на `/ready` |
-| Deployment | `cache-indexer` | без внешних портов |
-| StatefulSet / managed | Kafka, OpenSearch | часто проще managed-сервисы вне кластера |
-| ServiceMonitor | metrics | scrape `:9090/metrics` |
-| Ingress / Gateway | proxy | для клиентов |
+| Helm chart `charts/bsdm/` | proxy Deployment | порты 1488, 9090 |
+| Deployment | cache-indexer | admin `:8080`, Search API |
+| StatefulSet / managed | Kafka, ClickHouse | часто проще managed вне кластера |
+| ServiceMonitor | metrics | scrape proxy + indexer |
 
-Подробнее: [kubernetes.md](kubernetes.md)
+Подробнее: [kubernetes.md](kubernetes.md) · [k8s-architecture.md](k8s-architecture.md)
 
 ---
 
@@ -91,11 +92,12 @@ k8s решает оркестрацию и сетевое взаимодейст
 | Сервис | Порт | Endpoint / протокол |
 |--------|------|---------------------|
 | Proxy HTTP/HTTPS | 1488 | HTTP proxy, CONNECT |
-| Metrics / health | 9090 | `/health`, `/ready`, `/metrics` |
+| Proxy metrics / health | 9090 | `/health`, `/ready`, `/metrics` |
+| cache-indexer admin | 8080 | `/health`, `/metrics`, `/api/search` |
 | ICP | 3130/udp | межкешевые запросы (opt-in) |
 | Kafka | 9092 | cache-events |
-| OpenSearch | 9200 | REST API |
-| OpenSearch Dashboards | 5601 | UI |
+| ClickHouse HTTP | 8123 | REST / SQL |
+| ClickHouse native | 9000 | Grafana datasource |
 | Prometheus | 9091 | UI (в compose) |
 | Grafana | 3000 | UI (`admin` / `admin`) |
 
@@ -104,18 +106,13 @@ k8s решает оркестрацию и сетевое взаимодейст
 ## Проверка после развёртывания
 
 ```bash
-# Health
-curl http://localhost:9090/health    # {"status":"ok"}
-curl http://localhost:9090/ready     # {"status":"ready"}
-
-# Метрики (счётчики появляются после первых запросов)
-curl http://localhost:9090/metrics | grep bsdm_proxy
-
-# Проксирование
+curl http://localhost:9090/health
+curl http://localhost:9090/ready
 curl -x http://localhost:1488 http://httpbin.org/get
 
-# OpenSearch (полный стек)
-curl http://localhost:9200/_cluster/health
+# Analytics (после трафика через proxy)
+curl 'http://localhost:8123/?query=SELECT+count()+FROM+bsdm.http_cache'
+curl 'http://localhost:8080/api/search?limit=5'
 ```
 
 ---
@@ -123,21 +120,19 @@ curl http://localhost:9200/_cluster/health
 ## Зависимости между сервисами
 
 ```
-proxy ──► Kafka ──► cache-indexer ──► OpenSearch
-  │
-  └──► :9090/metrics ──► Prometheus ──► Grafana
+proxy ──► Kafka ──► cache-indexer ──► ClickHouse (bsdm.http_cache)
+  │                                        ▲
+  └──► :9090/metrics ──► Prometheus ──► Grafana (CH + Prometheus)
 ```
-
-Proxy стартует после healthy Kafka. cache-indexer — после Kafka и OpenSearch. dashboards-setup — после OpenSearch Dashboards.
 
 ---
 
-## Версии в репозитории
+## Версии
 
 | Артефакт | Версия |
 |----------|--------|
-| Cargo (proxy, cache-indexer) | `0.2.3-test` |
-| Последний release tag | `0.2.2b` |
-| OpenSearch (compose) | `3.7.0` |
+| Текущий release | **0.3.0** |
 | Kafka (compose) | Confluent `7.9.8` |
-| Rust (минимум) | `1.88+` (рекомендуется stable latest) |
+| ClickHouse (compose) | см. `docker-compose.yml` |
+| Rust (минимум) | `1.88+` |
+| Helm chart | `charts/bsdm/` |

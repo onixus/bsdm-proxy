@@ -2,15 +2,15 @@
 
 **B**usiness **S**ecure **D**ata **M**onitoring Proxy
 
-Высокопроизводительный кеширующий HTTPS-прокси на [Hyper](https://hyper.rs/) с [quick_cache](https://crates.io/crates/quick_cache), MITM TLS, аутентификацией, ACL и интеграцией с Kafka, OpenSearch, Prometheus и Grafana.
+Высокопроизводительный кеширующий HTTPS-прокси на [Hyper](https://hyper.rs/) с [quick_cache](https://crates.io/crates/quick_cache), MITM TLS, аутентификацией, ACL и интеграцией с Kafka, ClickHouse, Prometheus и Grafana.
 
 [![Build Status](https://github.com/onixus/bsdm-proxy/actions/workflows/rust.yml/badge.svg)](https://github.com/onixus/bsdm-proxy/actions/workflows/rust.yml)
 [![E2E Tests](https://github.com/onixus/bsdm-proxy/actions/workflows/e2e.yml/badge.svg)](https://github.com/onixus/bsdm-proxy/actions/workflows/e2e.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.2.3--test-blue.svg)](https://github.com/onixus/bsdm-proxy/releases)
+[![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](https://github.com/onixus/bsdm-proxy/releases)
 [![Rust](https://img.shields.io/badge/rust-1.88+-orange.svg)](https://www.rust-lang.org)
 
-> **Версия в репозитории:** `0.2.3-test` (dev) · **Последний release:** [`0.2.2b`](https://github.com/onixus/bsdm-proxy/releases/tag/v0.2.2b)
+> **Текущая версия:** `0.3.0` (релиз M2) · **M2.5** P0 закрыт · **M3** retro-search на ClickHouse (indexer, Grafana, Search API) — см. [Releases](https://github.com/onixus/bsdm-proxy/releases) · [CHANGELOG](CHANGELOG.md) · [roadmap](docs/roadmap.md)
 
 ⚠️ **MITM-прокси для HTTPS.** Используйте только в корпоративной среде с согласия пользователей и в рамках законодательства.
 
@@ -18,11 +18,12 @@
 
 | Область | Возможности |
 |---------|-------------|
-| **Прокси** | HTTP/HTTPS forward proxy, MITM TLS (порты 443/8443), HTTP CONNECT, кеш L1, **иерархический кеш** (ICP + parent/sibling peers) |
-| **Безопасность** | Proxy-аутентификация (Basic / LDAP / NTLM), ACL, категоризация URL |
-| **Наблюдаемость** | Prometheus (20+ метрик), Grafana, `/health`, `/ready`, `/metrics` |
-| **Аналитика** | Kafka → cache-indexer → OpenSearch |
-| **Эксплуатация** | Graceful shutdown, настраиваемые порты, release-пакет + systemd |
+| **Прокси** | HTTP/HTTPS forward proxy, MITM TLS (443/8443), HTTP CONNECT, **tiered L1** (inline + mmap spill, шарды), **streaming MISS**, Redis L2, **иерархический кеш** (ICP/HTCP), HTTP/2 upstream (опц.) |
+| **Безопасность** | Proxy-auth (Basic / LDAP / NTLM / Kerberos), **connection-level auth cache**, ACL + REST API, **policy decision cache**, категоризация URL, rate limiting |
+| **Производительность** | Multi-worker accept (`WORKER_COUNT`), perf fast path (`PERF_FAST_CACHE_HIT`), HTTP Archive bench profiles (`BENCH_PROFILE=warm\|cold`) |
+| **Наблюдаемость** | Prometheus (proxy + cache-indexer), Grafana (Prometheus + ClickHouse), `/health`, `/ready`, `/metrics` |
+| **Аналитика** | Kafka → cache-indexer → **ClickHouse** (`bsdm.http_cache`); Grafana **HTTP Traffic**; REST **Search API** (`/api/search`) |
+| **Эксплуатация** | Graceful shutdown, Helm chart `charts/bsdm/`, release-пакет + systemd |
 
 ## Архитектура
 
@@ -35,9 +36,10 @@
                         :9090 /metrics
                     ┌────────────┴────────────┐
              ┌──────▼──────┐           ┌──────▼──────┐
-             │ quick_cache │           │   Kafka     │
-             │   (L1)      │           │  (async)    │
-             └──────┬──────┘           └──────┬──────┘
+             │ tiered L1   │           │   Kafka     │
+             │ (shards +   │           │  (async)    │
+             │ mmap spill) │           └──────┬──────┘
+             └──────┬──────┘                  │
                     │ ICP :3130 (UDP)         │
              ┌──────▼──────┐                  │
              │ sibling /   │                  │
@@ -48,7 +50,7 @@
              │ Cache-Indexer  │        │ Prometheus  │   │  Grafana    │
              └──────┬─────────┘        └─────────────┘   └─────────────┘
              ┌──────▼─────────┐
-             │  OpenSearch    │
+             │  ClickHouse    │
              └────────────────┘
 ```
 
@@ -59,11 +61,11 @@
 | **proxy** | 1488 | HTTPS-прокси, MITM, кеш L1, иерархия (опционально) |
 | **ICP** | 3130 | UDP-запросы между cache peers (при `HIERARCHY_ENABLED=true`) |
 | **metrics** | 9090 | `/health`, `/ready`, `/metrics` |
-| **cache-indexer** | — | Kafka → OpenSearch |
+| **cache-indexer** | 8080 | Kafka → ClickHouse, `/api/search` |
 | **Kafka** | 9092 | Очередь событий кеша |
-| **OpenSearch** | 9200 | Поиск и аналитика |
+| **ClickHouse** | 8123 / 9000 | Аналитика HTTP-трафика |
 | **Prometheus** | 9091 | Сбор метрик |
-| **Grafana** | 3000 | Дашборды (`admin` / `admin`) |
+| **Grafana** | 3000 | Дашборды proxy + HTTP Traffic (`admin` / `admin`) |
 
 ## Быстрый старт (Docker)
 
@@ -106,7 +108,23 @@ sudo security add-trusted-cert -d -r trustRoot \
 curl -x http://localhost:1488 https://httpbin.org/get
 curl http://localhost:9090/health
 curl http://localhost:9090/metrics | grep bsdm_proxy
+
+# Analytics (after ~5s)
+curl 'http://localhost:8123/?query=SELECT+count()+FROM+bsdm.http_cache'
+curl 'http://localhost:8080/api/search?limit=5'
 ```
+
+Grafana: http://localhost:3000 → **BSDM HTTP Traffic (ClickHouse)** и **BSDM Proxy Dashboard**.
+
+### Compose-профили
+
+| Файл | Назначение |
+|------|------------|
+| [docker-compose.yml](docker-compose.yml) | Полный стек: proxy, Kafka, ClickHouse, cache-indexer, Prometheus, Grafana |
+| [docker-compose.test.yml](docker-compose.test.yml) | Минимальный стек для smoke/E2E |
+| [docker-compose.redis-l2.yml](docker-compose.redis-l2.yml) | Два proxy + Redis L2 |
+| [docker-compose.hierarchy.yml](docker-compose.hierarchy.yml) | Multi-instance + ICP |
+| [docker-compose.clickhouse.yml](docker-compose.clickhouse.yml) | Урезанный CH-lab (deprecated, см. заголовок файла) |
 
 ## Установка (native package)
 
@@ -116,13 +134,13 @@ curl http://localhost:9090/metrics | grep bsdm_proxy
 ./scripts/build-package.sh
 ```
 
-Архив: `dist/bsdm-proxy-0.2.3test-linux-<arch>.tar.gz` (версия из `proxy/Cargo.toml`)
+Архив: `dist/bsdm-proxy-0.3.0-linux-<arch>.tar.gz`
 
 Установка:
 
 ```bash
-tar xzf dist/bsdm-proxy-0.2.3test-linux-x86_64.tar.gz
-cd bsdm-proxy-0.2.3test-linux-x86_64
+tar xzf dist/bsdm-proxy-0.3.0-linux-x86_64.tar.gz
+cd bsdm-proxy-0.3.0-linux-x86_64
 sudo ./install.sh --create-user --systemd
 sudo cp certs/ca.key certs/ca.crt /certs/
 sudo systemctl start bsdm-proxy
@@ -151,23 +169,37 @@ cargo build --release -p bsdm-proxy --bin proxy -p cache-indexer --bin cache-ind
 | `METRICS_PORT` | `9090` | Порт health/metrics |
 | `MITM_ENABLED` | `true` | MITM для портов 443 и 8443 |
 | `KAFKA_BROKERS` | — | Kafka (опционально) |
-| `CACHE_CAPACITY` | `10000` | Размер L1-кеша |
-| `CACHE_TTL_SECONDS` | `3600` | TTL кеша (сек) |
+| `CACHE_CAPACITY` | `10000` | Размер L1-кеша (на шард) |
+| `CACHE_SHARDS` | `16` | Число шардов L1 (`quick_cache` на шард) |
+| `CACHE_SPILL_THRESHOLD_BYTES` | `262144` | Тела ≥ порога — в mmap spill (`0` = только inline) |
+| `CACHE_SPILL_DIR` | `{tmp}/bsdm-cache-spill` | Каталог spill-файлов (dir `0o700`, files `0o600` на Unix) |
+| `STREAMING_MISS_ENABLED` | `true` | Tee upstream MISS → client при записи в L1 |
+| `CACHE_TTL_SECONDS` | `3600` | Fallback TTL кеша (сек), если нет `max-age` |
 | `MAX_CACHE_BODY_SIZE` | `10485760` | Макс. размер body (байт) |
+| `NEGATIVE_CACHE_ENABLED` | `true` | Кешировать upstream 403/404 |
+| `NEGATIVE_CACHE_TTL_SECONDS` | `120` | TTL negative cache (сек) |
+| `CACHE_HONOR_CACHE_CONTROL` | `true` | Учитывать `Cache-Control`, ETag, revalidate |
 | `SHUTDOWN_TIMEOUT_SECONDS` | `30` | Таймаут graceful shutdown |
 | `UPSTREAM_CA_CERT` | — | PEM самоподписанного CA для upstream TLS (тесты/lab) |
-| `RUST_LOG` | `info` | Уровень логов |
+| `UPSTREAM_HTTP2_ENABLED` | `false` | HTTP/2 ALPN для upstream HTTPS |
+| `CACHE_COMPRESSION` | `off` | At-rest сжатие кеша: `zstd`, `brotli`, `off` |
+| `CACHE_COMPRESS_MIN_BYTES` | `1024` | Мин. размер body для сжатия в кеше |
+| `CACHE_COMPRESS_ZSTD_LEVEL` | `3` | Уровень Zstd (1–22) |
+| `RUST_LOG` | `info,bsdm_proxy=debug`¹ | Фильтр логов ([docs/logging.md](docs/logging.md)) |
 
 CA для MITM читается из `/certs/ca.key` и `/certs/ca.crt` (fallback: `./certs/`).
+
+¹ Если `RUST_LOG` не задана — fallback в коде; для production задайте `RUST_LOG=info,bsdm_proxy=info` (см. [docs/logging.md](docs/logging.md)).
 
 ### Аутентификация
 
 | Переменная | Описание |
 |-----------|----------|
 | `AUTH_ENABLED` | `true` / `false` |
-| `AUTH_BACKEND` | `basic`, `ldap` (`ntlm` — backlog M2, не реализован) |
+| `AUTH_BACKEND` | `basic` (default), `ldap` (`auth-ldap`), `ntlm` (`auth-ntlm`), `kerberos` (`auth-kerberos`) |
 | `AUTH_REALM` | Realm для `Proxy-Authenticate` |
 | `AUTH_CACHE_TTL` | TTL кеша сессий (сек) |
+| `AUTH_CONN_CACHE_TTL_SECONDS` | `300` | Кеш успешной `Proxy-Authorization` на keep-alive TCP (`0` = выкл.) |
 
 → [docs/authentication.md](docs/authentication.md)
 
@@ -180,13 +212,56 @@ CA для MITM читается из `/certs/ca.key` и `/certs/ca.crt` (fallbac
 | `ACL_RULES_PATH` | Путь к JSON с правилами |
 | `ACL_AUTO_RELOAD` | Автоперезагрузка правил |
 | `ACL_RELOAD_INTERVAL` | Интервал перезагрузки (сек) |
+| `ACL_API_TOKEN` | Bearer-токен для REST API `/api/acl/*` (опционально) |
 | `CATEGORIZATION_ENABLED` | Категоризация URL |
+| `POLICY_DECISION_CACHE_TTL_SECONDS` | `120` | Кеш решений ACL+cat по `(principal, domain)` (`0` = выкл.) |
+| `POLICY_DECISION_CACHE_MAX_KEYS` | `10000` | Макс. ключей policy cache |
 | `SHALLALIST_PATH` | Путь к Shallalist |
 | `CUSTOM_DB_PATH` | Пользовательская БД категорий |
 
 Пример правил: [config/acl-rules.example.json](config/acl-rules.example.json)
 
 → [docs/acl.md](docs/acl.md) · [docs/categorization.md](docs/categorization.md)
+
+### Rate limiting (опционально)
+
+Token-bucket лимиты на IP и аутентифицированного пользователя. Метрика: `bsdm_proxy_rate_limit_rejected_total{limit_type="ip|user"}`.
+
+| Переменная | По умолчанию | Описание |
+|-----------|-------------|----------|
+| `RATE_LIMIT_ENABLED` | `false` | Включить rate limiting |
+| `RATE_LIMIT_IP_RPS` | `100` | Запросов/сек на IP |
+| `RATE_LIMIT_IP_BURST` | `200` | Burst на IP |
+| `RATE_LIMIT_USER_RPS` | `50` | Запросов/сек на пользователя |
+| `RATE_LIMIT_USER_BURST` | `100` | Burst на пользователя |
+| `RATE_LIMIT_MAX_KEYS` | `10000` | Макс. отслеживаемых ключей |
+
+### Redis L2 cache (опционально)
+
+Распределённый кеш между инстансами прокси. Порядок: **L1 → Redis L2 → hierarchy → origin**.
+
+| Переменная | По умолчанию | Описание |
+|-----------|-------------|----------|
+| `REDIS_L2_ENABLED` | `false` | Включить Redis L2 |
+| `REDIS_URL` | `redis://127.0.0.1:6379` | URL Redis |
+| `REDIS_KEY_PREFIX` | `bsdm:http:` | Префикс ключей (тот же `SHA256(method:url)`) |
+
+Метрики: `bsdm_proxy_cache_l2_hits_total`, `bsdm_proxy_cache_l2_misses_total`, `bsdm_proxy_cache_l2_errors_total`.  
+Ответ при L2 hit: заголовок `x-cache-status: L2-HIT`.
+
+Демо: `docker compose -f docker-compose.redis-l2.yml up -d --build`
+
+### At-rest compression (опционально)
+
+Прозрачное сжатие тел cacheable-ответов в L1/L2. Клиент всегда получает распакованный ответ.
+
+| Переменная | По умолчанию | Описание |
+|-----------|-------------|----------|
+| `CACHE_COMPRESSION` | `off` | `zstd`, `brotli` или `off` |
+| `CACHE_COMPRESS_MIN_BYTES` | `1024` | Сжимать только если body ≥ N байт |
+| `CACHE_COMPRESS_ZSTD_LEVEL` | `3` | Уровень Zstd |
+
+Ответы с заголовком `Content-Encoding` не сжимаются повторно.
 
 ### Иерархический кеш (опционально)
 
@@ -208,24 +283,80 @@ CA для MITM читается из `/certs/ca.key` и `/certs/ca.crt` (fallbac
 
 → [docs/hierarchical-caching.md](docs/hierarchical-caching.md)
 
-### Cache-indexer
+### Performance tuning (опционально)
+
+Multi-worker accept и fast path для bench/lab. Полный список: [docs/performance.md](docs/performance.md).
+
+| Переменная | По умолчанию | Описание |
+|-----------|-------------|----------|
+| `WORKER_COUNT` | `1` | Число accept-loop с `SO_REUSEPORT` (Linux) |
+| `PERF_FAST_CACHE_HIT` | `false` | L1 HIT до ACL/policy/Kafka (bench) |
+| `TCP_SNDBUF_BYTES` | `524288` | `SO_SNDBUF` на клиентских сокетах (`0` = не менять) |
+| `METRICS_SAMPLE_RATE` | `0` | `N` → histograms для 1 из N запросов (`0` = все) |
+| `HTTP_PRESERVE_HEADER_CASE` | `true` | `false` убирает preserve case (bench) |
+
+HTTP Archive sites bench (70 сайтов × 20 warm repeats):
+
+```bash
+./scripts/run-httparchive-benchmark.sh                    # BENCH_PROFILE=warm (default)
+BENCH_PROFILE=cold ./scripts/compare-squid-bsdm-httparchive.sh
+```
+
+Профили `warm` / `cold` → `WORKER_COUNT` 1 / 4: [`scripts/bench-profile.sh`](scripts/bench-profile.sh). См. [docs/benchmarks-httparchive.md](docs/benchmarks-httparchive.md).
+
+### Cache-indexer (ClickHouse)
+
+`cache-indexer` — единственный backend аналитики: Kafka → `INSERT` в `bsdm.http_cache` (JSONEachRow). Admin HTTP на `METRICS_PORT`:
+
+| Endpoint | Описание |
+|----------|----------|
+| `GET /health` | `{"status":"ok"}` |
+| `GET /metrics` | `cache_indexer_*` Prometheus metrics |
+| `GET /api/search` | Retro-search (JSON/CSV), см. [docs/search-api.md](docs/search-api.md) |
 
 | Переменная | По умолчанию | Описание |
 |-----------|-------------|----------|
 | `KAFKA_BROKERS` | `kafka:9092` | Брокеры Kafka |
 | `KAFKA_TOPIC` | `cache-events` | Топик |
 | `KAFKA_GROUP_ID` | `cache-indexer-group` | Consumer group |
-| `OPENSEARCH_URL` | `http://opensearch:9200` | URL OpenSearch |
+| `CLICKHOUSE_URL` | `http://clickhouse:8123` | HTTP interface ClickHouse |
+| `CLICKHOUSE_DATABASE` | `bsdm` | База |
+| `CLICKHOUSE_TABLE` | `http_cache` | Таблица |
+| `CLICKHOUSE_USER` / `CLICKHOUSE_PASSWORD` | — | Basic auth (опц.) |
+| `METRICS_PORT` | `8080` | Admin port |
+| `SEARCH_API_ENABLED` | `true` | REST `/api/search` |
+| `SEARCH_API_TOKEN` | — | Bearer auth (опц.) |
+| `SEARCH_API_MAX_LIMIT` | `10000` | Макс. строк в ответе |
+| `SEARCH_API_DEFAULT_DAYS` | `30` | Lookback по умолчанию |
+
+Пример retro-search:
+
+```bash
+curl 'http://localhost:8080/api/search?domain=example.com&days=7&limit=100'
+curl 'http://localhost:8080/api/search?format=csv&limit=50' -o traffic.csv
+```
+
+Grafana использует plugin [`grafana-clickhouse-datasource`](https://grafana.com/grafana/plugins/grafana-clickhouse-datasource/) (native `:9000`, SQL по `bsdm.http_cache`). Provisioning: `grafana/datasources.yml`, dashboard `grafana/dashboards/bsdm-http-traffic-ch.json`.
+
+→ [docs/search-api.md](docs/search-api.md) · [docs/clickhouse-analytics.md](docs/clickhouse-analytics.md) · [ADR 0002](docs/adr/0002-clickhouse-analytics.md)
 
 ## Мониторинг
 
-### Endpoints
+### Proxy (`:9090`)
 
 | URL | Ответ |
 |-----|-------|
 | `GET /health` | `{"status":"ok"}` |
 | `GET /ready` | `{"status":"ready"}` или `draining` при shutdown |
 | `GET /metrics` | Prometheus text format |
+
+### cache-indexer (`:8080`)
+
+| URL | Ответ |
+|-----|-------|
+| `GET /health` | `{"status":"ok"}` |
+| `GET /metrics` | `cache_indexer_inserts_total`, `cache_indexer_insert_errors_total`, … |
+| `GET /api/search` | JSON/CSV retro-search ([docs/search-api.md](docs/search-api.md)) |
 
 ### Примеры PromQL
 
@@ -238,9 +369,12 @@ bsdm_proxy_cache_hits_total /
 histogram_quantile(0.95,
   rate(bsdm_proxy_request_duration_seconds_bucket[5m])
 )
+
+# Indexer insert rate
+rate(cache_indexer_inserts_total{backend="clickhouse"}[5m])
 ```
 
-Grafana: http://localhost:3000 → **BSDM Proxy Dashboard** (7 панелей, auto-provisioned).
+Grafana: http://localhost:3000 → **BSDM Proxy Dashboard** (Prometheus) и **BSDM HTTP Traffic (ClickHouse)**.
 
 ## Тестирование
 
@@ -260,6 +394,10 @@ cargo test --workspace --all-targets
 docker compose -f docker-compose.test.yml up -d --build
 ./scripts/run-smoke-tests.sh --external
 # E2E --external: cache HIT для HTTPS не ожидается (MITM_ENABLED=false)
+
+# HTTP Archive sites bench (mock upstream + proxy)
+./scripts/run-httparchive-benchmark.sh
+cargo test -p bsdm-proxy-e2e --test httparchive
 ```
 
 CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test, cargo-audit) и [e2e.yml](.github/workflows/e2e.yml).
@@ -273,14 +411,24 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test, cargo-audi
 | [docs/README.md](docs/README.md) | **Оглавление wiki** |
 | [docs/deployment.md](docs/deployment.md) | Развёртывание: Docker, native, k8s |
 | [docs/docker.md](docs/docker.md) | Docker Compose, сборка образов, troubleshooting |
-| [docs/kubernetes.md](docs/kubernetes.md) | Kubernetes: манифесты, probes, managed services |
+| [docs/kubernetes.md](docs/kubernetes.md) | Kubernetes: манифесты, probes, Helm chart |
+| [docs/k8s-architecture.md](docs/k8s-architecture.md) | Kubernetes / HA deployment |
 | [docs/development.md](docs/development.md) | Сборка, тесты, CI |
-| [docs/authentication.md](docs/authentication.md) | LDAP, Basic Auth (NTLM — в backlog) |
-| [docs/acl.md](docs/acl.md) | Правила доступа, приоритеты |
+| [docs/authentication.md](docs/authentication.md) | Basic, LDAP, NTLM, Kerberos |
+| [docs/logging.md](docs/logging.md) | Логирование (`RUST_LOG`, уровни, просмотр) |
+| [docs/performance.md](docs/performance.md) | Тюнинг RPS, `WORKER_COUNT`, bench profiles |
+| [docs/benchmarks-httparchive.md](docs/benchmarks-httparchive.md) | HTTP Archive Top 1k benchmarks |
+| [docs/acl.md](docs/acl.md) | Правила доступа, REST API |
 | [docs/categorization.md](docs/categorization.md) | Shallalist, URLhaus, PhishTank |
-| [docs/hierarchical-caching.md](docs/hierarchical-caching.md) | Иерархический кеш, ICP, peers |
-| [docs/architecture.md](docs/architecture.md) | Архитектура и блокеры B1–B26 |
+| [docs/hierarchical-caching.md](docs/hierarchical-caching.md) | Иерархический кеш, ICP, HTCP |
+| [docs/clickhouse-analytics.md](docs/clickhouse-analytics.md) | ClickHouse analytics, compose, SQL |
+| [docs/search-api.md](docs/search-api.md) | REST Search API (`/api/search`) |
+| [docs/adr/0002-clickhouse-analytics.md](docs/adr/0002-clickhouse-analytics.md) | ADR: ClickHouse как analytics store |
+| [docs/architecture.md](docs/architecture.md) | Архитектура и блокеры |
 | [docs/roadmap.md](docs/roadmap.md) | Roadmap и milestones |
+| [docs/capacity-planning.md](docs/capacity-planning.md) | Планирование ёмкости (корп. сценарии) |
+| [CHANGELOG.md](CHANGELOG.md) | История изменений |
+| [docs/releases/v0.3.0.md](docs/releases/v0.3.0.md) | Release notes 0.3.0 |
 | [packaging/README.md](packaging/README.md) | Release-пакет и systemd |
 | [OPTIMIZATIONS.md](OPTIMIZATIONS.md) | Оптимизации v2.0 |
 | [docker-compose.yml](docker-compose.yml) | Полный стек |
@@ -289,42 +437,36 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test, cargo-audi
 
 Цель: **альтернатива Squid с ретропоиском и ML** для аномалий, фишинга и C&C.
 
-Полный план: **[docs/roadmap.md](docs/roadmap.md)**
+Полный план: **[docs/roadmap.md](docs/roadmap.md)** · SWG gap mapping: [docs/swg-backlog-mapping.md](docs/swg-backlog-mapping.md)
 
 | Milestone | Версия | Фокус | Статус |
 |-----------|--------|-------|--------|
-| **M1** Foundation | v0.2.x | Прокси, ACL, категоризация, observability, иерархия | ~95% |
-| **M2** Squid parity | v0.3.x | L2 Redis, rate limit, полный ACL, hierarchy Phase 4 | Planned |
-| **M3** Retro-search | v0.4.x | OpenSearch dashboards, поиск по истории | Planned |
-| **M4** Threat analytics | v0.5.x | Rule-based алерты, C&C heuristics | Planned |
-| **M5** ML security | v1.0.x | ML anomaly, phishing, C&C detection | Planned |
+| **M1** Foundation | v0.2.x | Прокси, ACL, категоризация, observability | ✅ Done |
+| **M2** Squid parity | v0.3.x | L2, ACL API, NTLM/Kerberos, hierarchy Phase 4 | ✅ Done |
+| **M2.5** Data plane | v0.3.1 | Tiered L1, streaming MISS, auth/policy cache, bench | ✅ P0 done |
+| **M3** Retro-search | v0.4.x | ClickHouse, Grafana, Search API | ~85% |
+| **M4** Threat analytics | v0.5.x | Rule-based алерты, C&C heuristics | ~5% |
+| **M5** ML security | v1.0.x | ML anomaly, phishing, C&C detection | ~0% |
 
-### M1 — Foundation (v0.2.x, текущий)
+### M2.5 — P0 закрыт
 
-- [x] Prometheus + Grafana + health checks
-- [x] Graceful shutdown
-- [x] Proxy authentication (Basic / LDAP; NTLM — backlog M2)
-- [x] ACL + URL categorization
-- [x] E2E / smoke test harness
-- [x] Release packaging (`0.2.2b`, dev `0.2.3-test`)
-- [x] Hierarchical caching Phase 3 — ICP server, peer fetch, env config
-- [ ] Rate limiting per user/IP
-- [ ] Рефакторинг `main.rs` (вынос `ProxyService` в lib)
+### M2.5 — P0 закрыт
 
-### M2 — Squid parity (v0.3.x)
+- [x] Tiered L1 (mmap spill + shards), P0 perf, k8s/Helm docs
+- [x] Streaming MISS, connection auth cache, policy decision cache
+- [x] HTTP Archive bench profiles (`BENCH_PROFILE=warm|cold`)
+- [x] Spill files `mode 0o600` + private `CACHE_SPILL_DIR` ([#98](https://github.com/onixus/bsdm-proxy/issues/98))
 
-- [ ] Redis L2 cache
-- [ ] HTTP/2 upstream client
-- [ ] Compression (Brotli/Zstd)
-- [ ] ACL TimeWindow + group rules
-- [ ] NTLM auth
-- [ ] Hierarchy Phase 4 (discovery, digest, HTCP, hierarchy metrics)
+**Gate M2.5:** warm goodput на HTTP Archive sites bench ≥ Squid −5% (валидация bench).
 
-### M3–M5
+### M3 — retro-search (в работе)
 
-- [ ] **M3:** индексация threat-полей, OpenSearch Dashboards, saved searches
-- [ ] **M4:** rule-based anomaly alerts, C&C beacon heuristics, SIEM export
-- [ ] **M5:** ML pipeline, anomaly/phishing/C&C models
+- [x] ClickHouse schema + indexer (JSONEachRow)
+- [x] Grafana **BSDM HTTP Traffic (ClickHouse)** + Search API
+- [x] Default `docker compose up` на ClickHouse; OpenSearch удалён ([#125](https://github.com/onixus/bsdm-proxy/issues/125))
+- [ ] Session correlation (`session_id`, redirect chains)
+
+**Gate M3:** «кто ходил на domain X за 30 дней» — Grafana/CH SQL или `/api/search`.
 
 ## Лицензия
 

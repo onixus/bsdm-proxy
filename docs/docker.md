@@ -2,16 +2,20 @@
 
 Руководство по контейнеризации BSDM-Proxy.
 
-> См. также: [deployment.md](deployment.md) · [docker-compose.yml](../docker-compose.yml) · [docker-compose.test.yml](../docker-compose.test.yml)
+> См. также: [deployment.md](deployment.md) · [clickhouse-analytics.md](clickhouse-analytics.md)
 
 ---
 
 ## Compose-файлы
 
-| Файл | Назначение | Сервисы |
-|------|------------|---------|
-| `docker-compose.yml` | Полный стек | proxy, cache-indexer, kafka, zookeeper, opensearch, opensearch-dashboards, dashboards-setup, prometheus, grafana |
-| `docker-compose.test.yml` | Smoke/E2E external | upstream (httpbin), proxy |
+| Файл | Назначение |
+|------|------------|
+| `docker-compose.yml` | Полный стек: proxy, cache-indexer, kafka, zookeeper, clickhouse, prometheus, grafana |
+| `docker-compose.test.yml` | Smoke/E2E external (upstream + proxy) |
+| `docker-compose.redis-l2.yml` | Два proxy + Redis L2 |
+| `docker-compose.hierarchy.yml` | Multi-instance + ICP |
+| `docker-compose.ha.yml` | HA lab |
+| `docker-compose.clickhouse.yml` | Урезанный CH-lab (deprecated) |
 
 ---
 
@@ -20,38 +24,16 @@
 Dockerfile — multi-stage: `rust:1-alpine` (builder) → `alpine:3.21` (runtime).
 
 ```bash
-# Только proxy
 docker build --target proxy -t bsdm-proxy:proxy .
-
-# Только cache-indexer
 docker build --target cache-indexer -t bsdm-proxy:indexer .
-
-# Через compose
 docker compose build proxy cache-indexer
 ```
 
 ### Требования к сборке
 
-- В builder копируются все workspace members: `proxy`, `cache-indexer`, `e2e` (нужен для `cargo build` workspace).
-- Rust в образе: `rust:1-alpine` (stable ≥ 1.88).
-- Статическая линковка musl: `librdkafka-dev`, `openssl-dev`, и др. (см. Dockerfile).
-
-### Локальная сборка бинарника + runtime-образ (обход долгой Docker-сборки)
-
-```bash
-cargo build --release -p bsdm-proxy --bin proxy
-
-cat > /tmp/Dockerfile.proxy-local <<'EOF'
-FROM ubuntu:24.04
-RUN apt-get update -qq && apt-get install -y -qq ca-certificates wget \
-  && rm -rf /var/lib/apt/lists/*
-COPY target/release/proxy /usr/local/bin/proxy
-EXPOSE 1488 9090
-CMD ["proxy"]
-EOF
-
-docker build -f /tmp/Dockerfile.proxy-local -t bsdm-proxy:local .
-```
+- Workspace members в builder: `bsdm-events`, `proxy`, `cache-indexer`, `e2e`.
+- Rust: `rust:1-alpine` (stable ≥ 1.88).
+- Статическая линковка musl (см. Dockerfile).
 
 ---
 
@@ -63,29 +45,17 @@ docker compose ps
 docker compose logs -f proxy
 ```
 
-### Переменные proxy (compose defaults)
-
-| Переменная | Значение в compose | Описание |
-|-----------|-------------------|----------|
-| `MITM_ENABLED` | `true` | MITM для 443/8443 |
-| `AUTH_ENABLED` | `false` | Аутентификация выкл. |
-| `ACL_ENABLED` | `false` | ACL выкл. |
-| `KAFKA_BROKERS` | `kafka:9092` | Kafka |
-| `CACHE_CAPACITY` | `10000` | L1 cache |
-| `RUST_LOG` | `info,bsdm_proxy=debug` | Логи |
-
-CA монтируется из `./certs/` → `/certs/`.
-
 ### Health checks
 
 | Сервис | Проверка |
 |--------|----------|
-| proxy | `curl -f http://localhost:9090/health` |
+| proxy | `wget -q -O- http://127.0.0.1:9090/health \| grep -q ok` |
 | kafka | `kafka-broker-api-versions --bootstrap-server localhost:9092` |
-| opensearch | `curl -f http://localhost:9200/_cluster/health` |
-| opensearch-dashboards | `curl -f http://localhost:5601/api/status` |
+| clickhouse | HTTP `:8123/ping` |
 | prometheus | `wget --spider http://localhost:9090/-/healthy` |
 | grafana | `curl -f http://localhost:3000/api/health` |
+
+Proxy runtime включает **wget** (не curl) — healthchecks в compose используют wget.
 
 ---
 
@@ -93,40 +63,32 @@ CA монтируется из `./certs/` → `/certs/`.
 
 ```bash
 docker compose -f docker-compose.test.yml up -d --build
-
-# Smoke (health, metrics, HTTP forward)
 ./scripts/run-smoke-tests.sh --external
-
-# E2E external — только cache HIT для HTTPS при MITM_ENABLED=false не ожидается
-./scripts/run-e2e-tests.sh --external
 ```
 
-**Важно:** в test compose `MITM_ENABLED=false`. HTTPS-запросы идут через CONNECT-туннель; заголовок `x-cache-status: HIT` для HTTPS **не появится**. Для проверки кэша:
+**Ограничения external-режима:**
+- `MITM_ENABLED=false` — HTTPS не кэшируется (CONNECT-туннель).
+- `bsdm_proxy_requests_total` появляется после первого запроса.
+- `./scripts/run-e2e-tests.sh --external` — cache HIT для HTTPS может не пройти; используйте in-process `./scripts/run-e2e-tests.sh`.
+
+### Демо: hierarchy / Redis L2
 
 ```bash
-./scripts/run-e2e-tests.sh   # in-process, с MITM mock upstream
+docker compose -f docker-compose.hierarchy.yml up -d --build
+docker compose -f docker-compose.redis-l2.yml up -d --build
 ```
 
-### Метрика `bsdm_proxy_requests_total`
-
-Счётчик Prometheus появляется в `/metrics` **после первого HTTP-запроса** через proxy. До этого smoke-скрипт может не найти метрику — сделайте тестовый запрос:
-
-```bash
-curl -x http://127.0.0.1:1488 http://httpbin.org/get
-curl http://127.0.0.1:9090/metrics | grep bsdm_proxy_requests_total
-```
+См. [development.md](development.md).
 
 ---
 
-## Volumes и данные
+## Volumes
 
-| Volume | Сервис | Данные |
-|--------|--------|--------|
-| `opensearch-data` | opensearch | Индексы |
-| `prometheus-data` | prometheus | TSDB |
-| `grafana-data` | grafana | Дашборды, настройки |
-
-Очистка:
+| Volume | Сервис |
+|--------|--------|
+| `clickhouse-data` | clickhouse |
+| `prometheus-data` | prometheus |
+| `grafana-data` | grafana |
 
 ```bash
 docker compose down -v   # удаляет volumes
@@ -136,35 +98,25 @@ docker compose down -v   # удаляет volumes
 
 ## Troubleshooting
 
-### `docker compose build` падает на workspace member `e2e`
+### `docker compose build` — workspace member missing
 
-Убедитесь, что в Dockerfile есть `COPY e2e ./e2e`.
+Проверьте Dockerfile: `COPY bsdm-events`, `COPY e2e`, и др.
 
-### Ошибка rustc version / зависимости
+### rustc / зависимости
 
-Обновите базовый образ builder до `rust:1-alpine` (≥ 1.88). Зависимости `icu_*`, `time`, `serde_with` требуют современный stable.
+Builder: `rust:1-alpine` (≥ 1.88).
 
-### Kafka не подключается к Zookeeper
+### Kafka ↔ Zookeeper
 
-Проверьте сеть Docker: `docker network inspect workspace_bsdm-net`. На хостах с ограниченным iptables/nftables bridge-сеть может не работать — используйте нормальный Docker host или k8s.
+Проверьте bridge-сеть Docker. На хостах с ограниченным iptables используйте нормальный Docker host или k8s.
 
-### Proxy не может достучаться до интернета из контейнера
-
-Проверьте egress и DNS внутри контейнера:
+### Proxy egress из контейнера
 
 ```bash
-docker exec <proxy-container> wget -q -O- --timeout=5 http://httpbin.org/get
+docker exec <proxy> wget -q -O- --timeout=5 http://httpbin.org/get
 ```
 
-В проблемных средах временный обход: `--network host` (только для отладки).
-
-### OpenSearch не стартует (memory)
-
-Требуется `vm.max_map_count`:
-
-```bash
-sudo sysctl -w vm.max_map_count=262144
-```
+В проблемных средах: `--network host` (только отладка).
 
 ---
 

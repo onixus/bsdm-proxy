@@ -108,6 +108,8 @@ Flexible access control system for BSDM-Proxy with multiple rule types and prior
 }
 ```
 
+**Time format:** `HH:MM` (24-hour, local server time via `chrono::Local`). Overnight windows supported (e.g. `22:00`–`06:00`). Combine with domain/category rules via separate rule entries and priority.
+
 ### 6. User/Group Rules
 
 ```json
@@ -125,6 +127,8 @@ Flexible access control system for BSDM-Proxy with multiple rule types and prior
   }
 }
 ```
+
+**Groups:** LDAP `memberOf` DNs are matched by full DN or `cn=` value (e.g. rule `"admins"` matches `cn=admins,ou=groups,dc=corp,dc=local`). User and group in the same rule use OR logic.
 
 ### 7. IP Range Rules
 
@@ -432,6 +436,30 @@ curl http://localhost:9090/api/acl/rules
 ```bash
 curl -X POST http://localhost:9090/api/acl/reload
 ```
+
+Responses:
+- `GET /api/acl/rules` → `{ "count", "default_action", "rules": [...] }`
+- `POST /api/acl/rules` → `201 Created` with rule JSON (or `409` if `id` exists)
+- `POST /api/acl/reload` → `{ "status": "reloaded", "count": N }` (requires `ACL_RULES_PATH`)
+
+When `ACL_API_TOKEN` is set, pass `Authorization: Bearer <token>` on all `/api/acl/*` requests.
+
+The API is available when `ACL_ENABLED=true` on the metrics port (`METRICS_PORT`, default `9090`).
+
+**Security:** in production set `ACL_API_TOKEN` or restrict network access to `METRICS_PORT` (the API listens on `0.0.0.0`).
+
+**Persistence:** `POST /api/acl/rules` updates the in-memory engine only; rules are not written to `ACL_RULES_PATH`. A subsequent `POST /api/acl/reload` (or `ACL_AUTO_RELOAD`) replaces in-memory rules from the file and drops API-added rules. To make changes permanent, edit the JSON file and call reload.
+
+### Policy decision cache
+
+Caches ACL + categorization results per `(principal, domain)` to skip repeated evaluation on keep-alive traffic:
+
+```bash
+POLICY_DECISION_CACHE_TTL_SECONDS=120   # 0 = disabled
+POLICY_DECISION_CACHE_MAX_KEYS=10000
+```
+
+ACL reload (`POST /api/acl/reload`, `ACL_AUTO_RELOAD`) flushes the cache. Metric: `bsdm_proxy_policy_cache_hit_total`.
 
 ---
 

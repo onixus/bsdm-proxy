@@ -1,0 +1,10 @@
+# cargo-audit configuration (see https://github.com/rustsec/rustsec/tree/main/cargo-audit)
+
+[advisories]
+ignore = [
+    # RUSTSEC-2023-0071 — transitive `rsa` via optional `sspi` (Kerberos/NTLM).
+    # No patched release; proxy validates tickets server-side, not RSA signing over the network.
+    # Review by: 2026-12-31
+    "RUSTSEC-2023-0071",
+]
+informational_warnings = ["unmaintained"]

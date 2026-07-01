@@ -31,6 +31,7 @@ RUN rustup target add x86_64-unknown-linux-musl
 
 # Копируем весь workspace
 COPY Cargo.toml Cargo.lock ./
+COPY bsdm-events ./bsdm-events
 COPY proxy ./proxy
 COPY cache-indexer ./cache-indexer
 COPY e2e ./e2e
@@ -48,6 +49,7 @@ RUN cargo build --release --target x86_64-unknown-linux-musl
 # Proxy runtime
 # ============================================================
 FROM alpine:3.21 AS proxy
+# wget: used by docker-compose healthchecks (Alpine has no curl by default)
 RUN apk add --no-cache \
     ca-certificates \
     libgcc \

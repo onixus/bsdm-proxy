@@ -8,3 +8,18 @@ datasources:
     url: http://prometheus:9090
     isDefault: true
     editable: false
+
+  - name: ClickHouse
+    uid: clickhouse
+    type: grafana-clickhouse-datasource
+    access: proxy
+    editable: false
+    jsonData:
+      host: clickhouse
+      port: 9000
+      protocol: native
+      username: default
+      defaultDatabase: bsdm
+      defaultTable: http_cache
+      dialTimeout: 10
+      queryTimeout: 60

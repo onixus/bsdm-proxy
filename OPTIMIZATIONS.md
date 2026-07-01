@@ -393,10 +393,10 @@ ms_print massif.out | less
 - [ ] **SIMD для SHA256**: `sha2` с AVX2/NEON оптимизациями
 - [ ] **jemalloc**: Замена стандартного allocator
 - [ ] **HTTP/2 client**: Поддержка HTTP/2 к upstream
-- [ ] **Compression**: Brotli/Zstd для кешированных ответов
+- [x] **Compression**: Brotli/Zstd at-rest for cached responses (`CACHE_COMPRESSION`)
 
 ### v2.2 (Среднесрочные)
-- [ ] **Redis L2 cache**: Распределенный кеш
+- [x] **Redis L2 cache**: Распределенный кеш (`REDIS_L2_ENABLED`, `docker-compose.redis-l2.yml`)
 - [ ] **io_uring**: Linux 5.1+ оптимизация I/O
 - [ ] **eBPF**: Мониторинг на уровне ядра
 

@@ -1,0 +1,124 @@
+# 3-tier cache hierarchy demo: child → sibling (ICP) / parent → upstream
+#
+# Usage:
+#   docker compose -f docker-compose.hierarchy.yml up -d --build
+#   curl -x http://127.0.0.1:1488 http://upstream/get
+#   docker compose -f docker-compose.hierarchy.yml down
+#
+# Ports:
+#   child proxy   1488 (HTTP), 9090 (metrics), 3130 (ICP UDP)
+#   parent proxy  1489 (HTTP), 9091 (metrics), 3131 (ICP UDP)
+#   sibling proxy 1490 (HTTP), 9092 (metrics), 3132 (ICP UDP)
+
+services:
+  upstream:
+    image: kennethreitz/httpbin:latest
+    networks:
+      - hierarchy-net
+
+  proxy-parent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: proxy
+    ports:
+      - "1489:1488"
+      - "9091:9090"
+      - "3131:3130/udp"
+    environment:
+      - HTTP_PORT=1488
+      - METRICS_PORT=9090
+      - MITM_ENABLED=false
+      - AUTH_ENABLED=false
+      - ACL_ENABLED=false
+      - CATEGORIZATION_ENABLED=false
+      - HIERARCHY_ENABLED=true
+      - ICP_BIND=0.0.0.0:3130
+      - ICP_SERVER_ENABLED=true
+      - CACHE_CAPACITY=5000
+      - RUST_LOG=info,bsdm_proxy=info
+    volumes:
+      - ./certs:/certs:ro
+    networks:
+      - hierarchy-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:9090/health | grep -q ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  proxy-sibling:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: proxy
+    ports:
+      - "1490:1488"
+      - "9092:9090"
+      - "3132:3130/udp"
+    environment:
+      - HTTP_PORT=1488
+      - METRICS_PORT=9090
+      - MITM_ENABLED=false
+      - AUTH_ENABLED=false
+      - ACL_ENABLED=false
+      - CATEGORIZATION_ENABLED=false
+      - HIERARCHY_ENABLED=true
+      - ICP_BIND=0.0.0.0:3130
+      - ICP_SERVER_ENABLED=true
+      - CACHE_CAPACITY=5000
+      - RUST_LOG=info,bsdm_proxy=info
+    volumes:
+      - ./certs:/certs:ro
+    networks:
+      - hierarchy-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:9090/health | grep -q ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  proxy-child:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: proxy
+    ports:
+      - "1488:1488"
+      - "9090:9090"
+    environment:
+      - HTTP_PORT=1488
+      - METRICS_PORT=9090
+      - MITM_ENABLED=false
+      - AUTH_ENABLED=false
+      - ACL_ENABLED=false
+      - CATEGORIZATION_ENABLED=false
+      - HIERARCHY_ENABLED=true
+      - ICP_SERVER_ENABLED=false
+      - CACHE_PARENTS=proxy-parent:1488:1.0
+      - CACHE_SIBLINGS=proxy-sibling:1488:1.0:3130
+      - ICP_CLIENT_BIND=0.0.0.0:0
+      - ICP_TIMEOUT_MS=200
+      - PARENT_TIMEOUT_SECONDS=5
+      - CACHE_CAPACITY=1000
+      - RUST_LOG=info,bsdm_proxy=info
+    depends_on:
+      proxy-parent:
+        condition: service_healthy
+      proxy-sibling:
+        condition: service_healthy
+      upstream:
+        condition: service_started
+    volumes:
+      - ./certs:/certs:ro
+    networks:
+      - hierarchy-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:9090/health | grep -q ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+networks:
+  hierarchy-net:
+    driver: bridge

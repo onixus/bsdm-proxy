@@ -12,7 +12,7 @@
 | **Ретропоиск** | Поиск и аналитика по историческому HTTP-трафику |
 | **ML-безопасность** | Аномалии, фишинг и C&C поверх логов и поведенческих сигналов |
 
-Текущая версия в репозитории: **0.2.3-test** · Release tag: **0.2.2b** · [Releases](https://github.com/onixus/bsdm-proxy/releases)
+Текущая версия: **0.3.0** (post-release: tiered L1, M3 dashboards, CH/k8s docs) · [Releases](https://github.com/onixus/bsdm-proxy/releases) · [CHANGELOG](../CHANGELOG.md)
 
 ---
 
@@ -20,11 +20,12 @@
 
 | Milestone | Версия | Фокус | Готовность |
 |-----------|--------|-------|------------|
-| [M1 — Foundation](#m1--foundation-v02x) | v0.2.x | Ядро прокси, ACL, категоризация, observability, иерархия | ~95% |
-| [M2 — Squid parity](#m2--squid-parity-v03x) | v0.3.x | L2, rate limit, полный ACL, hierarchy Phase 4 | ~10% |
-| [M3 — Retro-search](#m3--retro-search-v04x) | v0.4.x | Индексация, дашборды, поиск по истории | ~15% |
+| [M1 — Foundation](#m1--foundation-v02x) | v0.2.x | Ядро прокси, ACL, категоризация, observability | ✅ Done |
+| [M2 — Squid parity](#m2--squid-parity-v03x) | v0.3.x | L2, ACL, hierarchy, auth, compression | ✅ Done |
+| [M2.5 — Data plane](#m25--data-plane-throughput-v031) | v0.3.1 | Tiered L1, perf, streaming, policy cache | ~95% |
+| [M3 — Retro-search](#m3--retro-search-v04x) | v0.4.x | Индексация, дашборды, ClickHouse, Search API | ~70% |
 | [M4 — Threat analytics](#m4--threat-analytics-v05x) | v0.5.x | Rule-based угрозы, алерты, C&C heuristics | ~5% |
-| [M5 — ML security](#m5--ml-security-v10x) | v1.0.x | ML anomaly, phishing ML, C&C beacon detection | ~0% |
+| [M5 — ML security](#m5--ml-security-v10x) | v1.0.x | ML anomaly, phishing ML, C&C detection | ~0% |
 
 ```mermaid
 gantt
@@ -32,73 +33,78 @@ gantt
   dateFormat YYYY-MM
   section Proxy
   M1 Foundation           :done, m1, 2025-10, 2026-03
-  M2 Squid parity         :m2, 2026-03, 2026-06
+  M2 Squid parity         :done, m2, 2026-03, 2026-06
+  M2.5 Data plane perf    :active, m25, 2026-06, 2026-08
   section Analytics
-  M3 Retro-search         :m3, 2026-05, 2026-08
-  M4 Threat analytics     :m4, 2026-07, 2026-10
+  M3 Retro-search         :active, m3, 2026-05, 2026-09
+  M4 Threat analytics     :m4, 2026-08, 2026-11
   section ML
-  M5 ML security          :m5, 2026-09, 2027-03
+  M5 ML security          :m5, 2026-10, 2027-03
 ```
 
 ---
 
 ## M1 — Foundation (v0.2.x)
 
-Базовый корпоративный HTTPS-прокси с политиками и наблюдаемостью.
+Базовый корпоративный HTTPS-прокси с политиками и наблюдаемостью. **✅ Завершён** (v0.2.3-test).
 
-### Выполнено
+<details>
+<summary>Выполнено (свернуть)</summary>
 
-- [x] Hyper forward proxy + HTTP CONNECT
-- [x] MITM TLS (порты 443/8443), динамические сертификаты
-- [x] L1 in-memory cache (`quick_cache`)
-- [x] Kafka producer (async cache events)
-- [x] cache-indexer → OpenSearch
-- [x] Prometheus metrics (20+) + Grafana dashboard
-- [x] Health endpoints (`/health`, `/ready`, `/metrics`)
-- [x] Graceful shutdown
-- [x] Proxy auth: Basic + LDAP (feature `auth-ldap`)
-- [x] ACL: domain, URL prefix, regex, category, IP, user
-- [x] URL categorization: Shallalist, URLhaus, PhishTank, custom DB
-- [x] E2E / smoke test harness
-- [x] Release packaging (`0.2.2b`) + systemd
-- [x] Hierarchical caching Phase 3 — modules in lib, ICP server, peer HTTP fetch, env config
-- [x] Optional MITM CA (`MITM_ENABLED=false` без `ca.key`)
-- [x] Pre-push hook (`fmt` + `clippy`)
+- [x] Hyper forward proxy + HTTP CONNECT, MITM TLS
+- [x] L1 cache, Kafka → OpenSearch, Prometheus + Grafana
+- [x] Auth Basic/LDAP, ACL, categorization, E2E harness
+- [x] Hierarchy Phase 3, rate limit [#37](https://github.com/onixus/bsdm-proxy/issues/37), `ProxyService` refactor [#38](https://github.com/onixus/bsdm-proxy/issues/38)
 
-### В работе / осталось в M1
 
-- [ ] Rate limiting per user/IP — [#37](https://github.com/onixus/bsdm-proxy/issues/37)
-- [ ] Рефакторинг `main.rs` — вынос `ProxyService` в lib — [#38](https://github.com/onixus/bsdm-proxy/issues/38)
-- [ ] Hierarchy E2E / `docker-compose.hierarchy.yml`
-- [ ] Исправить docs: NTLM помечен как done в старом README, но не реализован (`auth.rs`) — **исправлено в wiki**
-
-**Критерий завершения M1:** rate limit + рефакторинг main, hierarchy E2E, все CI зелёные.
+</details>
 
 ---
 
 ## M2 — Squid parity (v0.3.x)
 
-Полноценная замена Squid для корпоративного сценария (без ML).
+Полноценная замена Squid для корпоративного сценария. **✅ Завершён** (v0.3.0).
 
-### Задачи
+### Выполнено
 
-- [ ] **Hierarchy Phase 4** — peer discovery, cache digest, HTCP (опционально mTLS)
-- [ ] **Redis L2 cache** — распределённый кеш между инстансами
-- [ ] **HTTP/2 upstream client**
-- [ ] **Compression** — Brotli/Zstd для cacheable responses
-- [ ] **ACL completeness**
-  - [ ] TimeWindow rules (сейчас TODO в `acl.rs`)
-  - [ ] Group-based rules (сейчас игнорируются)
-  - [ ] REST API управления ACL (`/api/acl/*` из docs)
-- [ ] **NTLM auth** — реализация или снятие с roadmap
-- [ ] **Negative caching** coordination
-- [ ] **Cache refresh / revalidate** — Squid-style freshness
-- [ ] **docker-compose.hierarchy.yml** — 3-tier demo stack
-- [ ] Hierarchy Prometheus metrics (`bsdm_proxy_hierarchy_*`)
+- [x] Hierarchy Phase 4 — peer discovery, cache digest, HTCP ([#87](https://github.com/onixus/bsdm-proxy/pull/87) area)
+- [x] Redis L2 — `docker-compose.redis-l2.yml`, `docker-compose.ha.yml`
+- [x] HTTP/2 upstream — `UPSTREAM_HTTP2_ENABLED`
+- [x] At-rest compression — Brotli/Zstd (`CACHE_COMPRESSION`)
+- [x] ACL: TimeWindow, group Principal, REST API `/api/acl/*`
+- [x] NTLM / Kerberos / LDAP group enrichment ([#44](https://github.com/onixus/bsdm-proxy/issues/44))
+- [x] Negative cache, ETag revalidation (`REVALIDATED`)
+- [x] Shared event schema — `bsdm-events` crate
+- [x] HTTP Archive benchmarks — e2e + `scripts/compare-squid-bsdm-httparchive.sh` ([#90](https://github.com/onixus/bsdm-proxy/pull/90))
 
-**Критерий завершения M2:** 3-tier cache hierarchy в docker-compose, hit rate sibling/parent измеряется, Redis L2 работает.
+**Критерий завершения M2:** 3-tier cache, Redis L2, hierarchy metrics — **выполнен**.
 
-**Зависимости:** M1 (B6 rate limit, B7 refactor).
+---
+
+## M2.5 — Data plane throughput (v0.3.1)
+
+Закрытие gap к Squid на large-object workloads (HTTP Archive sites bench). См. [swg-backlog-mapping.md](swg-backlog-mapping.md), [ADR 0001](adr/0001-tiered-sharded-l1-cache.md).
+
+### Выполнено
+
+- [x] **Tiered L1** — mmap spill + `HttpL1Cache` shards ([#93](https://github.com/onixus/bsdm-proxy/pull/93))
+- [x] **P0 perf** — `response_body()` Raw fast path, `TCP_SNDBUF_BYTES`, bench `WORKER_COUNT` ([#92](https://github.com/onixus/bsdm-proxy/pull/92))
+- [x] **k8s / HA docs** — [k8s-architecture.md](k8s-architecture.md), Helm chart `charts/bsdm/` ([#113](https://github.com/onixus/bsdm-proxy/pull/113))
+- [x] **Streaming MISS** — `TeeMissBody` tees upstream → client while buffering for L1; `STREAMING_MISS_ENABLED` (default `true`) ([#94](https://github.com/onixus/bsdm-proxy/issues/94))
+- [x] **Connection auth cache** — per-TCP keep-alive `Proxy-Authorization` reuse; `AUTH_CONN_CACHE_TTL_SECONDS` ([#95](https://github.com/onixus/bsdm-proxy/issues/95))
+- [x] **Policy decision cache** — `(principal, domain)` ACL+cat; `POLICY_DECISION_CACHE_TTL_SECONDS`; flush on ACL reload ([#96](https://github.com/onixus/bsdm-proxy/issues/96))
+- [x] **HTTP Archive bench profiles** — `BENCH_PROFILE=warm|cold` → `WORKER_COUNT` 1/4; `bench-profile.sh` ([#97](https://github.com/onixus/bsdm-proxy/issues/97))
+- [x] **Spill file permissions** — `CACHE_SPILL_DIR` `0o700`, spill files `0o600` on Unix ([#98](https://github.com/onixus/bsdm-proxy/issues/98))
+
+### В работе (P0)
+
+_Нет открытых P0 — gate M2.5: warm goodput HTTP Archive ≥ Squid −5%._
+
+### P1 (single-pass hot path)
+
+[#100](https://github.com/onixus/bsdm-proxy/issues/100) fast path matrix · [#104](https://github.com/onixus/bsdm-proxy/issues/104) offline categorization · [#106](https://github.com/onixus/bsdm-proxy/issues/106) Kafka bounded queue · [#109](https://github.com/onixus/bsdm-proxy/issues/109) ACL read-mostly
+
+**Критерий завершения M2.5:** warm goodput на HTTP Archive sites bench ≥ Squid −5%; P0 issues закрыты.
 
 ---
 
@@ -106,121 +112,114 @@ gantt
 
 Ретроспективный поиск и аналитика по HTTP-трафику.
 
+### Архитектура
+
+```
+proxy → Kafka → cache-indexer → ClickHouse
+```
+
+**Default compose:** ClickHouse + Grafana SQL dashboards + Search API ([#125](https://github.com/onixus/bsdm-proxy/issues/125)).
+
 ### Текущий gap
 
-Pipeline Kafka → OpenSearch есть, но:
-- поле `categories` теряется в `cache-indexer`
-- нет OpenSearch Dashboards в стеке
-- нет saved searches и search API
+- Search API и session correlation
+- Session correlation (`session_id`, redirect chains)
 
 ### Задачи
 
-- [ ] **Расширить схему событий**
-  - [ ] `categories`, `acl_action`, `threat_sources` в indexer
-  - [ ] OpenSearch index template + mapping
-  - [ ] ILM / retention policy
-- [ ] **OpenSearch Dashboards** в `docker-compose.yml`
-- [ ] **Saved searches / playbooks**
-  - [ ] Все запросы пользователя X за период
-  - [ ] Доступ к домену Y
-  - [ ] Blocked + phishing/malware events
-  - [ ] Top domains per user / per IP
-- [ ] **Search API** (опционально) — thin REST поверх OpenSearch
+- [x] **Схема событий** — `bsdm-events`: `categories`, `acl_action`, `threat_sources`, ACL deny events
+- [x] **OpenSearch retention** — ISM 14d hot → delete 42d ([#91](https://github.com/onixus/bsdm-proxy/pull/91))
+- [x] **OpenSearch Dashboards** — saved searches, playbook «traffic to domain», **BSDM HTTP Traffic** dashboard
+- [x] **ClickHouse foundation** — schema, `docker-compose.clickhouse.yml` ([#115](https://github.com/onixus/bsdm-proxy/pull/115))
+- [x] **ClickHouse indexer** — `INDEXER_BACKEND=clickhouse`, JSONEachRow INSERT ([#114](https://github.com/onixus/bsdm-proxy/issues/114))
+- [x] **Grafana + Search API** — CH dashboards, `/api/search` ([#129](https://github.com/onixus/bsdm-proxy/issues/129), [#130](https://github.com/onixus/bsdm-proxy/issues/130))
+- [x] **Default compose on ClickHouse** — `docker compose up` ([#132](https://github.com/onixus/bsdm-proxy/issues/132))
+- [x] **Remove OpenSearch backend** — ClickHouse-only cache-indexer ([#134](https://github.com/onixus/bsdm-proxy/issues/134))
 - [ ] **Session correlation** — `session_id`, redirect chains
 - [ ] **Экспорт** — CSV/JSON для SOC
 
-**Критерий завершения M3:** аналитик находит «кто ходил на домен X за 30 дней» через Dashboards без ручного curl; categories индексируются.
-
-**Зависимости:** M1 (стабильный event pipeline).
+**Критерий завершения M3:** аналитик находит «кто ходил на domain X за 30 дней» через Dashboards **или** Grafana/CH SQL; CH indexer в production path.
 
 ---
 
 ## M4 — Threat analytics (v0.5.x)
 
-Rule-based обнаружение угроз и алертинг (без ML, быстрый win).
+Rule-based обнаружение угроз (без ML). Запросы и алерты — преимущественно **ClickHouse SQL / materialized views**.
 
 ### Задачи
 
-- [ ] **Обогащение событий** — reputation score, URLhaus/PhishTank metadata в индексе
-- [ ] **Rule-based anomaly alerts**
-  - [ ] Burst к новому/редкому домену
-  - [ ] Off-hours activity spike
-  - [ ] Множество blocked requests от одного user/IP
-- [ ] **C&C heuristics (rules)**
-  - [ ] Периодические короткие запросы к одному host:port (beacon pattern)
-  - [ ] Long-tail / high-entropy domain scoring
-  - [ ] Корреляция: user → множество POST к редким хостам
-- [ ] **Alerting pipeline** — OpenSearch Alerting → webhook / email / SIEM
-- [ ] **Threat dashboard** — Grafana или OpenSearch Dashboards
-- [ ] **Categorization metrics** в Prometheus (документированы, не реализованы)
-- [ ] **PhishTank API key** support (`PHISHTANK_API_KEY`)
+- [ ] **Обогащение событий** — reputation, URLhaus/PhishTank metadata ([#102](https://github.com/onixus/bsdm-proxy/issues/102))
+- [ ] **Rule-based alerts** — burst domain, off-hours, blocked burst
+- [ ] **C&C heuristics** — beacon pattern, high-entropy domains
+- [ ] **Alerting** — CH/Grafana alerting или webhook worker
+- [ ] **Threat dashboard** — Grafana + CH
+- [ ] **Categorization metrics** ([#105](https://github.com/onixus/bsdm-proxy/issues/105))
+- [ ] **PhishTank API key** (`PHISHTANK_API_KEY`)
 
-**Критерий завершения M4:** автоматический алерт при beacon-подобном паттерне; threat dashboard показывает top blocked categories.
+**Критерий завершения M4:** автоматический алерт на beacon-паттерн; threat dashboard с top blocked categories.
 
-**Зависимости:** M3 (полная схема данных в OpenSearch).
+**Зависимости:** M3 (данные в CH).
 
 ---
 
 ## M5 — ML security (v1.0.x)
 
-ML-слой для аномалий, фишинга и C&C.
+ML-слой поверх ClickHouse (batch) + опциональный inline score.
 
 ### Задачи
 
-- [ ] **Feature store** — извлечение признаков из OpenSearch (frequency, entropy, timing, UA, geo)
-- [ ] **Anomaly detection**
-  - [ ] Baseline per user/IP (volume, unique domains, time distribution)
-  - [ ] Isolation Forest / statistical models (batch)
-  - [ ] OpenSearch Anomaly Detection integration
-- [ ] **Phishing ML**
-  - [ ] URL feature model (дополнение PhishTank blocklist)
-  - [ ] HTML/content features через MITM body (опционально)
-- [ ] **C&C ML**
-  - [ ] Beacon detection (FFT / autocorrelation интервалов)
-  - [ ] DGA domain classifier
-- [ ] **Real-time scoring** (optional) — inline risk score в proxy path
-- [ ] **Feedback loop** — FP/FN разметка → переобучение
-- [ ] **ML pipeline** — training worker (Python/Rust) + model registry
+- [ ] **Feature store** — CH SQL / batch export (frequency, entropy, timing, UA)
+- [ ] **Anomaly detection** — baseline per user/IP, Isolation Forest
+- [ ] **Phishing ML** — URL features + optional MITM body
+- [ ] **C&C ML** — FFT beacon, DGA classifier
+- [ ] **Real-time scoring** (optional) — inline risk в proxy
+- [ ] **ML pipeline** — training worker + model registry
 
-**Критерий завершения M5:** ML anomaly score в индексе; алерт на C&C beacon без URL в blocklist; документированный pipeline обучения.
-
-**Зависимости:** M3 (данные), M4 (heuristics как baseline).
+**Критерий завершения M5:** ML anomaly score в store; алерт на C&C без blocklist hit.
 
 ---
 
 ## Матрица зрелости
 
-| Столп | Сейчас (0.2.2b) | После M2 | После M3 | После M5 |
-|-------|-----------------|----------|----------|----------|
-| Squid parity | ~45% | ~85% | ~85% | ~90% |
-| Ретропоиск | ~15% | ~15% | ~80% | ~90% |
+| Столп | Сейчас | После M2.5 | После M3 | После M5 |
+|-------|--------|------------|----------|----------|
+| Squid parity | **~90%** | ~92% | ~92% | ~93% |
+| Ретропоиск | **~60%** | ~60% | ~80% | ~90% |
 | ML / C&C / phishing | ~5% | ~5% | ~10% | ~75% |
-| **Целевое состояние** | **~20%** | **~35%** | **~60%** | **~85%** |
+| **Итого** | **~52%** | ~55% | ~65% | ~85% |
 
 ---
 
 ## GitHub milestones
 
-Issues привязывайте к milestones:
+| GitHub Milestone | Версия | Ключевые issues |
+|------------------|--------|-----------------|
+| M1 Foundation | 0.2.x | #37, #38, #44 |
+| M2 Squid parity | 0.3.x | hierarchy, L2, ACL API |
+| M2.5 Data plane | 0.3.1 | [#94](https://github.com/onixus/bsdm-proxy/issues/94)–[#98](https://github.com/onixus/bsdm-proxy/issues/98) |
+| M3 Retro-search | 0.4.x | [#114](https://github.com/onixus/bsdm-proxy/issues/114), [#110](https://github.com/onixus/bsdm-proxy/issues/110) |
+| M4 Threat analytics | 0.5.x | [#102](https://github.com/onixus/bsdm-proxy/issues/102), [#105](https://github.com/onixus/bsdm-proxy/issues/105) |
+| M5 ML security | 1.0.x | — |
 
-| GitHub Milestone | Версия | Label suggestion |
-|------------------|--------|------------------|
-| `M1: Foundation (v0.2.x)` | 0.2.x | `milestone:m1` |
-| `M2: Squid parity (v0.3.x)` | 0.3.x | `milestone:m2` |
-| `M3: Retro-search (v0.4.x)` | 0.4.x | `milestone:m3` |
-| `M4: Threat analytics (v0.5.x)` | 0.5.x | `milestone:m4` |
-| `M5: ML security (v1.0.x)` | 1.0.x | `milestone:m5` |
+Полный backlog P0–P3: [swg-backlog-mapping.md](swg-backlog-mapping.md) (issues [#94](https://github.com/onixus/bsdm-proxy/issues/94)–[#112](https://github.com/onixus/bsdm-proxy/issues/112)).
 
 ---
 
 ## Связанные документы
 
-- [architecture.md](architecture.md) — архитектура и блокеры B1–B25
-- [hierarchical-caching.md](hierarchical-caching.md) — дизайн ICP/HTCP (M2)
-- [categorization.md](categorization.md) — threat intel feeds (M1/M4)
-- [acl.md](acl.md) — политики доступа (M1/M2)
-- [development.md](development.md) — сборка и тесты
+| Документ | Тема |
+|----------|------|
+| [architecture.md](architecture.md) | Компоненты, блокеры B1–B25 |
+| [adr/0001-tiered-sharded-l1-cache.md](adr/0001-tiered-sharded-l1-cache.md) | Tiered L1 + shards |
+| [adr/0002-clickhouse-analytics.md](adr/0002-clickhouse-analytics.md) | ClickHouse analytics |
+| [swg-backlog-mapping.md](swg-backlog-mapping.md) | SWG leaders → backlog |
+| [k8s-architecture.md](k8s-architecture.md) | Kubernetes |
+| [clickhouse-analytics.md](clickhouse-analytics.md) | CH compose + SQL |
+| [benchmarks-httparchive.md](benchmarks-httparchive.md) | HTTP Archive bench |
+| [performance.md](performance.md) | Perf tuning |
+| [hierarchical-caching.md](hierarchical-caching.md) | ICP/HTCP |
+| [capacity-planning.md](capacity-planning.md) | Sizing |
 
 ---
 
-*Последнее обновление: v0.2.3-test (dev)*
+*Последнее обновление: 2026-06 — M2.5 data plane, M3 ~85%, ClickHouse, wiki deployment/docker/k8s*
