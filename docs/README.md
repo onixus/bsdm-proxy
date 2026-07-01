@@ -22,7 +22,8 @@
 | [logging.md](logging.md) | Логирование (`RUST_LOG`, уровни, troubleshooting) |
 | [performance.md](performance.md) | Тюнинг RPS (`PERF_FAST_CACHE_HIT`, `WORKER_COUNT`, bench) |
 | [acl.md](acl.md) | Списки контроля доступа (ACL) |
-| [categorization.md](categorization.md) | Категоризация URL и threat intelligence |
+| [clickhouse-analytics.md](clickhouse-analytics.md) | ClickHouse analytics (ADR 0002) |
+| [search-api.md](search-api.md) | REST Search API over ClickHouse |
 
 ## Архитектура и roadmap
 
@@ -40,7 +41,7 @@
 | Документ | Описание |
 |----------|----------|
 | [docker-compose.yml](../docker-compose.yml) | Полный стек (proxy, Kafka, OpenSearch, monitoring) |
-| [docker-compose.test.yml](../docker-compose.test.yml) | Минимальный стек для smoke-тестов |
+| [docker-compose.clickhouse.yml](../docker-compose.clickhouse.yml) | ClickHouse analytics stack (Grafana + Search API) |
 | [docker-compose.redis-l2.yml](../docker-compose.redis-l2.yml) | Демо Redis L2 (2 proxy + Redis) |
 | [OPENSEARCH_UPGRADE.md](../OPENSEARCH_UPGRADE.md) | Обновление OpenSearch |
 | [web-config/README.md](../web-config/README.md) | Web UI для генерации конфигурации |
@@ -52,7 +53,8 @@
 | [config/acl-rules.example.json](../config/acl-rules.example.json) | Пример ACL-правил |
 | [packaging/config/bsdm-proxy.env.example](../packaging/config/bsdm-proxy.env.example) | Переменные окружения proxy |
 | [prometheus/prometheus.yml](../prometheus/prometheus.yml) | Scrape config для Prometheus |
-| [grafana/dashboards/bsdm-proxy.json](../grafana/dashboards/bsdm-proxy.json) | Grafana dashboard |
+| [grafana/dashboards/bsdm-proxy.json](../grafana/dashboards/bsdm-proxy.json) | Grafana dashboard (Prometheus) |
+| [grafana/clickhouse/dashboards/bsdm-http-traffic-ch.json](../grafana/clickhouse/dashboards/bsdm-http-traffic-ch.json) | Grafana HTTP Traffic (ClickHouse) |
 
 ## Версии
 

@@ -17,7 +17,9 @@ curl -x http://127.0.0.1:1488 http://httpbin.org/get
 curl 'http://127.0.0.1:8123/?query=SELECT+count()+FROM+bsdm.http_cache'
 ```
 
-Grafana: http://localhost:3000 (admin/admin) — добавьте datasource ClickHouse (`http://clickhouse:8123`).
+Grafana: http://localhost:3000 (admin/admin) — datasource ClickHouse и dashboard **BSDM HTTP Traffic (ClickHouse)** поднимаются автоматически из `grafana/clickhouse/`.
+
+Search API: `http://localhost:8080/api/search` — см. [search-api.md](search-api.md).
 
 ## Схема
 
@@ -62,7 +64,11 @@ curl 'http://127.0.0.1:8123/?query=SELECT+count()+FROM+bsdm.http_cache'
 |------------|---------|----------|
 | `INDEXER_BACKEND` | `opensearch` | `clickhouse`, `ch`, или `dual` (OS+CH) |
 | `DUAL_WRITE_CH_FAIL_POLICY` | `warn` | `fail` — прерывать batch при ошибке CH |
-| `METRICS_PORT` | `8080` | `/metrics`, `/health` cache-indexer |
+| `METRICS_PORT` | `8080` | `/metrics`, `/health`, `/api/search` (cache-indexer) |
+| `SEARCH_API_ENABLED` | auto for CH/dual | REST search over ClickHouse |
+| `SEARCH_API_TOKEN` | — | Bearer auth for `/api/search` |
+| `SEARCH_API_MAX_LIMIT` | `10000` | Max rows per search |
+| `SEARCH_API_DEFAULT_DAYS` | `30` | Default lookback |
 | `CLICKHOUSE_URL` | `http://clickhouse:8123` | HTTP interface |
 | `CLICKHOUSE_DATABASE` | `bsdm` | База |
 | `CLICKHOUSE_TABLE` | `http_cache` | Таблица |
@@ -73,8 +79,8 @@ curl 'http://127.0.0.1:8123/?query=SELECT+count()+FROM+bsdm.http_cache'
 | 1 | Этот compose + ADR 0002 |
 | 2 | ✅ `INDEXER_BACKEND=clickhouse` в cache-indexer |
 | 2b | ✅ `INDEXER_BACKEND=dual` + reconciliation script |
-| 3 | Grafana SQL dashboards (замена OSD) |
-| 4 | Search API на ClickHouse HTTP |
+| 2 | Grafana SQL dashboards (CH compose) — [#129](https://github.com/onixus/bsdm-proxy/issues/129) |
+| 3 | Search API на ClickHouse — [#130](https://github.com/onixus/bsdm-proxy/issues/130), [search-api.md](search-api.md) |
 
 Kafka остаётся bus на фазе 1–2; NATS — опционально позже (ADR 0002).
 

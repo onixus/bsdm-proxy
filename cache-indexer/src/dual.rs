@@ -34,7 +34,7 @@ impl ChFailPolicy {
 
 pub struct DualIndexer {
     opensearch: OpenSearchWriter,
-    clickhouse: ClickHouseWriter,
+    clickhouse: Arc<ClickHouseWriter>,
     consumer: StreamConsumer,
     metrics: Arc<IndexerMetrics>,
     ch_fail_policy: ChFailPolicy,
@@ -46,7 +46,7 @@ impl DualIndexer {
         kafka_topic: &str,
         kafka_group: &str,
         opensearch: OpenSearchWriter,
-        clickhouse: ClickHouseWriter,
+        clickhouse: Arc<ClickHouseWriter>,
         metrics: Arc<IndexerMetrics>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let consumer = crate::kafka::create_consumer(kafka_brokers, kafka_topic, kafka_group)?;
