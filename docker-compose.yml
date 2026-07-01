@@ -59,75 +59,6 @@ services:
         soft: 262144
         hard: 262144
 
-  opensearch:
-    profiles: ["legacy-opensearch"]
-    image: opensearchproject/opensearch:3.7.0
-    environment:
-      - cluster.name=opensearch-cluster
-      - node.name=opensearch-node1
-      - discovery.type=single-node
-      - "OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g"
-      - DISABLE_INSTALL_DEMO_CONFIG=true
-      - DISABLE_SECURITY_PLUGIN=true
-      - "bootstrap.memory_lock=true"
-      - cluster.routing.allocation.disk.threshold_enabled=false
-    ulimits:
-      memlock:
-        soft: -1
-        hard: -1
-      nofile:
-        soft: 65536
-        hard: 65536
-    ports:
-      - "9200:9200"
-      - "9600:9600"
-    volumes:
-      - opensearch-data:/usr/share/opensearch/data
-    networks:
-      - bsdm-net
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-
-  opensearch-dashboards:
-    profiles: ["legacy-opensearch"]
-    image: opensearchproject/opensearch-dashboards:3.7.0
-    ports:
-      - "5601:5601"
-    environment:
-      - OPENSEARCH_HOSTS=["http://opensearch:9200"]
-      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
-      - "SERVER_HOST=0.0.0.0"
-    depends_on:
-      opensearch:
-        condition: service_healthy
-    networks:
-      - bsdm-net
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:5601/api/status || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 20
-
-  dashboards-setup:
-    profiles: ["legacy-opensearch"]
-    image: curlimages/curl:8.5.0
-    depends_on:
-      opensearch-dashboards:
-        condition: service_healthy
-    environment:
-      - OPENSEARCH_INDEX=http-cache
-    networks:
-      - bsdm-net
-    volumes:
-      - ./opensearch-dashboards/setup-saved-objects.sh:/setup-saved-objects.sh:ro
-    entrypoint: ["/bin/sh", "/setup-saved-objects.sh"]
-    restart: "no"
-
   proxy:
     build:
       context: .
@@ -180,7 +111,6 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - INDEXER_BACKEND=clickhouse
       - KAFKA_BROKERS=kafka:9092
       - KAFKA_TOPIC=cache-events
       - KAFKA_GROUP_ID=cache-indexer-group
@@ -257,8 +187,6 @@ networks:
 
 volumes:
   clickhouse-data:
-    driver: local
-  opensearch-data:
     driver: local
   prometheus-data:
     driver: local

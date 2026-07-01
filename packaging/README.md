@@ -9,7 +9,7 @@
 | Path | Description |
 |------|-------------|
 | `bin/proxy` | HTTPS caching proxy |
-| `bin/cache-indexer` | Kafka → OpenSearch indexer |
+| `bin/cache-indexer` | Kafka → ClickHouse indexer |
 | `config/*.example` | Environment and ACL templates |
 | `systemd/` | systemd unit files |
 | `install.sh` | Installer script |

@@ -27,7 +27,7 @@ bsdm-proxy/
 │       ├── lib.rs      # acl, auth, categorization, hierarchy, icp, peers
 │       ├── peer_fetch.rs, hierarchy_config.rs, cache_key.rs
 │       └── tls.rs, metrics.rs, policy_config.rs
-├── cache-indexer/      # Kafka → OpenSearch indexer
+├── cache-indexer/      # Kafka → ClickHouse indexer
 ├── e2e/                # Smoke и E2E тесты
 ├── config/             # Примеры ACL-правил
 ├── packaging/          # Release-пакет (systemd, install.sh)

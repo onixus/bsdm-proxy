@@ -4,9 +4,9 @@ version = "0.3.0"
 edition = "2021"
 license = "MIT"
 authors = ["BSDM-Proxy Contributors"]
-description = "Kafka to OpenSearch / ClickHouse indexer for HTTP cache events"
+description = "Kafka to ClickHouse indexer for HTTP cache events"
 repository = "https://github.com/onixus/bsdm-proxy"
-keywords = ["kafka", "opensearch", "clickhouse", "indexer", "cache"]
+keywords = ["kafka", "clickhouse", "indexer", "cache"]
 categories = ["database", "network-programming"]
 
 [[bin]]
@@ -19,7 +19,6 @@ tokio = { workspace = true }
 rdkafka = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-opensearch = { workspace = true }
 reqwest = { workspace = true }
 prometheus = "0.14"
 tracing = { workspace = true }

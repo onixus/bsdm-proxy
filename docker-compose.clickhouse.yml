@@ -116,7 +116,6 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - INDEXER_BACKEND=clickhouse
       - KAFKA_BROKERS=kafka:9092
       - KAFKA_TOPIC=cache-events
       - KAFKA_GROUP_ID=cache-indexer-ch-group

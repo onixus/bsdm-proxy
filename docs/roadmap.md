@@ -117,7 +117,7 @@ _Нет открытых P0 — gate M2.5: warm goodput HTTP Archive ≥ Squid �
 proxy → Kafka → cache-indexer → ClickHouse
 ```
 
-**Default compose:** ClickHouse + Grafana SQL dashboards + Search API ([#125](https://github.com/onixus/bsdm-proxy/issues/125)). OpenSearch доступен через `--profile legacy-opensearch` (deprecated, removal v0.5.0).
+**Default compose:** ClickHouse + Grafana SQL dashboards + Search API ([#125](https://github.com/onixus/bsdm-proxy/issues/125)).
 
 ### Текущий gap
 
@@ -133,6 +133,7 @@ proxy → Kafka → cache-indexer → ClickHouse
 - [x] **ClickHouse indexer** — `INDEXER_BACKEND=clickhouse`, JSONEachRow INSERT ([#114](https://github.com/onixus/bsdm-proxy/issues/114))
 - [x] **Grafana + Search API** — CH dashboards, `/api/search` ([#129](https://github.com/onixus/bsdm-proxy/issues/129), [#130](https://github.com/onixus/bsdm-proxy/issues/130))
 - [x] **Default compose on ClickHouse** — `docker compose up` ([#132](https://github.com/onixus/bsdm-proxy/issues/132))
+- [x] **Remove OpenSearch backend** — ClickHouse-only cache-indexer ([#134](https://github.com/onixus/bsdm-proxy/issues/134))
 - [ ] **Session correlation** — `session_id`, redirect chains
 - [ ] **Экспорт** — CSV/JSON для SOC
 

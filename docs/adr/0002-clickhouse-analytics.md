@@ -2,14 +2,14 @@
 
 ## Status
 
-Proposed (2026-06)
+Accepted (2026-06)
 
 ## Context
 
 BSDM analytics pipeline:
 
 ```
-proxy → Kafka (CacheEvent JSON) → cache-indexer → OpenSearch → Dashboards
+proxy → Kafka (CacheEvent JSON) → cache-indexer → ClickHouse → Grafana / Search API
 ```
 
 Roadmap M3–M5 workloads:
@@ -22,7 +22,7 @@ Roadmap M3–M5 workloads:
 
 Corporate medium: **~4M events/day**, 42-day retention ([capacity-planning.md](../capacity-planning.md)).
 
-OpenSearch works but is RAM-heavy and optimized for full-text search; BSDM queries are **structured analytics**.
+OpenSearch was RAM-heavy and optimized for full-text search; BSDM queries are **structured analytics**. Migration completed in phases 0–4 ([#125](https://github.com/onixus/bsdm-proxy/issues/125)).
 
 **Kafka vs NATS:** evaluated in parallel — bus unchanged in phase 1 (see Decision 2).
 
@@ -30,9 +30,9 @@ OpenSearch works but is RAM-heavy and optimized for full-text search; BSDM queri
 
 ### 1. ClickHouse as primary analytics store
 
-- Add `INDEXER_BACKEND=clickhouse` to cache-indexer (OpenSearch remains default during migration).
+- `cache-indexer` writes to ClickHouse (`bsdm.http_cache`).
 - Schema: `scripts/clickhouse/http_cache.sql` — `MergeTree`, daily partitions, 42-day TTL.
-- Dashboards: Grafana + ClickHouse datasource (replace OpenSearch Dashboards for M3).
+- Dashboards: Grafana + ClickHouse datasource; Search API on cache-indexer admin port.
 
 ### 2. Keep Kafka in phase 1–2; NATS optional later
 
@@ -41,20 +41,19 @@ OpenSearch works but is RAM-heavy and optimized for full-text search; BSDM queri
 | Kafka | Default — multi-consumer M4/M5, existing `rdkafka` integration |
 | NATS JetStream | Optional lab/k8s profile via `EventBus` abstraction (phase 3) |
 
-Do not migrate Kafka and OpenSearch simultaneously.
+### 3. Migration (completed)
 
-### 3. Phased migration
-
-1. `docker-compose.clickhouse.yml` + schema (this ADR)
+1. `docker-compose.clickhouse.yml` + schema
 2. cache-indexer ClickHouse backend + dual-write validation
-3. Search API (#110) on ClickHouse HTTP
-4. Deprecate OpenSearch in default compose
+3. Search API + Grafana CH dashboards
+4. Default compose on ClickHouse
+5. Remove OpenSearch backend ([#134](https://github.com/onixus/bsdm-proxy/issues/134))
 
 ## Consequences
 
-**Positive:** lower cost/RAM, SQL retro-search, M4/M5 fit, simpler Search API.
+**Positive:** lower cost/RAM, SQL retro-search, M4/M5 fit, simpler Search API, single analytics store.
 
-**Negative:** lose KQL/OSD, rewrite indexer, dual-run during migration, fuzzy URL search weaker.
+**Negative:** lose KQL/OSD (replaced by Grafana SQL); fuzzy URL search weaker in CH.
 
 ## Alternatives rejected
 
@@ -65,6 +64,6 @@ Do not migrate Kafka and OpenSearch simultaneously.
 ## References
 
 - [clickhouse-analytics.md](../clickhouse-analytics.md)
+- [search-api.md](../search-api.md)
 - [roadmap.md](../roadmap.md) M3–M5
 - `bsdm-events::CacheEvent`
-- Implementation: [#114](https://github.com/onixus/bsdm-proxy/issues/114) — cache-indexer ClickHouse backend

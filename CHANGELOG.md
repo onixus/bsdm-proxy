@@ -7,10 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **OpenSearch backend** — `cache-indexer` is ClickHouse-only; `opensearch` crate, dual-write, legacy compose ([#134](https://github.com/onixus/bsdm-proxy/issues/134))
+- `opensearch-dashboards/`, `OPENSEARCH_UPGRADE.md`, `scripts/reconcile-os-ch-events.sh`
+- OpenSearch index/ISM helpers from `bsdm-events`
+
 ### Changed
 
-- **Default Docker stack** — `docker compose up` uses ClickHouse + Grafana CH dashboards + Search API instead of OpenSearch ([#132](https://github.com/onixus/bsdm-proxy/issues/132))
-- OpenSearch, OpenSearch Dashboards moved to `--profile legacy-opensearch` (deprecated, removal target **v0.5.0**) ([#133](https://github.com/onixus/bsdm-proxy/issues/133))
+- **Default Docker stack** — `docker compose up` uses ClickHouse + Grafana CH dashboards + Search API ([#132](https://github.com/onixus/bsdm-proxy/issues/132))
+- ADR 0002 status → Accepted
 - `docker-compose.clickhouse.yml` marked deprecated — use main compose
 
 ## [0.3.0] - 2026-06-30

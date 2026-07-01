@@ -1,4 +1,4 @@
-//! ClickHouse backend for cache-indexer (`INDEXER_BACKEND=clickhouse`).
+//! ClickHouse backend for cache-indexer.
 
 use bsdm_events::json_each_row_lines;
 use bsdm_events::CacheEvent;

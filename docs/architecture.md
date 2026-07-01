@@ -165,7 +165,7 @@ proxy/
 │   ├── policy_config.rs ← env loading
 │   └── auth_config.rs
 cache-indexer/
-└── src/main.rs          ← Kafka → ClickHouse (default) / OpenSearch (legacy)
+└── src/main.rs          ← Kafka → ClickHouse
 e2e/                     ← smoke + E2E harness
 ```
 
