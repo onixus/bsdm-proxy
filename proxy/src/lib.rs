@@ -42,7 +42,7 @@ pub use acl_config::{load_acl_engine_from_file, parse_acl_action};
 pub use auth::KerberosConfig;
 #[cfg(feature = "auth-ntlm")]
 pub use auth::NtlmConfig;
-pub use auth::{AuthBackend, AuthConfig, AuthManager, ProxyAuthOutcome, UserInfo};
+pub use auth::{AuthBackend, AuthConfig, AuthManager, ConnAuthCache, ProxyAuthOutcome, UserInfo};
 pub use bsdm_events::CacheEvent;
 pub use cache::{CacheConfig, CachedResponse};
 pub use cache_body::CachedBody;

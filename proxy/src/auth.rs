@@ -198,6 +198,8 @@ pub struct AuthConfig {
     pub backend: AuthBackend,
     pub realm: String,
     pub cache_ttl: Duration,
+    /// Per-TCP-connection auth cache TTL (`AUTH_CONN_CACHE_TTL_SECONDS`; `0` = disabled).
+    pub conn_cache_ttl: Duration,
     #[cfg(feature = "auth-ldap")]
     pub ldap: Option<LdapConfig>,
     #[cfg(feature = "auth-ntlm")]
@@ -213,6 +215,7 @@ impl Default for AuthConfig {
             backend: AuthBackend::Basic,
             realm: "BSDM-Proxy".to_string(),
             cache_ttl: Duration::from_secs(300),
+            conn_cache_ttl: Duration::from_secs(300),
             #[cfg(feature = "auth-ldap")]
             ldap: None,
             #[cfg(feature = "auth-ntlm")]
@@ -227,6 +230,72 @@ impl Default for AuthConfig {
 struct HandshakeSession {
     session: SspiSession,
     created_at: Instant,
+}
+
+#[derive(Clone, Debug)]
+struct ConnAuthEntry {
+    user: UserInfo,
+    cred_fingerprint: Option<String>,
+    authenticated_at: Instant,
+}
+
+/// Per-TCP-connection proxy auth cache for HTTP keep-alive.
+#[derive(Debug)]
+pub struct ConnAuthCache {
+    ttl: Duration,
+    inner: RwLock<Option<ConnAuthEntry>>,
+}
+
+impl ConnAuthCache {
+    pub fn new(ttl: Duration) -> Self {
+        Self {
+            ttl,
+            inner: RwLock::new(None),
+        }
+    }
+
+    fn enabled(&self) -> bool {
+        !self.ttl.is_zero()
+    }
+
+    pub async fn get(&self, cred_fingerprint: Option<&str>) -> Option<UserInfo> {
+        if !self.enabled() {
+            return None;
+        }
+        let guard = self.inner.read().await;
+        let entry = guard.as_ref()?;
+        if entry.authenticated_at.elapsed() > self.ttl {
+            return None;
+        }
+        match (cred_fingerprint, entry.cred_fingerprint.as_deref()) {
+            (None, _) => Some(entry.user.clone()),
+            (Some(fp), Some(cached)) if fp == cached => Some(entry.user.clone()),
+            (Some(_), Some(_)) => None,
+            (Some(_), None) => Some(entry.user.clone()),
+        }
+    }
+
+    pub async fn store(&self, user: UserInfo, cred_fingerprint: Option<String>) {
+        if !self.enabled() {
+            return;
+        }
+        let mut guard = self.inner.write().await;
+        *guard = Some(ConnAuthEntry {
+            user,
+            cred_fingerprint,
+            authenticated_at: Instant::now(),
+        });
+    }
+
+    pub async fn invalidate(&self) {
+        let mut guard = self.inner.write().await;
+        *guard = None;
+    }
+}
+
+fn proxy_auth_fingerprint<T>(req: &Request<T>) -> Option<String> {
+    let value = req.headers().get(PROXY_AUTHORIZATION)?.to_str().ok()?;
+    Some(CachedUser::hash_password(value))
 }
 
 /// Authentication manager
@@ -290,6 +359,10 @@ impl AuthManager {
         self.config.enabled
     }
 
+    pub fn conn_cache_ttl(&self) -> Duration {
+        self.config.conn_cache_ttl
+    }
+
     /// Extract credentials from request
     pub fn extract_credentials<T>(&self, req: &Request<T>) -> Option<(String, String)> {
         let auth_header = req.headers().get(PROXY_AUTHORIZATION)?;
@@ -331,12 +404,21 @@ impl AuthManager {
     /// Handle proxy authentication including multi-round NTLM / Kerberos.
     pub async fn handle_proxy_auth<T>(
         &self,
-        #[allow(unused_variables)] client_key: &str,
+        _client_key: &str,
         req: &Request<T>,
+        conn_auth: Option<&ConnAuthCache>,
     ) -> ProxyAuthOutcome {
         #[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]
         if self.uses_sspi_handshake() {
-            return self.handle_sspi_auth(client_key, req).await;
+            return self.handle_sspi_auth(client_key, req, conn_auth).await;
+        }
+
+        let cred_fp = proxy_auth_fingerprint(req);
+        if let Some(cache) = conn_auth {
+            if let Some(user) = cache.get(cred_fp.as_deref()).await {
+                debug!("Connection auth cache hit for {}", user.username);
+                return ProxyAuthOutcome::Authenticated(user);
+            }
         }
 
         let Some((username, password)) = self.extract_credentials(req) else {
@@ -346,8 +428,16 @@ impl AuthManager {
         };
 
         match self.authenticate(&username, &password).await {
-            Ok(user) => ProxyAuthOutcome::Authenticated(user),
+            Ok(user) => {
+                if let Some(cache) = conn_auth {
+                    cache.store(user.clone(), cred_fp).await;
+                }
+                ProxyAuthOutcome::Authenticated(user)
+            }
             Err(e) => {
+                if let Some(cache) = conn_auth {
+                    cache.invalidate().await;
+                }
                 warn!("Proxy authentication failed for {}: {}", username, e);
                 ProxyAuthOutcome::Challenge {
                     authenticate_header: self.initial_auth_header(),
@@ -357,7 +447,12 @@ impl AuthManager {
     }
 
     #[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]
-    async fn handle_sspi_auth<T>(&self, client_key: &str, req: &Request<T>) -> ProxyAuthOutcome {
+    async fn handle_sspi_auth<T>(
+        &self,
+        client_key: &str,
+        req: &Request<T>,
+        conn_auth: Option<&ConnAuthCache>,
+    ) -> ProxyAuthOutcome {
         let Some(engine) = &self.sspi_engine else {
             return ProxyAuthOutcome::Challenge {
                 authenticate_header: self.initial_auth_header(),
@@ -370,6 +465,12 @@ impl AuthManager {
             .map(|(_, bytes)| bytes);
 
         if token.is_none() {
+            if let Some(cache) = conn_auth {
+                if let Some(user) = cache.get(None).await {
+                    debug!("Connection auth cache hit for {}", user.username);
+                    return ProxyAuthOutcome::Authenticated(user);
+                }
+            }
             if let Some(cached) = self.principal_cache.read().await.get(client_key).cloned() {
                 if cached.authenticated_at.elapsed() < self.config.cache_ttl {
                     return ProxyAuthOutcome::Authenticated(cached);
@@ -428,6 +529,9 @@ impl AuthManager {
                     .write()
                     .await
                     .insert(client_key.to_string(), user.clone());
+                if let Some(cache) = conn_auth {
+                    cache.store(user.clone(), None).await;
+                }
                 ProxyAuthOutcome::Authenticated(user)
             }
             Ok(SspiStepResult::Challenge { token_b64 }) => ProxyAuthOutcome::Challenge {
@@ -435,6 +539,9 @@ impl AuthManager {
             },
             Ok(SspiStepResult::Failed(reason)) => {
                 self.handshake_sessions.write().await.remove(client_key);
+                if let Some(cache) = conn_auth {
+                    cache.invalidate().await;
+                }
                 warn!("SSPI authentication failed for {}: {}", client_key, reason);
                 ProxyAuthOutcome::Challenge {
                     authenticate_header: self.initial_auth_header(),
@@ -927,5 +1034,106 @@ mod tests {
 
         let cached = manager.get_cached_user("testuser").await;
         assert!(cached.unwrap().is_expired());
+    }
+
+    fn basic_proxy_request(user: &str, pass: &str) -> Request<()> {
+        let token = general_purpose::STANDARD.encode(format!("{user}:{pass}"));
+        Request::builder()
+            .uri("http://example.com/")
+            .header(PROXY_AUTHORIZATION, format!("Basic {token}"))
+            .body(())
+            .unwrap()
+    }
+
+    fn bare_proxy_request() -> Request<()> {
+        Request::builder()
+            .uri("http://example.com/")
+            .body(())
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn conn_auth_cache_hit_without_proxy_authorization_header() {
+        let config = AuthConfig {
+            enabled: true,
+            backend: AuthBackend::Basic,
+            ..Default::default()
+        };
+        let manager = AuthManager::new(config);
+        let conn = ConnAuthCache::new(Duration::from_secs(60));
+        let secret = unit_test_secret();
+
+        let first = manager
+            .handle_proxy_auth(
+                "conn-1",
+                &basic_proxy_request("alice", &secret),
+                Some(&conn),
+            )
+            .await;
+        assert!(matches!(first, ProxyAuthOutcome::Authenticated(_)));
+
+        let second = manager
+            .handle_proxy_auth("conn-1", &bare_proxy_request(), Some(&conn))
+            .await;
+        match second {
+            ProxyAuthOutcome::Authenticated(user) => assert_eq!(user.username, "alice"),
+            other => panic!("expected authenticated cache hit, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn conn_auth_cache_reauths_when_credentials_change() {
+        let config = AuthConfig {
+            enabled: true,
+            backend: AuthBackend::Basic,
+            ..Default::default()
+        };
+        let manager = AuthManager::new(config);
+        let conn = ConnAuthCache::new(Duration::from_secs(60));
+        let secret = unit_test_secret();
+
+        let first = manager
+            .handle_proxy_auth(
+                "conn-1",
+                &basic_proxy_request("alice", &secret),
+                Some(&conn),
+            )
+            .await;
+        assert!(matches!(first, ProxyAuthOutcome::Authenticated(_)));
+
+        let changed = manager
+            .handle_proxy_auth("conn-1", &basic_proxy_request("bob", &secret), Some(&conn))
+            .await;
+        match changed {
+            ProxyAuthOutcome::Authenticated(user) => assert_eq!(user.username, "bob"),
+            other => panic!("expected re-auth with new credentials, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn conn_auth_cache_miss_after_invalidate() {
+        let config = AuthConfig {
+            enabled: true,
+            backend: AuthBackend::Basic,
+            ..Default::default()
+        };
+        let manager = AuthManager::new(config);
+        let conn = ConnAuthCache::new(Duration::from_secs(60));
+        let secret = unit_test_secret();
+
+        manager
+            .handle_proxy_auth(
+                "conn-1",
+                &basic_proxy_request("alice", &secret),
+                Some(&conn),
+            )
+            .await;
+
+        conn.invalidate().await;
+
+        let follow_up = manager
+            .handle_proxy_auth("conn-1", &bare_proxy_request(), Some(&conn))
+            .await;
+        assert!(matches!(follow_up, ProxyAuthOutcome::Challenge { .. }));
     }
 }
