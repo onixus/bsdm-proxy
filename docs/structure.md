@@ -81,4 +81,4 @@ bsdm-proxy/
 | `README.md_old`, `SDBM/` | — |
 | `.github/issue-bodies/ch-*.md` | Миграция завершена ([#125](https://github.com/onixus/bsdm-proxy/issues/125)) |
 
-См. [ADR 0002](adr/0002-clickhouse-analytics.md) · [clickhouse-analytics.md](clickhouse-analytics.md)
+См. [ADR 0002](adr/0002-clickhouse-analytics.md) · [clickhouse-analytics.md](clickhouse-analytics.md) · [licensing.md](licensing.md)

@@ -420,6 +420,8 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test, cargo-audi
 | [docs/acl.md](docs/acl.md) | Правила доступа, REST API |
 | [docs/categorization.md](docs/categorization.md) | Shallalist, URLhaus, PhishTank |
 | [docs/hierarchical-caching.md](docs/hierarchical-caching.md) | Иерархический кеш, ICP, HTCP |
+| [docs/licensing.md](docs/licensing.md) | Лицензии, third-party, AGPL-заметки |
+| [NOTICE](NOTICE) | Реестр third-party компонентов |
 | [docs/clickhouse-analytics.md](docs/clickhouse-analytics.md) | ClickHouse analytics, compose, SQL |
 | [docs/search-api.md](docs/search-api.md) | REST Search API (`/api/search`) |
 | [docs/adr/0002-clickhouse-analytics.md](docs/adr/0002-clickhouse-analytics.md) | ADR: ClickHouse как analytics store |

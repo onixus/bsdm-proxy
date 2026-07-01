@@ -13,6 +13,7 @@
 | [packaging/README.md](../packaging/README.md) | Установка из release-пакета (systemd) |
 | [development.md](development.md) | Сборка, тесты, CI, релиз |
 | [structure.md](structure.md) | **Структура репозитория** |
+| [licensing.md](licensing.md) | **Лицензии и third-party компоненты** |
 | [CHANGELOG.md](../CHANGELOG.md) | История изменений |
 | [releases/v0.3.0.md](releases/v0.3.0.md) | **Release notes 0.3.0** |
 | [releases/v0.2.3-test.md](releases/v0.2.3-test.md) | Release notes 0.2.3-test (superseded) |
