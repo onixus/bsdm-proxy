@@ -90,6 +90,21 @@ fn is_negative_status(status: u16) -> bool {
     matches!(status, 403 | 404)
 }
 
+pub fn content_length(headers: &HashMap<String, String>) -> Option<usize> {
+    header_value(headers, "content-length").and_then(|v| v.parse::<usize>().ok())
+}
+
+/// Pre-check cacheability from headers before the body is known (streaming MISS).
+pub fn evaluate_store_precheck(
+    method: &str,
+    status: u16,
+    headers: &HashMap<String, String>,
+    config: &CacheConfig,
+) -> CacheStoreDecision {
+    let size_hint = content_length(headers).unwrap_or(0);
+    evaluate_store(method, status, headers, size_hint, config)
+}
+
 /// Decide whether to store a response and compute freshness metadata.
 pub fn evaluate_store(
     method: &str,
@@ -98,7 +113,10 @@ pub fn evaluate_store(
     body_size: usize,
     config: &CacheConfig,
 ) -> CacheStoreDecision {
-    if !CACHEABLE_METHODS.contains(&method) || body_size > config.max_body_size {
+    if !CACHEABLE_METHODS.contains(&method) {
+        return CacheStoreDecision::bypass();
+    }
+    if body_size > config.max_body_size {
         return CacheStoreDecision::bypass();
     }
 

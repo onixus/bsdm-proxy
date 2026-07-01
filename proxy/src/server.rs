@@ -24,7 +24,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::acl_api::AclApiState;
 use crate::auth::UserInfo;
-use crate::http_types::Body;
+use crate::http_types::{empty, full};
 use crate::metrics::Metrics;
 use crate::pipeline::{new_event_id, CacheEvent};
 use crate::proxy_service::ProxyService;
@@ -118,10 +118,10 @@ pub async fn metrics_server(
                                                 .status(StatusCode::OK)
                                                 .header("Content-Type", "text/plain; version=0.0.4")
                                                 .header("Content-Length", body.len().to_string())
-                                                .body(Body::new(Bytes::from(body)))
+                                                .body(full(Bytes::from(body)))
                                                 .unwrap_or_else(|e| {
                                                     error!("Failed to build metrics response: {}", e);
-                                                    Response::new(Body::new(Bytes::from_static(
+                                                    Response::new(full(Bytes::from_static(
                                                         b"500 Internal Server Error",
                                                     )))
                                                 })
@@ -130,11 +130,11 @@ pub async fn metrics_server(
                                             error!("Failed to export metrics: {}", e);
                                             Response::builder()
                                                 .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                                .body(Body::new(Bytes::from_static(
+                                                .body(full(Bytes::from_static(
                                                     b"500 Internal Server Error",
                                                 )))
                                                 .unwrap_or_else(|_| {
-                                                    Response::new(Body::new(Bytes::from_static(
+                                                    Response::new(full(Bytes::from_static(
                                                         b"500 Internal Server Error",
                                                     )))
                                                 })
@@ -143,11 +143,11 @@ pub async fn metrics_server(
                                             error!("Metrics export panicked: {:?}", panic_info);
                                             Response::builder()
                                                 .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                                .body(Body::new(Bytes::from_static(
+                                                .body(full(Bytes::from_static(
                                                     b"500 Panic in metrics export",
                                                 )))
                                                 .unwrap_or_else(|_| {
-                                                    Response::new(Body::new(Bytes::from_static(
+                                                    Response::new(full(Bytes::from_static(
                                                         b"500 Internal Server Error",
                                                     )))
                                                 })
@@ -159,9 +159,9 @@ pub async fn metrics_server(
                                     Response::builder()
                                         .status(StatusCode::OK)
                                         .header("Content-Type", "application/json")
-                                        .body(Body::new(Bytes::from_static(b"{\"status\":\"ok\"}")))
+                                        .body(full(Bytes::from_static(b"{\"status\":\"ok\"}")))
                                         .unwrap_or_else(|_| {
-                                            Response::new(Body::new(Bytes::from_static(
+                                            Response::new(full(Bytes::from_static(
                                                 b"{\"status\":\"ok\"}",
                                             )))
                                         })
@@ -172,11 +172,11 @@ pub async fn metrics_server(
                                         Response::builder()
                                             .status(StatusCode::SERVICE_UNAVAILABLE)
                                             .header("Content-Type", "application/json")
-                                            .body(Body::new(Bytes::from_static(
+                                            .body(full(Bytes::from_static(
                                                 b"{\"status\":\"draining\"}",
                                             )))
                                             .unwrap_or_else(|_| {
-                                                Response::new(Body::new(Bytes::from_static(
+                                                Response::new(full(Bytes::from_static(
                                                     b"{\"status\":\"draining\"}",
                                                 )))
                                             })
@@ -185,11 +185,11 @@ pub async fn metrics_server(
                                         Response::builder()
                                             .status(StatusCode::OK)
                                             .header("Content-Type", "application/json")
-                                            .body(Body::new(Bytes::from_static(
+                                            .body(full(Bytes::from_static(
                                                 b"{\"status\":\"ready\"}",
                                             )))
                                             .unwrap_or_else(|_| {
-                                                Response::new(Body::new(Bytes::from_static(
+                                                Response::new(full(Bytes::from_static(
                                                     b"{\"status\":\"ready\"}",
                                                 )))
                                             })
@@ -199,9 +199,9 @@ pub async fn metrics_server(
                                     warn!("Unknown metrics endpoint: {}", path);
                                     Response::builder()
                                         .status(StatusCode::NOT_FOUND)
-                                        .body(Body::new(Bytes::from_static(b"404 Not Found")))
+                                        .body(full(Bytes::from_static(b"404 Not Found")))
                                         .unwrap_or_else(|_| {
-                                            Response::new(Body::new(Bytes::from_static(b"404 Not Found")))
+                                            Response::new(full(Bytes::from_static(b"404 Not Found")))
                                         })
                                 }
                             };
@@ -369,7 +369,7 @@ async fn handle_connect_mitm(
                 Ok(req) => req,
                 Err(e) => {
                     error!("Failed to rewrite MITM request for {}: {}", authority, e);
-                    let mut resp = Response::new(Body::new(Bytes::from_static(b"400 Bad Request")));
+                    let mut resp = Response::new(full(Bytes::from_static(b"400 Bad Request")));
                     *resp.status_mut() = StatusCode::BAD_REQUEST;
                     return Ok::<_, Infallible>(resp);
                 }
@@ -412,8 +412,7 @@ pub async fn handle_connection(
                     Some(auth) => auth.as_str().to_string(),
                     None => {
                         error!("CONNECT without authority");
-                        let mut resp =
-                            Response::new(Body::new(Bytes::from_static(b"400 Bad Request")));
+                        let mut resp = Response::new(full(Bytes::from_static(b"400 Bad Request")));
                         *resp.status_mut() = StatusCode::BAD_REQUEST;
                         return Ok::<_, Infallible>(resp);
                     }
@@ -481,10 +480,10 @@ pub async fn handle_connection(
 
                 let response = Response::builder()
                     .status(StatusCode::OK)
-                    .body(Body::new(Bytes::new()))
+                    .body(empty())
                     .unwrap_or_else(|e| {
                         error!("Failed to build response: {}", e);
-                        let mut resp = Response::new(Body::new(Bytes::new()));
+                        let mut resp = Response::new(empty());
                         *resp.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
                         resp
                     });

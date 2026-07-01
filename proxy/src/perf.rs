@@ -17,6 +17,8 @@ pub struct PerfConfig {
     pub kafka_sample_rate: u32,
     /// Record detailed request histograms for 1 of N requests (0 = all).
     pub metrics_sample_rate: u32,
+    /// Stream upstream MISS bodies to the client while buffering for cache (#94).
+    pub streaming_miss_enabled: bool,
 }
 
 impl PerfConfig {
@@ -44,12 +46,15 @@ impl PerfConfig {
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
 
+        let streaming_miss_enabled = env_bool("STREAMING_MISS_ENABLED", true);
+
         Self {
             fast_cache_hit,
             worker_count,
             http_preserve_header_case,
             kafka_sample_rate,
             metrics_sample_rate,
+            streaming_miss_enabled,
         }
     }
 
@@ -154,6 +159,7 @@ mod tests {
             http_preserve_header_case: true,
             kafka_sample_rate: 0,
             metrics_sample_rate: 0,
+            streaming_miss_enabled: true,
         };
         assert!(cfg.should_emit_kafka_event());
         assert!(cfg.record_detailed_metrics());
@@ -167,6 +173,7 @@ mod tests {
             http_preserve_header_case: true,
             kafka_sample_rate: 1,
             metrics_sample_rate: 0,
+            streaming_miss_enabled: true,
         };
         assert!(cfg.should_emit_kafka_event());
     }

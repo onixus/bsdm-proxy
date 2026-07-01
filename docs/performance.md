@@ -38,6 +38,7 @@ cargo install oha   # или бинарь с https://github.com/hatoo/oha
 | `HTTP_PRESERVE_HEADER_CASE` | `true` | `false` убирает preserve/title-case в http1 (bench) |
 | `KAFKA_SAMPLE_RATE` | `0` | `N` → 1 из N cache events в Kafka (`0` = все) |
 | `METRICS_SAMPLE_RATE` | `0` | `N` → histograms для 1 из N запросов (`0` = все) |
+| `STREAMING_MISS_ENABLED` | `true` | Tee upstream MISS body to client while buffering for L1 |
 
 ## Рекомендуемый bench-профиль
 

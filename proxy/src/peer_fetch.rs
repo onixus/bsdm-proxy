@@ -1,16 +1,14 @@
 //! Forward HTTP requests to a parent/sibling cache peer (forward proxy).
 
+use crate::http_types::Body as ProxyBody;
 use crate::peers::CachePeer;
-use bytes::Bytes;
-use http_body_util::Full;
+use http_body_util::{BodyExt, Full};
 use hyper::body::Incoming;
 use hyper::{Request, Response};
 use hyper_util::rt::TokioIo;
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tracing::debug;
-
-type Body = Full<Bytes>;
 
 #[derive(Debug)]
 pub enum PeerFetchError {
@@ -36,9 +34,16 @@ impl std::error::Error for PeerFetchError {}
 /// Send an HTTP forward-proxy request through a cache peer.
 pub async fn fetch_via_peer(
     peer: &CachePeer,
-    req: Request<Body>,
+    req: Request<ProxyBody>,
     timeout: Duration,
 ) -> Result<Response<Incoming>, PeerFetchError> {
+    let (parts, body) = req.into_parts();
+    let body_bytes = BodyExt::collect(body)
+        .await
+        .map_err(PeerFetchError::Request)?
+        .to_bytes();
+    let req = Request::from_parts(parts, Full::new(body_bytes));
+
     let addr = format!("{}:{}", peer.config.host, peer.config.port);
     debug!("Fetching via peer {} ({})", peer.id, addr);
 
@@ -70,6 +75,7 @@ pub async fn fetch_via_peer(
 mod tests {
     use super::*;
     use crate::peers::{CachePeer, PeerConfig, PeerType};
+    use bytes::Bytes;
     use http_body_util::BodyExt;
     use hyper::service::service_fn;
     use hyper::{Method, StatusCode};
@@ -119,7 +125,7 @@ mod tests {
         let req = Request::builder()
             .method(Method::GET)
             .uri("http://example.com/via-peer")
-            .body(Full::new(Bytes::new()))
+            .body(crate::http_types::empty())
             .unwrap();
 
         let response = fetch_via_peer(&peer, req, Duration::from_secs(5))

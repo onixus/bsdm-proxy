@@ -30,6 +30,7 @@ pub mod rate_limit;
 pub mod selection;
 pub mod server;
 pub mod sharded_cache;
+pub mod streaming_miss;
 pub mod tls;
 pub mod upstream;
 
