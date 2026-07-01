@@ -110,7 +110,8 @@ gantt
 
 ### Текущий gap
 
-Pipeline Kafka → OpenSearch работает; в v0.3.0+ добавлены `bsdm-events`, `acl_action`, `threat_sources`, события ACL block.
+Pipeline Kafka → OpenSearch работает; **целевой store M3+ — ClickHouse** ([ADR 0002](adr/0002-clickhouse-analytics.md)). В v0.3.0+ добавлены `bsdm-events`, `acl_action`, `threat_sources`, события ACL block.
+
 Остаётся:
 - search API и session correlation
 
@@ -217,6 +218,8 @@ Issues привязывайте к milestones:
 ## Связанные документы
 
 - [architecture.md](architecture.md) — архитектура и блокеры B1–B25
+- [adr/0002-clickhouse-analytics.md](adr/0002-clickhouse-analytics.md) — ClickHouse вместо OpenSearch (M3+)
+- [clickhouse-analytics.md](clickhouse-analytics.md) — compose и SQL примеры
 - [swg-backlog-mapping.md](swg-backlog-mapping.md) — mapping vs Zscaler/Netskope/Palo Alto + Squid rock
 - [k8s-architecture.md](k8s-architecture.md) — Kubernetes deployment guide
 - [hierarchical-caching.md](hierarchical-caching.md) — дизайн ICP/HTCP (M2)
