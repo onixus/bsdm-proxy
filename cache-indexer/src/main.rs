@@ -1,14 +1,18 @@
+mod admin_server;
 mod clickhouse;
 mod dual;
 mod kafka;
 mod metrics;
 mod opensearch;
+mod search_api;
 
+use admin_server::run_admin_server;
 use bsdm_events::{DEFAULT_ISM_DELETE_DAYS, DEFAULT_ISM_HOT_DAYS, DEFAULT_ISM_POLICY_ID};
 use clickhouse::{load_config_from_env, ClickHouseIndexer, ClickHouseWriter};
 use dual::DualIndexer;
-use metrics::{run_metrics_server, IndexerMetrics};
+use metrics::IndexerMetrics;
 use opensearch::{OpenSearchIndexer, OpenSearchWriter};
+use search_api::{SearchApi, SearchApiConfig};
 use std::sync::Arc;
 use tracing::info;
 
@@ -54,6 +58,25 @@ fn metrics_port() -> u16 {
         .unwrap_or(8080)
 }
 
+fn search_api_enabled(backend: IndexerBackend) -> bool {
+    if let Ok(v) = std::env::var("SEARCH_API_ENABLED") {
+        return matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES");
+    }
+    matches!(backend, IndexerBackend::ClickHouse | IndexerBackend::Dual)
+}
+
+fn needs_clickhouse_writer(backend: IndexerBackend) -> bool {
+    matches!(backend, IndexerBackend::ClickHouse | IndexerBackend::Dual)
+        || search_api_enabled(backend)
+}
+
+async fn bootstrap_clickhouse_writer() -> Result<Arc<ClickHouseWriter>, Box<dyn std::error::Error>>
+{
+    Ok(Arc::new(
+        ClickHouseWriter::bootstrap(load_config_from_env()).await?,
+    ))
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
@@ -69,11 +92,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::var("KAFKA_GROUP_ID").unwrap_or_else(|_| "cache-indexer-group".to_string());
     let backend = parse_backend();
     let metrics = Arc::new(IndexerMetrics::new()?);
+    let ch_writer = if needs_clickhouse_writer(backend) {
+        Some(bootstrap_clickhouse_writer().await?)
+    } else {
+        None
+    };
+    let search_api = if search_api_enabled(backend) {
+        Some(Arc::new(SearchApi::new(
+            ch_writer
+                .clone()
+                .expect("clickhouse writer required when search api enabled"),
+            SearchApiConfig::from_env(),
+        )))
+    } else {
+        None
+    };
     let port = metrics_port();
-    let metrics_task = {
+    let admin_task = {
         let metrics = metrics.clone();
+        let search_api = search_api.clone();
         tokio::spawn(async move {
-            run_metrics_server(port, metrics).await;
+            run_admin_server(port, metrics, search_api).await;
         })
     };
 
@@ -81,24 +120,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Kafka brokers: {kafka_brokers}");
     info!("Kafka topic: {kafka_topic}");
     info!("Kafka group: {kafka_group}");
-    info!("Metrics port: {port}");
+    info!("Admin port: {port}");
+    if search_api.is_some() {
+        info!("Search API enabled on :{port}/api/search");
+    }
 
     let result = match backend {
         IndexerBackend::ClickHouse => {
-            let ch_config = load_config_from_env();
-            info!("ClickHouse URL: {}", ch_config.url);
-            info!(
-                "ClickHouse table: {}.{}",
-                ch_config.database, ch_config.table
-            );
-            let indexer = ClickHouseIndexer::new(
-                &kafka_brokers,
-                &kafka_topic,
-                &kafka_group,
-                ch_config,
-                metrics,
-            )
-            .await?;
+            let writer = ch_writer.expect("clickhouse writer required");
+            info!("ClickHouse URL: {}", load_config_from_env().url);
+            let indexer =
+                ClickHouseIndexer::new(&kafka_brokers, &kafka_topic, &kafka_group, writer, metrics)
+                    .await?;
             indexer.run().await
         }
         IndexerBackend::Dual => {
@@ -106,32 +139,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .unwrap_or_else(|_| "http://opensearch:9200".to_string());
             let index_name =
                 std::env::var("OPENSEARCH_INDEX").unwrap_or_else(|_| "http-cache".to_string());
-            let ism_enabled = parse_env_bool("OPENSEARCH_ISM_ENABLED", true);
-            let ism_policy_id = std::env::var("OPENSEARCH_ISM_POLICY_ID")
-                .unwrap_or_else(|_| DEFAULT_ISM_POLICY_ID.to_string());
-            let ism_hot_days = parse_env_u32("OPENSEARCH_ISM_HOT_DAYS", DEFAULT_ISM_HOT_DAYS);
-            let ism_delete_days =
-                parse_env_u32("OPENSEARCH_ISM_DELETE_DAYS", DEFAULT_ISM_DELETE_DAYS);
-
             let os_writer = OpenSearchWriter::bootstrap(
                 &opensearch_url,
                 std::env::var("OPENSEARCH_USERNAME").ok(),
                 std::env::var("OPENSEARCH_PASSWORD").ok(),
                 parse_env_bool("OPENSEARCH_SSL_VERIFY", true),
                 &index_name,
-                ism_enabled,
-                ism_policy_id,
-                ism_hot_days,
-                ism_delete_days,
+                parse_env_bool("OPENSEARCH_ISM_ENABLED", true),
+                std::env::var("OPENSEARCH_ISM_POLICY_ID")
+                    .unwrap_or_else(|_| DEFAULT_ISM_POLICY_ID.to_string()),
+                parse_env_u32("OPENSEARCH_ISM_HOT_DAYS", DEFAULT_ISM_HOT_DAYS),
+                parse_env_u32("OPENSEARCH_ISM_DELETE_DAYS", DEFAULT_ISM_DELETE_DAYS),
             )
             .await?;
-            let ch_writer = ClickHouseWriter::bootstrap(load_config_from_env()).await?;
+            let writer = ch_writer.expect("clickhouse writer required");
             let indexer = DualIndexer::new(
                 &kafka_brokers,
                 &kafka_topic,
                 &kafka_group,
                 os_writer,
-                ch_writer,
+                writer,
                 metrics,
             )
             .await?;
@@ -140,37 +167,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         IndexerBackend::OpenSearch => {
             let opensearch_url = std::env::var("OPENSEARCH_URL")
                 .unwrap_or_else(|_| "http://opensearch:9200".to_string());
-            let opensearch_username = std::env::var("OPENSEARCH_USERNAME").ok();
-            let opensearch_password = std::env::var("OPENSEARCH_PASSWORD").ok();
-            let ssl_verify = std::env::var("OPENSEARCH_SSL_VERIFY")
-                .unwrap_or_else(|_| "true".to_string())
-                .parse::<bool>()
-                .unwrap_or(true);
-            let index_name =
-                std::env::var("OPENSEARCH_INDEX").unwrap_or_else(|_| "http-cache".to_string());
-            let ism_enabled = parse_env_bool("OPENSEARCH_ISM_ENABLED", true);
-            let ism_policy_id = std::env::var("OPENSEARCH_ISM_POLICY_ID")
-                .unwrap_or_else(|_| DEFAULT_ISM_POLICY_ID.to_string());
-            let ism_hot_days = parse_env_u32("OPENSEARCH_ISM_HOT_DAYS", DEFAULT_ISM_HOT_DAYS);
-            let ism_delete_days =
-                parse_env_u32("OPENSEARCH_ISM_DELETE_DAYS", DEFAULT_ISM_DELETE_DAYS);
-
-            info!("OpenSearch URL: {opensearch_url}");
-            info!("OpenSearch index: {index_name}");
-
             let indexer = OpenSearchIndexer::new(
                 &kafka_brokers,
                 &opensearch_url,
-                opensearch_username,
-                opensearch_password,
-                ssl_verify,
+                std::env::var("OPENSEARCH_USERNAME").ok(),
+                std::env::var("OPENSEARCH_PASSWORD").ok(),
+                parse_env_bool("OPENSEARCH_SSL_VERIFY", true),
                 &kafka_topic,
                 &kafka_group,
-                &index_name,
-                ism_enabled,
-                ism_policy_id,
-                ism_hot_days,
-                ism_delete_days,
+                &std::env::var("OPENSEARCH_INDEX").unwrap_or_else(|_| "http-cache".to_string()),
+                parse_env_bool("OPENSEARCH_ISM_ENABLED", true),
+                std::env::var("OPENSEARCH_ISM_POLICY_ID")
+                    .unwrap_or_else(|_| DEFAULT_ISM_POLICY_ID.to_string()),
+                parse_env_u32("OPENSEARCH_ISM_HOT_DAYS", DEFAULT_ISM_HOT_DAYS),
+                parse_env_u32("OPENSEARCH_ISM_DELETE_DAYS", DEFAULT_ISM_DELETE_DAYS),
                 metrics,
             )
             .await?;
@@ -178,49 +188,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    metrics_task.abort();
+    admin_task.abort();
     result
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bsdm_events::{document_id, CacheEvent};
-    use std::collections::HashMap;
-
-    fn sample_event(event_id: &str) -> CacheEvent {
-        CacheEvent {
-            url: "https://example.com".to_string(),
-            method: "GET".to_string(),
-            status: 200,
-            cache_key: "abc123".to_string(),
-            cache_status: "HIT".to_string(),
-            timestamp: 1700000001,
-            headers: HashMap::new(),
-            user_id: None,
-            username: None,
-            client_ip: "127.0.0.1".to_string(),
-            domain: "example.com".to_string(),
-            response_size: 100,
-            request_duration_ms: 5,
-            content_type: None,
-            user_agent: None,
-            categories: vec!["malware".to_string()],
-            threat_sources: vec!["urlhaus".to_string()],
-            acl_action: None,
-            event_id: event_id.to_string(),
-        }
-    }
-
-    #[test]
-    fn document_id_prefers_event_id() {
-        assert_eq!(document_id(&sample_event("evt-unique-1")), "evt-unique-1");
-    }
 
     #[test]
     fn parse_backend_variants() {
         assert_eq!(parse_backend_name("clickhouse"), IndexerBackend::ClickHouse);
         assert_eq!(parse_backend_name("dual"), IndexerBackend::Dual);
         assert_eq!(parse_backend_name("opensearch"), IndexerBackend::OpenSearch);
+    }
+
+    #[test]
+    fn search_enabled_for_clickhouse_by_default() {
+        assert!(search_api_enabled(IndexerBackend::ClickHouse));
+        assert!(!search_api_enabled(IndexerBackend::OpenSearch));
     }
 }

@@ -26,6 +26,14 @@ pub struct ClickHouseWriter {
 }
 
 impl ClickHouseWriter {
+    pub fn database(&self) -> &str {
+        &self.config.database
+    }
+
+    pub fn table(&self) -> &str {
+        &self.config.table
+    }
+
     pub async fn bootstrap(config: ClickHouseConfig) -> Result<Self, Box<dyn std::error::Error>> {
         let client = Client::builder().build()?;
         let writer = Self { client, config };
@@ -64,9 +72,16 @@ impl ClickHouseWriter {
         Ok(())
     }
 
-    async fn query(&self, sql: &str) -> Result<String, Box<dyn std::error::Error>> {
+    pub async fn query_with_params(
+        &self,
+        sql: &str,
+        params: &[(&str, String)],
+    ) -> Result<String, Box<dyn std::error::Error>> {
         let base = self.config.url.trim_end_matches('/');
         let mut req = self.client.post(base).query(&[("query", sql)]).body("");
+        for (name, value) in params {
+            req = req.query(&[(format!("param_{name}"), value.as_str())]);
+        }
         if let (Some(user), Some(password)) = (&self.config.user, &self.config.password) {
             req = req.basic_auth(user, Some(password));
         }
@@ -78,6 +93,10 @@ impl ClickHouseWriter {
         } else {
             Err(format!("ClickHouse query failed (HTTP {status}): {body}").into())
         }
+    }
+
+    async fn query(&self, sql: &str) -> Result<String, Box<dyn std::error::Error>> {
+        self.query_with_params(sql, &[]).await
     }
 
     pub async fn insert_batch(
@@ -118,7 +137,7 @@ impl ClickHouseWriter {
 }
 
 pub struct ClickHouseIndexer {
-    writer: ClickHouseWriter,
+    writer: Arc<ClickHouseWriter>,
     consumer: StreamConsumer,
     metrics: Arc<IndexerMetrics>,
 }
@@ -128,11 +147,10 @@ impl ClickHouseIndexer {
         kafka_brokers: &str,
         kafka_topic: &str,
         kafka_group: &str,
-        config: ClickHouseConfig,
+        writer: Arc<ClickHouseWriter>,
         metrics: Arc<IndexerMetrics>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let consumer = create_consumer(kafka_brokers, kafka_topic, kafka_group)?;
-        let writer = ClickHouseWriter::bootstrap(config).await?;
         Ok(Self {
             writer,
             consumer,
