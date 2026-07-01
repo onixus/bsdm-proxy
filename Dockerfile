@@ -31,6 +31,7 @@ RUN rustup target add x86_64-unknown-linux-musl
 
 # Копируем весь workspace
 COPY Cargo.toml Cargo.lock ./
+COPY bsdm-events ./bsdm-events
 COPY proxy ./proxy
 COPY cache-indexer ./cache-indexer
 

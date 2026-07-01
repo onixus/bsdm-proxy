@@ -47,12 +47,29 @@ LIMIT 50;
 
 ## Реализация indexer
 
-Отслеживается в [#114](https://github.com/onixus/bsdm-proxy/issues/114) — `INDEXER_BACKEND=clickhouse` в cache-indexer.
+Реализовано в cache-indexer: `INDEXER_BACKEND=clickhouse` ([#114](https://github.com/onixus/bsdm-proxy/issues/114)).
+
+```bash
+# Полный стек (proxy → Kafka → cache-indexer → ClickHouse)
+docker compose -f docker-compose.clickhouse.yml up -d --build
+
+curl -x http://127.0.0.1:1488 http://httpbin.org/get
+sleep 5
+curl 'http://127.0.0.1:8123/?query=SELECT+count()+FROM+bsdm.http_cache'
+```
+
+| Переменная | Default | Описание |
+|------------|---------|----------|
+| `INDEXER_BACKEND` | `opensearch` | `clickhouse` или `ch` для CH backend |
+| `CLICKHOUSE_URL` | `http://clickhouse:8123` | HTTP interface |
+| `CLICKHOUSE_DATABASE` | `bsdm` | База |
+| `CLICKHOUSE_TABLE` | `http_cache` | Таблица |
+| `CLICKHOUSE_USER` / `CLICKHOUSE_PASSWORD` | — | Basic auth (опц.) |
 
 | Фаза | Действие |
 |------|----------|
 | 1 | Этот compose + ADR 0002 |
-| 2 | `INDEXER_BACKEND=clickhouse` в cache-indexer |
+| 2 | ✅ `INDEXER_BACKEND=clickhouse` в cache-indexer |
 | 3 | Grafana SQL dashboards (замена OSD) |
 | 4 | Search API на ClickHouse HTTP |
 
