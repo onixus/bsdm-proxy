@@ -3,7 +3,7 @@
 # ============================================================
 # Unified builder stage - собирает оба бинарника
 # ============================================================
-FROM rust:1.85-alpine AS builder
+FROM rust:1-alpine AS builder
 WORKDIR /build
 
 # Установка зависимостей для сборки (включая bash для rdkafka)
@@ -33,6 +33,7 @@ RUN rustup target add x86_64-unknown-linux-musl
 COPY Cargo.toml Cargo.lock ./
 COPY proxy ./proxy
 COPY cache-indexer ./cache-indexer
+COPY e2e ./e2e
 
 # Настройка окружения для статической линковки
 ENV OPENSSL_STATIC=1 \

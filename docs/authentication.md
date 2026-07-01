@@ -2,6 +2,8 @@
 
 > См. также: [оглавление документации](README.md) · [конфигурация в README](../README.md#конфигурация)
 
+> ⚠️ **NTLM:** описан в конфигурации, но **не реализован** (`auth.rs` возвращает ошибку). Используйте Basic или LDAP. См. блокер [B13](BLOCKERS.md).
+
 BSDM-Proxy supports multiple authentication backends for proxy access control.
 
 ## Supported Backends
@@ -36,7 +38,9 @@ export LDAP_USE_TLS=true
 export LDAP_TIMEOUT=5
 ```
 
-### 3. NTLM (Windows Integrated Authentication)
+### 3. NTLM (Windows Integrated Authentication) — ⚠️ NOT IMPLEMENTED
+
+> Feature flag `auth-ntlm` существует, но backend возвращает `"NTLM not implemented yet"`. Планируется в M2.
 
 Challenge-response authentication for Windows environments.
 

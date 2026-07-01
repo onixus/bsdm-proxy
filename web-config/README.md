@@ -2,6 +2,8 @@
 
 🌐 Modern web-based configuration interface for BSDM-Proxy.
 
+> Project wiki: [docs/README.md](../docs/README.md) · Deployment: [docs/deployment.md](../docs/deployment.md)
+
 ## Features
 
 - ✨ **Modern UI** - Dark theme, responsive design

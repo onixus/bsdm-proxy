@@ -16,8 +16,8 @@
 ## Quick start
 
 ```bash
-tar xzf bsdm-proxy-0.2.2b-linux-x86_64.tar.gz
-cd bsdm-proxy-0.2.2b-linux-x86_64
+tar xzf bsdm-proxy-0.2.3test-linux-x86_64.tar.gz
+cd bsdm-proxy-0.2.3test-linux-x86_64
 sudo ./install.sh --create-user --systemd
 ```
 
@@ -59,7 +59,7 @@ curl http://127.0.0.1:9090/metrics | head
 
 ```bash
 ./scripts/build-package.sh
-# → dist/bsdm-proxy-0.2.2b-linux-<arch>.tar.gz
+# → dist/bsdm-proxy-0.2.3test-linux-<arch>.tar.gz
 ```
 
 См. также [docs/development.md](../docs/development.md).

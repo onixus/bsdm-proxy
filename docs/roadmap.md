@@ -12,7 +12,7 @@
 | **Ретропоиск** | Поиск и аналитика по историческому HTTP-трафику |
 | **ML-безопасность** | Аномалии, фишинг и C&C поверх логов и поведенческих сигналов |
 
-Текущая версия: **0.2.2b** · [Releases](https://github.com/onixus/bsdm-proxy/releases)
+Текущая версия в репозитории: **0.2.3-test** · Release tag: **0.2.2b** · [Releases](https://github.com/onixus/bsdm-proxy/releases)
 
 ---
 
@@ -70,7 +70,7 @@ gantt
 - [ ] Rate limiting per user/IP — [#37](https://github.com/onixus/bsdm-proxy/issues/37)
 - [ ] Рефакторинг `main.rs` — вынос `ProxyService` в lib — [#38](https://github.com/onixus/bsdm-proxy/issues/38)
 - [ ] Hierarchy E2E / `docker-compose.hierarchy.yml`
-- [ ] Исправить README: NTLM помечен как done, но не реализован (`auth.rs`)
+- [ ] Исправить docs: NTLM помечен как done в старом README, но не реализован (`auth.rs`) — **исправлено в wiki**
 
 **Критерий завершения M1:** rate limit + рефакторинг main, hierarchy E2E, все CI зелёные.
 
@@ -223,4 +223,4 @@ Issues привязывайте к milestones:
 
 ---
 
-*Последнее обновление: v0.2.2b*
+*Последнее обновление: v0.2.3-test (dev)*

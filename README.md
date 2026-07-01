@@ -7,10 +7,10 @@
 [![Build Status](https://github.com/onixus/bsdm-proxy/actions/workflows/rust.yml/badge.svg)](https://github.com/onixus/bsdm-proxy/actions/workflows/rust.yml)
 [![E2E Tests](https://github.com/onixus/bsdm-proxy/actions/workflows/e2e.yml/badge.svg)](https://github.com/onixus/bsdm-proxy/actions/workflows/e2e.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.2.2b-blue.svg)](https://github.com/onixus/bsdm-proxy/releases/tag/v0.2.2b)
-[![Rust](https://img.shields.io/badge/rust-1.85+-orange.svg)](https://www.rust-lang.org)
+[![Version](https://img.shields.io/badge/version-0.2.3--test-blue.svg)](https://github.com/onixus/bsdm-proxy/releases)
+[![Rust](https://img.shields.io/badge/rust-1.88+-orange.svg)](https://www.rust-lang.org)
 
-> **Текущая версия:** `0.2.2b` (beta) — см. [Releases](https://github.com/onixus/bsdm-proxy/releases)
+> **Версия в репозитории:** `0.2.3-test` (dev) · **Последний release:** [`0.2.2b`](https://github.com/onixus/bsdm-proxy/releases/tag/v0.2.2b)
 
 ⚠️ **MITM-прокси для HTTPS.** Используйте только в корпоративной среде с согласия пользователей и в рамках законодательства.
 
@@ -80,9 +80,11 @@ cd ..
 ### 2. Запуск стека
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 docker compose ps
 ```
+
+Подробнее: [docs/docker.md](docs/docker.md) · [docs/deployment.md](docs/deployment.md)
 
 ### 3. Доверие клиенту к CA
 
@@ -114,13 +116,13 @@ curl http://localhost:9090/metrics | grep bsdm_proxy
 ./scripts/build-package.sh
 ```
 
-Архив: `dist/bsdm-proxy-0.2.2b-linux-<arch>.tar.gz`
+Архив: `dist/bsdm-proxy-0.2.3test-linux-<arch>.tar.gz` (версия из `proxy/Cargo.toml`)
 
 Установка:
 
 ```bash
-tar xzf dist/bsdm-proxy-0.2.2b-linux-x86_64.tar.gz
-cd bsdm-proxy-0.2.2b-linux-x86_64
+tar xzf dist/bsdm-proxy-0.2.3test-linux-x86_64.tar.gz
+cd bsdm-proxy-0.2.3test-linux-x86_64
 sudo ./install.sh --create-user --systemd
 sudo cp certs/ca.key certs/ca.crt /certs/
 sudo systemctl start bsdm-proxy
@@ -163,7 +165,7 @@ CA для MITM читается из `/certs/ca.key` и `/certs/ca.crt` (fallbac
 | Переменная | Описание |
 |-----------|----------|
 | `AUTH_ENABLED` | `true` / `false` |
-| `AUTH_BACKEND` | `basic`, `ldap`, `ntlm` |
+| `AUTH_BACKEND` | `basic`, `ldap` (`ntlm` — backlog M2, не реализован) |
 | `AUTH_REALM` | Realm для `Proxy-Authenticate` |
 | `AUTH_CACHE_TTL` | TTL кеша сессий (сек) |
 
@@ -245,8 +247,8 @@ Grafana: http://localhost:3000 → **BSDM Proxy Dashboard** (7 панелей, a
 Перед push: `./scripts/pre-push-check.sh` (или `./scripts/install-git-hooks.sh` для auto hook).
 
 ```bash
-# Unit + integration (workspace)
-cargo test --workspace
+# Unit + integration + smoke + e2e (75 тестов)
+cargo test --workspace --all-targets
 
 # Smoke (health, metrics, HTTP forward)
 ./scripts/run-smoke-tests.sh
@@ -255,24 +257,29 @@ cargo test --workspace
 ./scripts/run-e2e-tests.sh
 
 # Docker test stack
-docker compose -f docker-compose.test.yml up -d
+docker compose -f docker-compose.test.yml up -d --build
 ./scripts/run-smoke-tests.sh --external
+# E2E --external: cache HIT для HTTPS не ожидается (MITM_ENABLED=false)
 ```
 
-CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.yml](.github/workflows/e2e.yml).
+CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test, cargo-audit) и [e2e.yml](.github/workflows/e2e.yml).
 
 → [docs/development.md](docs/development.md)
 
-## Документация
+## Документация (Wiki)
 
 | Документ | Содержание |
 |----------|------------|
-| [docs/README.md](docs/README.md) | Оглавление документации |
-| [docs/authentication.md](docs/authentication.md) | LDAP, NTLM, Basic Auth |
+| [docs/README.md](docs/README.md) | **Оглавление wiki** |
+| [docs/deployment.md](docs/deployment.md) | Развёртывание: Docker, native, k8s |
+| [docs/docker.md](docs/docker.md) | Docker Compose, сборка образов, troubleshooting |
+| [docs/kubernetes.md](docs/kubernetes.md) | Kubernetes: манифесты, probes, managed services |
+| [docs/development.md](docs/development.md) | Сборка, тесты, CI |
+| [docs/authentication.md](docs/authentication.md) | LDAP, Basic Auth (NTLM — в backlog) |
 | [docs/acl.md](docs/acl.md) | Правила доступа, приоритеты |
 | [docs/categorization.md](docs/categorization.md) | Shallalist, URLhaus, PhishTank |
 | [docs/hierarchical-caching.md](docs/hierarchical-caching.md) | Иерархический кеш, ICP, peers |
-| [docs/architecture.md](docs/architecture.md) | Архитектура и блокеры |
+| [docs/architecture.md](docs/architecture.md) | Архитектура и блокеры B1–B26 |
 | [docs/roadmap.md](docs/roadmap.md) | Roadmap и milestones |
 | [packaging/README.md](packaging/README.md) | Release-пакет и systemd |
 | [OPTIMIZATIONS.md](OPTIMIZATIONS.md) | Оптимизации v2.0 |
@@ -296,10 +303,10 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 
 - [x] Prometheus + Grafana + health checks
 - [x] Graceful shutdown
-- [x] Proxy authentication (Basic / LDAP; NTLM — в backlog M2)
+- [x] Proxy authentication (Basic / LDAP; NTLM — backlog M2)
 - [x] ACL + URL categorization
 - [x] E2E / smoke test harness
-- [x] Release packaging (`0.2.2b`)
+- [x] Release packaging (`0.2.2b`, dev `0.2.3-test`)
 - [x] Hierarchical caching Phase 3 — ICP server, peer fetch, env config
 - [ ] Rate limiting per user/IP
 - [ ] Рефакторинг `main.rs` (вынос `ProxyService` в lib)

@@ -2,7 +2,7 @@
 
 > См. также: [полная документация](hierarchical-caching.md) · [оглавление](README.md) · [architecture.md](architecture.md)
 
-## Статус: Phase 3 интегрирована (v0.2.2b)
+## Статус: Phase 3 интегрирована (v0.2.3-test dev / v0.2.2b release)
 
 Иерархический кеш **включён в runtime** и активируется через `HIERARCHY_ENABLED=true` (по умолчанию выключен).
 

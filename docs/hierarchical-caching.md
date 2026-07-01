@@ -161,7 +161,7 @@ TOML config is **planned** for M2. Currently only environment variables are supp
 4. **Hierarchy Manager** (`proxy/src/hierarchy.rs`) — done
 5. **Cache Fetcher** (`proxy/src/peer_fetch.rs`) — done (HTTP/1 forward proxy)
 
-### Phase 3: Integration ✅ (v0.2.2b)
+### Phase 3: Integration ✅ (v0.2.3-test dev)
 
 6. **Configuration** (`proxy/src/hierarchy_config.rs`) — env vars
 7. **Runtime wiring** (`proxy/src/main.rs`) — request path + ICP server spawn

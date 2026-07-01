@@ -4,7 +4,7 @@
 
 > Альтернатива Squid с ретропоиском и ML для выявления отклонений, фишинга и C&C
 
-См. также: [roadmap.md](roadmap.md) · [development.md](development.md)
+См. также: [roadmap.md](roadmap.md) · [development.md](development.md) · [deployment.md](deployment.md) · [docker.md](docker.md)
 
 ---
 
@@ -137,12 +137,14 @@ sequenceDiagram
   Note over P,K: categories sent by proxy
   K->>I: consume batch
   I->>O: bulk index
-  Note over I,O: categories NOT in indexer schema
+  Note over I,O: categories indexed (B11 ✅)
 ```
 
 **Поля `CacheEvent` (proxy):** url, method, status, cache_key, cache_status, user, client_ip, domain, timing, UA, content_type, **categories**
 
-**Поля indexer:** те же, кроме **categories** — теряются при десериализации.
+**Поля indexer:** url, method, status, cache_key, cache_status, user, client_ip, domain, timing, UA, content_type, **categories**, event_id
+
+> B11 закрыт: `categories` в схеме OpenSearch и в `CacheEvent` indexer.
 
 ---
 
@@ -208,7 +210,7 @@ Local L1 miss → ICP query siblings → select parent → fetch_via_peer → or
 | **B8** | Categorization на hot path (external HTTP) | `categorization.rs`, `main.rs` | M2 |
 | **B9** | ACL под `Mutex` | `policy_config.rs`, `main.rs` | M2 |
 | **B10** | Kafka `acks=0`, topic hardcoded | `main.rs:361-365` | M3 |
-| **B11** | Schema drift: `categories` не в indexer | `cache-indexer/src/main.rs` | M3 |
+| **B11** | Schema drift: `categories` в indexer | ✅ Done | `cache-indexer/src/main.rs` | M3 |
 | **B12** | Нет shared event crate | `proxy`, `cache-indexer` | M3 |
 | **B13** | NTLM — заглушка | `auth.rs:231` | M2 |
 | **B14** | ACL: TimeWindow TODO, groups ignored | `acl.rs:224-236` | M2 |
@@ -219,7 +221,7 @@ Local L1 miss → ICP query siblings → select parent → fetch_via_peer → or
 |----|--------|----------|-----------|
 | **B15** | Нет analytics/ML сервиса | Нужен worker для scoring, alerts | M4–M5 |
 | **B16** | Бедная event schema | Нет session_id, acl_action, threat_score | M4 |
-| **B17** | OpenSearch Dashboards не в стеке | `docker-compose.yml` | M3 |
+| **B17** | OpenSearch Dashboards в compose | ✅ Done | `docker-compose.yml` | M3 |
 | **B18** | Только URL-level threat | Нет DNS/timing/beacon signals | M4–M5 |
 | **B19** | Нет alerting pipeline | OS Alerting / webhook / SIEM | M4 |
 | **B20** | Grafana ≠ security analytics | Prometheus only, не historical threats | M3–M4 |
@@ -231,8 +233,9 @@ Local L1 miss → ICP query siblings → select parent → fetch_via_peer → or
 | **B21** | Feature flags не в main | `Cargo.toml` features |
 | **B22** | Нет negative caching / refresh | `main.rs` |
 | **B23** | HTTP/1 only upstream | `build_upstream_https_connector` |
-| **B24** | Healthcheck curl vs wget | `docker-compose.yml`, `Dockerfile` |
-| **B25** | REST ACL API документирован, не реализован | `docs/acl.md`, `main.rs` metrics server |
+| **B24** | Healthcheck curl vs wget | ✅ Done | `docker-compose.yml`, `Dockerfile` |
+| **B25** | REST ACL API документирован, не реализован | `docs/acl.md`, `main.rs` |
+| **B26** | Dockerfile: workspace `e2e`, Rust ≥1.88 | ✅ Done | `Dockerfile` |
 
 ---
 
@@ -301,4 +304,4 @@ flowchart LR
 
 ---
 
-*Версия документа: 0.2.2b · B1–B5 resolved, B6–B25 open*
+*Версия документа: 0.2.3-test · B1–B5, B11, B17, B24, B26 resolved · B6–B10, B12–B16, B18–B25 open*
