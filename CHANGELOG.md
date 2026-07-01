@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ADR 0002 status → Accepted
 - `docker-compose.clickhouse.yml`, `grafana/clickhouse/` duplicate, `README.md_old`, `SDBM/`, `.github/issue-bodies/ch-*.md`
 
+### Added
+
+- `docs/licensing.md` — license audit and compliance guide
+- Updated `NOTICE` — current Rust deps, Docker images, AGPL notes (removed Pingora/OpenSearch)
+
 ## [0.3.0] - 2026-06-30
 
 Milestone **M2 — Squid parity**: hierarchy Phase 4, enterprise auth (NTLM/Kerberos), ACL API, negative caching.
