@@ -3,13 +3,13 @@ mod policy_config;
 
 use auth_config::load_auth_config;
 use bsdm_proxy::{
-    bind_http_listeners, build_hierarchy_manager, handle_connection, htcp_peer_port,
-    htcp_server_bind_addr, http_cache_key, icp_server_bind_addr, load_hierarchy_config,
-    metrics_server, run_peer_discovery, should_start_htcp_server, should_start_icp_server,
-    wait_shutdown_signal, AclAction, AuthManager, CacheConfig, CertCache, HtcpServer, IcpServer,
-    L2CacheConfig, Metrics, PeerDiscoveryConfig, PerfConfig, PolicyCacheConfig,
-    PolicyDecisionCache, ProxyPolicy, ProxyService, RateLimitConfig, RedisL2Cache,
-    UpstreamTlsConfig, ensure_private_spill_dir,
+    bind_http_listeners, build_hierarchy_manager, ensure_private_spill_dir, handle_connection,
+    htcp_peer_port, htcp_server_bind_addr, http_cache_key, icp_server_bind_addr,
+    load_hierarchy_config, metrics_server, run_peer_discovery, should_start_htcp_server,
+    should_start_icp_server, wait_shutdown_signal, AclAction, AuthManager, CacheConfig, CertCache,
+    HtcpServer, IcpServer, L2CacheConfig, Metrics, PeerDiscoveryConfig, PerfConfig,
+    PolicyCacheConfig, PolicyDecisionCache, ProxyPolicy, ProxyService, RateLimitConfig,
+    RedisL2Cache, UpstreamTlsConfig,
 };
 use policy_config::{load_policy_config, reload_acl_engine};
 use std::sync::atomic::{AtomicBool, Ordering};
