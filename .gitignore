@@ -32,3 +32,4 @@ logs/
 dist/dump.rdb
 scripts/__pycache__/
 __pycache__/
+dist/

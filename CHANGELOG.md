@@ -7,22 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-01
+
+Milestone **M3 maintenance**: ClickHouse-only analytics, Search API, documentation and project structure cleanup.
+
+### Added
+
+- **`bsdm-events`** workspace crate — shared `CacheEvent` schema for Kafka pipeline
+- **ClickHouse indexer** — `cache-indexer` writes to `bsdm.http_cache` (JSONEachRow INSERT)
+- **Search API** — `GET /api/search` on cache-indexer admin port ([#130](https://github.com/onixus/bsdm-proxy/issues/130))
+- **Grafana ClickHouse dashboard** — `grafana/dashboards/bsdm-http-traffic-ch.json`
+- **Helm chart** — `charts/bsdm/` (proxy Deployment skeleton)
+- **Documentation** — `docs/deployment.md`, `docs/docker.md`, `docs/kubernetes.md`, `docs/structure.md`, `docs/licensing.md`
+- **NOTICE** — updated third-party registry (Rust deps, Docker images, AGPL notes)
+- `license = "MIT"` in `proxy` and `e2e` Cargo.toml
+
 ### Removed
 
 - **OpenSearch backend** — `cache-indexer` is ClickHouse-only; `opensearch` crate, dual-write, legacy compose ([#134](https://github.com/onixus/bsdm-proxy/issues/134))
 - `opensearch-dashboards/`, `OPENSEARCH_UPGRADE.md`, `scripts/reconcile-os-ch-events.sh`
 - OpenSearch index/ISM helpers from `bsdm-events`
+- `docker-compose.clickhouse.yml`, `grafana/clickhouse/` duplicate, `README.md_old`, `SDBM/`, `.github/issue-bodies/ch-*.md`
 
 ### Changed
 
 - **Default Docker stack** — `docker compose up` uses ClickHouse + Grafana CH dashboards + Search API ([#132](https://github.com/onixus/bsdm-proxy/issues/132))
 - ADR 0002 status → Accepted
-- `docker-compose.clickhouse.yml`, `grafana/clickhouse/` duplicate, `README.md_old`, `SDBM/`, `.github/issue-bodies/ch-*.md`
+- **web-config** — ClickHouse instead of OpenSearch in compose generator
+- **Dockerfile** — include `e2e`, `bsdm-events`; builder `rust:1-alpine`
 
-### Added
+### Migration
 
-- `docs/licensing.md` — license audit and compliance guide
-- Updated `NOTICE` — current Rust deps, Docker images, AGPL notes (removed Pingora/OpenSearch)
+- OpenSearch users: migrate to ClickHouse — see [docs/releases/v0.3.1.md](docs/releases/v0.3.1.md) and [clickhouse-analytics.md](docs/clickhouse-analytics.md)
+- `cache-indexer.env`: use `CLICKHOUSE_*`, remove `OPENSEARCH_*`
+
+Release package: `./scripts/build-package.sh` → `dist/bsdm-proxy-0.3.1-linux-<arch>.tar.gz`
 
 ## [0.3.0] - 2026-06-30
 
@@ -87,6 +106,7 @@ Beta — hierarchical caching Phase 3, optional MITM CA.
 
 [GitHub Releases](https://github.com/onixus/bsdm-proxy/releases/tag/v0.2.2b)
 
+[0.3.1]: https://github.com/onixus/bsdm-proxy/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/onixus/bsdm-proxy/compare/v0.2.3-test...v0.3.0
 [0.2.3-test]: https://github.com/onixus/bsdm-proxy/releases/tag/v0.2.3-test
 [0.2.2b]: https://github.com/onixus/bsdm-proxy/releases/tag/v0.2.2b

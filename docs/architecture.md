@@ -302,4 +302,4 @@ flowchart LR
 
 ---
 
-*Версия документа: 0.3.0 · M1–M2 done · M3 ClickHouse retro-search в работе*
+*Версия документа: 0.3.1 · M1–M2 done · M3 ClickHouse retro-search в работе*
