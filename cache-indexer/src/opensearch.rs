@@ -14,9 +14,12 @@ use opensearch::{
 use rdkafka::consumer::{CommitMode, Consumer, StreamConsumer};
 use rdkafka::message::Message;
 use serde_json::json;
+use std::sync::Arc;
+use std::time::Instant;
 use tracing::{error, info, warn};
 
 use crate::kafka::create_consumer;
+use crate::metrics::IndexerMetrics;
 
 struct IndexerConfig {
     index_name: String,
@@ -27,31 +30,24 @@ struct IndexerConfig {
     ism_delete_days: u32,
 }
 
-pub struct OpenSearchIndexer {
+pub struct OpenSearchWriter {
     opensearch: OpenSearch,
-    consumer: StreamConsumer,
     config: IndexerConfig,
 }
 
-impl OpenSearchIndexer {
+impl OpenSearchWriter {
     #[allow(clippy::too_many_arguments)]
-    pub async fn new(
-        kafka_brokers: &str,
+    pub async fn bootstrap(
         opensearch_url: &str,
         opensearch_username: Option<String>,
         opensearch_password: Option<String>,
         ssl_verify: bool,
-        kafka_topic: &str,
-        kafka_group: &str,
         index_name: &str,
         ism_enabled: bool,
         ism_policy_id: String,
         ism_hot_days: u32,
         ism_delete_days: u32,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let consumer = create_consumer(kafka_brokers, kafka_topic, kafka_group)?;
-        info!("Subscribed to Kafka topic: {}", kafka_topic);
-
         let mut transport_builder =
             TransportBuilder::new(SingleNodeConnectionPool::new(opensearch_url.parse()?));
 
@@ -68,10 +64,8 @@ impl OpenSearchIndexer {
         let transport = transport_builder.build()?;
         let opensearch = OpenSearch::new(transport);
         let index_pattern = format!("{index_name}*");
-
-        Ok(Self {
+        let writer = Self {
             opensearch,
-            consumer,
             config: IndexerConfig {
                 index_name: index_name.to_string(),
                 index_pattern,
@@ -80,7 +74,12 @@ impl OpenSearchIndexer {
                 ism_hot_days,
                 ism_delete_days,
             },
-        })
+        };
+        writer.ensure_ism_policy().await?;
+        writer.ensure_index_template().await?;
+        writer.ensure_index_exists().await?;
+        writer.attach_ism_policy_to_index().await?;
+        Ok(writer)
     }
 
     async fn send_json(
@@ -256,7 +255,10 @@ impl OpenSearchIndexer {
         }
     }
 
-    async fn index_batch(&self, events: &[CacheEvent]) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn index_batch(
+        &self,
+        events: &[CacheEvent],
+    ) -> Result<(), Box<dyn std::error::Error>> {
         if events.is_empty() {
             return Ok(());
         }
@@ -301,13 +303,52 @@ impl OpenSearchIndexer {
             }
         }
     }
+}
+
+pub struct OpenSearchIndexer {
+    writer: OpenSearchWriter,
+    consumer: StreamConsumer,
+    metrics: Arc<IndexerMetrics>,
+}
+
+impl OpenSearchIndexer {
+    #[allow(clippy::too_many_arguments)]
+    pub async fn new(
+        kafka_brokers: &str,
+        opensearch_url: &str,
+        opensearch_username: Option<String>,
+        opensearch_password: Option<String>,
+        ssl_verify: bool,
+        kafka_topic: &str,
+        kafka_group: &str,
+        index_name: &str,
+        ism_enabled: bool,
+        ism_policy_id: String,
+        ism_hot_days: u32,
+        ism_delete_days: u32,
+        metrics: Arc<IndexerMetrics>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let consumer = create_consumer(kafka_brokers, kafka_topic, kafka_group)?;
+        let writer = OpenSearchWriter::bootstrap(
+            opensearch_url,
+            opensearch_username,
+            opensearch_password,
+            ssl_verify,
+            index_name,
+            ism_enabled,
+            ism_policy_id,
+            ism_hot_days,
+            ism_delete_days,
+        )
+        .await?;
+        Ok(Self {
+            writer,
+            consumer,
+            metrics,
+        })
+    }
 
     pub async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
-        self.ensure_ism_policy().await?;
-        self.ensure_index_template().await?;
-        self.ensure_index_exists().await?;
-        self.attach_ism_policy_to_index().await?;
-
         let mut batch: Vec<CacheEvent> = Vec::new();
         let batch_size = 50;
         let batch_timeout = std::time::Duration::from_secs(5);
@@ -321,7 +362,7 @@ impl OpenSearchIndexer {
                             Ok(event) => {
                                 batch.push(event);
                                 if batch.len() >= batch_size {
-                                    self.index_batch(&batch).await?;
+                                    self.flush_batch(&batch).await?;
                                     batch.clear();
                                     self.consumer.commit_consumer_state(CommitMode::Async)?;
                                     last_commit = tokio::time::Instant::now();
@@ -342,7 +383,7 @@ impl OpenSearchIndexer {
                 }
                 Err(_) => {
                     if !batch.is_empty() {
-                        self.index_batch(&batch).await?;
+                        self.flush_batch(&batch).await?;
                         batch.clear();
                         self.consumer.commit_consumer_state(CommitMode::Async)?;
                         last_commit = tokio::time::Instant::now();
@@ -351,10 +392,25 @@ impl OpenSearchIndexer {
             }
 
             if last_commit.elapsed() > std::time::Duration::from_secs(30) && !batch.is_empty() {
-                self.index_batch(&batch).await?;
+                self.flush_batch(&batch).await?;
                 batch.clear();
                 self.consumer.commit_consumer_state(CommitMode::Async)?;
                 last_commit = tokio::time::Instant::now();
+            }
+        }
+    }
+
+    async fn flush_batch(&self, batch: &[CacheEvent]) -> Result<(), Box<dyn std::error::Error>> {
+        let started = Instant::now();
+        match self.writer.index_batch(batch).await {
+            Ok(()) => {
+                self.metrics
+                    .record_success("opensearch", batch.len(), started);
+                Ok(())
+            }
+            Err(e) => {
+                self.metrics.record_error("opensearch");
+                Err(e)
             }
         }
     }

@@ -5,9 +5,12 @@ use bsdm_events::CacheEvent;
 use rdkafka::consumer::{CommitMode, Consumer, StreamConsumer};
 use rdkafka::message::Message;
 use reqwest::Client;
+use std::sync::Arc;
+use std::time::Instant;
 use tracing::{error, info, warn};
 
 use crate::kafka::create_consumer;
+use crate::metrics::IndexerMetrics;
 
 pub struct ClickHouseConfig {
     pub url: String,
@@ -17,28 +20,17 @@ pub struct ClickHouseConfig {
     pub password: Option<String>,
 }
 
-pub struct ClickHouseIndexer {
+pub struct ClickHouseWriter {
     client: Client,
-    consumer: StreamConsumer,
     config: ClickHouseConfig,
 }
 
-impl ClickHouseIndexer {
-    pub async fn new(
-        kafka_brokers: &str,
-        kafka_topic: &str,
-        kafka_group: &str,
-        config: ClickHouseConfig,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
-        let consumer = create_consumer(kafka_brokers, kafka_topic, kafka_group)?;
+impl ClickHouseWriter {
+    pub async fn bootstrap(config: ClickHouseConfig) -> Result<Self, Box<dyn std::error::Error>> {
         let client = Client::builder().build()?;
-        let indexer = Self {
-            client,
-            consumer,
-            config,
-        };
-        indexer.ensure_ready().await?;
-        Ok(indexer)
+        let writer = Self { client, config };
+        writer.ensure_ready().await?;
+        Ok(writer)
     }
 
     async fn ensure_ready(&self) -> Result<(), Box<dyn std::error::Error>> {
@@ -88,7 +80,10 @@ impl ClickHouseIndexer {
         }
     }
 
-    async fn insert_batch(&self, events: &[CacheEvent]) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn insert_batch(
+        &self,
+        events: &[CacheEvent],
+    ) -> Result<(), Box<dyn std::error::Error>> {
         if events.is_empty() {
             return Ok(());
         }
@@ -120,6 +115,30 @@ impl ClickHouseIndexer {
             Err(format!("ClickHouse insert failed: {err_body}").into())
         }
     }
+}
+
+pub struct ClickHouseIndexer {
+    writer: ClickHouseWriter,
+    consumer: StreamConsumer,
+    metrics: Arc<IndexerMetrics>,
+}
+
+impl ClickHouseIndexer {
+    pub async fn new(
+        kafka_brokers: &str,
+        kafka_topic: &str,
+        kafka_group: &str,
+        config: ClickHouseConfig,
+        metrics: Arc<IndexerMetrics>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let consumer = create_consumer(kafka_brokers, kafka_topic, kafka_group)?;
+        let writer = ClickHouseWriter::bootstrap(config).await?;
+        Ok(Self {
+            writer,
+            consumer,
+            metrics,
+        })
+    }
 
     pub async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
         let mut batch: Vec<CacheEvent> = Vec::new();
@@ -135,7 +154,7 @@ impl ClickHouseIndexer {
                             Ok(event) => {
                                 batch.push(event);
                                 if batch.len() >= batch_size {
-                                    self.insert_batch(&batch).await?;
+                                    self.flush_batch(&batch).await?;
                                     batch.clear();
                                     self.consumer.commit_consumer_state(CommitMode::Async)?;
                                     last_commit = tokio::time::Instant::now();
@@ -156,7 +175,7 @@ impl ClickHouseIndexer {
                 }
                 Err(_) => {
                     if !batch.is_empty() {
-                        self.insert_batch(&batch).await?;
+                        self.flush_batch(&batch).await?;
                         batch.clear();
                         self.consumer.commit_consumer_state(CommitMode::Async)?;
                         last_commit = tokio::time::Instant::now();
@@ -165,10 +184,25 @@ impl ClickHouseIndexer {
             }
 
             if last_commit.elapsed() > std::time::Duration::from_secs(30) && !batch.is_empty() {
-                self.insert_batch(&batch).await?;
+                self.flush_batch(&batch).await?;
                 batch.clear();
                 self.consumer.commit_consumer_state(CommitMode::Async)?;
                 last_commit = tokio::time::Instant::now();
+            }
+        }
+    }
+
+    async fn flush_batch(&self, batch: &[CacheEvent]) -> Result<(), Box<dyn std::error::Error>> {
+        let started = Instant::now();
+        match self.writer.insert_batch(batch).await {
+            Ok(()) => {
+                self.metrics
+                    .record_success("clickhouse", batch.len(), started);
+                Ok(())
+            }
+            Err(e) => {
+                self.metrics.record_error("clickhouse");
+                Err(e)
             }
         }
     }
