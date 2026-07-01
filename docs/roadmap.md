@@ -22,7 +22,7 @@
 |-----------|--------|-------|------------|
 | [M1 — Foundation](#m1--foundation-v02x) | v0.2.x | Ядро прокси, ACL, категоризация, observability | ✅ Done |
 | [M2 — Squid parity](#m2--squid-parity-v03x) | v0.3.x | L2, ACL, hierarchy, auth, compression | ✅ Done |
-| [M2.5 — Data plane](#m25--data-plane-throughput-v031) | v0.3.1 | Tiered L1, perf, streaming, policy cache | ~40% |
+| [M2.5 — Data plane](#m25--data-plane-throughput-v031) | v0.3.1 | Tiered L1, perf, streaming, policy cache | ~55% |
 | [M3 — Retro-search](#m3--retro-search-v04x) | v0.4.x | Индексация, дашборды, ClickHouse, Search API | ~60% |
 | [M4 — Threat analytics](#m4--threat-analytics-v05x) | v0.5.x | Rule-based угрозы, алерты, C&C heuristics | ~5% |
 | [M5 — ML security](#m5--ml-security-v10x) | v1.0.x | ML anomaly, phishing ML, C&C detection | ~0% |
@@ -89,12 +89,12 @@ gantt
 - [x] **Tiered L1** — mmap spill + `HttpL1Cache` shards ([#93](https://github.com/onixus/bsdm-proxy/pull/93))
 - [x] **P0 perf** — `response_body()` Raw fast path, `TCP_SNDBUF_BYTES`, bench `WORKER_COUNT` ([#92](https://github.com/onixus/bsdm-proxy/pull/92))
 - [x] **k8s / HA docs** — [k8s-architecture.md](k8s-architecture.md), Helm chart `charts/bsdm/` ([#113](https://github.com/onixus/bsdm-proxy/pull/113))
+- [x] **Streaming MISS** — `TeeMissBody` tees upstream → client while buffering for L1; `STREAMING_MISS_ENABLED` (default `true`) ([#94](https://github.com/onixus/bsdm-proxy/issues/94))
 
 ### В работе (P0)
 
 | Issue | Задача |
 |-------|--------|
-| [#94](https://github.com/onixus/bsdm-proxy/issues/94) | Streaming MISS — tee upstream → client + cache |
 | [#95](https://github.com/onixus/bsdm-proxy/issues/95) | Connection-level proxy auth cache |
 | [#96](https://github.com/onixus/bsdm-proxy/issues/96) | Policy decision cache `(user, domain)` |
 | [#97](https://github.com/onixus/bsdm-proxy/issues/97) | Bench profiles `WORKER_COUNT` warm/cold |

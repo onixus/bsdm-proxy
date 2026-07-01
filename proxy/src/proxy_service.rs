@@ -3,6 +3,7 @@
 use base64::engine::general_purpose;
 use base64::Engine;
 use bytes::Bytes;
+use http_body_util::BodyExt;
 use hyper::body::Incoming;
 use hyper::header::{
     HeaderName, HeaderValue, AUTHORIZATION, IF_MODIFIED_SINCE, IF_NONE_MATCH, LOCATION,
@@ -22,11 +23,11 @@ use crate::acl::{AclAction, AclDecision, AclEngine};
 use crate::auth::{AuthManager, ProxyAuthOutcome, UserInfo};
 use crate::cache::{CacheConfig, CachedResponse, CACHEABLE_METHODS};
 use crate::cache_digest::DigestRegistry;
-use crate::cache_freshness::{evaluate_store, refresh_ttl_from_headers};
+use crate::cache_freshness::{evaluate_store, evaluate_store_precheck, refresh_ttl_from_headers};
 use crate::cache_key::http_cache_key;
 use crate::categorization::CategorizationEngine;
 use crate::hierarchy::{HierarchyManager, HierarchyResult};
-use crate::http_types::Body;
+use crate::http_types::{empty, full, Body};
 use crate::l2_cache::RedisL2Cache;
 use crate::metrics::{FastRequestScope, Metrics, RequestMetricsGuard};
 use crate::peer_fetch::fetch_via_peer;
@@ -37,12 +38,173 @@ use crate::pipeline::{
 };
 use crate::rate_limit::{RateLimitViolation, RateLimiter};
 use crate::sharded_cache::HttpL1Cache;
+use crate::streaming_miss::TeeMissBody;
 use crate::tls::CertCache;
 use crate::upstream::{build_upstream_https_connector, UpstreamTlsConfig};
 
 pub struct ProxyPolicy {
     pub acl_engine: Option<Arc<RwLock<AclEngine>>>,
     pub categorization: Option<Arc<CategorizationEngine>>,
+}
+
+/// Cloneable handles for streaming MISS completion (runs after body drained).
+#[derive(Clone)]
+struct MissCompletionHandle {
+    http_cache: Arc<HttpL1Cache>,
+    cache_config: CacheConfig,
+    l2_cache: Option<RedisL2Cache>,
+    hierarchy: Option<Arc<HierarchyManager>>,
+    metrics: Arc<Metrics>,
+    kafka_producer: Option<Arc<FutureProducer>>,
+    kafka_topic: String,
+    perf: PerfConfig,
+    digest_registry: Option<Arc<DigestRegistry>>,
+}
+
+impl MissCompletionHandle {
+    fn store_in_l1_and_l2(&self, cache_key: Arc<str>, cached_response: CachedResponse) {
+        self.http_cache
+            .insert(cache_key.clone(), cached_response.clone());
+        if let Some(registry) = &self.digest_registry {
+            let key = cache_key.to_string();
+            let reg = registry.clone();
+            tokio::spawn(async move {
+                reg.insert_cache_key(&key).await;
+            });
+        }
+        if let Some(l2) = &self.l2_cache {
+            let l2 = l2.clone();
+            tokio::spawn(async move {
+                l2.set(cache_key.as_ref(), &cached_response).await;
+            });
+        }
+    }
+
+    fn send_cache_event(&self, event: CacheEvent) {
+        if !self.perf.should_emit_kafka_event() {
+            return;
+        }
+        if let Some(producer) = self.kafka_producer.clone() {
+            send_to_kafka_async(
+                producer,
+                self.kafka_topic.clone(),
+                self.metrics.clone(),
+                event,
+            );
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn complete_cache_miss(
+        &self,
+        cache_key: Arc<str>,
+        url: &str,
+        method: &str,
+        domain: &str,
+        status: u16,
+        headers_map: &HashMap<String, String>,
+        body_bytes: Bytes,
+        store_decision: &crate::cache_freshness::CacheStoreDecision,
+        stored: bool,
+        user_id: Option<String>,
+        username: Option<String>,
+        client_ip: &str,
+        categories: &[String],
+        threat_sources: &[String],
+        request_start: Instant,
+        request_body_size: usize,
+        hierarchy_peer: Option<Arc<CachePeer>>,
+        mut guard: Option<RequestMetricsGuard>,
+        mut fast_scope: Option<FastRequestScope>,
+    ) {
+        let body_size = body_bytes.len();
+
+        if let (Some(hierarchy), Some(peer)) = (self.hierarchy.clone(), hierarchy_peer) {
+            let bytes = body_size as u64;
+            tokio::spawn(async move {
+                hierarchy.record_peer_hit(&peer, bytes).await;
+            });
+        }
+
+        if stored && store_decision.store {
+            let headers_arc: Arc<[(Arc<str>, Arc<str>)]> = headers_map
+                .iter()
+                .map(|(k, v)| (Arc::from(k.as_str()), Arc::from(v.as_str())))
+                .collect();
+
+            let cached_response = CachedResponse::from_upstream(
+                status,
+                headers_arc,
+                body_bytes,
+                store_decision.ttl,
+                &self.cache_config.compression,
+                self.cache_config.spill_threshold_bytes,
+                &self.cache_config.spill_dir,
+                store_decision.etag.clone(),
+                store_decision.last_modified.clone(),
+                store_decision.is_negative,
+                store_decision.must_revalidate,
+            );
+            self.store_in_l1_and_l2(cache_key.clone(), cached_response);
+            if let Some(g) = guard.as_mut() {
+                g.set_cache_status(if store_decision.is_negative {
+                    "NEGATIVE_MISS"
+                } else {
+                    "MISS"
+                });
+            }
+        } else {
+            self.metrics.cache_bypasses_total.inc();
+            if let Some(g) = guard.as_mut() {
+                g.set_cache_status("BYPASS");
+            }
+        }
+
+        let cache_status = if stored && store_decision.store {
+            if store_decision.is_negative {
+                "NEGATIVE_MISS"
+            } else {
+                "MISS"
+            }
+        } else {
+            "BYPASS"
+        };
+
+        if self.perf.should_emit_kafka_event() {
+            if let Ok(timestamp) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
+                let event = CacheEvent {
+                    url: url.to_string(),
+                    method: method.to_string(),
+                    status,
+                    cache_key: cache_key.to_string(),
+                    cache_status: cache_status.to_string(),
+                    timestamp: timestamp.as_secs(),
+                    headers: headers_map.clone(),
+                    user_id,
+                    username,
+                    client_ip: client_ip.to_string(),
+                    domain: domain.to_string(),
+                    response_size: body_size as u64,
+                    request_duration_ms: request_start.elapsed().as_millis() as u64,
+                    content_type: headers_map.get("content-type").cloned(),
+                    user_agent: headers_map.get("user-agent").cloned(),
+                    categories: categories.to_vec(),
+                    threat_sources: threat_sources.to_vec(),
+                    acl_action: None,
+                    event_id: new_event_id(),
+                };
+                self.send_cache_event(event);
+            }
+        }
+
+        ProxyService::finish_request_metrics(
+            &mut guard,
+            &mut fast_scope,
+            status,
+            request_body_size,
+            body_size,
+        );
+    }
 }
 
 pub struct ProxyService {
@@ -80,6 +242,20 @@ impl ProxyService {
 
     pub fn http_preserve_header_case(&self) -> bool {
         self.perf.http_preserve_header_case
+    }
+
+    fn miss_completion_handle(&self) -> MissCompletionHandle {
+        MissCompletionHandle {
+            http_cache: self.http_cache.clone(),
+            cache_config: self.cache_config.clone(),
+            l2_cache: self.l2_cache.clone(),
+            hierarchy: self.hierarchy.clone(),
+            metrics: self.metrics.clone(),
+            kafka_producer: self.kafka_producer.clone(),
+            kafka_topic: self.kafka_topic.clone(),
+            perf: self.perf.clone(),
+            digest_registry: self.digest_registry.clone(),
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -401,7 +577,7 @@ impl ProxyService {
         if let Some(lm) = &cached.last_modified {
             builder = builder.header(IF_MODIFIED_SINCE, lm.as_ref());
         }
-        builder.body(Body::new(Bytes::new())).ok()
+        builder.body(empty()).ok()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -498,10 +674,8 @@ impl ProxyService {
                 Response::builder()
                     .status(StatusCode::FORBIDDEN)
                     .header("Content-Type", "text/plain; charset=utf-8")
-                    .body(Body::new(Bytes::from(body)))
-                    .unwrap_or_else(|_| {
-                        Response::new(Body::new(Bytes::from_static(b"403 Forbidden")))
-                    })
+                    .body(full(Bytes::from(body)))
+                    .unwrap_or_else(|_| Response::new(full(Bytes::from_static(b"403 Forbidden"))))
             }
             AclAction::Redirect => {
                 let target = decision
@@ -512,10 +686,10 @@ impl ProxyService {
                 Response::builder()
                     .status(StatusCode::FOUND)
                     .header(LOCATION, target)
-                    .body(Body::new(Bytes::new()))
-                    .unwrap_or_else(|_| Response::new(Body::new(Bytes::new())))
+                    .body(empty())
+                    .unwrap_or_else(|_| Response::new(empty()))
             }
-            AclAction::Allow => Response::new(Body::new(Bytes::new())),
+            AclAction::Allow => Response::new(empty()),
         }
     }
 
@@ -579,12 +753,10 @@ impl ProxyService {
             .status(StatusCode::TOO_MANY_REQUESTS)
             .header("Content-Type", "text/plain; charset=utf-8")
             .header("Retry-After", "1")
-            .body(Body::new(Bytes::from_static(
+            .body(full(Bytes::from_static(
                 b"429 Too Many Requests: rate limit exceeded",
             )))
-            .unwrap_or_else(|_| {
-                Response::new(Body::new(Bytes::from_static(b"429 Too Many Requests")))
-            })
+            .unwrap_or_else(|_| Response::new(full(Bytes::from_static(b"429 Too Many Requests"))))
     }
 
     #[inline]
@@ -682,6 +854,85 @@ impl ProxyService {
             g.finish(status, request_size, response_size);
         } else if let Some(scope) = fast_scope.take() {
             scope.finish(status);
+        }
+    }
+
+    fn headers_map_from_response(response: &Response<Incoming>) -> HashMap<String, String> {
+        response
+            .headers()
+            .iter()
+            .filter_map(|(k, v)| {
+                v.to_str()
+                    .ok()
+                    .map(|v| (k.as_str().to_string(), v.to_string()))
+            })
+            .collect()
+    }
+
+    fn apply_response_headers(headers_map: &HashMap<String, String>, resp: &mut Response<Body>) {
+        for (key, value) in headers_map {
+            if let (Ok(name), Ok(val)) = (
+                HeaderName::from_bytes(key.as_bytes()),
+                HeaderValue::from_str(value),
+            ) {
+                resp.headers_mut().insert(name, val);
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn complete_cache_miss(
+        &self,
+        cache_key: Arc<str>,
+        url: &str,
+        method: &str,
+        domain: &str,
+        status: u16,
+        headers_map: &HashMap<String, String>,
+        body_bytes: Bytes,
+        store_decision: &crate::cache_freshness::CacheStoreDecision,
+        stored: bool,
+        user_id: Option<String>,
+        username: Option<String>,
+        client_ip: &str,
+        categories: &[String],
+        threat_sources: &[String],
+        request_start: Instant,
+        request_body_size: usize,
+        hierarchy_peer: Option<Arc<CachePeer>>,
+        guard: Option<RequestMetricsGuard>,
+        fast_scope: Option<FastRequestScope>,
+    ) -> &'static str {
+        let stored_and_cached = stored && store_decision.store;
+        self.miss_completion_handle().complete_cache_miss(
+            cache_key,
+            url,
+            method,
+            domain,
+            status,
+            headers_map,
+            body_bytes,
+            store_decision,
+            stored,
+            user_id,
+            username,
+            client_ip,
+            categories,
+            threat_sources,
+            request_start,
+            request_body_size,
+            hierarchy_peer,
+            guard,
+            fast_scope,
+        );
+        if stored_and_cached {
+            if store_decision.is_negative {
+                "NEGATIVE_MISS"
+            } else {
+                "MISS"
+            }
+        } else {
+            "BYPASS"
         }
     }
 
@@ -897,20 +1148,21 @@ impl ProxyService {
             Ok(collected) => collected.to_bytes(),
             Err(e) => {
                 error!("Body collection failed: {}", e);
-                let mut resp = Response::new(Body::new(Bytes::from_static(b"400 Bad Request")));
+                let mut resp = Response::new(full(Bytes::from_static(b"400 Bad Request")));
                 *resp.status_mut() = StatusCode::BAD_REQUEST;
                 Self::finish_request_metrics(&mut guard, &mut fast_scope, 400, 0, 15);
                 return resp;
             }
         };
         let request_body_size = body_bytes.len();
-        let req = Request::from_parts(parts, Body::new(body_bytes.clone()));
+        let req_for_peer = Request::from_parts(parts.clone(), full(body_bytes.clone()));
+        let req = Request::from_parts(parts, full(body_bytes));
 
         let domain = Self::extract_domain(&url);
         let upstream_start = Instant::now();
 
         let peer_fetch = self
-            .try_fetch_via_hierarchy(method, &url, req.clone())
+            .try_fetch_via_hierarchy(method, &url, req_for_peer)
             .await;
         let hierarchy_peer = peer_fetch.as_ref().map(|(peer, _)| peer.clone());
 
@@ -924,25 +1176,94 @@ impl ProxyService {
             Ok(response) => {
                 let upstream_duration = upstream_start.elapsed().as_secs_f64();
                 let status = response.status();
+                let status_code = status.as_u16();
 
                 self.metrics
                     .upstream_requests_total
-                    .with_label_values(&[&domain, &status.as_u16().to_string()])
+                    .with_label_values(&[&domain, &status_code.to_string()])
                     .inc();
                 self.metrics
                     .upstream_duration_seconds
                     .with_label_values(&[&domain])
                     .observe(upstream_duration);
 
-                let headers_map: HashMap<String, String> = response
-                    .headers()
-                    .iter()
-                    .filter_map(|(k, v)| {
-                        v.to_str()
-                            .ok()
-                            .map(|v| (k.as_str().to_string(), v.to_string()))
-                    })
-                    .collect();
+                let headers_map = Self::headers_map_from_response(&response);
+                let store_precheck =
+                    evaluate_store_precheck(method, status_code, &headers_map, &self.cache_config);
+
+                if self.perf.streaming_miss_enabled {
+                    let upstream_body = response.into_body();
+                    let x_cache = if store_precheck.store {
+                        "MISS"
+                    } else {
+                        "BYPASS"
+                    };
+
+                    let handle = self.miss_completion_handle();
+                    let cache_key_cb = cache_key.clone();
+                    let url_cb = url.clone();
+                    let method_cb = method.to_string();
+                    let domain_cb = domain.clone();
+                    let headers_cb = headers_map.clone();
+                    let store_precheck_cb = store_precheck.clone();
+                    let user_id_cb = user_id.clone();
+                    let username_cb = username.clone();
+                    let client_ip_cb = client_ip.clone();
+                    let categories_cb = categories.clone();
+                    let threat_sources_cb = threat_sources.clone();
+                    let hierarchy_peer_cb = hierarchy_peer.clone();
+                    let mut guard_cb = guard.take();
+                    let mut fast_scope_cb = fast_scope.take();
+
+                    let tee = TeeMissBody::new(
+                        upstream_body,
+                        store_precheck.store,
+                        self.cache_config.max_body_size,
+                        move |body_bytes, stored| {
+                            let final_decision = if stored {
+                                evaluate_store(
+                                    &method_cb,
+                                    status_code,
+                                    &headers_cb,
+                                    body_bytes.len(),
+                                    &handle.cache_config,
+                                )
+                            } else {
+                                crate::cache_freshness::CacheStoreDecision::bypass()
+                            };
+                            handle.complete_cache_miss(
+                                cache_key_cb,
+                                &url_cb,
+                                &method_cb,
+                                &domain_cb,
+                                status_code,
+                                &headers_cb,
+                                body_bytes,
+                                &final_decision,
+                                stored && final_decision.store,
+                                user_id_cb,
+                                username_cb,
+                                &client_ip_cb,
+                                &categories_cb,
+                                &threat_sources_cb,
+                                request_start,
+                                request_body_size,
+                                hierarchy_peer_cb,
+                                guard_cb.take(),
+                                fast_scope_cb.take(),
+                            );
+                            let _ = store_precheck_cb;
+                        },
+                    );
+
+                    let mut resp = Response::new(tee.boxed());
+                    *resp.status_mut() = status;
+                    Self::apply_response_headers(&headers_map, &mut resp);
+                    if let Ok(val) = HeaderValue::from_str(x_cache) {
+                        resp.headers_mut().insert("x-cache-status", val);
+                    }
+                    return resp;
+                }
 
                 let body_bytes = match http_body_util::BodyExt::collect(response.into_body()).await
                 {
@@ -953,8 +1274,7 @@ impl ProxyService {
                             .upstream_errors_total
                             .with_label_values(&[&domain, "body_read"])
                             .inc();
-                        let mut resp =
-                            Response::new(Body::new(Bytes::from_static(b"502 Bad Gateway")));
+                        let mut resp = Response::new(full(Bytes::from_static(b"502 Bad Gateway")));
                         *resp.status_mut() = StatusCode::BAD_GATEWAY;
                         Self::finish_request_metrics(
                             &mut guard,
@@ -966,103 +1286,42 @@ impl ProxyService {
                         return resp;
                     }
                 };
-                let body_size = body_bytes.len();
-
-                if let (Some(hierarchy), Some(peer)) =
-                    (self.hierarchy.as_ref(), hierarchy_peer.as_ref())
-                {
-                    hierarchy.record_peer_hit(peer, body_size as u64).await;
-                }
 
                 let store_decision = evaluate_store(
                     method,
-                    status.as_u16(),
+                    status_code,
                     &headers_map,
-                    body_size,
+                    body_bytes.len(),
                     &self.cache_config,
                 );
-                let cache_status = if store_decision.store {
-                    let headers_arc: Arc<[(Arc<str>, Arc<str>)]> = headers_map
-                        .iter()
-                        .map(|(k, v)| (Arc::from(k.as_str()), Arc::from(v.as_str())))
-                        .collect();
-
-                    let cached_response = CachedResponse::from_upstream(
-                        status.as_u16(),
-                        headers_arc,
-                        body_bytes.clone(),
-                        store_decision.ttl,
-                        &self.cache_config.compression,
-                        self.cache_config.spill_threshold_bytes,
-                        &self.cache_config.spill_dir,
-                        store_decision.etag,
-                        store_decision.last_modified,
-                        store_decision.is_negative,
-                        store_decision.must_revalidate,
-                    );
-                    self.store_in_l1_and_l2(cache_key.clone(), cached_response);
-                    if let Some(g) = guard.as_mut() {
-                        g.set_cache_status(if store_decision.is_negative {
-                            "NEGATIVE_MISS"
-                        } else {
-                            "MISS"
-                        });
-                    }
-                    if store_decision.is_negative {
-                        "NEGATIVE_MISS"
-                    } else {
-                        "MISS"
-                    }
-                } else {
-                    self.metrics.cache_bypasses_total.inc();
-                    if let Some(g) = guard.as_mut() {
-                        g.set_cache_status("BYPASS");
-                    }
-                    "BYPASS"
-                };
-
-                if let Ok(timestamp) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
-                    let event = CacheEvent {
-                        url: url.clone(),
-                        method: method.to_string(),
-                        status: status.as_u16(),
-                        cache_key: cache_key.to_string(),
-                        cache_status: cache_status.to_string(),
-                        timestamp: timestamp.as_secs(),
-                        headers: headers_map.clone(),
-                        user_id,
-                        username,
-                        client_ip,
-                        domain,
-                        response_size: body_size as u64,
-                        request_duration_ms: request_start.elapsed().as_millis() as u64,
-                        content_type: headers_map.get("content-type").cloned(),
-                        user_agent: headers_map.get("user-agent").cloned(),
-                        categories: categories.clone(),
-                        threat_sources: threat_sources.clone(),
-                        acl_action: None,
-                        event_id: new_event_id(),
-                    };
-                    self.send_cache_event(event);
-                }
-
-                let mut resp = Response::new(Body::new(body_bytes));
-                *resp.status_mut() = status;
-                for (key, value) in headers_map {
-                    if let (Ok(name), Ok(val)) = (
-                        HeaderName::from_bytes(key.as_bytes()),
-                        HeaderValue::from_str(&value),
-                    ) {
-                        resp.headers_mut().insert(name, val);
-                    }
-                }
-                Self::finish_request_metrics(
-                    &mut guard,
-                    &mut fast_scope,
-                    status.as_u16(),
+                let cache_status = self.complete_cache_miss(
+                    cache_key,
+                    &url,
+                    method,
+                    &domain,
+                    status_code,
+                    &headers_map,
+                    body_bytes.clone(),
+                    &store_decision,
+                    store_decision.store,
+                    user_id,
+                    username,
+                    &client_ip,
+                    &categories,
+                    &threat_sources,
+                    request_start,
                     request_body_size,
-                    body_size,
+                    hierarchy_peer,
+                    guard.take(),
+                    fast_scope.take(),
                 );
+
+                let mut resp = Response::new(full(body_bytes));
+                *resp.status_mut() = status;
+                Self::apply_response_headers(&headers_map, &mut resp);
+                if let Ok(val) = HeaderValue::from_str(cache_status) {
+                    resp.headers_mut().insert("x-cache-status", val);
+                }
                 resp
             }
             Err(e) => {
@@ -1071,7 +1330,7 @@ impl ProxyService {
                     .upstream_errors_total
                     .with_label_values(&[&domain, "connection"])
                     .inc();
-                let mut response = Response::new(Body::new(Bytes::from_static(b"502 Bad Gateway")));
+                let mut response = Response::new(full(Bytes::from_static(b"502 Bad Gateway")));
                 *response.status_mut() = StatusCode::BAD_GATEWAY;
                 Self::finish_request_metrics(
                     &mut guard,

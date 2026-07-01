@@ -12,7 +12,7 @@ use tracing::{info, warn};
 
 use crate::acl::{AclAction, AclEngine, AclRule};
 use crate::acl_config::{load_acl_engine_from_file, parse_acl_action};
-use crate::http_types::Body;
+use crate::http_types::{full, Body};
 
 #[derive(Clone)]
 pub struct AclApiConfig {
@@ -192,10 +192,8 @@ fn json_response(status: StatusCode, body: &str) -> Response<Body> {
     Response::builder()
         .status(status)
         .header("Content-Type", "application/json; charset=utf-8")
-        .body(Body::new(Bytes::from(body.to_string())))
-        .unwrap_or_else(|_| {
-            Response::new(Body::new(Bytes::from_static(b"500 Internal Server Error")))
-        })
+        .body(full(Bytes::from(body.to_string())))
+        .unwrap_or_else(|_| Response::new(full(Bytes::from_static(b"500 Internal Server Error"))))
 }
 
 fn escape_json(value: &str) -> String {

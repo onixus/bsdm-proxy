@@ -10,7 +10,7 @@ use tracing::warn;
 
 use crate::cache_body::CachedBody;
 use crate::cache_compress::{decode_body, prepare_body_for_cache, BodyEncoding, CompressionConfig};
-use crate::http_types::Body;
+use crate::http_types::{full, Body};
 
 pub const CACHEABLE_METHODS: &[&str] = &["GET", "HEAD"];
 pub const CACHEABLE_STATUS_CODES: &[u16] = &[200, 203, 204, 206, 300, 301, 404, 405, 410, 414, 501];
@@ -92,7 +92,7 @@ impl CachedResponse {
 
     pub fn to_response_with_cache_status(&self, cache_status: &str) -> Response<Body> {
         let body = self.response_body();
-        let mut response = Response::new(Body::new(body));
+        let mut response = Response::new(full(body));
         *response.status_mut() = StatusCode::from_u16(self.status).unwrap_or(StatusCode::OK);
 
         let headers_mut = response.headers_mut();

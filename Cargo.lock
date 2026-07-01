@@ -339,6 +339,7 @@ dependencies = [
  "bytes",
  "chrono",
  "hex",
+ "http-body",
  "http-body-util",
  "hyper",
  "hyper-rustls",
