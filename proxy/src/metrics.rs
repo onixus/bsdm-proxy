@@ -56,6 +56,7 @@ pub struct Metrics {
     pub acl_decisions_total: CounterVec,
     pub acl_rules_matched_total: CounterVec,
     pub acl_eval_duration_seconds: Histogram,
+    pub policy_cache_hit_total: Counter,
 
     // Rate limit metrics
     pub rate_limit_rejected_total: CounterVec,
@@ -261,6 +262,12 @@ impl Metrics {
         )?;
         registry.register(Box::new(acl_eval_duration_seconds.clone()))?;
 
+        let policy_cache_hit_total = Counter::new(
+            "bsdm_proxy_policy_cache_hit_total",
+            "Policy decision cache hits (ACL+categorization skipped)",
+        )?;
+        registry.register(Box::new(policy_cache_hit_total.clone()))?;
+
         let rate_limit_rejected_total = CounterVec::new(
             Opts::new(
                 "bsdm_proxy_rate_limit_rejected_total",
@@ -346,6 +353,7 @@ impl Metrics {
             acl_decisions_total,
             acl_rules_matched_total,
             acl_eval_duration_seconds,
+            policy_cache_hit_total,
             rate_limit_rejected_total,
             requests_fast_total,
             hierarchy_resolutions_total,

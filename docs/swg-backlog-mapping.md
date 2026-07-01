@@ -34,7 +34,7 @@
 | Zero-copy large HIT serve | yes | yes | yes | ✅ `Bytes::from_owner` | — |
 | Streaming MISS (tee upstream→client) | yes | yes | yes | ✅ `TeeMissBody` + `STREAMING_MISS_ENABLED` | merge #94 |
 | Connection-level auth cache | session at edge | identity on tunnel | GP session | ✅ `ConnAuthCache` + `AUTH_CONN_CACHE_TTL_SECONDS` | merge #95 |
-| Policy decision cache | context cached at edge | unified policy engine | forwarding profiles | ❌ ACL+cat every request | **P0** `policy_decision_cache` |
+| Policy decision cache | context cached at edge | unified policy engine | forwarding profiles | ✅ `PolicyDecisionCache` + reload invalidation | merge #96 |
 | PERF_FAST_CACHE_HIT (skip policy on HIT) | implicit | implicit | implicit | ✅ env flag | default on bench |
 | Multi-worker accept (SO_REUSEPORT) | internal | internal | internal | ✅ `WORKER_COUNT` | tune 1 vs 4 profiles |
 | TCP send buffer tuning | internal | internal | internal | ✅ `TCP_SNDBUF_BYTES` | merge PR #92 |

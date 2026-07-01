@@ -13,6 +13,7 @@ use tracing::{info, warn};
 use crate::acl::{AclAction, AclEngine, AclRule};
 use crate::acl_config::{load_acl_engine_from_file, parse_acl_action};
 use crate::http_types::{full, Body};
+use crate::policy_cache::PolicyDecisionCache;
 
 #[derive(Clone)]
 pub struct AclApiConfig {
@@ -41,11 +42,20 @@ impl AclApiConfig {
 pub struct AclApiState {
     engine: Arc<RwLock<AclEngine>>,
     config: AclApiConfig,
+    policy_cache: Option<Arc<PolicyDecisionCache>>,
 }
 
 impl AclApiState {
-    pub fn new(engine: Arc<RwLock<AclEngine>>, config: AclApiConfig) -> Self {
-        Self { engine, config }
+    pub fn new(
+        engine: Arc<RwLock<AclEngine>>,
+        config: AclApiConfig,
+        policy_cache: Option<Arc<PolicyDecisionCache>>,
+    ) -> Self {
+        Self {
+            engine,
+            config,
+            policy_cache,
+        }
     }
 
     pub async fn handle_request(&self, req: Request<Incoming>) -> Response<Body> {
@@ -164,6 +174,9 @@ impl AclApiState {
                 let count = loaded.rule_count();
                 let mut engine = self.engine.write().await;
                 *engine = loaded;
+                if let Some(cache) = &self.policy_cache {
+                    cache.invalidate();
+                }
                 info!("ACL API: reloaded {} rules from {}", count, path);
                 json_response(
                     StatusCode::OK,
@@ -221,6 +234,7 @@ mod tests {
                 rules_path: None,
                 api_token: None,
             },
+            None,
         )
     }
 
@@ -233,6 +247,7 @@ mod tests {
                 rules_path: None,
                 api_token: Some("secret-token".to_string()),
             },
+            None,
         )
     }
 

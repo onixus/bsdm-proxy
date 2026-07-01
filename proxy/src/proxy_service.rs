@@ -36,6 +36,7 @@ use crate::perf::PerfConfig;
 use crate::pipeline::{
     create_kafka_producer, flush_kafka, new_event_id, send_to_kafka_async, CacheEvent,
 };
+use crate::policy_cache::PolicyDecisionCache;
 use crate::rate_limit::{RateLimitViolation, RateLimiter};
 use crate::sharded_cache::HttpL1Cache;
 use crate::streaming_miss::TeeMissBody;
@@ -225,6 +226,7 @@ pub struct ProxyService {
     digest_registry: Option<Arc<DigestRegistry>>,
     rate_limiter: Arc<RateLimiter>,
     perf: PerfConfig,
+    policy_cache: Arc<PolicyDecisionCache>,
 }
 
 impl ProxyService {
@@ -242,6 +244,10 @@ impl ProxyService {
 
     pub fn http_preserve_header_case(&self) -> bool {
         self.perf.http_preserve_header_case
+    }
+
+    pub fn policy_cache(&self) -> Arc<PolicyDecisionCache> {
+        self.policy_cache.clone()
     }
 
     fn miss_completion_handle(&self) -> MissCompletionHandle {
@@ -274,6 +280,7 @@ impl ProxyService {
         rate_limit_config: crate::rate_limit::RateLimitConfig,
         upstream_tls: UpstreamTlsConfig,
         perf: PerfConfig,
+        policy_cache: Arc<PolicyDecisionCache>,
     ) -> Self {
         let kafka_producer = kafka_brokers.as_deref().and_then(create_kafka_producer);
 
@@ -307,6 +314,7 @@ impl ProxyService {
             digest_registry,
             rate_limiter: Arc::new(RateLimiter::new(rate_limit_config)),
             perf,
+            policy_cache,
         }
     }
 
@@ -505,11 +513,32 @@ impl ProxyService {
         groups: &[&str],
         client_ip: &str,
     ) -> (Option<AclDecision>, Vec<String>, Vec<String>) {
+        let policy_active = self.acl_engine.is_some() || self.categorization.is_some();
+        if policy_active && self.policy_cache.enabled() {
+            if let Some(hit) = self.policy_cache.lookup(username, domain, groups) {
+                self.metrics.policy_cache_hit_total.inc();
+                debug!("Policy cache hit for {:?} @ {}", username, domain);
+                return (hit.blocking, hit.categories, hit.threat_sources);
+            }
+        }
+
         let (category_names, threat_sources) = self.categorize_url(url).await;
-        let decision = self
+        let blocking = self
             .check_acl(url, domain, &category_names, username, groups, client_ip)
             .await;
-        (decision, category_names, threat_sources)
+
+        if policy_active && self.policy_cache.enabled() {
+            self.policy_cache.store(
+                username,
+                domain,
+                groups,
+                category_names.clone(),
+                threat_sources.clone(),
+                blocking.clone(),
+            );
+        }
+
+        (blocking, category_names, threat_sources)
     }
 
     #[allow(clippy::too_many_arguments)]

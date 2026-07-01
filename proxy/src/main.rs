@@ -7,8 +7,9 @@ use bsdm_proxy::{
     htcp_server_bind_addr, http_cache_key, icp_server_bind_addr, load_hierarchy_config,
     metrics_server, run_peer_discovery, should_start_htcp_server, should_start_icp_server,
     wait_shutdown_signal, AclAction, AuthManager, CacheConfig, CertCache, HtcpServer, IcpServer,
-    L2CacheConfig, Metrics, PeerDiscoveryConfig, PerfConfig, ProxyPolicy, ProxyService,
-    RateLimitConfig, RedisL2Cache, UpstreamTlsConfig,
+    L2CacheConfig, Metrics, PeerDiscoveryConfig, PerfConfig, PolicyCacheConfig,
+    PolicyDecisionCache, ProxyPolicy, ProxyService, RateLimitConfig, RedisL2Cache,
+    UpstreamTlsConfig,
 };
 use policy_config::{load_policy_config, reload_acl_engine};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -89,10 +90,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("URL categorization enabled");
     }
 
+    let policy_cache = Arc::new(PolicyDecisionCache::new(PolicyCacheConfig::from_env()));
+    if policy_cache.enabled() {
+        info!(
+            "Policy decision cache enabled (TTL={}s)",
+            policy_cache.config().ttl.as_secs()
+        );
+    }
+
     let acl_api = policy_config.acl_engine.as_ref().map(|engine| {
         Arc::new(bsdm_proxy::AclApiState::new(
             engine.clone(),
             bsdm_proxy::AclApiConfig::from_env(policy_config.acl_rules_path.clone()),
+            Some(policy_cache.clone()),
         ))
     });
     if acl_api.is_some() {
@@ -184,6 +194,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         rate_limit_config.clone(),
         upstream_tls,
         perf.clone(),
+        policy_cache.clone(),
     ));
 
     if should_start_icp_server(&hierarchy_config) {
@@ -280,6 +291,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 })
                 .unwrap_or(AclAction::Allow);
             let reload_interval = policy_config.acl_reload_interval;
+            let policy_cache = policy_cache.clone();
             let mut shutdown_rx = shutdown_rx.clone();
             tokio::spawn(async move {
                 let mut interval = tokio::time::interval(reload_interval);
@@ -290,6 +302,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 Ok(engine) => {
                                     let mut guard = acl_engine.write().await;
                                     *guard = engine;
+                                    policy_cache.invalidate();
                                     info!("ACL rules reloaded from {}", rules_path);
                                 }
                                 Err(e) => warn!("ACL reload failed: {}", e),
