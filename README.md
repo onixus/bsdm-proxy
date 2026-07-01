@@ -10,7 +10,7 @@
 [![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](https://github.com/onixus/bsdm-proxy/releases)
 [![Rust](https://img.shields.io/badge/rust-1.85+-orange.svg)](https://www.rust-lang.org)
 
-> **Текущая версия:** `0.3.0` (M2 — Squid parity) — см. [Releases](https://github.com/onixus/bsdm-proxy/releases) · [CHANGELOG](CHANGELOG.md) · [release notes](docs/releases/v0.3.0.md)
+> **Текущая версия:** `0.3.0` (релиз M2) · в разработке **M2.5** (data plane throughput) и **M3** (retro-search) — см. [Releases](https://github.com/onixus/bsdm-proxy/releases) · [CHANGELOG](CHANGELOG.md) · [roadmap](docs/roadmap.md)
 
 ⚠️ **MITM-прокси для HTTPS.** Используйте только в корпоративной среде с согласия пользователей и в рамках законодательства.
 
@@ -18,11 +18,12 @@
 
 | Область | Возможности |
 |---------|-------------|
-| **Прокси** | HTTP/HTTPS forward proxy, MITM TLS (порты 443/8443), HTTP CONNECT, кеш **L1 + Redis L2**, **иерархический кеш** (ICP/HTCP, discovery, digest), **HTTP/2 upstream** (опц.) |
-| **Безопасность** | Proxy-аутентификация (Basic / LDAP / NTLM / Kerberos), ACL + REST API, категоризация URL, rate limiting |
+| **Прокси** | HTTP/HTTPS forward proxy, MITM TLS (443/8443), HTTP CONNECT, **tiered L1** (inline + mmap spill, шарды), **streaming MISS**, Redis L2, **иерархический кеш** (ICP/HTCP), HTTP/2 upstream (опц.) |
+| **Безопасность** | Proxy-auth (Basic / LDAP / NTLM / Kerberos), **connection-level auth cache**, ACL + REST API, **policy decision cache**, категоризация URL, rate limiting |
+| **Производительность** | Multi-worker accept (`WORKER_COUNT`), perf fast path (`PERF_FAST_CACHE_HIT`), HTTP Archive bench profiles (`BENCH_PROFILE=warm\|cold`) |
 | **Наблюдаемость** | Prometheus (20+ метрик), Grafana, `/health`, `/ready`, `/metrics` |
-| **Аналитика** | Kafka → cache-indexer → OpenSearch |
-| **Эксплуатация** | Graceful shutdown, настраиваемые порты, release-пакет + systemd |
+| **Аналитика** | Kafka → cache-indexer → OpenSearch (целевой store: ClickHouse) |
+| **Эксплуатация** | Graceful shutdown, Helm chart `charts/bsdm/`, release-пакет + systemd |
 
 ## Архитектура
 
@@ -35,9 +36,10 @@
                         :9090 /metrics
                     ┌────────────┴────────────┐
              ┌──────▼──────┐           ┌──────▼──────┐
-             │ quick_cache │           │   Kafka     │
-             │   (L1)      │           │  (async)    │
-             └──────┬──────┘           └──────┬──────┘
+             │ tiered L1   │           │   Kafka     │
+             │ (shards +   │           │  (async)    │
+             │ mmap spill) │           └──────┬──────┘
+             └──────┬──────┘                  │
                     │ ICP :3130 (UDP)         │
              ┌──────▼──────┐                  │
              │ sibling /   │                  │
@@ -149,7 +151,11 @@ cargo build --release -p bsdm-proxy --bin proxy -p cache-indexer --bin cache-ind
 | `METRICS_PORT` | `9090` | Порт health/metrics |
 | `MITM_ENABLED` | `true` | MITM для портов 443 и 8443 |
 | `KAFKA_BROKERS` | — | Kafka (опционально) |
-| `CACHE_CAPACITY` | `10000` | Размер L1-кеша |
+| `CACHE_CAPACITY` | `10000` | Размер L1-кеша (на шард) |
+| `CACHE_SHARDS` | `16` | Число шардов L1 (`quick_cache` на шард) |
+| `CACHE_SPILL_THRESHOLD_BYTES` | `262144` | Тела ≥ порога — в mmap spill (`0` = только inline) |
+| `CACHE_SPILL_DIR` | `{tmp}/bsdm-cache-spill` | Каталог spill-файлов для крупных тел |
+| `STREAMING_MISS_ENABLED` | `true` | Tee upstream MISS → client при записи в L1 |
 | `CACHE_TTL_SECONDS` | `3600` | Fallback TTL кеша (сек), если нет `max-age` |
 | `MAX_CACHE_BODY_SIZE` | `10485760` | Макс. размер body (байт) |
 | `NEGATIVE_CACHE_ENABLED` | `true` | Кешировать upstream 403/404 |
@@ -175,6 +181,7 @@ CA для MITM читается из `/certs/ca.key` и `/certs/ca.crt` (fallbac
 | `AUTH_BACKEND` | `basic` (default), `ldap` (`auth-ldap`), `ntlm` (`auth-ntlm`), `kerberos` (`auth-kerberos`) |
 | `AUTH_REALM` | Realm для `Proxy-Authenticate` |
 | `AUTH_CACHE_TTL` | TTL кеша сессий (сек) |
+| `AUTH_CONN_CACHE_TTL_SECONDS` | `300` | Кеш успешной `Proxy-Authorization` на keep-alive TCP (`0` = выкл.) |
 
 → [docs/authentication.md](docs/authentication.md)
 
@@ -189,6 +196,8 @@ CA для MITM читается из `/certs/ca.key` и `/certs/ca.crt` (fallbac
 | `ACL_RELOAD_INTERVAL` | Интервал перезагрузки (сек) |
 | `ACL_API_TOKEN` | Bearer-токен для REST API `/api/acl/*` (опционально) |
 | `CATEGORIZATION_ENABLED` | Категоризация URL |
+| `POLICY_DECISION_CACHE_TTL_SECONDS` | `120` | Кеш решений ACL+cat по `(principal, domain)` (`0` = выкл.) |
+| `POLICY_DECISION_CACHE_MAX_KEYS` | `10000` | Макс. ключей policy cache |
 | `SHALLALIST_PATH` | Путь к Shallalist |
 | `CUSTOM_DB_PATH` | Пользовательская БД категорий |
 
@@ -256,6 +265,27 @@ Token-bucket лимиты на IP и аутентифицированного п
 
 → [docs/hierarchical-caching.md](docs/hierarchical-caching.md)
 
+### Performance tuning (опционально)
+
+Multi-worker accept и fast path для bench/lab. Полный список: [docs/performance.md](docs/performance.md).
+
+| Переменная | По умолчанию | Описание |
+|-----------|-------------|----------|
+| `WORKER_COUNT` | `1` | Число accept-loop с `SO_REUSEPORT` (Linux) |
+| `PERF_FAST_CACHE_HIT` | `false` | L1 HIT до ACL/policy/Kafka (bench) |
+| `TCP_SNDBUF_BYTES` | `524288` | `SO_SNDBUF` на клиентских сокетах (`0` = не менять) |
+| `METRICS_SAMPLE_RATE` | `0` | `N` → histograms для 1 из N запросов (`0` = все) |
+| `HTTP_PRESERVE_HEADER_CASE` | `true` | `false` убирает preserve case (bench) |
+
+HTTP Archive sites bench (70 сайтов × 20 warm repeats):
+
+```bash
+./scripts/run-httparchive-benchmark.sh                    # BENCH_PROFILE=warm (default)
+BENCH_PROFILE=cold ./scripts/compare-squid-bsdm-httparchive.sh
+```
+
+Профили `warm` / `cold` → `WORKER_COUNT` 1 / 4: [`scripts/bench-profile.sh`](scripts/bench-profile.sh). См. [docs/benchmarks-httparchive.md](docs/benchmarks-httparchive.md).
+
 ### Cache-indexer
 
 | Переменная | По умолчанию | Описание |
@@ -307,6 +337,10 @@ cargo test --workspace
 # Docker test stack
 docker compose -f docker-compose.test.yml up -d
 ./scripts/run-smoke-tests.sh --external
+
+# HTTP Archive sites bench (mock upstream + proxy)
+./scripts/run-httparchive-benchmark.sh
+cargo test -p bsdm-proxy-e2e --test httparchive
 ```
 
 CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.yml](.github/workflows/e2e.yml).
@@ -320,6 +354,9 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 | [docs/README.md](docs/README.md) | Оглавление документации |
 | [docs/authentication.md](docs/authentication.md) | Basic, LDAP, NTLM, Kerberos |
 | [docs/logging.md](docs/logging.md) | Логирование (`RUST_LOG`, уровни, просмотр) |
+| [docs/performance.md](docs/performance.md) | Тюнинг RPS, `WORKER_COUNT`, bench profiles |
+| [docs/benchmarks-httparchive.md](docs/benchmarks-httparchive.md) | HTTP Archive Top 1k benchmarks |
+| [docs/k8s-architecture.md](docs/k8s-architecture.md) | Kubernetes / HA deployment |
 | [docs/acl.md](docs/acl.md) | Правила доступа, приоритеты |
 | [docs/categorization.md](docs/categorization.md) | Shallalist, URLhaus, PhishTank |
 | [docs/hierarchical-caching.md](docs/hierarchical-caching.md) | Иерархический кеш, ICP, peers |
@@ -336,48 +373,25 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 
 Цель: **альтернатива Squid с ретропоиском и ML** для аномалий, фишинга и C&C.
 
-Полный план: **[docs/roadmap.md](docs/roadmap.md)**
+Полный план: **[docs/roadmap.md](docs/roadmap.md)** · SWG gap mapping: [docs/swg-backlog-mapping.md](docs/swg-backlog-mapping.md)
 
 | Milestone | Версия | Фокус | Статус |
 |-----------|--------|-------|--------|
-| **M1** Foundation | v0.2.x | Прокси, ACL, категоризация, observability, иерархия | ✅ Done |
+| **M1** Foundation | v0.2.x | Прокси, ACL, категоризация, observability | ✅ Done |
 | **M2** Squid parity | v0.3.x | L2, ACL API, NTLM/Kerberos, hierarchy Phase 4 | ✅ Done |
-| **M3** Retro-search | v0.4.x | OpenSearch dashboards, поиск по истории | Planned |
-| **M4** Threat analytics | v0.5.x | Rule-based алерты, C&C heuristics | Planned |
-| **M5** ML security | v1.0.x | ML anomaly, phishing, C&C detection | Planned |
+| **M2.5** Data plane | v0.3.1 | Tiered L1, streaming MISS, auth/policy cache, bench | ~85% |
+| **M3** Retro-search | v0.4.x | OpenSearch/ClickHouse, dashboards, Search API | ~60% |
+| **M4** Threat analytics | v0.5.x | Rule-based алерты, C&C heuristics | ~5% |
+| **M5** ML security | v1.0.x | ML anomaly, phishing, C&C detection | ~0% |
 
-### M1 — Foundation (v0.2.x, текущий)
+### M2.5 — в работе (последний P0)
 
-- [x] Prometheus + Grafana + health checks
-- [x] Graceful shutdown
-- [x] Proxy authentication (Basic / LDAP / NTLM / Kerberos)
-- [x] ACL + URL categorization
-- [x] E2E / smoke test harness
-- [x] Release packaging (`0.3.0`)
-- [x] Hierarchical caching Phase 3 — ICP server, peer fetch, env config
-- [x] Rate limiting per user/IP
-- [x] Рефакторинг `main.rs` (вынос `ProxyService` в lib)
-- [x] Hierarchy E2E + `docker-compose.hierarchy.yml`
-- [x] NTLM + Kerberos (SSPI, multi-round proxy auth)
+- [x] Tiered L1 (mmap spill + shards), P0 perf, k8s/Helm docs
+- [x] Streaming MISS, connection auth cache, policy decision cache
+- [x] HTTP Archive bench profiles (`BENCH_PROFILE=warm|cold`)
+- [ ] Spill files `mode 0o600` ([#98](https://github.com/onixus/bsdm-proxy/issues/98))
 
-### M2 — Squid parity (v0.3.x)
-
-- [x] Redis L2 cache
-- [x] HTTP/2 upstream client — `UPSTREAM_HTTP2_ENABLED`
-- [x] Compression (Brotli/Zstd) — `CACHE_COMPRESSION=zstd|brotli`
-- [x] ACL TimeWindow + group rules
-- [x] NTLM auth ([#44](https://github.com/onixus/bsdm-proxy/issues/44))
-- [x] Kerberos / SPNEGO auth
-- [x] Hierarchy Phase 4 (discovery, digest, HTCP)
-- [x] LDAP group enrichment after NTLM/Kerberos
-- [x] Negative caching / cache refresh (B22) — `Cache-Control`, ETag revalidate, 403/404 negative cache
-- [x] REST ACL API (`/api/acl/*` на порту metrics)
-
-### M3–M5
-
-- [ ] **M3:** индексация threat-полей, OpenSearch Dashboards, saved searches
-- [ ] **M4:** rule-based anomaly alerts, C&C beacon heuristics, SIEM export
-- [ ] **M5:** ML pipeline, anomaly/phishing/C&C models
+**Gate M2.5:** warm goodput на HTTP Archive sites bench ≥ Squid −5%.
 
 ## Лицензия
 
