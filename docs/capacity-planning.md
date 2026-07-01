@@ -48,3 +48,9 @@ REDIS_L2_ENABLED=true
 | **Итого** | — | ~80 | ~350 GB | ~1.3 TB |
 
 Полные формулы, модели нагрузки и риски — на [wiki](https://github.com/onixus/bsdm-proxy/wiki/Capacity-Planning).
+
+## Kubernetes
+
+См. [k8s-architecture.md](k8s-architecture.md) и Helm chart [`charts/bsdm/`](../charts/bsdm/README.md).
+
+Локальный HA sketch без k8s: `docker compose -f docker-compose.ha.yml up -d`.

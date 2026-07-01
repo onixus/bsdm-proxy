@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "bsdm.fullname" . }}-env
+  labels:
+    {{- include "bsdm.labels" . | nindent 4 }}
+data:
+  HTTP_PORT: {{ .Values.service.proxyPort | quote }}
+  METRICS_PORT: {{ .Values.service.metricsPort | quote }}
+  WORKER_COUNT: {{ .Values.proxy.workerCount | quote }}
+  CACHE_CAPACITY: {{ .Values.proxy.cacheCapacity | quote }}
+  CACHE_SHARDS: {{ .Values.proxy.cacheShards | quote }}
+  CACHE_TTL_SECONDS: {{ .Values.proxy.cacheTtlSeconds | quote }}
+  MAX_CACHE_BODY_SIZE: {{ .Values.proxy.maxCacheBodySize | quote }}
+  CACHE_SPILL_THRESHOLD_BYTES: {{ .Values.proxy.spillThresholdBytes | quote }}
+  CACHE_SPILL_DIR: {{ .Values.spill.mountPath | quote }}
+  REDIS_L2_ENABLED: {{ .Values.proxy.redisL2Enabled | quote }}
+  REDIS_URL: {{ .Values.proxy.redisUrl | quote }}
+  REDIS_KEY_PREFIX: {{ .Values.proxy.redisKeyPrefix | quote }}
+  KAFKA_TOPIC: {{ .Values.proxy.kafkaTopic | quote }}
+  KAFKA_SAMPLE_RATE: {{ .Values.proxy.kafkaSampleRate | quote }}
+  METRICS_SAMPLE_RATE: {{ .Values.proxy.metricsSampleRate | quote }}
+  PERF_FAST_CACHE_HIT: {{ .Values.proxy.perfFastCacheHit | quote }}
+  MITM_ENABLED: {{ .Values.proxy.mitmEnabled | quote }}
+  AUTH_ENABLED: {{ .Values.proxy.authEnabled | quote }}
+  ACL_ENABLED: {{ .Values.proxy.aclEnabled | quote }}
+  ACL_DEFAULT_ACTION: {{ .Values.acl.defaultAction | quote }}
+  ACL_RULES_PATH: {{ printf "%s/acl-rules.json" .Values.acl.mountPath | quote }}
+  CATEGORIZATION_ENABLED: {{ .Values.proxy.categorizationEnabled | quote }}
+  HIERARCHY_ENABLED: {{ .Values.proxy.hierarchyEnabled | quote }}
+  RUST_LOG: {{ .Values.proxy.rustLog | quote }}
+  SHUTDOWN_TIMEOUT_SECONDS: {{ .Values.proxy.shutdownTimeoutSeconds | quote }}
+  {{- if .Values.proxy.kafkaBrokers }}
+  KAFKA_BROKERS: {{ .Values.proxy.kafkaBrokers | quote }}
+  {{- end }}
