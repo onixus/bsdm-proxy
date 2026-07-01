@@ -111,14 +111,14 @@ mod tests {
             content_type: None,
             user_agent: None,
             categories: vec!["malware".to_string()],
-            threat_sources: vec!["shallalist".to_string()],
+            threat_sources: vec!["ut1".to_string()],
             acl_action: Some("deny".to_string()),
             event_id: "evt-block".to_string(),
         };
 
         let row = bsdm_events::cache_event_to_row(&event);
         assert_eq!(row.acl_action.as_deref(), Some("deny"));
-        assert_eq!(row.threat_sources, vec!["shallalist"]);
+        assert_eq!(row.threat_sources, vec!["ut1"]);
     }
 
     #[test]
@@ -177,7 +177,7 @@ mod tests {
             content_type: None,
             user_agent: None,
             categories: vec!["malware".to_string()],
-            threat_sources: vec!["shallalist".to_string()],
+            threat_sources: vec!["ut1".to_string()],
             acl_action: Some("deny".to_string()),
             event_id: "evt-block".to_string(),
         };

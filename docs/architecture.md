@@ -80,7 +80,7 @@ TCP accept
   → CONNECT? → [MITM TLS | raw tunnel]
   → authenticate_proxy()          # Proxy-Authorization
   → check_policy()
-       → categorization.categorize()   # Shallalist / URLhaus / PhishTank
+       → categorization.categorize()   # UT1 Blacklists / OTX / custom
        → acl_engine.check_access()     # Mutex lock
   → L1 cache lookup (GET/HEAD)
   → [if HIERARCHY_ENABLED] resolve_source()

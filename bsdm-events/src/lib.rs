@@ -33,7 +33,7 @@ pub struct CacheEvent {
     pub user_agent: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub categories: Vec<String>,
-    /// Feed identifiers: shallalist, urlhaus, phishtank, custom, cache, multiple.
+    /// Feed identifiers: ut1, urlhaus, phishtank, custom, cache, multiple.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub threat_sources: Vec<String>,
     /// ACL decision when request was denied or redirected: deny, redirect.

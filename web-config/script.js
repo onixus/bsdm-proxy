@@ -115,8 +115,8 @@ function collectConfig() {
         CATEGORIZATION_ENABLED: document.getElementById('categorization_enabled').checked.toString(),
         ...(document.getElementById('categorization_enabled').checked ? {
             CATEGORIZATION_CACHE_TTL: document.getElementById('categorization_cache_ttl').value,
-            SHALLALIST_ENABLED: document.getElementById('shallalist_enabled').checked.toString(),
-            SHALLALIST_PATH: document.getElementById('shallalist_path').value,
+            UT1_ENABLED: document.getElementById('ut1_enabled').checked.toString(),
+            UT1_PATH: document.getElementById('ut1_path').value,
             URLHAUS_ENABLED: document.getElementById('urlhaus_enabled').checked.toString(),
             URLHAUS_API: document.getElementById('urlhaus_api').value,
             PHISHTANK_ENABLED: document.getElementById('phishtank_enabled').checked.toString(),
@@ -319,8 +319,8 @@ ${config.ACL_ENABLED === 'true' ? `      - ACL_ENABLED=${config.ACL_ENABLED}
       - ACL_RULES_PATH=${config.ACL_RULES_PATH}` : ''}
 ${config.CATEGORIZATION_ENABLED === 'true' ? `      - CATEGORIZATION_ENABLED=${config.CATEGORIZATION_ENABLED}
       - CATEGORIZATION_CACHE_TTL=${config.CATEGORIZATION_CACHE_TTL}
-      - SHALLALIST_ENABLED=${config.SHALLALIST_ENABLED}
-      - SHALLALIST_PATH=${config.SHALLALIST_PATH}
+      - UT1_ENABLED=${config.UT1_ENABLED}
+      - UT1_PATH=${config.UT1_PATH}
       - URLHAUS_ENABLED=${config.URLHAUS_ENABLED}
       - URLHAUS_API=${config.URLHAUS_API}
       - PHISHTANK_ENABLED=${config.PHISHTANK_ENABLED}
@@ -328,7 +328,7 @@ ${config.CATEGORIZATION_ENABLED === 'true' ? `      - CATEGORIZATION_ENABLED=${c
       - CUSTOM_DB_ENABLED=${config.CUSTOM_DB_ENABLED}
       - CUSTOM_DB_PATH=${config.CUSTOM_DB_PATH}` : ''}
     volumes:
-${config.SHALLALIST_ENABLED === 'true' ? `      - ${config.SHALLALIST_PATH}:${config.SHALLALIST_PATH}:ro
+${config.UT1_ENABLED === 'true' ? `      - ${config.UT1_PATH}:${config.UT1_PATH}:ro
 ` : ''}${config.ACL_ENABLED === 'true' ? `      - ./acl-rules.json:${config.ACL_RULES_PATH}:ro
 ` : ''}${config.CUSTOM_DB_ENABLED === 'true' ? `      - ./custom-categories.json:${config.CUSTOM_DB_PATH}:ro
 ` : ''}    depends_on:

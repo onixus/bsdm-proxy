@@ -115,20 +115,20 @@
                         <span class="help">How long to cache categories</span>
                     </div>
 
-                    <h3>Shallalist (Open-Source DB)</h3>
+                    <h3>UT1 Blacklists (local category DB)</h3>
                     
                     <div class="form-group">
                         <label>
-                            <input type="checkbox" id="shallalist_enabled" checked>
-                            Enable Shallalist
+                            <input type="checkbox" id="ut1_enabled" checked>
+                            Enable UT1 Blacklists
                         </label>
-                        <span class="help">60+ categories, millions of domains</span>
+                        <span class="help">30+ categories, millions of domains (Université Toulouse 1)</span>
                     </div>
 
                     <div class="form-group">
-                        <label for="shallalist_path">Shallalist Path</label>
-                        <input type="text" id="shallalist_path" value="/var/lib/shallalist">
-                        <span class="help">Path to extracted Shallalist database</span>
+                        <label for="ut1_path">UT1 Path</label>
+                        <input type="text" id="ut1_path" value="/var/lib/ut1-blacklists">
+                        <span class="help">Path to extracted UT1 blacklists (blacklists/&lt;category&gt;/domains)</span>
                     </div>
 
                     <h3>URLhaus (Malware Detection)</h3>
@@ -184,8 +184,7 @@
                         <strong>Safe:</strong> education, news, business, health<br>
                         <br>
                         <strong>Setup:</strong><br>
-                        <code>wget http://www.shallalist.de/Downloads/shallalist.tar.gz</code><br>
-                        <code>tar -xzf shallalist.tar.gz -C /var/lib/</code>
+                        <code>UT1_PATH=/var/lib/ut1-blacklists ./scripts/download-ut1-blacklists.sh</code>
                     </div>
                 </div>
             </section>

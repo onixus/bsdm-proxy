@@ -24,17 +24,39 @@ fn env_flag(name: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn load_ut1_config() -> (bool, Option<String>) {
+    let enabled = env_flag("UT1_ENABLED")
+        || env_flag("LOCAL_CATEGORY_DB_ENABLED")
+        || env_flag("SHALLALIST_ENABLED");
+
+    let path = std::env::var("UT1_PATH")
+        .ok()
+        .or_else(|| std::env::var("LOCAL_CATEGORY_DB_PATH").ok())
+        .or_else(|| std::env::var("SHALLALIST_PATH").ok());
+
+    if env_flag("SHALLALIST_ENABLED") || std::env::var("SHALLALIST_PATH").is_ok() {
+        warn!(
+            "SHALLALIST_* env vars are deprecated; use UT1_ENABLED and UT1_PATH \
+             (https://dsi.ut-capitole.fr/blacklists/index_en.php)"
+        );
+    }
+
+    (enabled, path)
+}
+
 fn load_categorization_config() -> CategorizationConfig {
     let cache_ttl_secs = std::env::var("CATEGORIZATION_CACHE_TTL")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(3600);
 
+    let (ut1_enabled, ut1_path) = load_ut1_config();
+
     CategorizationConfig {
         enabled: true,
         cache_ttl: Duration::from_secs(cache_ttl_secs),
-        shallalist_enabled: env_flag("SHALLALIST_ENABLED"),
-        shallalist_path: std::env::var("SHALLALIST_PATH").ok(),
+        ut1_enabled,
+        ut1_path,
         urlhaus_enabled: env_flag("URLHAUS_ENABLED"),
         urlhaus_api: std::env::var("URLHAUS_API")
             .unwrap_or_else(|_| "https://urlhaus-api.abuse.ch/v1/url/".to_string()),

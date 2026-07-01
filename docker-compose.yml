@@ -83,7 +83,8 @@ services:
       - ACL_RULES_PATH=/etc/bsdm-proxy/acl-rules.json
       - ACL_AUTO_RELOAD=false
       - CATEGORIZATION_ENABLED=false
-      - SHALLALIST_ENABLED=false
+      - UT1_ENABLED=false
+      - UT1_PATH=/var/lib/ut1-blacklists
       - RUST_LOG=info,bsdm_proxy=debug
       - RUST_BACKTRACE=1
     depends_on:
