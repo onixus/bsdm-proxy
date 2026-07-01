@@ -31,7 +31,7 @@
 | B10 | [#41](https://github.com/onixus/bsdm-proxy/issues/41) | Kafka reliable delivery (topic env, acks) | ✅ |
 | B11 | [#42](https://github.com/onixus/bsdm-proxy/issues/42) | Indexer: add `categories` to CacheEvent | ✅ |
 | B12 | [#43](https://github.com/onixus/bsdm-proxy/issues/43) | Shared `bsdm-events` crate | ✅ |
-| B13 | [#44](https://github.com/onixus/bsdm-proxy/issues/44) | Implement NTLM or remove from docs | ✅ docs |
+| B13 | [#44](https://github.com/onixus/bsdm-proxy/issues/44) | Implement NTLM or remove from docs | ✅ |
 | B14 | [#45](https://github.com/onixus/bsdm-proxy/issues/45) | ACL TimeWindow + group rules | ✅ |
 
 ## Medium — M3 / M4 / M5
@@ -54,11 +54,12 @@
 | B23 | [#54](https://github.com/onixus/bsdm-proxy/issues/54) | HTTP/2 upstream client | ✅ |
 | B24 | [#55](https://github.com/onixus/bsdm-proxy/issues/55) | Fix healthcheck curl vs wget | ✅ |
 | B25 | [#56](https://github.com/onixus/bsdm-proxy/issues/56) | Implement or remove REST ACL API | ✅ |
+| B26 | — | Dockerfile: workspace `e2e` + Rust stable in builder | ✅ |
 
 ---
 
 ## Волны разблокировки
 
 1. **Волна 1 (M1):** ~~B5~~ → ~~B1+B2~~ → ~~B3+B4~~ → ~~**B6**~~ → ~~**B7**~~
-2. **Волна 2 (M3):** B12 → B11 → B10 → B17
+2. **Волна 2 (M3):** ~~B12~~ → ~~B11~~ → ~~B10~~ → ~~B17~~
 3. **Волна 3 (M4/M5):** B16 → B15 → B8

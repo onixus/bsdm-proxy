@@ -8,7 +8,7 @@
 [![E2E Tests](https://github.com/onixus/bsdm-proxy/actions/workflows/e2e.yml/badge.svg)](https://github.com/onixus/bsdm-proxy/actions/workflows/e2e.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](https://github.com/onixus/bsdm-proxy/releases)
-[![Rust](https://img.shields.io/badge/rust-1.85+-orange.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.88+-orange.svg)](https://www.rust-lang.org)
 
 > **Текущая версия:** `0.3.0` (релиз M2) · **M2.5** P0 закрыт · **M3** retro-search на ClickHouse (indexer, Grafana, Search API) — см. [Releases](https://github.com/onixus/bsdm-proxy/releases) · [CHANGELOG](CHANGELOG.md) · [roadmap](docs/roadmap.md)
 
@@ -82,9 +82,11 @@ cd ..
 ### 2. Запуск стека
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 docker compose ps
 ```
+
+Подробнее: [docs/docker.md](docs/docker.md) · [docs/deployment.md](docs/deployment.md)
 
 ### 3. Доверие клиенту к CA
 
@@ -379,8 +381,8 @@ Grafana: http://localhost:3000 → **BSDM Proxy Dashboard** (Prometheus) и **BS
 Перед push: `./scripts/pre-push-check.sh` (или `./scripts/install-git-hooks.sh` для auto hook).
 
 ```bash
-# Unit + integration (workspace)
-cargo test --workspace
+# Unit + integration + smoke + e2e (75 тестов)
+cargo test --workspace --all-targets
 
 # Smoke (health, metrics, HTTP forward)
 ./scripts/run-smoke-tests.sh
@@ -389,31 +391,36 @@ cargo test --workspace
 ./scripts/run-e2e-tests.sh
 
 # Docker test stack
-docker compose -f docker-compose.test.yml up -d
+docker compose -f docker-compose.test.yml up -d --build
 ./scripts/run-smoke-tests.sh --external
+# E2E --external: cache HIT для HTTPS не ожидается (MITM_ENABLED=false)
 
 # HTTP Archive sites bench (mock upstream + proxy)
 ./scripts/run-httparchive-benchmark.sh
 cargo test -p bsdm-proxy-e2e --test httparchive
 ```
 
-CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.yml](.github/workflows/e2e.yml).
+CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test, cargo-audit) и [e2e.yml](.github/workflows/e2e.yml).
 
 → [docs/development.md](docs/development.md)
 
-## Документация
+## Документация (Wiki)
 
 | Документ | Содержание |
 |----------|------------|
-| [docs/README.md](docs/README.md) | Оглавление документации |
+| [docs/README.md](docs/README.md) | **Оглавление wiki** |
+| [docs/deployment.md](docs/deployment.md) | Развёртывание: Docker, native, k8s |
+| [docs/docker.md](docs/docker.md) | Docker Compose, сборка образов, troubleshooting |
+| [docs/kubernetes.md](docs/kubernetes.md) | Kubernetes: манифесты, probes, Helm chart |
+| [docs/k8s-architecture.md](docs/k8s-architecture.md) | Kubernetes / HA deployment |
+| [docs/development.md](docs/development.md) | Сборка, тесты, CI |
 | [docs/authentication.md](docs/authentication.md) | Basic, LDAP, NTLM, Kerberos |
 | [docs/logging.md](docs/logging.md) | Логирование (`RUST_LOG`, уровни, просмотр) |
 | [docs/performance.md](docs/performance.md) | Тюнинг RPS, `WORKER_COUNT`, bench profiles |
 | [docs/benchmarks-httparchive.md](docs/benchmarks-httparchive.md) | HTTP Archive Top 1k benchmarks |
-| [docs/k8s-architecture.md](docs/k8s-architecture.md) | Kubernetes / HA deployment |
-| [docs/acl.md](docs/acl.md) | Правила доступа, приоритеты |
+| [docs/acl.md](docs/acl.md) | Правила доступа, REST API |
 | [docs/categorization.md](docs/categorization.md) | Shallalist, URLhaus, PhishTank |
-| [docs/hierarchical-caching.md](docs/hierarchical-caching.md) | Иерархический кеш, ICP, peers |
+| [docs/hierarchical-caching.md](docs/hierarchical-caching.md) | Иерархический кеш, ICP, HTCP |
 | [docs/clickhouse-analytics.md](docs/clickhouse-analytics.md) | ClickHouse analytics, compose, SQL |
 | [docs/search-api.md](docs/search-api.md) | REST Search API (`/api/search`) |
 | [docs/adr/0002-clickhouse-analytics.md](docs/adr/0002-clickhouse-analytics.md) | ADR: ClickHouse как analytics store |
@@ -440,6 +447,8 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 | **M3** Retro-search | v0.4.x | ClickHouse, Grafana, Search API | ~85% |
 | **M4** Threat analytics | v0.5.x | Rule-based алерты, C&C heuristics | ~5% |
 | **M5** ML security | v1.0.x | ML anomaly, phishing, C&C detection | ~0% |
+
+### M2.5 — P0 закрыт
 
 ### M2.5 — P0 закрыт
 

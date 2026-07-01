@@ -56,6 +56,7 @@ gantt
 - [x] Auth Basic/LDAP, ACL, categorization, E2E harness
 - [x] Hierarchy Phase 3, rate limit [#37](https://github.com/onixus/bsdm-proxy/issues/37), `ProxyService` refactor [#38](https://github.com/onixus/bsdm-proxy/issues/38)
 
+
 </details>
 
 ---
@@ -221,4 +222,4 @@ ML-слой поверх ClickHouse (batch) + опциональный inline sc
 
 ---
 
-*Последнее обновление: 2026-06 — M2.5 data plane, M3 ~60%, ClickHouse ADR, tiered L1 merged*
+*Последнее обновление: 2026-06 — M2.5 data plane, M3 ~85%, ClickHouse, wiki deployment/docker/k8s*

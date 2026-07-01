@@ -4,7 +4,7 @@
 
 > Альтернатива Squid с ретропоиском и ML для выявления отклонений, фишинга и C&C
 
-См. также: [roadmap.md](roadmap.md) · [development.md](development.md)
+См. также: [roadmap.md](roadmap.md) · [development.md](development.md) · [deployment.md](deployment.md) · [docker.md](docker.md)
 
 ---
 
@@ -208,7 +208,7 @@ Local L1 miss → ICP query siblings → select parent → fetch_via_peer → or
 | **B8** | Categorization на hot path (external HTTP) | `categorization.rs`, `main.rs` | M2 |
 | **B9** | ACL под `Mutex` | `policy_config.rs`, `main.rs` | M2 |
 | **B10** | Kafka `acks=0`, topic hardcoded | `main.rs:361-365` | M3 |
-| **B11** | Schema drift: `categories` не в indexer | `cache-indexer/src/main.rs` | M3 |
+| **B11** | Schema drift: `categories` в indexer | ✅ Done | `cache-indexer/src/main.rs` | M3 |
 | **B12** | Нет shared event crate | `proxy`, `cache-indexer` | M3 |
 | **B13** | NTLM — не реализован (документация исправлена) | `auth.rs` | M2 impl |
 | **B14** | ACL TimeWindow + group rules — реализовано | `acl.rs` | M2 ✅ |
@@ -219,7 +219,7 @@ Local L1 miss → ICP query siblings → select parent → fetch_via_peer → or
 |----|--------|----------|-----------|
 | **B15** | Нет analytics/ML сервиса | Нужен worker для scoring, alerts | M4–M5 |
 | **B16** | Бедная event schema | Нет session_id, acl_action, threat_score | M4 |
-| **B17** | OpenSearch Dashboards не в стеке | `docker-compose.yml` | M3 |
+| **B17** | OpenSearch Dashboards в compose | ✅ Done | `docker-compose.yml` | M3 |
 | **B18** | Только URL-level threat | Нет DNS/timing/beacon signals | M4–M5 |
 | **B19** | Нет alerting pipeline | OS Alerting / webhook / SIEM | M4 |
 | **B20** | Grafana ≠ security analytics | Prometheus only, не historical threats | M3–M4 |
@@ -233,6 +233,7 @@ Local L1 miss → ICP query siblings → select parent → fetch_via_peer → or
 | **B23** | HTTP/2 upstream — `UPSTREAM_HTTP2_ENABLED` | `upstream.rs` | ✅ |
 | **B24** | Healthcheck curl vs wget — исправлено (`wget` в compose) | `docker-compose.yml`, `Dockerfile` |
 | **B25** | REST ACL API на metrics port | `acl_api.rs`, `server.rs` | ✅ |
+| **B26** | Dockerfile: workspace `e2e`, Rust stable | `Dockerfile` | ✅ |
 
 ---
 
@@ -301,4 +302,4 @@ flowchart LR
 
 ---
 
-*Версия документа: 0.3.0 · M1 done, M2 done (hierarchy Phase 4, NTLM/Kerberos, ACL API)*
+*Версия документа: 0.3.0 · M1–M2 done · M3 ClickHouse retro-search в работе*

@@ -2,6 +2,8 @@
 
 > См. также: [оглавление документации](README.md) · [пример правил](../config/acl-rules.example.json)
 
+> ⚠️ **Ограничения реализации:** TimeWindow rules — TODO ([B14](BLOCKERS.md)); group-based rules частично игнорируются; REST API для управления ACL **не реализован** ([B25](BLOCKERS.md)) — только JSON-файл.
+
 Flexible access control system for BSDM-Proxy with multiple rule types and priority-based matching.
 
 ## Features

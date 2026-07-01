@@ -6,7 +6,7 @@
 
 | Компонент | Версия |
 |-----------|--------|
-| Rust | 1.85+ |
+| Rust | **1.88+** (рекомендуется latest stable) |
 | Cargo | stable |
 | librdkafka | dev-пакет (`librdkafka-dev`) |
 | OpenSSL | dev-пакет (`libssl-dev`) |
@@ -80,8 +80,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 ### Workspace
 
 ```bash
-cargo test --workspace
+cargo test --workspace --all-targets
 ```
+
+Ожидаемый результат: **75 тестов** (proxy unit/integration, cache-indexer, e2e smoke + e2e).
 
 ### Smoke-тесты
 
@@ -97,6 +99,11 @@ In-process (поднимает proxy как subprocess):
 docker compose -f docker-compose.test.yml up -d --build
 ./scripts/run-smoke-tests.sh --external
 ```
+
+**Ограничения external-режима:**
+- `MITM_ENABLED=false` в test compose — HTTPS не кэшируется (CONNECT-туннель).
+- Метрика `bsdm_proxy_requests_total` появляется после первого запроса через proxy.
+- `./scripts/run-e2e-tests.sh --external` проверяет cache HIT для HTTPS — **может не пройти** без MITM; используйте in-process `./scripts/run-e2e-tests.sh`.
 
 > Proxy Alpine image includes **wget** (not curl). Healthchecks in compose files use  
 > `wget -q -O- http://127.0.0.1:9090/health | grep -q ok`.
@@ -165,6 +172,14 @@ cargo test -p bsdm-proxy-e2e --test e2e e2e_mitm_https_with_self_signed_ca -- --
 - `install.sh` и `SHA256SUMS`
 
 Версия берётся из `proxy/Cargo.toml` (например `0.3.0` → пакет `0.3.0`, `0.2.3-test` → `0.2.3test`, `0.2.2-b` → `0.2.2b`).
+
+## Docker
+
+См. [docker.md](docker.md) — сборка образов, compose-стеки, troubleshooting.
+
+## Kubernetes
+
+См. [kubernetes.md](kubernetes.md) и [k8s-architecture.md](k8s-architecture.md) — Helm chart `charts/bsdm/`, probes, HA.
 
 ## GitHub Release (CI)
 
