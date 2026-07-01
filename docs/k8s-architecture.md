@@ -117,7 +117,7 @@ securityContext:
   fsGroup: 65532
 ```
 
-Spill files: `mode 0o600` (см. [#98](https://github.com/onixus/bsdm-proxy/issues/98)).
+Spill files: `mode 0o600`, directory `0o700` (см. `ensure_private_spill_dir` в `cache_body.rs`, [#98](https://github.com/onixus/bsdm-proxy/issues/98)).
 
 ---
 

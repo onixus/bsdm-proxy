@@ -46,7 +46,7 @@ pub use auth::NtlmConfig;
 pub use auth::{AuthBackend, AuthConfig, AuthManager, ConnAuthCache, ProxyAuthOutcome, UserInfo};
 pub use bsdm_events::CacheEvent;
 pub use cache::{CacheConfig, CachedResponse};
-pub use cache_body::CachedBody;
+pub use cache_body::{ensure_private_spill_dir, CachedBody};
 pub use cache_compress::{BodyEncoding, CompressionConfig};
 pub use cache_digest::DigestRegistry;
 pub use cache_key::http_cache_key;

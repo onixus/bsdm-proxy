@@ -34,7 +34,7 @@ cargo install oha   # или бинарь с https://github.com/hatoo/oha
 | `TCP_SNDBUF_BYTES` | `524288` | SO_SNDBUF на клиентских соединениях (`0` = не менять) |
 | `CACHE_SHARDS` | `16` | Число шардов L1 (`quick_cache` на шард); снижает contention при `WORKER_COUNT>1` |
 | `CACHE_SPILL_THRESHOLD_BYTES` | `262144` | Тела ≥ порога пишутся в mmap spill (`0` = только inline) |
-| `CACHE_SPILL_DIR` | `{tmp}/bsdm-cache-spill` | Каталог временных spill-файлов для крупных тел |
+| `CACHE_SPILL_DIR` | `{tmp}/bsdm-cache-spill` | Каталог spill-файлов (dir `0o700`, files `0o600` на Unix) |
 | `HTTP_PRESERVE_HEADER_CASE` | `true` | `false` убирает preserve/title-case в http1 (bench) |
 | `KAFKA_SAMPLE_RATE` | `0` | `N` → 1 из N cache events в Kafka (`0` = все) |
 | `METRICS_SAMPLE_RATE` | `0` | `N` → histograms для 1 из N запросов (`0` = все) |

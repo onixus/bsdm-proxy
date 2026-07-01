@@ -9,6 +9,30 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static SPILL_SEQ: AtomicU64 = AtomicU64::new(0);
 
+/// Create `CACHE_SPILL_DIR` if missing and restrict to owner-only (`0o700` on Unix).
+pub fn ensure_private_spill_dir(spill_dir: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(spill_dir)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(spill_dir)?.permissions();
+        perms.set_mode(0o700);
+        fs::set_permissions(spill_dir, perms)?;
+    }
+    Ok(())
+}
+
+fn open_new_spill_file(path: &Path) -> std::io::Result<File> {
+    let mut opts = OpenOptions::new();
+    opts.create_new(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    opts.open(path)
+}
+
 /// Owns a spill file, its mmap mapping, and removes the file on drop.
 struct MmapOwner {
     _file: File,
@@ -56,15 +80,12 @@ impl CachedBody {
 
     /// Write `data` to a spill file and mmap it read-only.
     pub fn spill(data: &[u8], spill_dir: &Path) -> std::io::Result<Self> {
-        fs::create_dir_all(spill_dir)?;
+        ensure_private_spill_dir(spill_dir)?;
         let id = SPILL_SEQ.fetch_add(1, Ordering::Relaxed);
         let path = spill_dir.join(format!("body-{id:016x}.bin"));
         let spill_result: std::io::Result<Self> = (|| {
             {
-                let mut file = OpenOptions::new()
-                    .create_new(true)
-                    .write(true)
-                    .open(&path)?;
+                let mut file = open_new_spill_file(&path)?;
                 file.write_all(data)?;
                 file.sync_all()?;
             }
@@ -118,5 +139,40 @@ mod tests {
         let b = Bytes::from_static(b"small");
         let body = CachedBody::maybe_spill(b.clone(), dir.path(), 1024).unwrap();
         assert!(!body.is_mmap());
+    }
+
+    #[test]
+    fn ensure_private_spill_dir_restricts_mode() {
+        let parent = tempdir().unwrap();
+        let spill_dir = parent.path().join("spill");
+        ensure_private_spill_dir(&spill_dir).unwrap();
+        assert!(spill_dir.is_dir());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&spill_dir).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o700);
+        }
+    }
+
+    #[test]
+    fn spill_file_is_owner_read_write_only() {
+        let dir = tempdir().unwrap();
+        let payload: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
+        let _body = CachedBody::spill(&payload, dir.path()).unwrap();
+        let spill_file = fs::read_dir(dir.path())
+            .unwrap()
+            .find_map(|e| e.ok())
+            .expect("spill file");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = spill_file.metadata().unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = spill_file;
+        }
     }
 }

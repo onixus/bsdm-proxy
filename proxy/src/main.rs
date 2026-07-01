@@ -9,7 +9,7 @@ use bsdm_proxy::{
     wait_shutdown_signal, AclAction, AuthManager, CacheConfig, CertCache, HtcpServer, IcpServer,
     L2CacheConfig, Metrics, PeerDiscoveryConfig, PerfConfig, PolicyCacheConfig,
     PolicyDecisionCache, ProxyPolicy, ProxyService, RateLimitConfig, RedisL2Cache,
-    UpstreamTlsConfig,
+    UpstreamTlsConfig, ensure_private_spill_dir,
 };
 use policy_config::{load_policy_config, reload_acl_engine};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -136,6 +136,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let kafka_brokers = std::env::var("KAFKA_BROKERS").ok();
     let kafka_topic = std::env::var("KAFKA_TOPIC").unwrap_or_else(|_| "cache-events".to_string());
     let cache_config = CacheConfig::from_env();
+    if cache_config.spill_threshold_bytes > 0 {
+        if let Err(e) = ensure_private_spill_dir(&cache_config.spill_dir) {
+            warn!(
+                "CACHE_SPILL_DIR {:?} init failed: {} — large bodies may stay inline",
+                cache_config.spill_dir, e
+            );
+        }
+    }
 
     let l2_config = L2CacheConfig::from_env();
     let l2_cache = if l2_config.enabled {

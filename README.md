@@ -154,7 +154,7 @@ cargo build --release -p bsdm-proxy --bin proxy -p cache-indexer --bin cache-ind
 | `CACHE_CAPACITY` | `10000` | Размер L1-кеша (на шард) |
 | `CACHE_SHARDS` | `16` | Число шардов L1 (`quick_cache` на шард) |
 | `CACHE_SPILL_THRESHOLD_BYTES` | `262144` | Тела ≥ порога — в mmap spill (`0` = только inline) |
-| `CACHE_SPILL_DIR` | `{tmp}/bsdm-cache-spill` | Каталог spill-файлов для крупных тел |
+| `CACHE_SPILL_DIR` | `{tmp}/bsdm-cache-spill` | Каталог spill-файлов (dir `0o700`, files `0o600` на Unix) |
 | `STREAMING_MISS_ENABLED` | `true` | Tee upstream MISS → client при записи в L1 |
 | `CACHE_TTL_SECONDS` | `3600` | Fallback TTL кеша (сек), если нет `max-age` |
 | `MAX_CACHE_BODY_SIZE` | `10485760` | Макс. размер body (байт) |
@@ -379,7 +379,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 |-----------|--------|-------|--------|
 | **M1** Foundation | v0.2.x | Прокси, ACL, категоризация, observability | ✅ Done |
 | **M2** Squid parity | v0.3.x | L2, ACL API, NTLM/Kerberos, hierarchy Phase 4 | ✅ Done |
-| **M2.5** Data plane | v0.3.1 | Tiered L1, streaming MISS, auth/policy cache, bench | ~85% |
+| **M2.5** Data plane | v0.3.1 | Tiered L1, streaming MISS, auth/policy cache, bench | ~95% |
 | **M3** Retro-search | v0.4.x | OpenSearch/ClickHouse, dashboards, Search API | ~60% |
 | **M4** Threat analytics | v0.5.x | Rule-based алерты, C&C heuristics | ~5% |
 | **M5** ML security | v1.0.x | ML anomaly, phishing, C&C detection | ~0% |
@@ -389,7 +389,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 - [x] Tiered L1 (mmap spill + shards), P0 perf, k8s/Helm docs
 - [x] Streaming MISS, connection auth cache, policy decision cache
 - [x] HTTP Archive bench profiles (`BENCH_PROFILE=warm|cold`)
-- [ ] Spill files `mode 0o600` ([#98](https://github.com/onixus/bsdm-proxy/issues/98))
+- [x] Spill files `mode 0o600` + private `CACHE_SPILL_DIR` ([#98](https://github.com/onixus/bsdm-proxy/issues/98))
 
 **Gate M2.5:** warm goodput на HTTP Archive sites bench ≥ Squid −5%.
 
