@@ -34,7 +34,7 @@
 | Zero-copy large HIT serve | yes | yes | yes | ✅ `Bytes::from_owner` | — |
 | Streaming MISS (tee upstream→client) | yes | yes | yes | ✅ `TeeMissBody` + `STREAMING_MISS_ENABLED` | merge #94 |
 | Connection-level auth cache | session at edge | identity on tunnel | GP session | ✅ `ConnAuthCache` + `AUTH_CONN_CACHE_TTL_SECONDS` | merge #95 |
-| Policy decision cache | context cached at edge | unified policy engine | forwarding profiles | ❌ ACL+cat every request | **P0** `policy_decision_cache` |
+| Policy decision cache | context cached at edge | unified policy engine | forwarding profiles | ✅ `PolicyDecisionCache` + reload invalidation | merge #96 |
 | PERF_FAST_CACHE_HIT (skip policy on HIT) | implicit | implicit | implicit | ✅ env flag | default on bench |
 | Multi-worker accept (SO_REUSEPORT) | internal | internal | internal | ✅ `WORKER_COUNT` | tune 1 vs 4 profiles |
 | TCP send buffer tuning | internal | internal | internal | ✅ `TCP_SNDBUF_BYTES` | merge PR #92 |
@@ -245,7 +245,7 @@ gantt
 |----|-------|-----------|
 | P0-3 | [#94](https://github.com/onixus/bsdm-proxy/issues/94) Streaming MISS | P0 |
 | P0-4 | [#95](https://github.com/onixus/bsdm-proxy/issues/95) Connection-level auth cache | P0 |
-| P0-5 | [#96](https://github.com/onixus/bsdm-proxy/issues/96) Policy decision cache | P0 |
+| P0-5 | [#96](https://github.com/onixus/bsdm-proxy/issues/96) Policy decision cache | P0 | ✅ |
 | P0-6 | [#97](https://github.com/onixus/bsdm-proxy/issues/97) Bench profiles WORKER_COUNT | P0 | ✅ |
 | P0-7 | [#98](https://github.com/onixus/bsdm-proxy/issues/98) Spill files mode 0o600 | P0 |
 | P1-1 | [#100](https://github.com/onixus/bsdm-proxy/issues/100) PERF fast path matrix | P1 |

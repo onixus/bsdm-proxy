@@ -448,6 +448,17 @@ The API is available when `ACL_ENABLED=true` on the metrics port (`METRICS_PORT`
 
 **Persistence:** `POST /api/acl/rules` updates the in-memory engine only; rules are not written to `ACL_RULES_PATH`. A subsequent `POST /api/acl/reload` (or `ACL_AUTO_RELOAD`) replaces in-memory rules from the file and drops API-added rules. To make changes permanent, edit the JSON file and call reload.
 
+### Policy decision cache
+
+Caches ACL + categorization results per `(principal, domain)` to skip repeated evaluation on keep-alive traffic:
+
+```bash
+POLICY_DECISION_CACHE_TTL_SECONDS=120   # 0 = disabled
+POLICY_DECISION_CACHE_MAX_KEYS=10000
+```
+
+ACL reload (`POST /api/acl/reload`, `ACL_AUTO_RELOAD`) flushes the cache. Metric: `bsdm_proxy_policy_cache_hit_total`.
+
 ---
 
 **See also:**
