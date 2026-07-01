@@ -34,7 +34,33 @@ services:
       retries: 12
       start_period: 30s
 
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.12
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    environment:
+      CLICKHOUSE_DB: bsdm
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./scripts/clickhouse/http_cache.sql:/docker-entrypoint-initdb.d/01-http_cache.sql:ro
+    networks:
+      - bsdm-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --query 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
   opensearch:
+    profiles: ["legacy-opensearch"]
     image: opensearchproject/opensearch:3.7.0
     environment:
       - cluster.name=opensearch-cluster
@@ -67,6 +93,7 @@ services:
       retries: 10
 
   opensearch-dashboards:
+    profiles: ["legacy-opensearch"]
     image: opensearchproject/opensearch-dashboards:3.7.0
     ports:
       - "5601:5601"
@@ -87,6 +114,7 @@ services:
       retries: 20
 
   dashboards-setup:
+    profiles: ["legacy-opensearch"]
     image: curlimages/curl:8.5.0
     depends_on:
       opensearch-dashboards:
@@ -149,21 +177,24 @@ services:
       context: .
       dockerfile: Dockerfile
       target: cache-indexer
+    ports:
+      - "8080:8080"
     environment:
+      - INDEXER_BACKEND=clickhouse
       - KAFKA_BROKERS=kafka:9092
-      - OPENSEARCH_URL=http://opensearch:9200
-      - OPENSEARCH_INDEX=http-cache
-      - OPENSEARCH_ISM_ENABLED=true
-      - OPENSEARCH_ISM_HOT_DAYS=14
-      - OPENSEARCH_ISM_DELETE_DAYS=42
       - KAFKA_TOPIC=cache-events
       - KAFKA_GROUP_ID=cache-indexer-group
+      - CLICKHOUSE_URL=http://clickhouse:8123
+      - CLICKHOUSE_DATABASE=bsdm
+      - CLICKHOUSE_TABLE=http_cache
+      - METRICS_PORT=8080
+      - SEARCH_API_ENABLED=true
       - RUST_LOG=info,cache_indexer=debug
       - RUST_BACKTRACE=1
     depends_on:
       kafka:
         condition: service_healthy
-      opensearch:
+      clickhouse:
         condition: service_healthy
     networks:
       - bsdm-net
@@ -202,7 +233,7 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_SECURITY_ADMIN_USER=admin
       - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-clickhouse-datasource
       - GF_SERVER_ROOT_URL=http://localhost:3000
     volumes:
       - grafana-data:/var/lib/grafana
@@ -213,6 +244,7 @@ services:
     restart: unless-stopped
     depends_on:
       - prometheus
+      - clickhouse
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
       interval: 10s
@@ -224,6 +256,8 @@ networks:
     driver: bridge
 
 volumes:
+  clickhouse-data:
+    driver: local
   opensearch-data:
     driver: local
   prometheus-data:

@@ -2,7 +2,7 @@
 
 **B**usiness **S**ecure **D**ata **M**onitoring Proxy
 
-Высокопроизводительный кеширующий HTTPS-прокси на [Hyper](https://hyper.rs/) с [quick_cache](https://crates.io/crates/quick_cache), MITM TLS, аутентификацией, ACL и интеграцией с Kafka, OpenSearch, Prometheus и Grafana.
+Высокопроизводительный кеширующий HTTPS-прокси на [Hyper](https://hyper.rs/) с [quick_cache](https://crates.io/crates/quick_cache), MITM TLS, аутентификацией, ACL и интеграцией с Kafka, ClickHouse, Prometheus и Grafana.
 
 [![Build Status](https://github.com/onixus/bsdm-proxy/actions/workflows/rust.yml/badge.svg)](https://github.com/onixus/bsdm-proxy/actions/workflows/rust.yml)
 [![E2E Tests](https://github.com/onixus/bsdm-proxy/actions/workflows/e2e.yml/badge.svg)](https://github.com/onixus/bsdm-proxy/actions/workflows/e2e.yml)
@@ -22,7 +22,7 @@
 | **Безопасность** | Proxy-auth (Basic / LDAP / NTLM / Kerberos), **connection-level auth cache**, ACL + REST API, **policy decision cache**, категоризация URL, rate limiting |
 | **Производительность** | Multi-worker accept (`WORKER_COUNT`), perf fast path (`PERF_FAST_CACHE_HIT`), HTTP Archive bench profiles (`BENCH_PROFILE=warm\|cold`) |
 | **Наблюдаемость** | Prometheus (20+ метрик), Grafana, `/health`, `/ready`, `/metrics` |
-| **Аналитика** | Kafka → cache-indexer → OpenSearch (целевой store: ClickHouse) |
+| **Аналитика** | Kafka → cache-indexer → ClickHouse (Search API + Grafana) |
 | **Эксплуатация** | Graceful shutdown, Helm chart `charts/bsdm/`, release-пакет + systemd |
 
 ## Архитектура
@@ -50,7 +50,7 @@
              │ Cache-Indexer  │        │ Prometheus  │   │  Grafana    │
              └──────┬─────────┘        └─────────────┘   └─────────────┘
              ┌──────▼─────────┐
-             │  OpenSearch    │
+             │  ClickHouse    │
              └────────────────┘
 ```
 
@@ -61,11 +61,11 @@
 | **proxy** | 1488 | HTTPS-прокси, MITM, кеш L1, иерархия (опционально) |
 | **ICP** | 3130 | UDP-запросы между cache peers (при `HIERARCHY_ENABLED=true`) |
 | **metrics** | 9090 | `/health`, `/ready`, `/metrics` |
-| **cache-indexer** | — | Kafka → OpenSearch |
+| **cache-indexer** | 8080 | Kafka → ClickHouse, `/api/search` |
 | **Kafka** | 9092 | Очередь событий кеша |
-| **OpenSearch** | 9200 | Поиск и аналитика |
+| **ClickHouse** | 8123 / 9000 | Аналитика HTTP-трафика |
 | **Prometheus** | 9091 | Сбор метрик |
-| **Grafana** | 3000 | Дашборды (`admin` / `admin`) |
+| **Grafana** | 3000 | Дашборды proxy + HTTP Traffic (`admin` / `admin`) |
 
 ## Быстрый старт (Docker)
 
@@ -106,6 +106,19 @@ sudo security add-trusted-cert -d -r trustRoot \
 curl -x http://localhost:1488 https://httpbin.org/get
 curl http://localhost:9090/health
 curl http://localhost:9090/metrics | grep bsdm_proxy
+
+# Analytics (after ~5s)
+curl 'http://localhost:8123/?query=SELECT+count()+FROM+bsdm.http_cache'
+curl 'http://localhost:8080/api/search?limit=5'
+```
+
+Grafana: http://localhost:3000 → **BSDM HTTP Traffic (ClickHouse)** и **BSDM Proxy Dashboard**.
+
+**Legacy OpenSearch** (deprecated, removal target v0.5.0):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.legacy-opensearch.yml \
+  --profile legacy-opensearch up -d --build
 ```
 
 ## Установка (native package)
@@ -293,7 +306,11 @@ BENCH_PROFILE=cold ./scripts/compare-squid-bsdm-httparchive.sh
 | `KAFKA_BROKERS` | `kafka:9092` | Брокеры Kafka |
 | `KAFKA_TOPIC` | `cache-events` | Топик |
 | `KAFKA_GROUP_ID` | `cache-indexer-group` | Consumer group |
-| `OPENSEARCH_URL` | `http://opensearch:9200` | URL OpenSearch |
+| `INDEXER_BACKEND` | `clickhouse` (compose) | `clickhouse`, `dual`, `opensearch` (legacy) |
+| `CLICKHOUSE_URL` | `http://clickhouse:8123` | HTTP interface ClickHouse |
+| `METRICS_PORT` | `8080` | `/metrics`, `/health`, `/api/search` |
+
+→ [docs/search-api.md](docs/search-api.md) · [docs/clickhouse-analytics.md](docs/clickhouse-analytics.md)
 
 ## Мониторинг
 
@@ -318,7 +335,7 @@ histogram_quantile(0.95,
 )
 ```
 
-Grafana: http://localhost:3000 → **BSDM Proxy Dashboard** (7 панелей, auto-provisioned).
+Grafana: http://localhost:3000 → **BSDM Proxy Dashboard** (Prometheus) и **BSDM HTTP Traffic (ClickHouse)**.
 
 ## Тестирование
 
@@ -380,7 +397,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 | **M1** Foundation | v0.2.x | Прокси, ACL, категоризация, observability | ✅ Done |
 | **M2** Squid parity | v0.3.x | L2, ACL API, NTLM/Kerberos, hierarchy Phase 4 | ✅ Done |
 | **M2.5** Data plane | v0.3.1 | Tiered L1, streaming MISS, auth/policy cache, bench | ~95% |
-| **M3** Retro-search | v0.4.x | OpenSearch/ClickHouse, dashboards, Search API | ~60% |
+| **M3** Retro-search | v0.4.x | ClickHouse, Grafana, Search API | ~75% |
 | **M4** Threat analytics | v0.5.x | Rule-based алерты, C&C heuristics | ~5% |
 | **M5** ML security | v1.0.x | ML anomaly, phishing, C&C detection | ~0% |
 

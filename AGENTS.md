@@ -3,7 +3,7 @@
 ## Cursor Cloud specific instructions
 
 BSDM-Proxy is a single Rust/Cargo product: a caching HTTPS forward proxy with MITM
-TLS, auth, ACL, Prometheus metrics, and an optional Kafka → cache-indexer → OpenSearch
+TLS, auth, ACL, Prometheus metrics, and an optional Kafka → cache-indexer → ClickHouse
 analytics pipeline. The Cargo workspace has three crates: `proxy/` (bin `proxy`),
 `cache-indexer/` (bin `cache-indexer`), and `e2e/` (test harness). Standard build,
 lint, test, and run commands live in `README.md` and `docs/development.md` — use those
@@ -30,5 +30,5 @@ Running and testing:
   (or the built `./target/debug/proxy`). Verify with `curl http://127.0.0.1:9090/health`
   and `curl -x http://127.0.0.1:1488 http://httpbin.org/get`. HTTPS through MITM:
   `curl --cacert certs/ca.crt -x http://127.0.0.1:1488 https://httpbin.org/uuid`.
-- The full Docker stack (`docker-compose.yml`: Kafka, OpenSearch, Prometheus, Grafana) is
+- The full Docker stack (`docker-compose.yml`: Kafka, ClickHouse, Prometheus, Grafana) is
   optional and only needed to exercise the analytics pipeline / dashboards end to end.
