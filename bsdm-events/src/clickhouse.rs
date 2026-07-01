@@ -122,7 +122,7 @@ mod tests {
             content_type: Some("text/html".to_string()),
             user_agent: Some("curl/8".to_string()),
             categories: vec!["news".to_string()],
-            threat_sources: vec!["shallalist".to_string()],
+            threat_sources: vec!["ut1".to_string()],
             acl_action: Some("allow".to_string()),
             event_id: "evt-ch-1".to_string(),
         }

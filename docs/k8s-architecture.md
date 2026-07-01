@@ -96,7 +96,7 @@ Corporate profile: `MAX_CACHE_BODY_SIZE=2097152`, `CACHE_COMPRESSION=zstd`, `CAC
 | `mitm-certs` | Secret | `ca.crt`, `ca.key` → `/certs` |
 | `acl-rules` | ConfigMap | `/etc/bsdm-proxy/acl-rules.json` |
 | `spill` | emptyDir (sizeLimit 30Gi) | mmap spill; prefer nodes with local SSD |
-| `shallalist` | ConfigMap / initContainer | categorization DB |
+| `ut1-blacklists` | ConfigMap / initContainer | UT1 categorization DB |
 
 ### Probes
 

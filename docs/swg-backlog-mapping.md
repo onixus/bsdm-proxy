@@ -59,7 +59,7 @@
 
 | Сервис | Zscaler | Netskope | Palo Alto | BSDM | Backlog |
 |--------|---------|----------|-----------|------|---------|
-| URL filtering / categories | cloud intel | SkopeIT | PAN-DB | ⚠️ Shallalist+URLhaus+PhishTank | offline cat DB **P1** |
+| URL filtering / categories | cloud intel | SkopeIT | PAN-DB | ⚠️ UT1+OTX | offline cat DB **P1** |
 | AV / sandbox | cloud | cloud | WildFire | ❌ | ICAP or async scan **P3** |
 | DLP (body) | inline | inline | Enterprise DLP | ❌ | M5 / optional ICAP **P4** |
 | RBI (remote browser) | yes | yes | yes | ❌ | out of scope v1 |
@@ -103,7 +103,7 @@
 | ID | Задача | Паттерн | Заметки |
 |----|--------|---------|---------|
 | P1-1 | **Fast path matrix** — явная таблица: HIT / REVALIDATED / negative HIT skip cat+ACL | Zscaler fast path implicit | extend `PERF_FAST_CACHE_HIT` |
-| P1-2 | **Offline categorization** — Shallalist-only on hot path; URLhaus async enrich | cloud intel async | `categorization.rs` |
+| P1-2 | **Offline categorization** — UT1 on hot path; OTX async enrich | cloud intel async | `categorization.rs` |
 | P1-3 | **Kafka fully async** — never block response on producer; drop+metric on full queue | telemetry off hot path | `pipeline.rs` |
 | P1-4 | **ACL read lock** — remove inner Mutex on regex compile cache | read-mostly policy | `acl.rs` (B9) |
 | P1-5 | `x-cache-status: MISS` on first upstream byte | observability | `proxy_service.rs` |

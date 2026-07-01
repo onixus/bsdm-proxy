@@ -1,7 +1,7 @@
 //! URL Categorization module
 //!
 //! Supports multiple categorization engines:
-//! - Shallalist (open-source category database)
+//! - UT1 Blacklists (Université Toulouse 1 — local category DB, Shallalist successor)
 //! - URLhaus (malware URLs)
 //! - PhishTank (phishing detection)
 //! - Custom database
@@ -18,7 +18,7 @@ use url::Url;
 /// URL category
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Category {
-    // Content categories (Shallalist)
+    // Content categories (UT1 / legacy Shallalist layout)
     Adult,
     Gambling,
     Violence,
@@ -73,30 +73,51 @@ impl Category {
         match s.to_lowercase().as_str() {
             "adult" | "porn" => Category::Adult,
             "gambling" | "gamble" => Category::Gambling,
-            "violence" | "aggressive" => Category::Violence,
-            "weapons" | "warez" => Category::Weapons,
-            "drugs" | "alcohol" => Category::Drugs,
-            "hacking" | "hacker" => Category::Hacking,
-            "malware" | "virus" => Category::Malware,
+            "violence" | "aggressive" | "agressif" => Category::Violence,
+            "weapons" | "warez" | "dangerous_material" => Category::Weapons,
+            "drugs" | "alcohol" | "drogue" => Category::Drugs,
+            "hacking" | "hacker" | "ddos" => Category::Hacking,
+            "malware" | "virus" | "cryptojacking" | "stalkerware" => Category::Malware,
             "phishing" | "phish" => Category::Phishing,
             "spyware" | "spy" => Category::Spyware,
-            "adv" | "advertising" | "ads" => Category::Adv,
-            "redirector" | "redirect" => Category::Redirector,
+            "adv" | "advertising" | "ads" | "publicite" | "marketingware" => Category::Adv,
+            "redirector" | "redirect" | "strict_redirector" | "strong_redirector" => {
+                Category::Redirector
+            }
             "tracker" | "tracking" => Category::Tracker,
-            "news" => Category::News,
-            "education" | "schools" => Category::Education,
-            "finance" | "banking" => Category::Finance,
+            "news" | "press" => Category::News,
+            "education" | "schools" | "child" | "liste_bu" => Category::Education,
+            "finance" | "banking" | "bank" | "financial" => Category::Finance,
             "shopping" | "shops" => Category::Shopping,
-            "social" | "socialnet" => Category::Social,
-            "entertainment" | "movies" | "music" => Category::Entertainment,
+            "social" | "socialnet" | "social_networks" => Category::Social,
+            "entertainment" | "movies" | "music" | "games" | "manga" | "audio-video" => {
+                Category::Entertainment
+            }
             "sports" => Category::Sports,
-            "technology" | "tech" => Category::Technology,
-            "business" => Category::Business,
-            "government" | "military" => Category::Government,
+            "technology" | "tech" | "ai" => Category::Technology,
+            "business" | "jobsearch" => Category::Business,
+            "government" | "military" | "arjel" => Category::Government,
             "health" | "medical" => Category::Health,
+            "vpn" | "doh" | "residential-proxies" | "dynamic-dns" | "shortener" => {
+                Category::Custom(s.to_string())
+            }
+            "fakenews" => Category::Custom("fakenews".to_string()),
             _ => Category::Custom(s.to_string()),
         }
     }
+}
+
+/// Domain suffix chain for local blacklist lookup (`www.foo.example.com` → `foo.example.com` → `example.com`).
+fn domain_suffixes(domain: &str) -> Vec<String> {
+    let domain = domain.trim().to_ascii_lowercase();
+    let parts: Vec<&str> = domain.split('.').filter(|p| !p.is_empty()).collect();
+    if parts.len() < 2 {
+        return vec![domain];
+    }
+    (2..=parts.len())
+        .rev()
+        .map(|n| parts[parts.len() - n..].join("."))
+        .collect()
 }
 
 /// Categorization result
@@ -129,8 +150,8 @@ impl CategoryCache {
 pub struct CategorizationConfig {
     pub enabled: bool,
     pub cache_ttl: Duration,
-    pub shallalist_enabled: bool,
-    pub shallalist_path: Option<String>,
+    pub ut1_enabled: bool,
+    pub ut1_path: Option<String>,
     pub urlhaus_enabled: bool,
     pub urlhaus_api: String,
     pub phishtank_enabled: bool,
@@ -144,8 +165,8 @@ impl Default for CategorizationConfig {
         Self {
             enabled: false,
             cache_ttl: Duration::from_secs(3600),
-            shallalist_enabled: false,
-            shallalist_path: None,
+            ut1_enabled: false,
+            ut1_path: None,
             urlhaus_enabled: false,
             urlhaus_api: "https://urlhaus-api.abuse.ch/v1/url/".to_string(),
             phishtank_enabled: false,
@@ -160,7 +181,7 @@ impl Default for CategorizationConfig {
 pub struct CategorizationEngine {
     config: CategorizationConfig,
     cache: Arc<RwLock<HashMap<String, CategoryCache>>>,
-    shallalist: Option<HashMap<String, HashSet<Category>>>,
+    local_db: Option<HashMap<String, HashSet<Category>>>,
     custom_db: Option<HashMap<String, HashSet<Category>>>,
     http_client: Client,
 }
@@ -172,7 +193,7 @@ impl CategorizationEngine {
         let mut engine = Self {
             config,
             cache: Arc::new(RwLock::new(HashMap::new())),
-            shallalist: None,
+            local_db: None,
             custom_db: None,
             http_client: Client::builder()
                 .timeout(Duration::from_secs(5))
@@ -180,12 +201,12 @@ impl CategorizationEngine {
                 .expect("Failed to create HTTP client"),
         };
 
-        // Load Shallalist if enabled
-        if engine.config.shallalist_enabled {
-            if let Some(path) = engine.config.shallalist_path.clone() {
-                match engine.load_shallalist(&path) {
-                    Ok(count) => info!("Loaded {} Shallalist entries", count),
-                    Err(e) => error!("Failed to load Shallalist: {}", e),
+        // Load UT1 blacklists if enabled
+        if engine.config.ut1_enabled {
+            if let Some(path) = engine.config.ut1_path.clone() {
+                match engine.load_ut1_blacklists(&path) {
+                    Ok(count) => info!("Loaded {} UT1 blacklist domain entries", count),
+                    Err(e) => error!("Failed to load UT1 blacklists: {}", e),
                 }
             }
         }
@@ -225,11 +246,11 @@ impl CategorizationEngine {
         let mut categories = HashSet::new();
         let mut source = "unknown";
 
-        // Check Shallalist
-        if self.config.shallalist_enabled {
-            if let Some(cats) = self.check_shallalist(&domain) {
+        // Check local category DB (UT1)
+        if self.config.ut1_enabled {
+            if let Some(cats) = self.check_local_db(&domain) {
                 categories.extend(cats);
-                source = "shallalist";
+                source = "ut1";
             }
         }
 
@@ -276,9 +297,14 @@ impl CategorizationEngine {
         self.create_result(url, &domain, categories, source, false)
     }
 
-    /// Check Shallalist database
-    fn check_shallalist(&self, domain: &str) -> Option<HashSet<Category>> {
-        self.shallalist.as_ref()?.get(domain).cloned()
+    fn check_local_db(&self, domain: &str) -> Option<HashSet<Category>> {
+        let db = self.local_db.as_ref()?;
+        for suffix in domain_suffixes(domain) {
+            if let Some(cats) = db.get(&suffix) {
+                return Some(cats.clone());
+            }
+        }
+        None
     }
 
     /// Check custom database
@@ -332,47 +358,57 @@ impl CategorizationEngine {
         None
     }
 
-    /// Load Shallalist database
-    fn load_shallalist(&mut self, path: &str) -> Result<usize, String> {
-        // Shallalist format: category/domains
-        // Example structure:
-        // adult/domains:
-        //   example.com
-        //   test.com
-
-        let mut db = HashMap::new();
-        let categories_dir = std::path::Path::new(path);
-
-        if !categories_dir.exists() {
-            return Err(format!("Shallalist directory not found: {}", path));
+    /// Load UT1 Blacklists (or legacy Shallalist layout: `category/domains`).
+    ///
+    /// UT1 official tarball extracts to `blacklists/<category>/domains`.
+    fn load_ut1_blacklists(&mut self, path: &str) -> Result<usize, String> {
+        let root = std::path::Path::new(path);
+        if !root.exists() {
+            return Err(format!("UT1 blacklist directory not found: {path}"));
         }
 
-        // Read each category directory
-        for entry in std::fs::read_dir(categories_dir)
-            .map_err(|e| format!("Failed to read directory: {}", e))?
+        let categories_dir = if root.join("blacklists").is_dir() {
+            root.join("blacklists")
+        } else {
+            root.to_path_buf()
+        };
+
+        let mut db = HashMap::new();
+        for entry in std::fs::read_dir(&categories_dir)
+            .map_err(|e| format!("Failed to read {}: {e}", categories_dir.display()))?
         {
-            let entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
+            let entry = entry.map_err(|e| format!("Failed to read entry: {e}"))?;
+            if !entry.file_type().map_err(|e| e.to_string())?.is_dir() {
+                continue;
+            }
             let category_name = entry.file_name().to_string_lossy().to_string();
             let category = Category::from_str(&category_name);
-
             let domains_file = entry.path().join("domains");
-            if domains_file.exists() {
-                let content = std::fs::read_to_string(&domains_file)
-                    .map_err(|e| format!("Failed to read domains file: {}", e))?;
-
-                for line in content.lines() {
-                    let domain = line.trim();
-                    if !domain.is_empty() && !domain.starts_with('#') {
-                        db.entry(domain.to_string())
-                            .or_insert_with(HashSet::new)
-                            .insert(category.clone());
-                    }
+            if !domains_file.is_file() {
+                continue;
+            }
+            let content = std::fs::read_to_string(&domains_file)
+                .map_err(|e| format!("Failed to read {}: {e}", domains_file.display()))?;
+            for line in content.lines() {
+                let domain = line.trim().to_ascii_lowercase();
+                if domain.is_empty() || domain.starts_with('#') {
+                    continue;
                 }
+                db.entry(domain)
+                    .or_insert_with(HashSet::new)
+                    .insert(category.clone());
             }
         }
 
+        if db.is_empty() {
+            return Err(format!(
+                "No UT1 categories loaded under {} (expected <category>/domains)",
+                categories_dir.display()
+            ));
+        }
+
         let count = db.len();
-        self.shallalist = Some(db);
+        self.local_db = Some(db);
         Ok(count)
     }
 
@@ -448,11 +484,40 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_category_from_str() {
-        assert_eq!(Category::from_str("adult"), Category::Adult);
-        assert_eq!(Category::from_str("GAMBLING"), Category::Gambling);
-        assert_eq!(Category::from_str("phishing"), Category::Phishing);
-        assert_eq!(Category::from_str("news"), Category::News);
+    fn test_category_from_str_ut1_names() {
+        assert_eq!(Category::from_str("agressif"), Category::Violence);
+        assert_eq!(Category::from_str("social_networks"), Category::Social);
+        assert_eq!(Category::from_str("publicite"), Category::Adv);
+    }
+
+    #[test]
+    fn test_domain_suffixes() {
+        assert_eq!(
+            domain_suffixes("www.evil.example.com"),
+            vec![
+                "www.evil.example.com".to_string(),
+                "evil.example.com".to_string(),
+                "example.com".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_load_ut1_blacklists_layout() {
+        let dir = tempfile::tempdir().unwrap();
+        let cat_dir = dir.path().join("blacklists").join("adult");
+        std::fs::create_dir_all(&cat_dir).unwrap();
+        std::fs::write(cat_dir.join("domains"), "blocked.example\n").unwrap();
+
+        let mut engine = CategorizationEngine::new(CategorizationConfig::default());
+        let count = engine
+            .load_ut1_blacklists(dir.path().to_str().unwrap())
+            .unwrap();
+        assert_eq!(count, 1);
+        assert_eq!(
+            engine.check_local_db("www.blocked.example"),
+            Some(HashSet::from([Category::Adult]))
+        );
     }
 
     #[tokio::test]

@@ -116,8 +116,8 @@ network service, AGPL obligations may apply. See docs/licensing.md.
 External data sources (admin-provided, not shipped)
 --------------------------------------------------------------------------------
 
-  Shallalist         URL categorization database — admin downloads separately;
-                     license terms defined by the list maintainer (if any).
+  UT1 Blacklists     URL categorization database — admin downloads separately;
+                     license terms defined by Université Toulouse 1 Capitole.
   URLhaus / PhishTank  HTTP APIs for threat intelligence — online services.
 
 ================================================================================

@@ -215,7 +215,8 @@ CA для MITM читается из `/certs/ca.key` и `/certs/ca.crt` (fallbac
 | `CATEGORIZATION_ENABLED` | Категоризация URL |
 | `POLICY_DECISION_CACHE_TTL_SECONDS` | `120` | Кеш решений ACL+cat по `(principal, domain)` (`0` = выкл.) |
 | `POLICY_DECISION_CACHE_MAX_KEYS` | `10000` | Макс. ключей policy cache |
-| `SHALLALIST_PATH` | Путь к Shallalist |
+| `UT1_ENABLED` | Включить локальную БД категорий ([UT1 Blacklists](https://dsi.ut-capitole.fr/blacklists/)) |
+| `UT1_PATH` | Путь к распакованным спискам (`blacklists/<category>/domains`) |
 | `CUSTOM_DB_PATH` | Пользовательская БД категорий |
 
 Пример правил: [config/acl-rules.example.json](config/acl-rules.example.json)
@@ -418,7 +419,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test, cargo-audi
 | [docs/performance.md](docs/performance.md) | Тюнинг RPS, `WORKER_COUNT`, bench profiles |
 | [docs/benchmarks-httparchive.md](docs/benchmarks-httparchive.md) | HTTP Archive Top 1k benchmarks |
 | [docs/acl.md](docs/acl.md) | Правила доступа, REST API |
-| [docs/categorization.md](docs/categorization.md) | Shallalist, URLhaus, PhishTank |
+| [docs/categorization.md](docs/categorization.md) | UT1 Blacklists, OTX, custom DB |
 | [docs/hierarchical-caching.md](docs/hierarchical-caching.md) | Иерархический кеш, ICP, HTCP |
 | [docs/licensing.md](docs/licensing.md) | Лицензии, third-party, AGPL-заметки |
 | [NOTICE](NOTICE) | Реестр third-party компонентов |

@@ -29,7 +29,7 @@ Workspace-крейты:
 | `auth-ldap`, `auth-ntlm` | ✅ Permissive | ldap3, sspi — Apache-2.0 OR MIT |
 | `auth-kerberos` | ⚠️ AGPL | `kerberos_keytab` — **AGPL-3.0** |
 | Docker Compose (инфра) | ⚠️ AGPL | Grafana core — **AGPL-3.0** |
-| Внешние БД (Shallalist) | ⚠️ Admin | Лицензия данных — на стороне администратора |
+| Внешние БД (UT1 Blacklists) | ⚠️ Admin | Лицензия данных — на стороне администратора |
 
 ---
 
@@ -136,7 +136,7 @@ cd proxy && cargo license --features auth-kerberos --json \
 
 | Источник | Тип | Лицензия |
 |----------|-----|----------|
-| **Shallalist** | Локальная БД категорий | Определяется правообладателем списка; сервис discontinued с 2022 — проверяйте условия перед production |
+| **UT1 Blacklists** | Локальная БД категорий | Условия [UT1](https://dsi.ut-capitole.fr/blacklists/) — проверяйте перед production |
 | **URLhaus** | HTTP API (abuse.ch) | Условия использования API |
 | **PhishTank** | HTTP API | Условия использования API |
 | MITM CA (`certs/`) | Генерируется локально | — |

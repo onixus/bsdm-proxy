@@ -363,7 +363,7 @@ create_issue 18 "Behavioral threat signals beyond URL blocklists" "pillar:ml-sec
 **Milestone:** M4–M5
 
 ### Problem
-Threat detection is URL list-based only (Shallalist, URLhaus, PhishTank). No DNS, timing, volume, or beacon analysis for C&C.
+Threat detection is URL list-based only (UT1 Blacklists, OTX). No DNS, timing, volume, or beacon analysis for C&C.
 
 ### Resolution
 M4: rule-based heuristics; M5: ML models on behavioral features.
