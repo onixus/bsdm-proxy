@@ -10,7 +10,7 @@
 [![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](https://github.com/onixus/bsdm-proxy/releases)
 [![Rust](https://img.shields.io/badge/rust-1.85+-orange.svg)](https://www.rust-lang.org)
 
-> **Текущая версия:** `0.3.0` (релиз M2) · в разработке **M2.5** (data plane throughput) и **M3** (retro-search) — см. [Releases](https://github.com/onixus/bsdm-proxy/releases) · [CHANGELOG](CHANGELOG.md) · [roadmap](docs/roadmap.md)
+> **Текущая версия:** `0.3.0` (релиз M2) · **M2.5** P0 закрыт · **M3** retro-search на ClickHouse (indexer, Grafana, Search API) — см. [Releases](https://github.com/onixus/bsdm-proxy/releases) · [CHANGELOG](CHANGELOG.md) · [roadmap](docs/roadmap.md)
 
 ⚠️ **MITM-прокси для HTTPS.** Используйте только в корпоративной среде с согласия пользователей и в рамках законодательства.
 
@@ -21,8 +21,8 @@
 | **Прокси** | HTTP/HTTPS forward proxy, MITM TLS (443/8443), HTTP CONNECT, **tiered L1** (inline + mmap spill, шарды), **streaming MISS**, Redis L2, **иерархический кеш** (ICP/HTCP), HTTP/2 upstream (опц.) |
 | **Безопасность** | Proxy-auth (Basic / LDAP / NTLM / Kerberos), **connection-level auth cache**, ACL + REST API, **policy decision cache**, категоризация URL, rate limiting |
 | **Производительность** | Multi-worker accept (`WORKER_COUNT`), perf fast path (`PERF_FAST_CACHE_HIT`), HTTP Archive bench profiles (`BENCH_PROFILE=warm\|cold`) |
-| **Наблюдаемость** | Prometheus (20+ метрик), Grafana, `/health`, `/ready`, `/metrics` |
-| **Аналитика** | Kafka → cache-indexer → ClickHouse (Search API + Grafana) |
+| **Наблюдаемость** | Prometheus (proxy + cache-indexer), Grafana (Prometheus + ClickHouse), `/health`, `/ready`, `/metrics` |
+| **Аналитика** | Kafka → cache-indexer → **ClickHouse** (`bsdm.http_cache`); Grafana **HTTP Traffic**; REST **Search API** (`/api/search`) |
 | **Эксплуатация** | Graceful shutdown, Helm chart `charts/bsdm/`, release-пакет + systemd |
 
 ## Архитектура
@@ -113,6 +113,16 @@ curl 'http://localhost:8080/api/search?limit=5'
 ```
 
 Grafana: http://localhost:3000 → **BSDM HTTP Traffic (ClickHouse)** и **BSDM Proxy Dashboard**.
+
+### Compose-профили
+
+| Файл | Назначение |
+|------|------------|
+| [docker-compose.yml](docker-compose.yml) | Полный стек: proxy, Kafka, ClickHouse, cache-indexer, Prometheus, Grafana |
+| [docker-compose.test.yml](docker-compose.test.yml) | Минимальный стек для smoke/E2E |
+| [docker-compose.redis-l2.yml](docker-compose.redis-l2.yml) | Два proxy + Redis L2 |
+| [docker-compose.hierarchy.yml](docker-compose.hierarchy.yml) | Multi-instance + ICP |
+| [docker-compose.clickhouse.yml](docker-compose.clickhouse.yml) | Урезанный CH-lab (deprecated, см. заголовок файла) |
 
 ## Установка (native package)
 
@@ -292,7 +302,15 @@ BENCH_PROFILE=cold ./scripts/compare-squid-bsdm-httparchive.sh
 
 Профили `warm` / `cold` → `WORKER_COUNT` 1 / 4: [`scripts/bench-profile.sh`](scripts/bench-profile.sh). См. [docs/benchmarks-httparchive.md](docs/benchmarks-httparchive.md).
 
-### Cache-indexer
+### Cache-indexer (ClickHouse)
+
+`cache-indexer` — единственный backend аналитики: Kafka → `INSERT` в `bsdm.http_cache` (JSONEachRow). Admin HTTP на `METRICS_PORT`:
+
+| Endpoint | Описание |
+|----------|----------|
+| `GET /health` | `{"status":"ok"}` |
+| `GET /metrics` | `cache_indexer_*` Prometheus metrics |
+| `GET /api/search` | Retro-search (JSON/CSV), см. [docs/search-api.md](docs/search-api.md) |
 
 | Переменная | По умолчанию | Описание |
 |-----------|-------------|----------|
@@ -300,19 +318,43 @@ BENCH_PROFILE=cold ./scripts/compare-squid-bsdm-httparchive.sh
 | `KAFKA_TOPIC` | `cache-events` | Топик |
 | `KAFKA_GROUP_ID` | `cache-indexer-group` | Consumer group |
 | `CLICKHOUSE_URL` | `http://clickhouse:8123` | HTTP interface ClickHouse |
-| `METRICS_PORT` | `8080` | `/metrics`, `/health`, `/api/search` |
+| `CLICKHOUSE_DATABASE` | `bsdm` | База |
+| `CLICKHOUSE_TABLE` | `http_cache` | Таблица |
+| `CLICKHOUSE_USER` / `CLICKHOUSE_PASSWORD` | — | Basic auth (опц.) |
+| `METRICS_PORT` | `8080` | Admin port |
+| `SEARCH_API_ENABLED` | `true` | REST `/api/search` |
+| `SEARCH_API_TOKEN` | — | Bearer auth (опц.) |
+| `SEARCH_API_MAX_LIMIT` | `10000` | Макс. строк в ответе |
+| `SEARCH_API_DEFAULT_DAYS` | `30` | Lookback по умолчанию |
 
-→ [docs/search-api.md](docs/search-api.md) · [docs/clickhouse-analytics.md](docs/clickhouse-analytics.md)
+Пример retro-search:
+
+```bash
+curl 'http://localhost:8080/api/search?domain=example.com&days=7&limit=100'
+curl 'http://localhost:8080/api/search?format=csv&limit=50' -o traffic.csv
+```
+
+Grafana использует plugin [`grafana-clickhouse-datasource`](https://grafana.com/grafana/plugins/grafana-clickhouse-datasource/) (native `:9000`, SQL по `bsdm.http_cache`). Provisioning: `grafana/datasources.yml`, dashboard `grafana/dashboards/bsdm-http-traffic-ch.json`.
+
+→ [docs/search-api.md](docs/search-api.md) · [docs/clickhouse-analytics.md](docs/clickhouse-analytics.md) · [ADR 0002](docs/adr/0002-clickhouse-analytics.md)
 
 ## Мониторинг
 
-### Endpoints
+### Proxy (`:9090`)
 
 | URL | Ответ |
 |-----|-------|
 | `GET /health` | `{"status":"ok"}` |
 | `GET /ready` | `{"status":"ready"}` или `draining` при shutdown |
 | `GET /metrics` | Prometheus text format |
+
+### cache-indexer (`:8080`)
+
+| URL | Ответ |
+|-----|-------|
+| `GET /health` | `{"status":"ok"}` |
+| `GET /metrics` | `cache_indexer_inserts_total`, `cache_indexer_insert_errors_total`, … |
+| `GET /api/search` | JSON/CSV retro-search ([docs/search-api.md](docs/search-api.md)) |
 
 ### Примеры PromQL
 
@@ -325,6 +367,9 @@ bsdm_proxy_cache_hits_total /
 histogram_quantile(0.95,
   rate(bsdm_proxy_request_duration_seconds_bucket[5m])
 )
+
+# Indexer insert rate
+rate(cache_indexer_inserts_total{backend="clickhouse"}[5m])
 ```
 
 Grafana: http://localhost:3000 → **BSDM Proxy Dashboard** (Prometheus) и **BSDM HTTP Traffic (ClickHouse)**.
@@ -369,6 +414,9 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 | [docs/acl.md](docs/acl.md) | Правила доступа, приоритеты |
 | [docs/categorization.md](docs/categorization.md) | Shallalist, URLhaus, PhishTank |
 | [docs/hierarchical-caching.md](docs/hierarchical-caching.md) | Иерархический кеш, ICP, peers |
+| [docs/clickhouse-analytics.md](docs/clickhouse-analytics.md) | ClickHouse analytics, compose, SQL |
+| [docs/search-api.md](docs/search-api.md) | REST Search API (`/api/search`) |
+| [docs/adr/0002-clickhouse-analytics.md](docs/adr/0002-clickhouse-analytics.md) | ADR: ClickHouse как analytics store |
 | [docs/architecture.md](docs/architecture.md) | Архитектура и блокеры |
 | [docs/roadmap.md](docs/roadmap.md) | Roadmap и milestones |
 | [docs/capacity-planning.md](docs/capacity-planning.md) | Планирование ёмкости (корп. сценарии) |
@@ -388,19 +436,28 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test) и [e2e.ym
 |-----------|--------|-------|--------|
 | **M1** Foundation | v0.2.x | Прокси, ACL, категоризация, observability | ✅ Done |
 | **M2** Squid parity | v0.3.x | L2, ACL API, NTLM/Kerberos, hierarchy Phase 4 | ✅ Done |
-| **M2.5** Data plane | v0.3.1 | Tiered L1, streaming MISS, auth/policy cache, bench | ~95% |
-| **M3** Retro-search | v0.4.x | ClickHouse, Grafana, Search API | ~75% |
+| **M2.5** Data plane | v0.3.1 | Tiered L1, streaming MISS, auth/policy cache, bench | ✅ P0 done |
+| **M3** Retro-search | v0.4.x | ClickHouse, Grafana, Search API | ~85% |
 | **M4** Threat analytics | v0.5.x | Rule-based алерты, C&C heuristics | ~5% |
 | **M5** ML security | v1.0.x | ML anomaly, phishing, C&C detection | ~0% |
 
-### M2.5 — в работе (последний P0)
+### M2.5 — P0 закрыт
 
 - [x] Tiered L1 (mmap spill + shards), P0 perf, k8s/Helm docs
 - [x] Streaming MISS, connection auth cache, policy decision cache
 - [x] HTTP Archive bench profiles (`BENCH_PROFILE=warm|cold`)
 - [x] Spill files `mode 0o600` + private `CACHE_SPILL_DIR` ([#98](https://github.com/onixus/bsdm-proxy/issues/98))
 
-**Gate M2.5:** warm goodput на HTTP Archive sites bench ≥ Squid −5%.
+**Gate M2.5:** warm goodput на HTTP Archive sites bench ≥ Squid −5% (валидация bench).
+
+### M3 — retro-search (в работе)
+
+- [x] ClickHouse schema + indexer (JSONEachRow)
+- [x] Grafana **BSDM HTTP Traffic (ClickHouse)** + Search API
+- [x] Default `docker compose up` на ClickHouse; OpenSearch удалён ([#125](https://github.com/onixus/bsdm-proxy/issues/125))
+- [ ] Session correlation (`session_id`, redirect chains)
+
+**Gate M3:** «кто ходил на domain X за 30 дней» — Grafana/CH SQL или `/api/search`.
 
 ## Лицензия
 
