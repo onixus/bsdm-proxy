@@ -87,9 +87,9 @@ systemd подхватывает env из `/etc/bsdm-proxy/bsdm-proxy.env` и `c
 
 | Уровень | Примеры |
 |---------|---------|
-| `info` | Старт, Kafka/OpenSearch endpoints, bulk index stats |
+| `info` | Старт, Kafka/ClickHouse endpoints, batch insert stats |
 | `warn` | Пропуск событий, retryable ошибки |
-| `error` | Сбой consumer, OpenSearch bulk errors |
+| `error` | Сбой consumer, ClickHouse insert errors |
 
 Метрики и health **не** дублируются в логах — используйте `/metrics` и `/health` на `METRICS_PORT` (по умолчанию `9090`).
 

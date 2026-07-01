@@ -37,8 +37,8 @@ GET /api/search
 ### Examples
 
 ```bash
-# ClickHouse compose stack
-docker compose -f docker-compose.clickhouse.yml up -d --build
+# Full stack (proxy, Kafka, ClickHouse, cache-indexer)
+docker compose up -d --build
 curl -x http://127.0.0.1:1488 http://httpbin.org/get
 sleep 5
 
@@ -70,6 +70,6 @@ Errors: `401` (unauthorized), `404` (search disabled), `500` (query failure).
 
 ## Grafana alternative
 
-For interactive dashboards use Grafana + ClickHouse datasource (`docker-compose.clickhouse.yml`). Search API is for scripted export and integrations.
+For interactive dashboards use Grafana + ClickHouse datasource (`docker compose up`). Search API is for scripted export and integrations.
 
 See [clickhouse-analytics.md](clickhouse-analytics.md).

@@ -12,7 +12,7 @@
   - Cache (capacity, TTL, L2)
   - Kafka (brokers, topics, batching)
   - Authentication (Basic, LDAP; NTLM — planned M2)
-  - Monitoring (Prometheus, Grafana, OpenSearch)
+  - Monitoring (Prometheus, Grafana, ClickHouse)
 - 📊 **Real-time Validation** - Live feedback
 - 📥 **Export Options**
   - `.env` file
@@ -82,7 +82,7 @@ docker run -d -p 8080:80 -v $(pwd)/web-config:/usr/share/nginx/html:ro nginx:alp
 **Monitoring Tab:**
 - Prometheus toggle
 - Grafana toggle
-- OpenSearch URL
+- ClickHouse URL, database, table
 - Access URLs reference
 
 ### 2. Generate Configuration
@@ -105,7 +105,7 @@ CACHE_CAPACITY=10000
 
 **Export docker-compose.yml:**
 - Complete docker-compose.yml with all services
-- Includes: Zookeeper, Kafka, OpenSearch, Prometheus, Grafana, Proxy, Cache-Indexer
+- Includes: Zookeeper, Kafka, ClickHouse, Prometheus, Grafana, Proxy, Cache-Indexer
 - Pre-configured with your settings
 
 ### 4. Deploy

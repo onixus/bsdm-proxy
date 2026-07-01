@@ -1,5 +1,5 @@
 [Unit]
-Description=BSDM-Proxy cache-indexer (Kafka to OpenSearch)
+Description=BSDM-Proxy cache-indexer (Kafka to ClickHouse)
 Documentation=https://github.com/onixus/bsdm-proxy
 After=network-online.target
 Wants=network-online.target

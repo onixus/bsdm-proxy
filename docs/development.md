@@ -19,6 +19,8 @@ sudo apt-get install -y \
 
 ## Структура workspace
 
+Полная карта репозитория: [structure.md](structure.md).
+
 ```
 bsdm-proxy/
 ├── proxy/              # Основной прокси (bin: proxy)
@@ -27,11 +29,16 @@ bsdm-proxy/
 │       ├── lib.rs      # acl, auth, categorization, hierarchy, icp, peers
 │       ├── peer_fetch.rs, hierarchy_config.rs, cache_key.rs
 │       └── tls.rs, metrics.rs, policy_config.rs
-├── cache-indexer/      # Kafka → ClickHouse indexer
+├── cache-indexer/      # Kafka → ClickHouse indexer + Search API
+├── bsdm-events/        # Shared CacheEvent types (proxy ↔ indexer)
 ├── e2e/                # Smoke и E2E тесты
+├── charts/bsdm/        # Helm chart для Kubernetes
 ├── config/             # Примеры ACL-правил
 ├── packaging/          # Release-пакет (systemd, install.sh)
-├── scripts/            # build-package, run-*-tests, pre-push-check
+├── scripts/            # build-package, run-*-tests, pre-push-check, clickhouse SQL
+├── grafana/            # Datasources + dashboards (Prometheus, ClickHouse)
+├── prometheus/         # Scrape config
+├── web-config/         # Web UI для генерации конфигурации
 └── docs/               # Документация
 ```
 

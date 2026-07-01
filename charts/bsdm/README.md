@@ -49,7 +49,7 @@ Set `mitm.existingSecret: bsdm-mitm-ca` in values.
 ## Not included (deploy separately)
 
 - Redis / Sentinel
-- Kafka, OpenSearch, cache-indexer
+- Kafka, ClickHouse, cache-indexer
 - Ingress / Gateway API
 - cert-manager Issuer
 

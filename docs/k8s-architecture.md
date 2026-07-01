@@ -1,6 +1,6 @@
 # BSDM-Proxy on Kubernetes
 
-Рекомендуемая архитектура развёртывания BSDM на Kubernetes: data plane (proxy + Redis L2) и analytics plane (Kafka → indexer → OpenSearch).
+Рекомендуемая архитектура развёртывания BSDM на Kubernetes: data plane (proxy + Redis L2) и analytics plane (Kafka → indexer → ClickHouse).
 
 См. также: [capacity-planning.md](capacity-planning.md) · [swg-backlog-mapping.md](swg-backlog-mapping.md) · [helm chart](../charts/bsdm/README.md)
 
@@ -13,7 +13,7 @@
 | Горизонтальный scale proxy pods | Bench: `WORKER_COUNT=4` + shared L1 хуже, чем N реплик с `WORKER_COUNT=1` |
 | Redis L2 обязателен для HA | L1 локален; без L2 — sticky sessions и cache miss storm |
 | Spill локальный per pod | mmap spill (`CACHE_SPILL_DIR`) не шарить через NFS |
-| Analytics в отдельном namespace | Kafka/OpenSearch не конкурируют с proxy за CPU |
+| Analytics в отдельном namespace | Kafka/ClickHouse не конкурируют с proxy за CPU |
 | `sessionAffinity: None` | Когерентность через L2, не через LB stickiness |
 
 ---
@@ -39,14 +39,14 @@ flowchart TB
   subgraph ns_analytics [namespace bsdm-analytics]
     K[Kafka]
     I[cache-indexer]
-    OS[(OpenSearch)]
+    CH[(ClickHouse)]
     PM[Prometheus]
   end
 
   B --> LB --> P
   S --> LB
   P --> R
-  P -.->|async| K --> I --> OS
+  P -.->|async| K --> I --> CH
   P -->|/metrics| PM
 ```
 
@@ -58,7 +58,7 @@ flowchart TB
 | Redis L2 | StatefulSet / Helm | 2+1 sentinel | 2 / 4 | 16 Gi / 32 Gi |
 | cache-indexer | Deployment | 2 | 1 / 2 | 512 Mi / 1 Gi |
 | Kafka | Strimzi / external | 3 | 2 / 4 | 8 Gi |
-| OpenSearch | StatefulSet / managed | 3+2 | 8 / 8 | 64 Gi |
+| ClickHouse | StatefulSet / managed / ClickHouse Cloud | 1–3 | 8 / 8 | 32 Gi |
 
 Полные цифры: [capacity-planning.md](capacity-planning.md).
 
@@ -168,7 +168,7 @@ sessionAffinity: None
 |-----------|------------|
 | Kafka topic `cache-events` | 12 partitions, RF=3, retention 7d |
 | cache-indexer | Consumer group, HPA по lag |
-| OpenSearch | Index `http-cache`, ILM 14d hot |
+| ClickHouse | Table `bsdm.http_cache`, TTL 42d |
 | Prometheus + Grafana | Scrape `/metrics` всех proxy pods |
 
 Proxy **не должен** блокироваться на Kafka (см. [#106](https://github.com/onixus/bsdm-proxy/issues/106)).
@@ -211,7 +211,7 @@ Kafka external / small cluster
 ### B. Full stack
 
 ```
-bsdm-proxy + Redis + Kafka + OpenSearch + indexer + Grafana
+bsdm-proxy + Redis + Kafka + ClickHouse + indexer + Grafana
 ```
 
 См. `docker-compose.yml` как reference stack; в k8s — разнести по namespace.

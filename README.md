@@ -124,7 +124,6 @@ Grafana: http://localhost:3000 → **BSDM HTTP Traffic (ClickHouse)** и **BSDM 
 | [docker-compose.test.yml](docker-compose.test.yml) | Минимальный стек для smoke/E2E |
 | [docker-compose.redis-l2.yml](docker-compose.redis-l2.yml) | Два proxy + Redis L2 |
 | [docker-compose.hierarchy.yml](docker-compose.hierarchy.yml) | Multi-instance + ICP |
-| [docker-compose.clickhouse.yml](docker-compose.clickhouse.yml) | Урезанный CH-lab (deprecated, см. заголовок файла) |
 
 ## Установка (native package)
 
