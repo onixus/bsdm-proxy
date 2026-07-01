@@ -95,7 +95,7 @@
 | P0-3 | **Streaming MISS** — tee upstream→client while caching | все лидеры: no buffer-full-object | `proxy_service.rs`, `upstream.rs` |
 | P0-4 | **Connection-level auth** — cache `Proxy-Authorization` outcome per TCP conn | identity on tunnel (ZCC/GP) | `server.rs`, `auth.rs` |
 | P0-5 | **Policy decision cache** — `(user, domain, url_hash) → Allow/Deny` TTL 60–300s | unified policy engine cache | `proxy_service.rs`, `acl.rs` |
-| P0-6 | Bench profiles: `WORKER_COUNT=1` warm / `4` cold | internal tuning | `compare-squid-bsdm-httparchive.sh` |
+| P0-6 | Bench profiles: `WORKER_COUNT=1` warm / `4` cold | internal tuning | ✅ `bench-profile.sh` |
 | P0-7 | Spill file `mode(0o600)` + private `CACHE_SPILL_DIR` | security hygiene | `cache_body.rs` |
 
 ### P1 — Single-pass policy path (как Single Scan / single-pass)
@@ -246,7 +246,7 @@ gantt
 | P0-3 | [#94](https://github.com/onixus/bsdm-proxy/issues/94) Streaming MISS | P0 |
 | P0-4 | [#95](https://github.com/onixus/bsdm-proxy/issues/95) Connection-level auth cache | P0 |
 | P0-5 | [#96](https://github.com/onixus/bsdm-proxy/issues/96) Policy decision cache | P0 |
-| P0-6 | [#97](https://github.com/onixus/bsdm-proxy/issues/97) Bench profiles WORKER_COUNT | P0 |
+| P0-6 | [#97](https://github.com/onixus/bsdm-proxy/issues/97) Bench profiles WORKER_COUNT | P0 | ✅ |
 | P0-7 | [#98](https://github.com/onixus/bsdm-proxy/issues/98) Spill files mode 0o600 | P0 |
 | P1-1 | [#100](https://github.com/onixus/bsdm-proxy/issues/100) PERF fast path matrix | P1 |
 | P1-2 | [#104](https://github.com/onixus/bsdm-proxy/issues/104) Offline categorization | P1 |

@@ -40,7 +40,34 @@ cargo install oha   # или бинарь с https://github.com/hatoo/oha
 | `METRICS_SAMPLE_RATE` | `0` | `N` → histograms для 1 из N запросов (`0` = все) |
 | `STREAMING_MISS_ENABLED` | `true` | Tee upstream MISS body to client while buffering for L1 |
 
-## Рекомендуемый bench-профиль
+## HTTP Archive bench profiles (`BENCH_PROFILE`)
+
+Sites bench (70 sites × 20 warm repeats) is **warm-heavy**. Multi-worker accept (`WORKER_COUNT=4`) increases L1 lock contention on repeated HITs; a single worker often wins on warm goodput.
+
+| `BENCH_PROFILE` | `WORKER_COUNT` | Когда использовать |
+|-----------------|----------------|-------------------|
+| `warm` (default) | `1` | HTTP Archive sites bench, warm goodput vs Squid |
+| `cold` | `4` | Cold/MISS-heavy, multi-accept parallelism |
+
+Пресеты заданы в [`scripts/bench-profile.sh`](../scripts/bench-profile.sh) и применяются в `run-httparchive-benchmark.sh` / `compare-squid-bsdm-httparchive.sh`.
+
+```bash
+# Warm profile (default) — рекомендуется для sites bench
+./scripts/run-httparchive-benchmark.sh
+
+# Cold profile — больше accept workers
+BENCH_PROFILE=cold ./scripts/run-httparchive-benchmark.sh
+
+# Оба профиля подряд
+./scripts/run-httparchive-bench-profiles.sh
+
+# Squid vs BSDM (BSDM с выбранным профилем)
+BENCH_PROFILE=warm ./scripts/compare-squid-bsdm-httparchive.sh
+```
+
+См. результаты и методику: [benchmarks-httparchive.md](benchmarks-httparchive.md).
+
+## Рекомендуемый bench-профиль (wrk/oha micro-bench)
 
 ```bash
 cargo build --release -p bsdm-proxy --bin proxy
@@ -102,11 +129,12 @@ sudo perf report -i /tmp/bsdm-perf.data
 
 ## Production vs bench
 
-| | Bench | Production |
-|---|-------|------------|
-| `PERF_FAST_CACHE_HIT` | `true` | `false` |
-| `WORKER_COUNT` | `4` (по CPU) | `4` |
-| `KAFKA_SAMPLE_RATE` | — | `10` |
-| `HTTP_PRESERVE_HEADER_CASE` | `false` | `true` (MITM) |
+| | Bench (HTTP Archive warm) | Bench (wrk HIT) | Production |
+|---|---------------------------|-----------------|------------|
+| `BENCH_PROFILE` | `warm` | — | — |
+| `PERF_FAST_CACHE_HIT` | `true` | `true` | `false` |
+| `WORKER_COUNT` | `1` (warm) / `4` (cold) | `4` | `1` per pod (k8s) |
+| `KAFKA_SAMPLE_RATE` | — | — | `10` |
+| `HTTP_PRESERVE_HEADER_CASE` | `false` | `false` | `true` (MITM) |
 
 См. также [architecture.md](architecture.md), [logging.md](logging.md).

@@ -28,6 +28,8 @@
 | `scripts/httparchive-sites-bench.py` | **Основная методика**: 70 случайных сайтов Top 1k, 12 conn, 20 warm-повторов |
 | `scripts/httparchive-page-load.py` | Legacy: одна медианная страница (71 ресурс) |
 | `scripts/run-httparchive-benchmark.sh` | Полный прогон sites bench (BSDM) |
+| `scripts/run-httparchive-bench-profiles.sh` | Прогон warm + cold профилей подряд |
+| `scripts/bench-profile.sh` | Пресеты `BENCH_PROFILE` → `WORKER_COUNT` |
 | `scripts/compare-squid-bsdm-httparchive.sh` | Squid vs BSDM (sites bench) |
 | `e2e/tests/httparchive.rs` | E2E: 71/66 запросов, MISS → HIT, проверка объёма |
 
@@ -54,15 +56,29 @@ cargo build --release -p bsdm-proxy --bin proxy
 ./scripts/run-httparchive-benchmark.sh
 
 # Squid vs BSDM
-./scripts/compare-squid-bsdm-httparchive.sh
+BENCH_PROFILE=warm ./scripts/compare-squid-bsdm-httparchive.sh
+BENCH_PROFILE=cold ./scripts/compare-squid-bsdm-httparchive.sh
+
+# Оба профиля (BSDM only)
+./scripts/run-httparchive-bench-profiles.sh
 ```
+
+### Bench profiles (`BENCH_PROFILE`)
+
+| Профиль | `WORKER_COUNT` | Назначение |
+|---------|----------------|------------|
+| `warm` (default) | `1` | Warm goodput на sites bench (меньше contention на shared L1) |
+| `cold` | `4` | Cold/MISS parallelism, multi accept-loop |
+
+Пресеты: [`scripts/bench-profile.sh`](../scripts/bench-profile.sh). Переопределение: `BENCH_PROFILE=warm WORKER_COUNT=2 ...` (явный `WORKER_COUNT` сохраняется).
 
 Переменные:
 
 - `BENCH_SITES` — число сайтов (default **70**)
 - `PAGE_CONCURRENCY` — параллелизм (default **12**)
 - `BENCH_WARM_REPEATS` — warm-повторы (default **20**)
-- `WORKER_COUNT` — default **4** в `run-httparchive-benchmark.sh` / compare
+- `BENCH_PROFILE` — `warm` \| `cold` (default **warm**); см. таблицу выше
+- `WORKER_COUNT` — задаётся профилем (`1` warm / `4` cold), можно переопределить
 - `BENCH_SITE_SEED` — seed выбора сайтов (default **42**)
 - `HTTPARCHIVE_DEVICE` — `desktop` или `mobile`
 - `PERF_FAST_CACHE_HIT`, `WORKER_COUNT` — как в [performance.md](performance.md)
@@ -79,3 +95,17 @@ PAGE_CONCURRENCY=6 python3 scripts/httparchive-page-load.py \
 Сценарии `run-proxy-benchmark.sh` измеряют **один URL** (микро-запрос ~33 B). HTTP Archive-тесты моделируют **полную медианную страницу Top 1k**: десятки запросов и ~2.6 MB на cold load, что ближе к реальному корпоративному трафику и нагрузке на кэш/память.
 
 См. также [performance.md](performance.md), [capacity-planning.md](capacity-planning.md).
+
+## Результаты (lab, 4 vCPU, desktop profile)
+
+Методика: 70 сайтов, 12 conn, 20 warm repeats, `PERF_FAST_CACHE_HIT=true`, tiered L1 (PR #93).  
+Warm goodput — фаза **warm repeats** из вывода `httparchive-sites-bench.py`.  
+Перемеряйте на своём железе: `BENCH_PROFILE=warm ./scripts/compare-squid-bsdm-httparchive.sh`.
+
+| Дата | Профиль | `WORKER_COUNT` | BSDM warm Mbit/s | Squid warm Mbit/s | Примечание |
+|------|---------|----------------|------------------|-------------------|------------|
+| 2026-03 (ADR 0001) | cold | 4 | ~500 | ~657 | до tiered L1 tuning |
+| 2026-06 (backlog) | cold | 4 | ~538 | ~593 | post P0 perf + tiered L1 |
+| — | **warm** | **1** | **цель ≥560** | ~593 | рекомендуемый профиль для M2.5 gate |
+
+Gap warm profile vs Squid: цель M2.5 — **≥ Squid −5%** на warm goodput ([roadmap](roadmap.md)).
