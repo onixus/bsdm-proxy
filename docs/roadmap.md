@@ -22,7 +22,7 @@
 |-----------|--------|-------|------------|
 | [M1 — Foundation](#m1--foundation-v02x) | v0.2.x | Ядро прокси, ACL, категоризация, observability | ✅ Done |
 | [M2 — Squid parity](#m2--squid-parity-v03x) | v0.3.x | L2, ACL, hierarchy, auth, compression | ✅ Done |
-| [M2.5 — Data plane](#m25--data-plane-throughput-v031) | v0.3.1 | Tiered L1, perf, streaming, policy cache | ~75% |
+| [M2.5 — Data plane](#m25--data-plane-throughput-v031) | v0.3.1 | Tiered L1, perf, streaming, policy cache | ~85% |
 | [M3 — Retro-search](#m3--retro-search-v04x) | v0.4.x | Индексация, дашборды, ClickHouse, Search API | ~60% |
 | [M4 — Threat analytics](#m4--threat-analytics-v05x) | v0.5.x | Rule-based угрозы, алерты, C&C heuristics | ~5% |
 | [M5 — ML security](#m5--ml-security-v10x) | v1.0.x | ML anomaly, phishing ML, C&C detection | ~0% |
@@ -92,12 +92,12 @@ gantt
 - [x] **Streaming MISS** — `TeeMissBody` tees upstream → client while buffering for L1; `STREAMING_MISS_ENABLED` (default `true`) ([#94](https://github.com/onixus/bsdm-proxy/issues/94))
 - [x] **Connection auth cache** — per-TCP keep-alive `Proxy-Authorization` reuse; `AUTH_CONN_CACHE_TTL_SECONDS` ([#95](https://github.com/onixus/bsdm-proxy/issues/95))
 - [x] **Policy decision cache** — `(principal, domain)` ACL+cat; `POLICY_DECISION_CACHE_TTL_SECONDS`; flush on ACL reload ([#96](https://github.com/onixus/bsdm-proxy/issues/96))
+- [x] **HTTP Archive bench profiles** — `BENCH_PROFILE=warm|cold` → `WORKER_COUNT` 1/4; `bench-profile.sh` ([#97](https://github.com/onixus/bsdm-proxy/issues/97))
 
 ### В работе (P0)
 
 | Issue | Задача |
 |-------|--------|
-| [#97](https://github.com/onixus/bsdm-proxy/issues/97) | Bench profiles `WORKER_COUNT` warm/cold |
 | [#98](https://github.com/onixus/bsdm-proxy/issues/98) | Spill files `mode 0o600` |
 
 ### P1 (single-pass hot path)

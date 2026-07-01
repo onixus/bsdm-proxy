@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 # Benchmark BSDM-Proxy with HTTP Archive Top 1k median page loads.
+#
+# Bench profiles: BENCH_PROFILE=warm|cold (see scripts/bench-profile.sh)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+# shellcheck source=bench-profile.sh
+source "${ROOT}/scripts/bench-profile.sh"
+apply_bench_profile
 
 PROXY_PORT="${PROXY_PORT:-12788}"
 METRICS_PORT="${METRICS_PORT:-19190}"
@@ -51,10 +56,11 @@ start_mock() {
 start_proxy() {
   tmux -f /exec-daemon/tmux.portal.conf kill-session -t ha-bench-proxy 2>/dev/null || true
   local env_cmd="MITM_ENABLED=false HIERARCHY_ENABLED=false RUST_LOG=warn"
-  env_cmd+=" PERF_FAST_CACHE_HIT=${PERF_FAST_CACHE_HIT:-true}"
-  env_cmd+=" WORKER_COUNT=${WORKER_COUNT:-4}"
-  env_cmd+=" METRICS_SAMPLE_RATE=${METRICS_SAMPLE_RATE:-100}"
-  env_cmd+=" HTTP_PRESERVE_HEADER_CASE=${HTTP_PRESERVE_HEADER_CASE:-false}"
+  env_cmd+=" PERF_FAST_CACHE_HIT=${PERF_FAST_CACHE_HIT}"
+  env_cmd+=" WORKER_COUNT=${WORKER_COUNT}"
+  env_cmd+=" CACHE_SHARDS=${CACHE_SHARDS}"
+  env_cmd+=" METRICS_SAMPLE_RATE=${METRICS_SAMPLE_RATE}"
+  env_cmd+=" HTTP_PRESERVE_HEADER_CASE=${HTTP_PRESERVE_HEADER_CASE}"
   tmux -f /exec-daemon/tmux.portal.conf new-session -d -s ha-bench-proxy -c "$ROOT" -- \
     "${SHELL:-bash}" -lc \
     "${env_cmd} HTTP_PORT=${PROXY_PORT} METRICS_PORT=${METRICS_PORT} ${BSDM_BIN}"
@@ -75,7 +81,7 @@ validate_profile() {
 
 run_sites_bench() {
   echo ""
-  echo "==> sites bench (sites=${BENCH_SITES}, concurrency=${PAGE_CONCURRENCY}, warm=${BENCH_WARM_REPEATS})"
+  echo "==> sites bench (profile=$(print_bench_profile), sites=${BENCH_SITES}, concurrency=${PAGE_CONCURRENCY}, warm=${BENCH_WARM_REPEATS})"
   python3 "${ROOT}/scripts/httparchive-sites-bench.py" \
     --proxy "${PROXY}" \
     --upstream "${UPSTREAM}" \
@@ -97,6 +103,7 @@ start_proxy
 
 echo "############################################"
 echo "# HTTP Archive benchmark: ${LABEL}"
+echo "# profile: $(print_bench_profile)"
 echo "# lens=top1k device=${DEVICE}"
 echo "# sites=${BENCH_SITES} concurrency=${PAGE_CONCURRENCY} warm=${BENCH_WARM_REPEATS}"
 echo "############################################"

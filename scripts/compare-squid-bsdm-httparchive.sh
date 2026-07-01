@@ -1,9 +1,16 @@
 #!/usr/bin/env bash
 # Squid vs BSDM — HTTP Archive Top 1k sites (70 random, 12 conn, 20 warm repeats).
+#
+# Bench profiles (see scripts/bench-profile.sh):
+#   BENCH_PROFILE=warm  WORKER_COUNT=1  — warm-heavy goodput (default)
+#   BENCH_PROFILE=cold  WORKER_COUNT=4  — cold/MISS parallelism
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+# shellcheck source=bench-profile.sh
+source "${ROOT}/scripts/bench-profile.sh"
+apply_bench_profile
 
 SQUID_CONF="${ROOT}/scripts/squid-benchmark-tuned.conf"
 SQUID_PORT=13128
@@ -77,10 +84,11 @@ start_bsdm() {
   pkill -f 'target/release/proxy' 2>/dev/null || true
   sleep 1
   local env_cmd="MITM_ENABLED=false HIERARCHY_ENABLED=false RUST_LOG=warn"
-  env_cmd+=" PERF_FAST_CACHE_HIT=${PERF_FAST_CACHE_HIT:-true}"
-  env_cmd+=" WORKER_COUNT=${WORKER_COUNT:-4}"
-  env_cmd+=" METRICS_SAMPLE_RATE=${METRICS_SAMPLE_RATE:-100}"
-  env_cmd+=" HTTP_PRESERVE_HEADER_CASE=${HTTP_PRESERVE_HEADER_CASE:-false}"
+  env_cmd+=" PERF_FAST_CACHE_HIT=${PERF_FAST_CACHE_HIT}"
+  env_cmd+=" WORKER_COUNT=${WORKER_COUNT}"
+  env_cmd+=" CACHE_SHARDS=${CACHE_SHARDS}"
+  env_cmd+=" METRICS_SAMPLE_RATE=${METRICS_SAMPLE_RATE}"
+  env_cmd+=" HTTP_PRESERVE_HEADER_CASE=${HTTP_PRESERVE_HEADER_CASE}"
   tmux -f /exec-daemon/tmux.portal.conf new-session -d -s ha-compare-bsdm -c "$ROOT" -- \
     "${SHELL:-bash}" -lc \
     "${env_cmd} HTTP_PORT=${BSDM_PORT} METRICS_PORT=${BSDM_METRICS} ${BSDM_BIN}"
@@ -102,6 +110,7 @@ run_sites_bench() {
   {
     echo "############################################"
     echo "# ${label} @ ${proxy}"
+    echo "# profile: $(print_bench_profile)"
     echo "# sites=${BENCH_SITES} concurrency=${PAGE_CONCURRENCY} warm=${BENCH_WARM_REPEATS} seed=${BENCH_SITE_SEED}"
     echo "############################################"
     python3 "${ROOT}/scripts/httparchive-sites-bench.py" \
@@ -122,6 +131,8 @@ trap cleanup EXIT
 python3 "${ROOT}/scripts/httparchive_profile.py"
 cargo build --release -p bsdm-proxy --bin proxy 2>&1 | tail -2
 
+echo "Bench profile: $(print_bench_profile)"
+
 start_mock
 
 echo ""
@@ -133,9 +144,10 @@ stop_squid
 echo ""
 echo "========== BSDM (HTTP Archive sites) =========="
 start_bsdm
-run_sites_bench "bsdm-perf" "http://127.0.0.1:${BSDM_PORT}" /tmp/bench-httparchive-bsdm.txt
+BSDM_OUT="/tmp/bench-httparchive-bsdm-${BENCH_PROFILE}.txt"
+run_sites_bench "bsdm-${BENCH_PROFILE}" "http://127.0.0.1:${BSDM_PORT}" "${BSDM_OUT}"
 
 echo ""
 echo "Done."
 echo "  Squid: /tmp/bench-httparchive-squid.txt"
-echo "  BSDM:  /tmp/bench-httparchive-bsdm.txt"
+echo "  BSDM:  ${BSDM_OUT} ($(print_bench_profile))"
