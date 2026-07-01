@@ -1,13 +1,15 @@
-# ClickHouse analytics stack for BSDM-Proxy
+# ClickHouse analytics stack for BSDM-Proxy (slim profile)
 #
-# Kafka → cache-indexer (INDEXER_BACKEND=clickhouse) → ClickHouse
+# **Deprecated:** default `docker compose up` now includes ClickHouse, Grafana CH
+# dashboards, and Search API. Use this file only for a minimal CH-only lab stack
+# without Prometheus proxy metrics or MITM proxy defaults.
 #
-# End-to-end CH stack:
-#   docker compose -f docker-compose.clickhouse.yml up -d --build
-#   curl -x http://127.0.0.1:1488 http://httpbin.org/get
+# Preferred:
+#   docker compose up -d --build
 #   curl 'http://127.0.0.1:8123/?query=SELECT+count()+FROM+bsdm.http_cache'
 #
-# Default stack (OpenSearch): docker compose up -d
+# This file:
+#   docker compose -f docker-compose.clickhouse.yml up -d --build
 #
 # ADR: docs/adr/0002-clickhouse-analytics.md
 

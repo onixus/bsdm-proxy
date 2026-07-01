@@ -40,8 +40,8 @@
 
 | Документ | Описание |
 |----------|----------|
-| [docker-compose.yml](../docker-compose.yml) | Полный стек (proxy, Kafka, OpenSearch, monitoring) |
-| [docker-compose.clickhouse.yml](../docker-compose.clickhouse.yml) | ClickHouse analytics stack (Grafana + Search API) |
+| [docker-compose.yml](../docker-compose.yml) | Полный стек (proxy, Kafka, ClickHouse, monitoring) |
+| [docker-compose.legacy-opensearch.yml](../docker-compose.legacy-opensearch.yml) | Legacy OpenSearch override (deprecated) |
 | [docker-compose.redis-l2.yml](../docker-compose.redis-l2.yml) | Демо Redis L2 (2 proxy + Redis) |
 | [OPENSEARCH_UPGRADE.md](../OPENSEARCH_UPGRADE.md) | Обновление OpenSearch |
 | [web-config/README.md](../web-config/README.md) | Web UI для генерации конфигурации |

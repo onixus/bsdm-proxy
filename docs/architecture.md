@@ -39,7 +39,7 @@ flowchart TB
   subgraph pipeline [Analytics pipeline]
     KAFKA[Kafka cache-events]
     IDX[cache-indexer]
-    OS[(OpenSearch http-cache)]
+    CH[(ClickHouse http_cache)]
   end
 
   subgraph observability [Observability]
@@ -57,7 +57,7 @@ flowchart TB
   PEER --> UP
   CACHE --> UP
   MAIN --> TLS
-  MAIN --> KPROD --> KAFKA --> IDX --> OS
+  MAIN --> KPROD --> KAFKA --> IDX --> CH
   MET --> PROM --> GRAF
 ```
 
@@ -122,7 +122,7 @@ TCP accept
 CacheEvent (main.rs)
   → Kafka topic "cache-events" (hardcoded, acks=0)
   → cache-indexer consumer
-  → OpenSearch bulk index "http-cache"
+  → ClickHouse INSERT `bsdm.http_cache`
 ```
 
 ```mermaid
@@ -130,19 +130,19 @@ sequenceDiagram
   participant P as proxy
   participant K as Kafka
   participant I as cache-indexer
-  participant O as OpenSearch
+  participant C as ClickHouse
 
   P->>P: handle_request completes
   P-->>K: CacheEvent JSON (async, acks=0)
   Note over P,K: categories sent by proxy
   K->>I: consume batch
-  I->>O: bulk index
-  Note over I,O: categories NOT in indexer schema
+  I->>C: JSONEachRow insert
+  Note over I,C: full CacheEvent schema in CH
 ```
 
 **Поля `CacheEvent` (proxy):** url, method, status, cache_key, cache_status, user, client_ip, domain, timing, UA, content_type, **categories**
 
-**Поля indexer:** те же, кроме **categories** — теряются при десериализации.
+**Поля indexer:** полная схема `CacheEvent` в ClickHouse (`categories`, `threat_sources`, `acl_action`).
 
 ---
 
@@ -165,7 +165,7 @@ proxy/
 │   ├── policy_config.rs ← env loading
 │   └── auth_config.rs
 cache-indexer/
-└── src/main.rs          ← Kafka → OpenSearch
+└── src/main.rs          ← Kafka → ClickHouse (default) / OpenSearch (legacy)
 e2e/                     ← smoke + E2E harness
 ```
 

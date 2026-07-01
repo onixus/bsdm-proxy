@@ -5,7 +5,7 @@
 ## Быстрый старт
 
 ```bash
-docker compose -f docker-compose.clickhouse.yml up -d --build
+docker compose up -d --build
 
 # Проверка схемы
 curl 'http://127.0.0.1:8123/?query=SHOW+TABLES+FROM+bsdm'
@@ -13,8 +13,8 @@ curl 'http://127.0.0.1:8123/?query=SHOW+TABLES+FROM+bsdm'
 # Трафик через прокси (события уходят в Kafka)
 curl -x http://127.0.0.1:1488 http://httpbin.org/get
 
-# После реализации CH indexer — строки появятся в bsdm.http_cache
 curl 'http://127.0.0.1:8123/?query=SELECT+count()+FROM+bsdm.http_cache'
+curl 'http://127.0.0.1:8080/api/search?limit=5'
 ```
 
 Grafana: http://localhost:3000 (admin/admin) — datasource ClickHouse и dashboard **BSDM HTTP Traffic (ClickHouse)** поднимаются автоматически из `grafana/clickhouse/`.
@@ -79,14 +79,15 @@ curl 'http://127.0.0.1:8123/?query=SELECT+count()+FROM+bsdm.http_cache'
 | 1 | Этот compose + ADR 0002 |
 | 2 | ✅ `INDEXER_BACKEND=clickhouse` в cache-indexer |
 | 2b | ✅ `INDEXER_BACKEND=dual` + reconciliation script |
-| 2 | Grafana SQL dashboards (CH compose) — [#129](https://github.com/onixus/bsdm-proxy/issues/129) |
-| 3 | Search API на ClickHouse — [#130](https://github.com/onixus/bsdm-proxy/issues/130), [search-api.md](search-api.md) |
+| 2 | ✅ Grafana CH dashboards + Search API ([#129](https://github.com/onixus/bsdm-proxy/issues/129), [#130](https://github.com/onixus/bsdm-proxy/issues/130)) |
+| 3 | ✅ Default `docker compose up` на ClickHouse ([#132](https://github.com/onixus/bsdm-proxy/issues/132)) |
+| 4 | Legacy OpenSearch profile (removal v0.5.0) |
 
 Kafka остаётся bus на фазе 1–2; NATS — опционально позже (ADR 0002).
 
 ## Миграция (dual-write)
 
-Пока default compose на OpenSearch, для валидации CH:
+Для валидации CH перед cutover (нужны OS + CH + Kafka):
 
 ```bash
 # cache-indexer с dual-write (нужны OS + CH + Kafka)
@@ -104,6 +105,19 @@ chmod +x scripts/reconcile-os-ch-events.sh
 Метрики: `cache_indexer_inserts_total{backend}`, `cache_indexer_insert_errors_total{backend}`, `cache_indexer_batch_duration_seconds`.
 
 Epic: [#125](https://github.com/onixus/bsdm-proxy/issues/125).
+
+## Legacy OpenSearch (deprecated)
+
+Default compose использует ClickHouse. OpenSearch + Dashboards доступны один релизный цикл:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.legacy-opensearch.yml \
+  --profile legacy-opensearch up -d --build
+```
+
+Env: `packaging/config/cache-indexer.legacy-opensearch.env`. **Планируемое удаление: v0.5.0** (Phase 4 — [#134](https://github.com/onixus/bsdm-proxy/issues/134)).
+
+Slim CH-only lab: `docker-compose.clickhouse.yml` (deprecated, см. заголовок файла).
 
 ## k8s
 

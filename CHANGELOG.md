@@ -5,6 +5,14 @@ All notable changes to BSDM-Proxy are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Default Docker stack** — `docker compose up` uses ClickHouse + Grafana CH dashboards + Search API instead of OpenSearch ([#132](https://github.com/onixus/bsdm-proxy/issues/132))
+- OpenSearch, OpenSearch Dashboards moved to `--profile legacy-opensearch` (deprecated, removal target **v0.5.0**) ([#133](https://github.com/onixus/bsdm-proxy/issues/133))
+- `docker-compose.clickhouse.yml` marked deprecated — use main compose
+
 ## [0.3.0] - 2026-06-30
 
 Milestone **M2 — Squid parity**: hierarchy Phase 4, enterprise auth (NTLM/Kerberos), ACL API, negative caching.
