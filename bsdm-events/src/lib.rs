@@ -1,4 +1,8 @@
-//! Shared cache event schema for the Kafka → OpenSearch pipeline.
+//! Shared cache event schema for the Kafka → indexer pipeline.
+
+mod clickhouse;
+
+pub use clickhouse::{cache_event_to_row, json_each_row_lines, HttpCacheRow};
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

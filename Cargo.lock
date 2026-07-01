@@ -325,6 +325,7 @@ dependencies = [
 name = "bsdm-events"
 version = "0.3.0"
 dependencies = [
+ "chrono",
  "serde",
  "serde_json",
 ]
@@ -425,6 +426,7 @@ dependencies = [
  "bytes",
  "opensearch",
  "rdkafka",
+ "reqwest 0.13.4",
  "serde",
  "serde_json",
  "tokio",

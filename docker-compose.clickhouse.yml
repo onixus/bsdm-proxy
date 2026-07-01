@@ -1,13 +1,13 @@
 # ClickHouse analytics stack for BSDM-Proxy
 #
-# Kafka → (cache-indexer with INDEXER_BACKEND=clickhouse) → ClickHouse
-# Until CH indexer lands (see GitHub issue), use OpenSearch stack for end-to-end indexing:
-#   docker compose up -d
+# Kafka → cache-indexer (INDEXER_BACKEND=clickhouse) → ClickHouse
 #
-# This compose validates ClickHouse schema + proxy event production:
+# End-to-end CH stack:
 #   docker compose -f docker-compose.clickhouse.yml up -d --build
 #   curl -x http://127.0.0.1:1488 http://httpbin.org/get
 #   curl 'http://127.0.0.1:8123/?query=SELECT+count()+FROM+bsdm.http_cache'
+#
+# Default stack (OpenSearch): docker compose up -d
 #
 # ADR: docs/adr/0002-clickhouse-analytics.md
 
@@ -106,25 +106,28 @@ services:
       timeout: 5s
       retries: 5
 
-  # cache-indexer with INDEXER_BACKEND=clickhouse — see ADR 0002 / GitHub issue
-  # cache-indexer-ch:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile
-  #     target: cache-indexer
-  #   environment:
-  #     - INDEXER_BACKEND=clickhouse
-  #     - KAFKA_BROKERS=kafka:9092
-  #     - CLICKHOUSE_URL=http://clickhouse:8123
-  #     - CLICKHOUSE_DATABASE=bsdm
-  #     - CLICKHOUSE_TABLE=http_cache
-  #   depends_on:
-  #     kafka:
-  #       condition: service_healthy
-  #     clickhouse:
-  #       condition: service_healthy
-  #   networks:
-  #     - bsdm-ch-net
+  cache-indexer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: cache-indexer
+    environment:
+      - INDEXER_BACKEND=clickhouse
+      - KAFKA_BROKERS=kafka:9092
+      - KAFKA_TOPIC=cache-events
+      - KAFKA_GROUP_ID=cache-indexer-ch-group
+      - CLICKHOUSE_URL=http://clickhouse:8123
+      - CLICKHOUSE_DATABASE=bsdm
+      - CLICKHOUSE_TABLE=http_cache
+      - RUST_LOG=info,cache_indexer=info
+    depends_on:
+      kafka:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    networks:
+      - bsdm-ch-net
+    restart: unless-stopped
 
   grafana:
     image: grafana/grafana:12.3.8

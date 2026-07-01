@@ -23,7 +23,7 @@
 | [M1 — Foundation](#m1--foundation-v02x) | v0.2.x | Ядро прокси, ACL, категоризация, observability | ✅ Done |
 | [M2 — Squid parity](#m2--squid-parity-v03x) | v0.3.x | L2, ACL, hierarchy, auth, compression | ✅ Done |
 | [M2.5 — Data plane](#m25--data-plane-throughput-v031) | v0.3.1 | Tiered L1, perf, streaming, policy cache | ~95% |
-| [M3 — Retro-search](#m3--retro-search-v04x) | v0.4.x | Индексация, дашборды, ClickHouse, Search API | ~60% |
+| [M3 — Retro-search](#m3--retro-search-v04x) | v0.4.x | Индексация, дашборды, ClickHouse, Search API | ~70% |
 | [M4 — Threat analytics](#m4--threat-analytics-v05x) | v0.5.x | Rule-based угрозы, алерты, C&C heuristics | ~5% |
 | [M5 — ML security](#m5--ml-security-v10x) | v1.0.x | ML anomaly, phishing ML, C&C detection | ~0% |
 
@@ -131,7 +131,7 @@ proxy → Kafka → cache-indexer → OpenSearch (interim) / ClickHouse (target)
 - [x] **OpenSearch retention** — ISM 14d hot → delete 42d ([#91](https://github.com/onixus/bsdm-proxy/pull/91))
 - [x] **OpenSearch Dashboards** — saved searches, playbook «traffic to domain», **BSDM HTTP Traffic** dashboard
 - [x] **ClickHouse foundation** — schema, `docker-compose.clickhouse.yml` ([#115](https://github.com/onixus/bsdm-proxy/pull/115))
-- [ ] **ClickHouse indexer** — `INDEXER_BACKEND=clickhouse` ([#114](https://github.com/onixus/bsdm-proxy/issues/114))
+- [x] **ClickHouse indexer** — `INDEXER_BACKEND=clickhouse`, JSONEachRow INSERT ([#114](https://github.com/onixus/bsdm-proxy/issues/114))
 - [ ] **Search API** — thin REST (ClickHouse HTTP) ([#110](https://github.com/onixus/bsdm-proxy/issues/110))
 - [ ] **Session correlation** — `session_id`, redirect chains
 - [ ] **Экспорт** — CSV/JSON для SOC

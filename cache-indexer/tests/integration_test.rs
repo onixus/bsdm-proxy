@@ -7,6 +7,37 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_clickhouse_row_mapping() {
+        let event = CacheEvent {
+            url: "https://example.com/api".to_string(),
+            method: "GET".to_string(),
+            status: 200,
+            cache_key: "abc123".to_string(),
+            cache_status: "MISS".to_string(),
+            timestamp: 1234567890,
+            headers: HashMap::new(),
+            user_id: None,
+            username: Some("alice".to_string()),
+            client_ip: "10.0.0.1".to_string(),
+            domain: "example.com".to_string(),
+            response_size: 128,
+            request_duration_ms: 12,
+            content_type: Some("application/json".to_string()),
+            user_agent: None,
+            categories: vec!["malware".to_string()],
+            threat_sources: vec!["urlhaus".to_string()],
+            acl_action: None,
+            event_id: "evt-1".to_string(),
+        };
+
+        let row = bsdm_events::cache_event_to_row(&event);
+        assert_eq!(row.event_id, "evt-1");
+        assert_eq!(row.username.as_deref(), Some("alice"));
+        let lines = bsdm_events::json_each_row_lines(&[event]).unwrap();
+        assert!(lines.contains("\"domain\":\"example.com\""));
+    }
+
+    #[test]
     fn test_cache_event_serialization() {
         let mut headers = HashMap::new();
         headers.insert("Content-Type".to_string(), "application/json".to_string());
