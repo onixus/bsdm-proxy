@@ -1,0 +1,13 @@
+apiVersion: v2
+name: bsdm
+description: BSDM-Proxy forward proxy with optional Redis L2
+type: application
+version: 0.1.0
+appVersion: "0.3.0"
+keywords:
+  - proxy
+  - cache
+  - swg
+maintainers:
+  - name: onixus
+    url: https://github.com/onixus/bsdm-proxy

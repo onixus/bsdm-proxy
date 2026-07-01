@@ -1,0 +1,60 @@
+# Production profile — corporate medium (~5k users).
+# 4 replicas × 25k L1 capacity ≈ 100k total; Redis L2 required.
+# See docs/k8s-architecture.md
+
+replicaCount: 4
+
+resources:
+  requests:
+    cpu: "4"
+    memory: 8Gi
+  limits:
+    cpu: "8"
+    memory: 16Gi
+
+spill:
+  enabled: true
+  sizeLimit: 30Gi
+
+proxy:
+  workerCount: 1
+  cacheCapacity: 25000
+  cacheShards: 16
+  cacheTtlSeconds: 7200
+  maxCacheBodySize: 2097152
+  spillThresholdBytes: 262144
+  redisL2Enabled: true
+  redisUrl: "redis://redis-master.bsdm-proxy.svc:6379"
+  kafkaBrokers: "kafka-bootstrap.bsdm-analytics.svc:9092"
+  kafkaSampleRate: 10
+  metricsSampleRate: 100
+  perfFastCacheHit: false
+  mitmEnabled: true
+  authEnabled: true
+  aclEnabled: true
+  categorizationEnabled: true
+  rustLog: "warn,bsdm_proxy=info"
+
+acl:
+  enabled: true
+
+autoscaling:
+  enabled: true
+  minReplicas: 4
+  maxReplicas: 12
+  targetCPUUtilizationPercentage: 70
+
+pdb:
+  enabled: true
+  minAvailable: 2
+
+networkPolicy:
+  enabled: true
+  proxyIngressCidrs:
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+  redisNamespace: bsdm-proxy
+  kafkaNamespace: bsdm-analytics
+
+serviceMonitor:
+  enabled: true

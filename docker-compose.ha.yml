@@ -1,0 +1,100 @@
+# HA sketch: 2 proxy instances + Redis L2 behind implicit round-robin.
+# No k8s required — validates L2-HIT across restarts before Helm deploy.
+#
+# Usage:
+#   docker compose -f docker-compose.ha.yml up -d --build
+#   curl -x http://127.0.0.1:1488 http://upstream/get          # MISS via proxy-a
+#   docker compose -f docker-compose.ha.yml restart proxy-a
+#   curl -x http://127.0.0.1:1488 http://upstream/get          # L2-HIT on proxy-b path
+#
+# k8s equivalent: docs/k8s-architecture.md, charts/bsdm/
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    networks:
+      - ha-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  upstream:
+    image: kennethreitz/httpbin:latest
+    networks:
+      - ha-net
+
+  proxy-a:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: proxy
+    ports:
+      - "1488:1488"
+    environment:
+      - HTTP_PORT=1488
+      - METRICS_PORT=9090
+      - MITM_ENABLED=false
+      - WORKER_COUNT=1
+      - CACHE_SHARDS=16
+      - CACHE_CAPACITY=5000
+      - CACHE_SPILL_DIR=/var/cache/bsdm-spill
+      - CACHE_SPILL_THRESHOLD_BYTES=262144
+      - REDIS_L2_ENABLED=true
+      - REDIS_URL=redis://redis:6379
+      - AUTH_ENABLED=false
+      - ACL_ENABLED=false
+      - CATEGORIZATION_ENABLED=false
+      - RUST_LOG=info,bsdm_proxy=info
+    volumes:
+      - spill-a:/var/cache/bsdm-spill
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - ha-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:9090/health | grep -q ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  proxy-b:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: proxy
+    environment:
+      - HTTP_PORT=1488
+      - METRICS_PORT=9090
+      - MITM_ENABLED=false
+      - WORKER_COUNT=1
+      - CACHE_SHARDS=16
+      - CACHE_CAPACITY=5000
+      - CACHE_SPILL_DIR=/var/cache/bsdm-spill
+      - CACHE_SPILL_THRESHOLD_BYTES=262144
+      - REDIS_L2_ENABLED=true
+      - REDIS_URL=redis://redis:6379
+      - AUTH_ENABLED=false
+      - ACL_ENABLED=false
+      - CATEGORIZATION_ENABLED=false
+      - RUST_LOG=info,bsdm_proxy=info
+    volumes:
+      - spill-b:/var/cache/bsdm-spill
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - ha-net
+
+  # Simulates second endpoint — in prod use LB across proxy replicas.
+  # Only proxy-a is exposed; restart proxy-a to demo L2 recovery via shared Redis.
+
+networks:
+  ha-net:
+    driver: bridge
+
+volumes:
+  spill-a:
+  spill-b:
