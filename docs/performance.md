@@ -41,6 +41,8 @@ cargo install oha   # или бинарь с https://github.com/hatoo/oha
 | `METRICS_SAMPLE_RATE` | `0` | `N` → histograms для 1 из N запросов (`0` = все) |
 | `STREAMING_MISS_ENABLED` | `true` | Tee upstream MISS body to client while buffering for L1 |
 
+> **Production ACL:** `PERF_FAST_CACHE_HIT=true` пропускает ACL и categorization на cache HIT. Используйте **только для bench/lab**, не в production с включённой политикой.
+
 ## HTTP Archive bench profiles (`BENCH_PROFILE`)
 
 Sites bench (70 sites × 20 warm repeats) is **warm-heavy**. Multi-worker accept (`WORKER_COUNT=4`) increases L1 lock contention on repeated HITs; a single worker often wins on warm goodput.

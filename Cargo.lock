@@ -296,7 +296,7 @@ dependencies = [
 
 [[package]]
 name = "bsdm-events"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "chrono",
  "serde",
@@ -305,7 +305,7 @@ dependencies = [
 
 [[package]]
 name = "bsdm-proxy"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "base64",
  "brotli",
@@ -393,7 +393,7 @@ checksum = "8ae3f5d315924270530207e2a68396c3cc547f6dca3fbdca317cfb1a51edb593"
 
 [[package]]
 name = "cache-indexer"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "bsdm-events",
  "bytes",
