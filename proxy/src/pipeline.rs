@@ -17,8 +17,8 @@ pub fn new_event_id() -> String {
 
 pub fn create_kafka_producer(brokers: &str) -> Option<Arc<FutureProducer>> {
     let acks = std::env::var("KAFKA_ACKS").unwrap_or_else(|_| "1".to_string());
-    let queue_buffering_max_ms = std::env::var("KAFKA_QUEUE_BUFFERING_MAX_MS")
-        .unwrap_or_else(|_| "5".to_string());
+    let queue_buffering_max_ms =
+        std::env::var("KAFKA_QUEUE_BUFFERING_MAX_MS").unwrap_or_else(|_| "5".to_string());
     let batch_size = std::env::var("KAFKA_BATCH_SIZE")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -51,11 +51,7 @@ pub struct KafkaEventPipeline {
 }
 
 impl KafkaEventPipeline {
-    pub fn spawn(
-        brokers: &str,
-        topic: String,
-        metrics: Arc<Metrics>,
-    ) -> Option<Arc<Self>> {
+    pub fn spawn(brokers: &str, topic: String, metrics: Arc<Metrics>) -> Option<Arc<Self>> {
         let producer = create_kafka_producer(brokers)?;
         let capacity = queue_capacity_from_env();
         let (sender, mut receiver) = mpsc::channel::<CacheEvent>(capacity);
@@ -90,10 +86,7 @@ impl KafkaEventPipeline {
             capacity
         );
 
-        Some(Arc::new(Self {
-            sender,
-            producer,
-        }))
+        Some(Arc::new(Self { sender, producer }))
     }
 
     /// Enqueue without blocking the request hot path. Drops when full (`KAFKA_QUEUE_DROP_POLICY=drop_new`).

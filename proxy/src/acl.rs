@@ -636,26 +636,30 @@ mod tests {
             redirect_url: None,
             comment: None,
         }]);
-        assert!(engine.check_access(
-            "https://evil.com/malware.exe",
-            "evil.com",
-            &[],
-            None,
-            &[],
-            None,
-        )
-        .action
-            == AclAction::Allow);
+        assert!(
+            engine
+                .check_access(
+                    "https://evil.com/malware.exe",
+                    "evil.com",
+                    &[],
+                    None,
+                    &[],
+                    None,
+                )
+                .action
+                == AclAction::Allow
+        );
         assert_eq!(
-            engine.check_access(
-                "https://evil.com/page.html",
-                "evil.com",
-                &[],
-                None,
-                &[],
-                None
-            )
-            .action,
+            engine
+                .check_access(
+                    "https://evil.com/page.html",
+                    "evil.com",
+                    &[],
+                    None,
+                    &[],
+                    None
+                )
+                .action,
             AclAction::Deny
         );
     }

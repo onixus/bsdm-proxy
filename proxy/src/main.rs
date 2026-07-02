@@ -8,8 +8,8 @@ use bsdm_proxy::{
     load_hierarchy_config, metrics_server, run_peer_discovery, should_start_htcp_server,
     should_start_icp_server, wait_shutdown_signal, AclAction, AuthManager, CacheConfig, CertCache,
     HtcpServer, IcpServer, KafkaEventPipeline, L2CacheConfig, Metrics, PeerDiscoveryConfig,
-    PerfConfig, PolicyCacheConfig, PolicyDecisionCache, ProxyPolicy, ProxyService,
-    RateLimitConfig, RedisL2Cache, UpstreamTlsConfig,
+    PerfConfig, PolicyCacheConfig, PolicyDecisionCache, ProxyPolicy, ProxyService, RateLimitConfig,
+    RedisL2Cache, UpstreamTlsConfig,
 };
 use policy_config::{load_policy_config, reload_acl_engine};
 use std::sync::atomic::{AtomicBool, Ordering};

@@ -32,9 +32,7 @@ use crate::metrics::{FastRequestScope, Metrics, RequestMetricsGuard};
 use crate::peer_fetch::fetch_via_peer;
 use crate::peers::CachePeer;
 use crate::perf::PerfConfig;
-use crate::pipeline::{
-    flush_kafka, new_event_id, CacheEvent, KafkaEventPipeline,
-};
+use crate::pipeline::{flush_kafka, new_event_id, CacheEvent, KafkaEventPipeline};
 use crate::policy_cache::PolicyDecisionCache;
 use crate::rate_limit::{RateLimitViolation, RateLimiter};
 use crate::sharded_cache::HttpL1Cache;
@@ -981,7 +979,10 @@ impl ProxyService {
                 } else {
                     ("HIT", "HIT")
                 };
-                debug!("Cache {} (fast path, skip policy): {} {}", label, method, url);
+                debug!(
+                    "Cache {} (fast path, skip policy): {} {}",
+                    label, method, url
+                );
                 return Some(self.serve_l1_hit(
                     &cached,
                     cache_key,
