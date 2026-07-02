@@ -116,7 +116,7 @@
 | P2-2 | **Peer mTLS** | hierarchy security | `peer_fetch.rs` |
 | P2-3 | **HA deployment** — Redis L2 + sticky-less LB + shared spill dir or no-spill | cloud PoP equivalent | docs + compose |
 | P2-4 | OpenSearch Search API (M3) | retro-search differentiator | `cache-indexer` |
-| P2-5 | Web config UI for ACL | Palo Alto console lite | `web-config/` |
+| P2-5 | Web config UI for ACL | Palo Alto console lite | `web-config/` ✅ generator |
 
 ### P3 — Threat plane (async, не inline)
 

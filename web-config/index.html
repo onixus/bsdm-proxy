@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -9,236 +9,411 @@
 <body>
     <div class="container">
         <header>
-            <h1>🔧 BSDM-Proxy Configuration</h1>
-            <p class="subtitle">Configure your proxy deployment</p>
+            <h1>BSDM-Proxy Configuration</h1>
+            <p class="subtitle">Генератор <code>.env</code>, <code>docker-compose.yml</code> и <code>acl-rules.json</code></p>
         </header>
 
         <nav class="tabs">
-            <button class="tab active" data-tab="general">General</button>
-            <button class="tab" data-tab="cache">Cache</button>
-            <button class="tab" data-tab="kafka">Kafka</button>
-            <button class="tab" data-tab="auth">Auth</button>
-            <button class="tab" data-tab="acl">ACL</button>
-            <button class="tab" data-tab="categorization">Categories</button>
-            <button class="tab" data-tab="monitoring">Monitoring</button>
+            <button class="tab active" data-tab="general" type="button">General</button>
+            <button class="tab" data-tab="cache" type="button">Cache</button>
+            <button class="tab" data-tab="perf" type="button">Performance</button>
+            <button class="tab" data-tab="kafka" type="button">Kafka</button>
+            <button class="tab" data-tab="auth" type="button">Auth</button>
+            <button class="tab" data-tab="acl" type="button">ACL</button>
+            <button class="tab" data-tab="categorization" type="button">Categories</button>
+            <button class="tab" data-tab="monitoring" type="button">Monitoring</button>
         </nav>
 
         <main>
-            <!-- General, Cache, Kafka, Auth tabs remain the same -->
-            <!-- ACL Tab -->
+            <section id="general" class="tab-content active">
+                <h2>General</h2>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="http_port">HTTP proxy port</label>
+                        <input type="number" id="http_port" value="1488" min="1" max="65535">
+                    </div>
+                    <div class="form-group">
+                        <label for="metrics_port">Metrics / ACL API port</label>
+                        <input type="number" id="metrics_port" value="9090" min="1" max="65535">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="log_level">RUST_LOG</label>
+                    <select id="log_level">
+                        <option value="warn">warn</option>
+                        <option value="info,bsdm_proxy=info" selected>info,bsdm_proxy=info</option>
+                        <option value="info,bsdm_proxy=debug">info,bsdm_proxy=debug</option>
+                        <option value="debug">debug</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="shutdown_timeout">Shutdown timeout (seconds)</label>
+                    <input type="number" id="shutdown_timeout" value="30" min="5" max="300">
+                </div>
+                <div class="form-group">
+                    <label for="max_body_size">Max cache body (MB)</label>
+                    <input type="number" id="max_body_size" value="10" min="1" max="64">
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="mitm_enabled" checked>
+                        MITM_ENABLED (HTTPS interception)
+                    </label>
+                    <span class="help">Требует <code>/certs/ca.key</code> и <code>/certs/ca.crt</code></span>
+                </div>
+            </section>
+
+            <section id="cache" class="tab-content">
+                <h2>Cache (L1)</h2>
+                <div class="form-group">
+                    <label for="cache_capacity">CACHE_CAPACITY (entries)</label>
+                    <input type="number" id="cache_capacity" value="10000" min="100" step="100">
+                    <span class="help" id="cache_stats">10,000 entries ≈ 1.14 MB metadata</span>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="cache_ttl">CACHE_TTL_SECONDS</label>
+                        <input type="number" id="cache_ttl" value="3600" min="60">
+                    </div>
+                    <div class="form-group">
+                        <label for="cache_shards">CACHE_SHARDS</label>
+                        <input type="number" id="cache_shards" value="16" min="1" max="256">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="cache_honor_cache_control" checked>
+                        CACHE_HONOR_CACHE_CONTROL
+                    </label>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="negative_cache_enabled" checked>
+                            NEGATIVE_CACHE_ENABLED
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label for="negative_cache_ttl">NEGATIVE_CACHE_TTL_SECONDS</label>
+                        <input type="number" id="negative_cache_ttl" value="120" min="30">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="spill_threshold">CACHE_SPILL_THRESHOLD_BYTES (KB)</label>
+                    <input type="number" id="spill_threshold" value="256" min="0">
+                    <span class="help">Тела ≥ порога пишутся в mmap spill</span>
+                </div>
+
+                <h3>Redis L2 (optional)</h3>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="redis_l2_enabled">
+                        REDIS_L2_ENABLED
+                    </label>
+                </div>
+                <div id="redis_l2_options" class="nested" style="display:none">
+                    <div class="form-group">
+                        <label for="redis_url">REDIS_URL</label>
+                        <input type="text" id="redis_url" value="redis://redis:6379">
+                    </div>
+                    <div class="form-group">
+                        <label for="redis_key_prefix">REDIS_KEY_PREFIX</label>
+                        <input type="text" id="redis_key_prefix" value="bsdm:http:">
+                    </div>
+                </div>
+            </section>
+
+            <section id="perf" class="tab-content">
+                <h2>Performance</h2>
+                <div class="form-group">
+                    <label for="worker_count">WORKER_COUNT</label>
+                    <input type="number" id="worker_count" value="1" min="1" max="32">
+                    <span class="help">SO_REUSEPORT accept loops (Linux). Bench: 4 для cold, 1 для warm.</span>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="perf_fast_cache_hit">
+                        PERF_FAST_CACHE_HIT
+                    </label>
+                    <span class="help warn">Только bench/lab — пропускает ACL на cache HIT</span>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="streaming_miss_enabled" checked>
+                        STREAMING_MISS_ENABLED
+                    </label>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="kafka_sample_rate">KAFKA_SAMPLE_RATE (0 = all)</label>
+                        <input type="number" id="kafka_sample_rate" value="0" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label for="metrics_sample_rate">METRICS_SAMPLE_RATE (0 = all)</label>
+                        <input type="number" id="metrics_sample_rate" value="0" min="0">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="kafka_queue_capacity">KAFKA_QUEUE_CAPACITY</label>
+                    <input type="number" id="kafka_queue_capacity" value="8192" min="256">
+                </div>
+            </section>
+
+            <section id="kafka" class="tab-content">
+                <h2>Kafka &amp; analytics pipeline</h2>
+                <div class="form-group">
+                    <label for="kafka_brokers">KAFKA_BROKERS</label>
+                    <input type="text" id="kafka_brokers" value="kafka:9092">
+                </div>
+                <div class="form-group">
+                    <label for="kafka_topic">KAFKA_TOPIC</label>
+                    <input type="text" id="kafka_topic" value="cache-events">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="kafka_batch_size">Indexer KAFKA_BATCH_SIZE</label>
+                        <input type="number" id="kafka_batch_size" value="100" min="1">
+                    </div>
+                    <div class="form-group">
+                        <label for="kafka_batch_timeout">Indexer KAFKA_BATCH_TIMEOUT (ms)</label>
+                        <input type="number" id="kafka_batch_timeout" value="5000" min="100">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="kafka_acks">KAFKA_ACKS</label>
+                    <select id="kafka_acks">
+                        <option value="1" selected>1</option>
+                        <option value="0">0</option>
+                        <option value="all">all</option>
+                    </select>
+                </div>
+            </section>
+
+            <section id="auth" class="tab-content">
+                <h2>Authentication</h2>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="auth_enabled">
+                        AUTH_ENABLED
+                    </label>
+                </div>
+                <div id="auth_options" class="nested" style="display:none">
+                    <div class="form-group">
+                        <label for="auth_backend">AUTH_BACKEND</label>
+                        <select id="auth_backend">
+                            <option value="basic" selected>basic</option>
+                            <option value="ldap">ldap</option>
+                            <option value="ntlm">ntlm</option>
+                            <option value="kerberos">kerberos</option>
+                        </select>
+                        <span class="help">NTLM/Kerberos требуют сборки с features</span>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="auth_realm">AUTH_REALM</label>
+                            <input type="text" id="auth_realm" value="BSDM-Proxy">
+                        </div>
+                        <div class="form-group">
+                            <label for="auth_cache_ttl">AUTH_CACHE_TTL (seconds)</label>
+                            <input type="number" id="auth_cache_ttl" value="300" min="60">
+                        </div>
+                    </div>
+                    <div id="ldap_settings" class="nested" style="display:none">
+                        <h3>LDAP</h3>
+                        <div class="form-group">
+                            <label for="ldap_servers">LDAP_SERVERS</label>
+                            <input type="text" id="ldap_servers" value="ldaps://dc.corp.local:636">
+                        </div>
+                        <div class="form-group">
+                            <label for="ldap_base_dn">LDAP_BASE_DN</label>
+                            <input type="text" id="ldap_base_dn" value="dc=corp,dc=local">
+                        </div>
+                        <div class="form-group">
+                            <label for="ldap_bind_dn">LDAP_BIND_DN</label>
+                            <input type="text" id="ldap_bind_dn" value="cn=proxy,ou=services,dc=corp,dc=local">
+                        </div>
+                        <div class="form-group">
+                            <label for="ldap_bind_password">LDAP_BIND_PASSWORD</label>
+                            <input type="password" id="ldap_bind_password" value="" autocomplete="off">
+                        </div>
+                        <div class="form-group">
+                            <label for="ldap_user_filter">LDAP_USER_FILTER</label>
+                            <input type="text" id="ldap_user_filter" value="(sAMAccountName={username})">
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="ldap_use_tls" checked>
+                                LDAP_USE_TLS
+                            </label>
+                        </div>
+                    </div>
+                    <div id="ntlm_settings" class="nested" style="display:none">
+                        <h3>NTLM</h3>
+                        <div class="form-group">
+                            <label for="ntlm_domain">NTLM_DOMAIN</label>
+                            <input type="text" id="ntlm_domain" value="WORKGROUP">
+                        </div>
+                        <div class="form-group">
+                            <label for="ntlm_workstation">NTLM_WORKSTATION</label>
+                            <input type="text" id="ntlm_workstation" value="PROXY01">
+                        </div>
+                    </div>
+                </div>
+            </section>
+
             <section id="acl" class="tab-content">
-                <h2>🔐 Access Control Lists</h2>
-                
+                <h2>Access Control Lists</h2>
                 <div class="form-group">
                     <label>
                         <input type="checkbox" id="acl_enabled">
-                        Enable ACL
+                        ACL_ENABLED
                     </label>
-                    <span class="help">Control access by domain, category, user, time</span>
                 </div>
-
-                <div id="acl_options" style="display: none;">
-                    <div class="form-group">
-                        <label for="acl_default_action">Default Action</label>
-                        <select id="acl_default_action">
-                            <option value="allow">Allow</option>
-                            <option value="deny" selected>Deny</option>
-                        </select>
-                        <span class="help">Action when no rules match</span>
+                <div id="acl_options" class="nested" style="display:none">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="acl_default_action">ACL_DEFAULT_ACTION</label>
+                            <select id="acl_default_action">
+                                <option value="allow" selected>allow</option>
+                                <option value="deny">deny</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="acl_rules_path">ACL_RULES_PATH</label>
+                            <input type="text" id="acl_rules_path" value="/etc/bsdm-proxy/acl-rules.json">
+                        </div>
                     </div>
-
-                    <div class="form-group">
-                        <label for="acl_rules_path">Rules File Path</label>
-                        <input type="text" id="acl_rules_path" value="/etc/bsdm-proxy/acl-rules.json">
-                        <span class="help">Path to JSON rules file</span>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="acl_auto_reload">
+                                ACL_AUTO_RELOAD
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="acl_reload_interval">ACL_RELOAD_INTERVAL (sec)</label>
+                            <input type="number" id="acl_reload_interval" value="60" min="10">
+                        </div>
                     </div>
-
-                    <h3>Quick Rules</h3>
-                    
                     <div class="form-group">
-                        <label>
-                            <input type="checkbox" id="acl_block_adult">
-                            Block Adult Content
-                        </label>
+                        <label for="acl_api_token">ACL_API_TOKEN (REST on metrics port)</label>
+                        <input type="password" id="acl_api_token" value="" placeholder="optional Bearer token" autocomplete="off">
                     </div>
-
+                    <h3>Quick category rules</h3>
                     <div class="form-group">
-                        <label>
-                            <input type="checkbox" id="acl_block_gambling">
-                            Block Gambling
-                        </label>
+                        <label><input type="checkbox" id="acl_block_adult"> Block adult</label>
                     </div>
-
                     <div class="form-group">
-                        <label>
-                            <input type="checkbox" id="acl_block_malware" checked>
-                            Block Malware
-                        </label>
+                        <label><input type="checkbox" id="acl_block_gambling"> Block gambling</label>
                     </div>
-
                     <div class="form-group">
-                        <label>
-                            <input type="checkbox" id="acl_block_phishing" checked>
-                            Block Phishing
-                        </label>
+                        <label><input type="checkbox" id="acl_block_malware" checked> Block malware</label>
                     </div>
-
+                    <div class="form-group">
+                        <label><input type="checkbox" id="acl_block_phishing" checked> Block phishing</label>
+                    </div>
                     <div class="info-box">
-                        <strong>💡 Rule Types Available:</strong><br>
-                        • Domain (*.example.com)<br>
-                        • URL Prefix (/admin/*)<br>
-                        • Regex (\.exe$)<br>
-                        • Category (adult, malware)<br>
-                        • Time Window (9AM-5PM)<br>
-                        • User/Group<br>
-                        • IP Range
+                        REST API: <code>GET/POST :METRICS_PORT/api/acl/rules</code>, <code>POST /api/acl/reload</code>
                     </div>
                 </div>
             </section>
 
-            <!-- Categorization Tab -->
             <section id="categorization" class="tab-content">
-                <h2>🌐 URL Categorization</h2>
-                
+                <h2>URL Categorization</h2>
                 <div class="form-group">
                     <label>
                         <input type="checkbox" id="categorization_enabled">
-                        Enable Categorization
+                        CATEGORIZATION_ENABLED
                     </label>
-                    <span class="help">Automatic URL category detection</span>
                 </div>
-
-                <div id="categorization_options" style="display: none;">
+                <div id="categorization_options" class="nested" style="display:none">
                     <div class="form-group">
-                        <label for="categorization_cache_ttl">Cache TTL (seconds)</label>
-                        <input type="number" id="categorization_cache_ttl" value="3600" min="300" max="86400">
-                        <span class="help">How long to cache categories</span>
+                        <label for="categorization_cache_ttl">CATEGORIZATION_CACHE_TTL</label>
+                        <input type="number" id="categorization_cache_ttl" value="3600" min="300">
                     </div>
-
-                    <h3>UT1 Blacklists (local category DB)</h3>
-                    
+                    <h3>UT1 Blacklists (hot path)</h3>
                     <div class="form-group">
-                        <label>
-                            <input type="checkbox" id="ut1_enabled" checked>
-                            Enable UT1 Blacklists
-                        </label>
-                        <span class="help">30+ categories, millions of domains (Université Toulouse 1)</span>
+                        <label><input type="checkbox" id="ut1_enabled" checked> UT1_ENABLED</label>
                     </div>
-
                     <div class="form-group">
-                        <label for="ut1_path">UT1 Path</label>
+                        <label for="ut1_path">UT1_PATH</label>
                         <input type="text" id="ut1_path" value="/var/lib/ut1-blacklists">
-                        <span class="help">Path to extracted UT1 blacklists (blacklists/&lt;category&gt;/domains)</span>
                     </div>
-
-                    <h3>URLhaus (Malware Detection)</h3>
-                    
+                    <h3>Online enrich (async, off hot path)</h3>
                     <div class="form-group">
-                        <label>
-                            <input type="checkbox" id="urlhaus_enabled" checked>
-                            Enable URLhaus
-                        </label>
-                        <span class="help">Real-time malware URL detection</span>
+                        <label><input type="checkbox" id="urlhaus_enabled"> URLHAUS_ENABLED</label>
                     </div>
-
                     <div class="form-group">
-                        <label for="urlhaus_api">URLhaus API</label>
+                        <label for="urlhaus_api">URLHAUS_API</label>
                         <input type="text" id="urlhaus_api" value="https://urlhaus-api.abuse.ch/v1/url/">
                     </div>
-
-                    <h3>PhishTank (Phishing Detection)</h3>
-                    
                     <div class="form-group">
-                        <label>
-                            <input type="checkbox" id="phishtank_enabled" checked>
-                            Enable PhishTank
-                        </label>
-                        <span class="help">Community phishing database</span>
+                        <label><input type="checkbox" id="phishtank_enabled"> PHISHTANK_ENABLED</label>
                     </div>
-
                     <div class="form-group">
-                        <label for="phishtank_api">PhishTank API</label>
+                        <label for="phishtank_api">PHISHTANK_API</label>
                         <input type="text" id="phishtank_api" value="https://checkurl.phishtank.com/checkurl/">
                     </div>
-
-                    <h3>Custom Database</h3>
-                    
+                    <h3>Custom DB</h3>
                     <div class="form-group">
-                        <label>
-                            <input type="checkbox" id="custom_db_enabled">
-                            Enable Custom DB
-                        </label>
-                        <span class="help">Your own category database (JSON)</span>
+                        <label><input type="checkbox" id="custom_db_enabled"> CUSTOM_DB_ENABLED</label>
                     </div>
-
                     <div class="form-group">
-                        <label for="custom_db_path">Custom DB Path</label>
+                        <label for="custom_db_path">CUSTOM_DB_PATH</label>
                         <input type="text" id="custom_db_path" value="/etc/bsdm-proxy/custom-categories.json">
-                    </div>
-
-                    <div class="info-box">
-                        <strong>📚 Categories Available:</strong><br>
-                        <strong>Threats:</strong> malware, phishing, spyware<br>
-                        <strong>Inappropriate:</strong> adult, gambling, violence, weapons, drugs<br>
-                        <strong>Tracking:</strong> adv, tracker, redirector<br>
-                        <strong>Safe:</strong> education, news, business, health<br>
-                        <br>
-                        <strong>Setup:</strong><br>
-                        <code>UT1_PATH=/var/lib/ut1-blacklists ./scripts/download-ut1-blacklists.sh</code>
                     </div>
                 </div>
             </section>
 
-            <!-- Monitoring Tab -->
             <section id="monitoring" class="tab-content">
-                <h2>📊 Monitoring &amp; Analytics</h2>
-
+                <h2>Monitoring stack</h2>
                 <div class="form-group">
-                    <label>
-                        <input type="checkbox" id="prometheus_enabled" checked>
-                        Enable Prometheus
-                    </label>
+                    <label><input type="checkbox" id="prometheus_enabled" checked> Include Prometheus</label>
                 </div>
-
                 <div class="form-group">
-                    <label>
-                        <input type="checkbox" id="grafana_enabled" checked>
-                        Enable Grafana
-                    </label>
+                    <label><input type="checkbox" id="grafana_enabled" checked> Include Grafana</label>
                 </div>
-
-                <h3>ClickHouse (cache-indexer backend)</h3>
-
+                <h3>cache-indexer → ClickHouse</h3>
                 <div class="form-group">
-                    <label for="clickhouse_url">ClickHouse URL</label>
+                    <label for="clickhouse_url">CLICKHOUSE_URL</label>
                     <input type="text" id="clickhouse_url" value="http://clickhouse:8123">
                 </div>
-
-                <div class="form-group">
-                    <label for="clickhouse_database">Database</label>
-                    <input type="text" id="clickhouse_database" value="bsdm">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="clickhouse_database">CLICKHOUSE_DATABASE</label>
+                        <input type="text" id="clickhouse_database" value="bsdm">
+                    </div>
+                    <div class="form-group">
+                        <label for="clickhouse_table">CLICKHOUSE_TABLE</label>
+                        <input type="text" id="clickhouse_table" value="http_cache">
+                    </div>
                 </div>
-
                 <div class="form-group">
-                    <label for="clickhouse_table">Table</label>
-                    <input type="text" id="clickhouse_table" value="http_cache">
+                    <label for="search_api_token">SEARCH_API_TOKEN (optional)</label>
+                    <input type="password" id="search_api_token" value="" autocomplete="off">
                 </div>
             </section>
         </main>
 
         <footer>
-            <button class="btn btn-primary" onclick="generateConfig()">Generate Configuration</button>
-            <button class="btn btn-secondary" onclick="exportEnv()">Export .env</button>
-            <button class="btn btn-secondary" onclick="exportDockerCompose()">Export docker-compose.yml</button>
+            <div class="footer-actions">
+                <button class="btn btn-primary" type="button" onclick="generateConfig()">Preview</button>
+                <button class="btn btn-secondary" type="button" onclick="exportEnv()">Export .env</button>
+                <button class="btn btn-secondary" type="button" onclick="exportDockerCompose()">Export compose</button>
+                <button class="btn btn-secondary" type="button" onclick="exportAclRules()">Export ACL JSON</button>
+                <label class="btn btn-secondary import-label">
+                    Import .env
+                    <input type="file" id="import_env" accept=".env,text/plain" hidden onchange="importEnvFile(event)">
+                </label>
+            </div>
         </footer>
 
-        <!-- Output Modal -->
         <div id="output-modal" class="modal">
             <div class="modal-content">
                 <span class="close" onclick="closeModal()">&times;</span>
                 <h2 id="modal-title">Configuration</h2>
                 <pre id="modal-output"></pre>
-                <button class="btn btn-primary" onclick="copyToClipboard()">Copy to Clipboard</button>
+                <button class="btn btn-primary" type="button" onclick="copyToClipboard()">Copy</button>
             </div>
         </div>
     </div>

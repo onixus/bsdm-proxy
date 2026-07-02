@@ -6,20 +6,13 @@
 
 ## Features
 
-- ✨ **Modern UI** - Dark theme, responsive design
-- 🛠️ **5 Configuration Sections**
-  - General (ports, logging, limits)
-  - Cache (capacity, TTL, L2)
-  - Kafka (brokers, topics, batching)
-  - Authentication (Basic, LDAP; NTLM — planned M2)
-  - Monitoring (Prometheus, Grafana, ClickHouse)
-- 📊 **Real-time Validation** - Live feedback
-- 📥 **Export Options**
-  - `.env` file
-  - `docker-compose.yml`
-  - Environment variables
-- 📋 **Copy to Clipboard** - One-click copy
-- 📦 **Zero Dependencies** - Pure HTML/CSS/JS
+- **8 configuration tabs** — General, Cache, Performance, Kafka, Auth, ACL, Categories, Monitoring
+- **Export** — `bsdm-proxy.env`, `docker-compose.yml` (aligned with repo layout), `acl-rules.json`
+- **Import** — load existing `.env` into the form
+- **ACL quick rules** — category blocks + REST API token / auto-reload
+- **Zero backend** — static HTML/CSS/JS; open locally or via `python3 -m http.server`
+
+> Live runtime ACL editing: use proxy REST API on `:METRICS_PORT/api/acl/*` (see [docs/acl.md](../docs/acl.md)).
 
 ## Quick Start
 
