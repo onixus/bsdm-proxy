@@ -6,11 +6,24 @@ BSDM proxy categorizes HTTP(S) traffic using a layered engine: local domain list
 
 ```
 Request URL → extract hostname
-    → Local category DB (UT1 Blacklists, optional)
-    → OTX threat intel (optional)
+    → In-memory category cache (sync)
+    → Local category DB (UT1 Blacklists, optional)     ← hot path (#104)
+    → URLhaus / PhishTank (optional, background task)  ← async enrich
+    → OTX threat intel (optional, future)
     → ML classifier (stub, optional)
     → Category + confidence + source
 ```
+
+### Hot path vs async enrichment (#104)
+
+На пути ответа клиенту вызывается только **`categorize_local()`**:
+
+- sync read in-memory cache (`std::sync::RwLock`)
+- lookup в UT1 / custom domain DB
+
+**URLhaus** и **PhishTank** не блокируют запрос: при отсутствии локальной категории запускается фоновый `tokio` task (`schedule_online_enrichment`), результат попадает в cache для следующих запросов.
+
+Первый запрос к неизвестному URL может пройти ACL до завершения online enrich (и до истечения policy cache TTL). Для threat-intel это ожидаемый компромисс async-модели.
 
 ## Local category database (UT1 Blacklists)
 

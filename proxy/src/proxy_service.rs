@@ -421,11 +421,14 @@ impl ProxyService {
         }
     }
 
-    async fn categorize_url(&self, url: &str) -> (Vec<String>, Vec<String>) {
+    fn categorize_url(&self, url: &str) -> (Vec<String>, Vec<String>) {
         let Some(engine) = &self.categorization else {
             return (Vec::new(), Vec::new());
         };
-        let result = engine.categorize(url).await;
+        let result = engine.categorize_local(url);
+        if result.categories.is_empty() && engine.online_enrichment_enabled() {
+            engine.schedule_online_enrichment(url);
+        }
         let categories: Vec<String> = result
             .categories
             .iter()
@@ -507,7 +510,7 @@ impl ProxyService {
             }
         }
 
-        let (category_names, threat_sources) = self.categorize_url(url).await;
+        let (category_names, threat_sources) = self.categorize_url(url);
         let blocking = self
             .check_acl(url, domain, &category_names, username, groups, client_ip)
             .await;

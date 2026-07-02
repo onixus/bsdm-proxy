@@ -3,7 +3,7 @@ name: bsdm
 description: BSDM-Proxy forward proxy with optional Redis L2
 type: application
 version: 0.1.0
-appVersion: "0.3.1"
+appVersion: "0.3.2"
 keywords:
   - proxy
   - cache

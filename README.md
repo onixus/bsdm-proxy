@@ -7,10 +7,10 @@
 
 [![E2E Tests](https://github.com/onixus/bsdm-proxy/actions/workflows/e2e.yml/badge.svg)](https://github.com/onixus/bsdm-proxy/actions/workflows/e2e.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.3.1-blue.svg)](https://github.com/onixus/bsdm-proxy/releases)
+[![Version](https://img.shields.io/badge/version-0.3.2-blue.svg)](https://github.com/onixus/bsdm-proxy/releases)
 [![Rust](https://img.shields.io/badge/rust-1.88+-orange.svg)](https://www.rust-lang.org)
 
-> **Текущая версия:** `0.3.1` (M3 ClickHouse analytics) · **M2.5** P0 закрыт · **M3** retro-search — indexer, Grafana, Search API — см. [Releases](https://github.com/onixus/bsdm-proxy/releases) · [CHANGELOG](CHANGELOG.md) · [roadmap](docs/roadmap.md)
+> **Текущая версия:** `0.3.2` (M2.5 perf P1) · **M2.5** P1 perf + offline categorization · **M3** retro-search — см. [Releases](https://github.com/onixus/bsdm-proxy/releases) · [CHANGELOG](CHANGELOG.md) · [roadmap](docs/roadmap.md)
 
 ⚠️ **MITM-прокси для HTTPS.** Используйте только в корпоративной среде с согласия пользователей и в рамках законодательства.
 

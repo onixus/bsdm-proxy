@@ -11,7 +11,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 use url::Url;
 
@@ -180,7 +179,8 @@ impl Default for CategorizationConfig {
 /// Categorization engine
 pub struct CategorizationEngine {
     config: CategorizationConfig,
-    cache: Arc<RwLock<HashMap<String, CategoryCache>>>,
+    /// Sync lock: hot-path reads must not await (#104).
+    cache: Arc<std::sync::RwLock<HashMap<String, CategoryCache>>>,
     local_db: Option<HashMap<String, HashSet<Category>>>,
     custom_db: Option<HashMap<String, HashSet<Category>>>,
     http_client: Client,
@@ -192,7 +192,7 @@ impl CategorizationEngine {
 
         let mut engine = Self {
             config,
-            cache: Arc::new(RwLock::new(HashMap::new())),
+            cache: Arc::new(std::sync::RwLock::new(HashMap::new())),
             local_db: None,
             custom_db: None,
             http_client: Client::builder()
@@ -224,8 +224,13 @@ impl CategorizationEngine {
         engine
     }
 
-    /// Categorize URL
-    pub async fn categorize(&self, url: &str) -> CategorizationResult {
+    /// Whether URLhaus / PhishTank lookups are configured.
+    pub fn online_enrichment_enabled(&self) -> bool {
+        self.config.urlhaus_enabled || self.config.phishtank_enabled
+    }
+
+    /// Hot path: in-memory cache + local UT1/custom DB only (no HTTP). #104
+    pub fn categorize_local(&self, url: &str) -> CategorizationResult {
         let parsed_url = match Url::parse(url) {
             Ok(u) => u,
             Err(e) => {
@@ -236,17 +241,14 @@ impl CategorizationEngine {
 
         let domain = parsed_url.host_str().unwrap_or("").to_string();
 
-        // Check cache first
-        if let Some(cached) = self.get_cached(&domain).await {
+        if let Some(cached) = self.get_cached(&domain) {
             debug!("Category cache hit for: {}", domain);
             return self.create_result(url, &domain, cached.categories, "cache", true);
         }
 
-        // Try local databases first (faster)
         let mut categories = HashSet::new();
         let mut source = "unknown";
 
-        // Check local category DB (UT1)
         if self.config.ut1_enabled {
             if let Some(cats) = self.check_local_db(&domain) {
                 categories.extend(cats);
@@ -254,7 +256,6 @@ impl CategorizationEngine {
             }
         }
 
-        // Check custom database
         if self.config.custom_db_enabled {
             if let Some(cats) = self.check_custom_db(&domain) {
                 categories.extend(cats);
@@ -266,35 +267,74 @@ impl CategorizationEngine {
             }
         }
 
-        // Check online services if no local match
-        if categories.is_empty() {
-            // Check URLhaus for malware
-            if self.config.urlhaus_enabled {
-                if let Some(cats) = self.check_urlhaus(url).await {
-                    categories.extend(cats);
-                    source = "urlhaus";
-                }
-            }
-
-            // Check PhishTank for phishing
-            if self.config.phishtank_enabled {
-                if let Some(cats) = self.check_phishtank(url).await {
-                    categories.extend(cats);
-                    source = if source == "unknown" {
-                        "phishtank"
-                    } else {
-                        "multiple"
-                    };
-                }
-            }
-        }
-
-        // Cache result
         if !categories.is_empty() {
-            self.cache_categories(&domain, categories.clone()).await;
+            self.cache_categories(&domain, categories.clone());
         }
 
         self.create_result(url, &domain, categories, source, false)
+    }
+
+    /// Spawn background URLhaus/PhishTank lookup when local DB had no match (#104).
+    pub fn schedule_online_enrichment(self: &Arc<Self>, url: &str) {
+        if !self.online_enrichment_enabled() {
+            return;
+        }
+        let url = url.to_string();
+        let engine = Arc::clone(self);
+        tokio::spawn(async move {
+            if let Err(e) = engine.enrich_online(&url).await {
+                debug!("Online categorization enrichment failed for {}: {}", url, e);
+            }
+        });
+    }
+
+    /// Categorize URL (compat wrapper — local only; online enrichment is async).
+    pub async fn categorize(&self, url: &str) -> CategorizationResult {
+        self.categorize_local(url)
+    }
+
+    async fn enrich_online(&self, url: &str) -> Result<(), String> {
+        let parsed_url = Url::parse(url).map_err(|e| e.to_string())?;
+        let domain = parsed_url.host_str().unwrap_or("").to_string();
+
+        if self
+            .get_cached(&domain)
+            .is_some_and(|c| !c.categories.is_empty())
+        {
+            return Ok(());
+        }
+
+        let mut categories = HashSet::new();
+        let mut source = "unknown";
+
+        if self.config.urlhaus_enabled {
+            if let Some(cats) = self.check_urlhaus(url).await {
+                categories.extend(cats);
+                source = "urlhaus";
+            }
+        }
+
+        if self.config.phishtank_enabled {
+            if let Some(cats) = self.check_phishtank(url).await {
+                categories.extend(cats);
+                source = if source == "unknown" {
+                    "phishtank"
+                } else {
+                    "multiple"
+                };
+            }
+        }
+
+        if categories.is_empty() {
+            return Ok(());
+        }
+
+        self.cache_categories(&domain, categories);
+        debug!(
+            "Online categorization enriched {} (source={})",
+            domain, source
+        );
+        Ok(())
     }
 
     fn check_local_db(&self, domain: &str) -> Option<HashSet<Category>> {
@@ -432,23 +472,24 @@ impl CategorizationEngine {
         Ok(count)
     }
 
-    /// Get cached categories
-    async fn get_cached(&self, domain: &str) -> Option<CategoryCache> {
-        let cache = self.cache.read().await;
+    /// Get cached categories (sync hot path).
+    fn get_cached(&self, domain: &str) -> Option<CategoryCache> {
+        let cache = self.cache.read().ok()?;
         cache.get(domain).filter(|c| !c.is_expired()).cloned()
     }
 
-    /// Cache categories
-    async fn cache_categories(&self, domain: &str, categories: HashSet<Category>) {
-        let mut cache = self.cache.write().await;
-        cache.insert(
-            domain.to_string(),
-            CategoryCache {
-                categories,
-                cached_at: Instant::now(),
-                ttl: self.config.cache_ttl,
-            },
-        );
+    /// Cache categories (sync).
+    fn cache_categories(&self, domain: &str, categories: HashSet<Category>) {
+        if let Ok(mut cache) = self.cache.write() {
+            cache.insert(
+                domain.to_string(),
+                CategoryCache {
+                    categories,
+                    cached_at: Instant::now(),
+                    ttl: self.config.cache_ttl,
+                },
+            );
+        }
     }
 
     /// Create result
@@ -472,10 +513,11 @@ impl CategorizationEngine {
         }
     }
 
-    /// Clean expired cache
-    pub async fn cleanup_cache(&self) {
-        let mut cache = self.cache.write().await;
-        cache.retain(|_, entry| !entry.is_expired());
+    /// Clean expired cache entries.
+    pub fn cleanup_cache(&self) {
+        if let Ok(mut cache) = self.cache.write() {
+            cache.retain(|_, entry| !entry.is_expired());
+        }
     }
 }
 
@@ -520,29 +562,48 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_categorization_disabled() {
+    #[test]
+    fn test_categorization_disabled() {
         let config = CategorizationConfig {
             enabled: false,
             ..Default::default()
         };
 
         let engine = CategorizationEngine::new(config);
-        let result = engine.categorize("https://example.com").await;
+        let result = engine.categorize_local("https://example.com");
 
         assert!(result.categories.is_empty());
     }
 
-    #[tokio::test]
-    async fn test_cache() {
+    #[test]
+    fn test_categorize_local_ut1() {
+        let dir = tempfile::tempdir().unwrap();
+        let cat_dir = dir.path().join("blacklists").join("malware");
+        std::fs::create_dir_all(&cat_dir).unwrap();
+        std::fs::write(cat_dir.join("domains"), "evil.example\n").unwrap();
+
+        let config = CategorizationConfig {
+            ut1_enabled: true,
+            ut1_path: Some(dir.path().to_string_lossy().into_owned()),
+            ..Default::default()
+        };
+
+        let engine = CategorizationEngine::new(config);
+        let result = engine.categorize_local("https://www.evil.example/path");
+        assert!(result.categories.contains(&Category::Malware));
+        assert_eq!(result.source, "ut1");
+    }
+
+    #[test]
+    fn test_cache() {
         let config = CategorizationConfig::default();
         let engine = CategorizationEngine::new(config);
 
         let mut cats = HashSet::new();
         cats.insert(Category::News);
-        engine.cache_categories("example.com", cats.clone()).await;
+        engine.cache_categories("example.com", cats.clone());
 
-        let cached = engine.get_cached("example.com").await;
+        let cached = engine.get_cached("example.com");
         assert!(cached.is_some());
         assert_eq!(cached.unwrap().categories, cats);
     }

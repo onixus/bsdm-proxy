@@ -89,7 +89,7 @@ impl KafkaEventPipeline {
         Some(Arc::new(Self { sender, producer }))
     }
 
-    /// Enqueue without blocking the request hot path. Drops when full (`KAFKA_QUEUE_DROP_POLICY=drop_new`).
+    /// Enqueue without blocking the request hot path. Drops when queue is full (drop-new).
     pub fn try_enqueue(&self, event: CacheEvent, metrics: &Metrics) {
         match self.sender.try_send(event) {
             Ok(()) => {}
