@@ -21,6 +21,8 @@ def cache_label(headers) -> str:
     """Normalize cache status from BSDM (x-cache-status) or Squid (Cache-Status / X-Cache)."""
     xcs = headers.get("x-cache-status")
     if xcs:
+        if xcs.endswith("-STREAMING"):
+            return xcs.removesuffix("-STREAMING")
         return xcs
     cache_status = headers.get("Cache-Status") or headers.get("cache-status")
     if cache_status:

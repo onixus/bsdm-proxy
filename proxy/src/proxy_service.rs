@@ -22,7 +22,10 @@ use crate::acl::{AclAction, AclDecision, AclEngine};
 use crate::auth::{AuthManager, ProxyAuthOutcome, UserInfo};
 use crate::cache::{CacheConfig, CachedResponse, CACHEABLE_METHODS};
 use crate::cache_digest::DigestRegistry;
-use crate::cache_freshness::{evaluate_store, evaluate_store_precheck, refresh_ttl_from_headers};
+use crate::cache_freshness::{
+    cache_status_metric_label, evaluate_store, evaluate_store_precheck, miss_x_cache_status_header,
+    refresh_ttl_from_headers,
+};
 use crate::cache_key::http_cache_key;
 use crate::categorization::CategorizationEngine;
 use crate::hierarchy::{HierarchyManager, HierarchyResult};
@@ -896,6 +899,12 @@ impl ProxyService {
         }
     }
 
+    fn attach_x_cache_status(resp: &mut Response<Body>, label: &str) {
+        if let Ok(val) = HeaderValue::from_str(label) {
+            resp.headers_mut().insert("x-cache-status", val);
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn complete_cache_miss(
         &self,
@@ -1323,11 +1332,10 @@ impl ProxyService {
 
                 if self.perf.streaming_miss_enabled {
                     let upstream_body = response.into_body();
-                    let x_cache = if store_precheck.store {
-                        "MISS"
-                    } else {
-                        "BYPASS"
-                    };
+                    let x_cache = miss_x_cache_status_header(true, &store_precheck);
+                    if let Some(g) = guard.as_mut() {
+                        g.set_cache_status(&cache_status_metric_label(x_cache));
+                    }
 
                     let handle = self.miss_completion_handle();
                     let cache_key_cb = cache_key.clone();
@@ -1389,9 +1397,7 @@ impl ProxyService {
                     let mut resp = Response::new(tee.boxed());
                     *resp.status_mut() = status;
                     Self::apply_response_headers(&headers_map, &mut resp);
-                    if let Ok(val) = HeaderValue::from_str(x_cache) {
-                        resp.headers_mut().insert("x-cache-status", val);
-                    }
+                    Self::attach_x_cache_status(&mut resp, x_cache);
                     return resp;
                 }
 
@@ -1424,7 +1430,7 @@ impl ProxyService {
                     body_bytes.len(),
                     &self.cache_config,
                 );
-                let cache_status = self.complete_cache_miss(
+                let _cache_status = self.complete_cache_miss(
                     cache_key,
                     &url,
                     method,
@@ -1449,9 +1455,8 @@ impl ProxyService {
                 let mut resp = Response::new(full(body_bytes));
                 *resp.status_mut() = status;
                 Self::apply_response_headers(&headers_map, &mut resp);
-                if let Ok(val) = HeaderValue::from_str(cache_status) {
-                    resp.headers_mut().insert("x-cache-status", val);
-                }
+                let header_label = miss_x_cache_status_header(false, &store_decision);
+                Self::attach_x_cache_status(&mut resp, header_label);
                 resp
             }
             Err(e) => {
