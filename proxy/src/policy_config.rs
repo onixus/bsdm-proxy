@@ -1,17 +1,16 @@
 //! Load ACL and categorization configuration from environment variables.
 
-use bsdm_proxy::acl::{AclAction, AclEngine};
+use bsdm_proxy::acl::{AclAction, AclEngine, AclEngineHandle};
 use bsdm_proxy::acl_config::{load_acl_engine_from_file, parse_acl_action};
 use bsdm_proxy::categorization::{CategorizationConfig, CategorizationEngine};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::RwLock;
 use tracing::{info, warn};
 
 #[derive(Clone)]
 pub struct PolicyConfig {
     pub acl_enabled: bool,
-    pub acl_engine: Option<Arc<RwLock<AclEngine>>>,
+    pub acl_engine: Option<Arc<AclEngineHandle>>,
     pub acl_rules_path: Option<String>,
     pub acl_auto_reload: bool,
     pub acl_reload_interval: Duration,
@@ -94,7 +93,7 @@ pub fn load_policy_config() -> PolicyConfig {
             info!("ACL enabled without ACL_RULES_PATH, using default action only");
             AclEngine::new(default_action)
         };
-        Some(Arc::new(RwLock::new(engine)))
+        Some(Arc::new(AclEngineHandle::new(engine)))
     } else {
         None
     };

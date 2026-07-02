@@ -310,8 +310,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         _ = interval.tick() => {
                             match reload_acl_engine(&rules_path, default_action) {
                                 Ok(engine) => {
-                                    let mut guard = acl_engine.write().await;
-                                    *guard = engine;
+                                    acl_engine.replace(engine);
                                     policy_cache.invalidate();
                                     info!("ACL rules reloaded from {}", rules_path);
                                 }

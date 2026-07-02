@@ -36,7 +36,7 @@ pub mod tls;
 pub mod upstream;
 
 // Re-export commonly used types
-pub use acl::{AclAction, AclDecision, AclEngine, AclRule};
+pub use acl::{AclAction, AclDecision, AclEngine, AclEngineHandle, AclRule};
 pub use acl_api::{AclApiConfig, AclApiState};
 pub use acl_config::{load_acl_engine_from_file, parse_acl_action};
 #[cfg(feature = "auth-kerberos")]

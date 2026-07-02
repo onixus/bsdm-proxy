@@ -7,10 +7,9 @@ use hyper::header::AUTHORIZATION;
 use hyper::{HeaderMap, Method, Request, Response, StatusCode};
 use serde::Serialize;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tracing::{info, warn};
 
-use crate::acl::{AclAction, AclEngine, AclRule};
+use crate::acl::{AclAction, AclEngineHandle, AclRule};
 use crate::acl_config::{load_acl_engine_from_file, parse_acl_action};
 use crate::http_types::{full, Body};
 use crate::policy_cache::PolicyDecisionCache;
@@ -40,14 +39,14 @@ impl AclApiConfig {
 
 #[derive(Clone)]
 pub struct AclApiState {
-    engine: Arc<RwLock<AclEngine>>,
+    engine: Arc<AclEngineHandle>,
     config: AclApiConfig,
     policy_cache: Option<Arc<PolicyDecisionCache>>,
 }
 
 impl AclApiState {
     pub fn new(
-        engine: Arc<RwLock<AclEngine>>,
+        engine: Arc<AclEngineHandle>,
         config: AclApiConfig,
         policy_cache: Option<Arc<PolicyDecisionCache>>,
     ) -> Self {
@@ -102,7 +101,7 @@ impl AclApiState {
     }
 
     async fn list_rules(&self) -> Response<Body> {
-        let engine = self.engine.read().await;
+        let engine = self.engine.load();
         let payload = ListRulesResponse {
             count: engine.rule_count(),
             default_action: engine.default_action(),
@@ -142,8 +141,7 @@ impl AclApiState {
             );
         }
 
-        let mut engine = self.engine.write().await;
-        if engine.has_rule(&rule.id) {
+        if self.engine.load().has_rule(&rule.id) {
             return json_response(
                 StatusCode::CONFLICT,
                 &format!(
@@ -154,7 +152,7 @@ impl AclApiState {
         }
 
         info!("ACL API: adding rule {} ({})", rule.id, rule.name);
-        engine.add_rule(rule.clone());
+        self.engine.mutate(|engine| engine.add_rule(rule.clone()));
         match serde_json::to_string(&rule) {
             Ok(body) => json_response(StatusCode::CREATED, &body),
             Err(_) => json_response(StatusCode::CREATED, r#"{"status":"created"}"#),
@@ -172,8 +170,7 @@ impl AclApiState {
         match load_acl_engine_from_file(path, self.config.default_action) {
             Ok(loaded) => {
                 let count = loaded.rule_count();
-                let mut engine = self.engine.write().await;
-                *engine = loaded;
+                self.engine.replace(loaded);
                 if let Some(cache) = &self.policy_cache {
                     cache.invalidate();
                 }
@@ -220,13 +217,13 @@ fn escape_json(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::acl::AclEngine;
+    use crate::acl::{AclEngine, AclEngineHandle};
     use http_body_util::BodyExt;
     use hyper::body::Bytes;
     use hyper::{Method, StatusCode};
 
     fn test_state() -> AclApiState {
-        let engine = Arc::new(RwLock::new(AclEngine::new(AclAction::Allow)));
+        let engine = Arc::new(AclEngineHandle::new(AclEngine::new(AclAction::Allow)));
         AclApiState::new(
             engine,
             AclApiConfig {
@@ -239,7 +236,7 @@ mod tests {
     }
 
     fn test_state_with_token() -> AclApiState {
-        let engine = Arc::new(RwLock::new(AclEngine::new(AclAction::Allow)));
+        let engine = Arc::new(AclEngineHandle::new(AclEngine::new(AclAction::Allow)));
         AclApiState::new(
             engine,
             AclApiConfig {
