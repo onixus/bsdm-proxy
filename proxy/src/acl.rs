@@ -8,11 +8,13 @@
 //! - Time-based access control
 //! - User/group-based rules
 
+use arc_swap::ArcSwap;
 use chrono::Timelike;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::IpAddr;
+use std::sync::Arc;
 use tracing::{debug, info, warn};
 
 /// Minutes since midnight for time-window matching (0–1439).
@@ -168,6 +170,72 @@ impl AclDecision {
     }
 }
 
+/// Lock-free snapshot handle for hot-path ACL checks (#40 / B9).
+pub struct AclEngineHandle {
+    snapshot: Arc<ArcSwap<AclEngine>>,
+}
+
+impl AclEngineHandle {
+    pub fn new(engine: AclEngine) -> Self {
+        Self {
+            snapshot: Arc::new(ArcSwap::from_pointee(engine)),
+        }
+    }
+
+    pub fn shared(snapshot: Arc<ArcSwap<AclEngine>>) -> Self {
+        Self { snapshot }
+    }
+
+    pub fn load(&self) -> arc_swap::Guard<Arc<AclEngine>> {
+        self.snapshot.load()
+    }
+
+    /// Hot path: atomic snapshot read, no `RwLock` (#40).
+    pub fn check_access(
+        &self,
+        url: &str,
+        domain: &str,
+        categories: &[&str],
+        user: Option<&str>,
+        groups: &[&str],
+        client_ip: Option<IpAddr>,
+    ) -> AclDecision {
+        self.snapshot
+            .load()
+            .check_access(url, domain, categories, user, groups, client_ip)
+    }
+
+    pub fn replace(&self, engine: AclEngine) {
+        self.snapshot.store(Arc::new(engine));
+    }
+
+    fn fork_from(engine: &AclEngine) -> AclEngine {
+        let mut next = AclEngine::new(engine.default_action());
+        next.load_rules(engine.rules().to_vec());
+        next
+    }
+
+    /// Copy-on-write update for ACL API / reload paths.
+    pub fn mutate<F>(&self, f: F)
+    where
+        F: FnOnce(&mut AclEngine),
+    {
+        let current = self.snapshot.load_full();
+        let next = match Arc::try_unwrap(current) {
+            Ok(mut engine) => {
+                f(&mut engine);
+                engine
+            }
+            Err(arc) => {
+                let mut engine = Self::fork_from(&arc);
+                f(&mut engine);
+                engine
+            }
+        };
+        self.snapshot.store(Arc::new(next));
+    }
+}
+
 /// ACL engine
 pub struct AclEngine {
     rules: Vec<AclRule>,
@@ -244,7 +312,7 @@ impl AclEngine {
         self.rules.iter().any(|r| r.id == id)
     }
 
-    /// Check if request is allowed (read-mostly; safe under `RwLock` read guard).
+    /// Check if request is allowed (immutable snapshot; no lock on hot path).
     pub fn check_access(
         &self,
         url: &str,
@@ -658,6 +726,37 @@ mod tests {
                     None,
                     &[],
                     None
+                )
+                .action,
+            AclAction::Deny
+        );
+    }
+
+    #[test]
+    fn handle_arcswap_hot_path_without_rwlock() {
+        let handle = AclEngineHandle::new(AclEngine::new(AclAction::Allow));
+        handle.mutate(|engine| {
+            engine.add_rule(AclRule {
+                id: "block-bad".to_string(),
+                name: "block".to_string(),
+                enabled: true,
+                priority: 100,
+                action: AclAction::Deny,
+                rule_type: AclRuleType::Domain("blocked.test".to_string()),
+                redirect_url: None,
+                comment: None,
+            });
+        });
+
+        assert_eq!(
+            handle
+                .check_access(
+                    "http://blocked.test/path",
+                    "blocked.test",
+                    &[],
+                    None,
+                    &[],
+                    None,
                 )
                 .action,
             AclAction::Deny

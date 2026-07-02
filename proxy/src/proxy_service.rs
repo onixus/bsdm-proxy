@@ -15,10 +15,9 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
-use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
-use crate::acl::{AclAction, AclDecision, AclEngine};
+use crate::acl::{AclAction, AclDecision, AclEngineHandle};
 use crate::auth::{AuthManager, ProxyAuthOutcome, UserInfo};
 use crate::cache::{CacheConfig, CachedResponse, CACHEABLE_METHODS};
 use crate::cache_digest::DigestRegistry;
@@ -44,7 +43,7 @@ use crate::tls::CertCache;
 use crate::upstream::{build_upstream_https_connector, UpstreamTlsConfig};
 
 pub struct ProxyPolicy {
-    pub acl_engine: Option<Arc<RwLock<AclEngine>>>,
+    pub acl_engine: Option<Arc<AclEngineHandle>>,
     pub categorization: Option<Arc<CategorizationEngine>>,
 }
 
@@ -213,7 +212,7 @@ pub struct ProxyService {
     pub(crate) metrics: Arc<Metrics>,
     pub(crate) mitm_enabled: bool,
     auth: Option<Arc<AuthManager>>,
-    acl_engine: Option<Arc<RwLock<AclEngine>>>,
+    acl_engine: Option<Arc<AclEngineHandle>>,
     categorization: Option<Arc<CategorizationEngine>>,
     hierarchy: Option<Arc<HierarchyManager>>,
     digest_registry: Option<Arc<DigestRegistry>>,
@@ -461,17 +460,14 @@ impl ProxyService {
 
         let eval_start = Instant::now();
         let category_refs: Vec<&str> = category_names.iter().map(String::as_str).collect();
-        let decision = {
-            let engine = acl_engine.read().await;
-            engine.check_access(
-                url,
-                domain,
-                &category_refs,
-                username,
-                groups,
-                Self::parse_client_ip(client_ip),
-            )
-        };
+        let decision = acl_engine.check_access(
+            url,
+            domain,
+            &category_refs,
+            username,
+            groups,
+            Self::parse_client_ip(client_ip),
+        );
 
         self.metrics
             .acl_eval_duration_seconds

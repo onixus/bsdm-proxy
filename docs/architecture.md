@@ -81,7 +81,7 @@ TCP accept
   → authenticate_proxy()          # Proxy-Authorization
   → check_policy()
        → categorization.categorize()   # UT1 Blacklists / OTX / custom
-       → acl_engine.check_access()     # Mutex lock
+       → acl_engine.check_access()     # ArcSwap snapshot (lock-free read)
   → L1 cache lookup (GET/HEAD)
   → [if HIERARCHY_ENABLED] resolve_source()
        → ICP query siblings (parallel UDP)
@@ -110,7 +110,7 @@ TCP accept
 
 - Вся логика в **binary crate** (`main.rs` ~1300 строк) — `ProxyService` не в `lib.rs` (B7)
 - Categorization с online API на **критическом пути** каждого запроса
-- ACL под глобальным `Mutex` — serializes concurrent ACL checks
+- ACL uses `AclEngineHandle` (`arc-swap`) — no `RwLock` on hot-path checks
 - Hierarchy metrics (`bsdm_proxy_hierarchy_*`) экспортируются в Prometheus при `HIERARCHY_ENABLED=true`
 - Нет `docker-compose.hierarchy.yml` для multi-instance E2E
 
@@ -206,7 +206,7 @@ Local L1 miss → ICP query siblings → select parent → fetch_via_peer → or
 |----|--------|-------|-----------|
 | **B7** | Монолит `main.rs` | `main.rs` | M1–M2 |
 | **B8** | Categorization на hot path (external HTTP) | `categorization.rs`, `main.rs` | M2 |
-| **B9** | ACL под `Mutex` | `policy_config.rs`, `main.rs` | M2 |
+| **B9** | ACL lock-free snapshot | `acl.rs` (`AclEngineHandle`) | M2 |
 | **B10** | Kafka `acks=0`, topic hardcoded | `main.rs:361-365` | M3 |
 | **B11** | Schema drift: `categories` в indexer | ✅ Done | `cache-indexer/src/main.rs` | M3 |
 | **B12** | Нет shared event crate | `proxy`, `cache-indexer` | M3 |

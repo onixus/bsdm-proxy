@@ -27,7 +27,7 @@
 |----|-------|--------|--------|
 | B7 | [#38](https://github.com/onixus/bsdm-proxy/issues/38) | Refactor ProxyService out of `main.rs` | ✅ |
 | B8 | [#39](https://github.com/onixus/bsdm-proxy/issues/39) | Move online categorization off hot path | ✅ |
-| B9 | [#40](https://github.com/onixus/bsdm-proxy/issues/40) | Replace ACL global Mutex | 🔄 |
+| B9 | [#40](https://github.com/onixus/bsdm-proxy/issues/40) | Replace ACL global Mutex | ✅ |
 | B10 | [#41](https://github.com/onixus/bsdm-proxy/issues/41) | Kafka reliable delivery (topic env, acks) | ✅ |
 | B11 | [#42](https://github.com/onixus/bsdm-proxy/issues/42) | Indexer: add `categories` to CacheEvent | ✅ |
 | B12 | [#43](https://github.com/onixus/bsdm-proxy/issues/43) | Shared `bsdm-events` crate | ✅ |

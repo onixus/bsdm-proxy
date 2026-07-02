@@ -307,6 +307,7 @@ dependencies = [
 name = "bsdm-proxy"
 version = "0.3.2"
 dependencies = [
+ "arc-swap",
  "base64",
  "brotli",
  "bsdm-events",
