@@ -26,7 +26,11 @@ async fn e2e_cache_hit_on_repeat_request() {
         .and_then(|v| v.to_str().ok())
         .map(str::to_string);
 
-    assert_ne!(first.as_deref(), Some("HIT"));
+    assert!(
+        matches!(first.as_deref(), Some("MISS") | Some("MISS-STREAMING")),
+        "expected MISS on first request, got {:?}",
+        first
+    );
 
     let second = client.get(&url).send().await.expect("second GET");
 

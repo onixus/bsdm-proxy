@@ -40,6 +40,30 @@ impl CacheStoreDecision {
     }
 }
 
+/// `x-cache-status` for upstream MISS before cache insert completes (#111).
+pub fn miss_x_cache_status_header(streaming: bool, precheck: &CacheStoreDecision) -> &'static str {
+    if !precheck.store {
+        return "BYPASS";
+    }
+    if precheck.is_negative {
+        return if streaming {
+            "NEGATIVE-MISS-STREAMING"
+        } else {
+            "NEGATIVE-MISS"
+        };
+    }
+    if streaming {
+        "MISS-STREAMING"
+    } else {
+        "MISS"
+    }
+}
+
+/// Prometheus / internal label (underscores).
+pub fn cache_status_metric_label(header_label: &str) -> String {
+    header_label.replace('-', "_")
+}
+
 pub fn parse_cache_control(value: &str) -> CacheControlDirectives {
     let mut directives = CacheControlDirectives::default();
     for part in value.split(',') {
@@ -284,5 +308,22 @@ mod tests {
         let h = headers(&[("Cache-Control", "private, max-age=3600")]);
         let decision = evaluate_store("GET", 200, &h, 100, &default_config());
         assert!(!decision.store);
+    }
+
+    #[test]
+    fn miss_x_cache_status_header_streaming() {
+        let store = CacheStoreDecision {
+            store: true,
+            ttl: Duration::from_secs(60),
+            is_negative: false,
+            must_revalidate: false,
+            etag: None,
+            last_modified: None,
+        };
+        assert_eq!(miss_x_cache_status_header(true, &store), "MISS-STREAMING");
+        assert_eq!(
+            cache_status_metric_label("MISS-STREAMING"),
+            "MISS_STREAMING"
+        );
     }
 }
