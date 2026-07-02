@@ -7,7 +7,7 @@ use tracing::warn;
 /// Performance-related settings loaded once at startup.
 #[derive(Debug, Clone)]
 pub struct PerfConfig {
-    /// Skip policy/Kafka/heavy metrics on L1 cache HIT (bench or trusted cache).
+    /// When true, serve L1/L2 cache hits (HIT, REVALIDATED, NEGATIVE_HIT) before ACL/categorization (#100).
     pub fast_cache_hit: bool,
     /// Number of accept loops bound with SO_REUSEPORT (Linux).
     pub worker_count: usize,
@@ -64,6 +64,11 @@ impl PerfConfig {
             0 => true,
             n => rand::random::<u32>().is_multiple_of(n),
         }
+    }
+
+    /// Bench/lab: skip ACL+categorization when serving from cache (HIT / REVALIDATED / NEGATIVE_HIT / L2_HIT).
+    pub fn skip_policy_on_cache_serve(&self) -> bool {
+        self.fast_cache_hit
     }
 
     /// Whether to enqueue a cache event to Kafka.

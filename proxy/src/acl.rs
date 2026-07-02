@@ -13,7 +13,6 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::sync::Mutex;
 use tracing::{debug, info, warn};
 
 /// Minutes since midnight for time-window matching (0–1439).
@@ -173,7 +172,8 @@ impl AclDecision {
 pub struct AclEngine {
     rules: Vec<AclRule>,
     default_action: AclAction,
-    regex_cache: Mutex<HashMap<String, Regex>>,
+    /// Regex patterns precompiled at rule load — no Mutex on hot path (#109).
+    compiled_regex: HashMap<String, Regex>,
 }
 
 impl AclEngine {
@@ -185,8 +185,28 @@ impl AclEngine {
         Self {
             rules: Vec::new(),
             default_action,
-            regex_cache: Mutex::new(HashMap::new()),
+            compiled_regex: HashMap::new(),
         }
+    }
+
+    fn compile_regex_pattern(pattern: &str) -> Regex {
+        Regex::new(pattern).unwrap_or_else(|e| {
+            warn!("Invalid regex pattern '{}': {}", pattern, e);
+            #[allow(clippy::invalid_regex)]
+            Regex::new("(?!)").expect("Failed to create never-matching regex")
+        })
+    }
+
+    fn rebuild_regex_cache(&mut self) {
+        let mut compiled = HashMap::new();
+        for rule in &self.rules {
+            if let AclRuleType::Regex(pattern) = &rule.rule_type {
+                compiled
+                    .entry(pattern.clone())
+                    .or_insert_with(|| Self::compile_regex_pattern(pattern));
+            }
+        }
+        self.compiled_regex = compiled;
     }
 
     /// Add ACL rule
@@ -197,6 +217,7 @@ impl AclEngine {
         );
         self.rules.push(rule);
         self.rules.sort_by_key(|b| std::cmp::Reverse(b.priority));
+        self.rebuild_regex_cache();
     }
 
     /// Load rules from configuration
@@ -204,6 +225,7 @@ impl AclEngine {
         info!("Loading {} ACL rules", rules.len());
         self.rules = rules;
         self.rules.sort_by_key(|b| std::cmp::Reverse(b.priority));
+        self.rebuild_regex_cache();
     }
 
     pub fn rule_count(&self) -> usize {
@@ -344,18 +366,11 @@ impl AclEngine {
         }
     }
 
-    /// Match regex pattern
+    /// Match regex pattern (precompiled at rule load).
     fn match_regex(&self, text: &str, pattern: &str) -> bool {
-        let mut cache = self.regex_cache.lock().unwrap_or_else(|e| e.into_inner());
-        let regex = cache.entry(pattern.to_string()).or_insert_with(|| {
-            Regex::new(pattern).unwrap_or_else(|e| {
-                warn!("Invalid regex pattern '{}': {}", pattern, e);
-                #[allow(clippy::invalid_regex)]
-                Regex::new("(?!)").expect("Failed to create never-matching regex")
-            })
-        });
-
-        regex.is_match(text)
+        self.compiled_regex
+            .get(pattern)
+            .is_some_and(|regex| regex.is_match(text))
     }
 
     /// Check if IP is in range
@@ -606,5 +621,42 @@ mod tests {
             None,
         );
         assert_eq!(decision.action, AclAction::Allow);
+    }
+
+    #[test]
+    fn regex_precompiled_on_load_rules() {
+        let mut engine = AclEngine::new(AclAction::Deny);
+        engine.load_rules(vec![AclRule {
+            id: "re".to_string(),
+            name: "regex".to_string(),
+            enabled: true,
+            priority: 100,
+            action: AclAction::Allow,
+            rule_type: AclRuleType::Regex(r"\.exe$".to_string()),
+            redirect_url: None,
+            comment: None,
+        }]);
+        assert!(engine.check_access(
+            "https://evil.com/malware.exe",
+            "evil.com",
+            &[],
+            None,
+            &[],
+            None,
+        )
+        .action
+            == AclAction::Allow);
+        assert_eq!(
+            engine.check_access(
+                "https://evil.com/page.html",
+                "evil.com",
+                &[],
+                None,
+                &[],
+                None
+            )
+            .action,
+            AclAction::Deny
+        );
     }
 }

@@ -50,6 +50,7 @@ pub struct Metrics {
     // System metrics
     pub kafka_events_sent: Counter,
     pub kafka_send_errors: Counter,
+    pub kafka_queue_dropped_total: Counter,
     pub tls_handshakes_total: CounterVec,
 
     // ACL metrics
@@ -235,6 +236,12 @@ impl Metrics {
         )?;
         registry.register(Box::new(kafka_send_errors.clone()))?;
 
+        let kafka_queue_dropped_total = Counter::new(
+            "bsdm_proxy_kafka_queue_dropped_total",
+            "Kafka events dropped because the in-memory queue was full",
+        )?;
+        registry.register(Box::new(kafka_queue_dropped_total.clone()))?;
+
         let tls_handshakes_total = CounterVec::new(
             Opts::new("bsdm_proxy_tls_handshakes_total", "Total TLS handshakes"),
             &["status"],
@@ -349,6 +356,7 @@ impl Metrics {
             upstream_connections_created,
             kafka_events_sent,
             kafka_send_errors,
+            kafka_queue_dropped_total,
             tls_handshakes_total,
             acl_decisions_total,
             acl_rules_matched_total,

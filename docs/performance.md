@@ -28,7 +28,7 @@ cargo install oha   # или бинарь с https://github.com/hatoo/oha
 
 | Переменная | Default | Описание |
 |------------|---------|----------|
-| `PERF_FAST_CACHE_HIT` | `false` | L1 HIT до ACL: без policy/Kafka/heavy metrics |
+| `PERF_FAST_CACHE_HIT` | `false` | Cache serve (HIT / REVALIDATED / NEGATIVE_HIT / L2_HIT) до ACL: без policy/Kafka/heavy metrics |
 | `BSM_PERF_MODE` | `false` | Алиас `PERF_FAST_CACHE_HIT=true` |
 | `WORKER_COUNT` | `1` | Число accept-loop с SO_REUSEPORT (Linux); **4** для sites/large-object bench |
 | `TCP_SNDBUF_BYTES` | `524288` | SO_SNDBUF на клиентских соединениях (`0` = не менять) |
@@ -37,6 +37,7 @@ cargo install oha   # или бинарь с https://github.com/hatoo/oha
 | `CACHE_SPILL_DIR` | `{tmp}/bsdm-cache-spill` | Каталог spill-файлов (dir `0o700`, files `0o600` на Unix) |
 | `HTTP_PRESERVE_HEADER_CASE` | `true` | `false` убирает preserve/title-case в http1 (bench) |
 | `KAFKA_SAMPLE_RATE` | `0` | `N` → 1 из N cache events в Kafka (`0` = все) |
+| `KAFKA_QUEUE_CAPACITY` | `8192` | Bounded in-memory queue перед Kafka producer (#106) |
 | `METRICS_SAMPLE_RATE` | `0` | `N` → histograms для 1 из N запросов (`0` = все) |
 | `STREAMING_MISS_ENABLED` | `true` | Tee upstream MISS body to client while buffering for L1 |
 

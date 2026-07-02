@@ -64,6 +64,7 @@ pub use peer_discovery::{run_peer_discovery, PeerDiscoveryConfig};
 pub use peer_fetch::{fetch_via_peer, PeerFetchError};
 pub use peers::{CachePeer, PeerConfig, PeerRegistry, PeerType};
 pub use perf::{bind_http_listeners, PerfConfig};
+pub use pipeline::KafkaEventPipeline;
 pub use policy_cache::{PolicyCacheConfig, PolicyDecisionCache};
 pub use proxy_service::{ProxyPolicy, ProxyService};
 pub use rate_limit::{RateLimitConfig, RateLimitViolation, RateLimiter};

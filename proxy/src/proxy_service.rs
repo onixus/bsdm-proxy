@@ -11,7 +11,6 @@ use hyper::header::{
 use hyper::{Request, Response, StatusCode};
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
-use rdkafka::producer::FutureProducer;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -34,7 +33,7 @@ use crate::peer_fetch::fetch_via_peer;
 use crate::peers::CachePeer;
 use crate::perf::PerfConfig;
 use crate::pipeline::{
-    create_kafka_producer, flush_kafka, new_event_id, send_to_kafka_async, CacheEvent,
+    flush_kafka, new_event_id, CacheEvent, KafkaEventPipeline,
 };
 use crate::policy_cache::PolicyDecisionCache;
 use crate::rate_limit::{RateLimitViolation, RateLimiter};
@@ -56,8 +55,7 @@ struct MissCompletionHandle {
     l2_cache: Option<RedisL2Cache>,
     hierarchy: Option<Arc<HierarchyManager>>,
     metrics: Arc<Metrics>,
-    kafka_producer: Option<Arc<FutureProducer>>,
-    kafka_topic: String,
+    kafka_pipeline: Option<Arc<KafkaEventPipeline>>,
     perf: PerfConfig,
     digest_registry: Option<Arc<DigestRegistry>>,
 }
@@ -85,13 +83,8 @@ impl MissCompletionHandle {
         if !self.perf.should_emit_kafka_event() {
             return;
         }
-        if let Some(producer) = self.kafka_producer.clone() {
-            send_to_kafka_async(
-                producer,
-                self.kafka_topic.clone(),
-                self.metrics.clone(),
-                event,
-            );
+        if let Some(pipeline) = &self.kafka_pipeline {
+            pipeline.try_enqueue(event, &self.metrics);
         }
     }
 
@@ -213,8 +206,7 @@ pub struct ProxyService {
     http_cache: Arc<HttpL1Cache>,
     l2_cache: Option<RedisL2Cache>,
     cache_config: CacheConfig,
-    kafka_producer: Option<Arc<FutureProducer>>,
-    kafka_topic: String,
+    kafka_pipeline: Option<Arc<KafkaEventPipeline>>,
     http_client:
         hyper_util::client::legacy::Client<hyper_rustls::HttpsConnector<HttpConnector>, Body>,
     pub(crate) metrics: Arc<Metrics>,
@@ -257,8 +249,7 @@ impl ProxyService {
             l2_cache: self.l2_cache.clone(),
             hierarchy: self.hierarchy.clone(),
             metrics: self.metrics.clone(),
-            kafka_producer: self.kafka_producer.clone(),
-            kafka_topic: self.kafka_topic.clone(),
+            kafka_pipeline: self.kafka_pipeline.clone(),
             perf: self.perf.clone(),
             digest_registry: self.digest_registry.clone(),
         }
@@ -269,8 +260,7 @@ impl ProxyService {
         cert_cache: CertCache,
         cache_config: CacheConfig,
         l2_cache: Option<RedisL2Cache>,
-        kafka_brokers: Option<String>,
-        kafka_topic: String,
+        kafka_pipeline: Option<Arc<KafkaEventPipeline>>,
         metrics: Arc<Metrics>,
         mitm_enabled: bool,
         auth: Option<Arc<AuthManager>>,
@@ -282,8 +272,6 @@ impl ProxyService {
         perf: PerfConfig,
         policy_cache: Arc<PolicyDecisionCache>,
     ) -> Self {
-        let kafka_producer = kafka_brokers.as_deref().and_then(create_kafka_producer);
-
         let http_cache = Arc::new(HttpL1Cache::new(
             cache_config.capacity,
             cache_config.shard_count,
@@ -302,8 +290,7 @@ impl ProxyService {
             http_cache,
             l2_cache,
             cache_config,
-            kafka_producer,
-            kafka_topic,
+            kafka_pipeline,
             http_client,
             metrics,
             mitm_enabled,
@@ -858,22 +845,17 @@ impl ProxyService {
         if !self.perf.should_emit_kafka_event() {
             return;
         }
-        if let Some(producer) = self.kafka_producer.clone() {
-            send_to_kafka_async(
-                producer,
-                self.kafka_topic.clone(),
-                self.metrics.clone(),
-                event,
-            );
+        if let Some(pipeline) = &self.kafka_pipeline {
+            pipeline.try_enqueue(event, &self.metrics);
         }
     }
 
     pub async fn flush_kafka(&self, timeout: Duration) {
-        let Some(producer) = self.kafka_producer.clone() else {
+        let Some(pipeline) = self.kafka_pipeline.as_ref() else {
             return;
         };
 
-        flush_kafka(producer, timeout).await;
+        flush_kafka(pipeline.producer(), timeout).await;
     }
 
     fn finish_request_metrics(
@@ -969,6 +951,123 @@ impl ProxyService {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
+    async fn try_serve_cache_before_policy(
+        &self,
+        req: &Request<Incoming>,
+        cache_key: &Arc<str>,
+        url: &str,
+        method: &str,
+        client_ip: &str,
+        request_start: Instant,
+        detailed_metrics: bool,
+        guard: &mut Option<RequestMetricsGuard>,
+        fast_scope: &mut Option<FastRequestScope>,
+    ) -> Option<Response<Body>> {
+        let no_user: Option<String> = None;
+        let no_cats: Vec<String> = Vec::new();
+        let no_threats: Vec<String> = Vec::new();
+        let cache_lookup_start = Instant::now();
+
+        if let Some(cached) = self.http_cache.get(cache_key) {
+            if detailed_metrics {
+                self.metrics
+                    .cache_lookup_duration_seconds
+                    .observe(cache_lookup_start.elapsed().as_secs_f64());
+            }
+            if cached.can_serve_fresh() {
+                let (label, x_status) = if cached.is_negative {
+                    ("NEGATIVE_HIT", "NEGATIVE-HIT")
+                } else {
+                    ("HIT", "HIT")
+                };
+                debug!("Cache {} (fast path, skip policy): {} {}", label, method, url);
+                return Some(self.serve_l1_hit(
+                    &cached,
+                    cache_key,
+                    url,
+                    method,
+                    &no_user,
+                    &no_user,
+                    client_ip,
+                    &no_cats,
+                    &no_threats,
+                    request_start,
+                    detailed_metrics,
+                    guard,
+                    fast_scope,
+                    label,
+                    x_status,
+                ));
+            }
+            if let Some(resp) = self
+                .try_revalidate_stale(
+                    &cached,
+                    req,
+                    cache_key,
+                    url,
+                    method,
+                    &no_user,
+                    &no_user,
+                    client_ip,
+                    &no_cats,
+                    &no_threats,
+                    request_start,
+                    detailed_metrics,
+                    guard,
+                    fast_scope,
+                )
+                .await
+            {
+                return Some(resp);
+            }
+        }
+
+        if let Some(cached) = self.try_l2_cache_get(cache_key).await {
+            debug!("Cache L2 HIT (fast path, skip policy): {} {}", method, url);
+            self.http_cache.insert(cache_key.clone(), cached.clone());
+            let hit_label = if cached.is_negative {
+                "NEGATIVE_HIT"
+            } else {
+                "L2_HIT"
+            };
+            let x_status = if cached.is_negative {
+                "NEGATIVE-HIT"
+            } else {
+                "L2-HIT"
+            };
+            if let Some(g) = guard.as_mut() {
+                g.set_cache_status(hit_label);
+                self.metrics.cache_hits_total.inc();
+            }
+            if detailed_metrics {
+                self.emit_cache_hit_event(
+                    url,
+                    method,
+                    cache_key,
+                    hit_label,
+                    &cached,
+                    &no_user,
+                    &no_user,
+                    client_ip,
+                    &no_cats,
+                    &no_threats,
+                    request_start,
+                );
+            }
+            let response = cached.to_response_with_cache_status(x_status);
+            let body_size = cached.response_body_len();
+            if let Some(g) = guard.take() {
+                g.finish(cached.status, 0, body_size);
+            } else if let Some(scope) = fast_scope.take() {
+                scope.finish_cache_hit();
+            }
+            return Some(response);
+        }
+
+        None
+    }
+
     pub(crate) async fn handle_request(
         &self,
         req: Request<Incoming>,
@@ -999,31 +1098,6 @@ impl ProxyService {
 
         let cache_key = self.generate_cache_key(method, &url);
 
-        if self.perf.fast_cache_hit {
-            if let Some(cached) = self.http_cache.get(&cache_key) {
-                if cached.can_serve_fresh() {
-                    debug!("Cache HIT (fast path): {} {}", method, url);
-                    return self.serve_l1_hit(
-                        &cached,
-                        &cache_key,
-                        &url,
-                        method,
-                        &None,
-                        &None,
-                        &client_ip,
-                        &[],
-                        &[],
-                        request_start,
-                        false,
-                        &mut guard,
-                        &mut fast_scope,
-                        "HIT",
-                        "HIT",
-                    );
-                }
-            }
-        }
-
         let (user_id, username) = if let Some(user) = proxy_user.as_deref() {
             Self::user_fields(Some(user))
         } else {
@@ -1037,6 +1111,25 @@ impl ProxyService {
                 scope.finish(429);
             }
             return resp;
+        }
+
+        if self.perf.skip_policy_on_cache_serve() {
+            if let Some(resp) = self
+                .try_serve_cache_before_policy(
+                    &req,
+                    &cache_key,
+                    &url,
+                    method,
+                    &client_ip,
+                    request_start,
+                    detailed_metrics,
+                    &mut guard,
+                    &mut fast_scope,
+                )
+                .await
+            {
+                return resp;
+            }
         }
 
         let user_groups: Vec<&str> = proxy_user

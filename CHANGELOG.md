@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Fast cache serve path** — `PERF_FAST_CACHE_HIT` serves L1/L2 hits (HIT, REVALIDATED, NEGATIVE_HIT, L2_HIT) before ACL/categorization ([#100](https://github.com/onixus/bsdm-proxy/issues/100))
+- **Bounded Kafka queue** — `KafkaEventPipeline` with `KAFKA_QUEUE_CAPACITY` (default 8192), non-blocking `try_enqueue`, drop when full ([#106](https://github.com/onixus/bsdm-proxy/issues/106))
+- Prometheus counter `bsdm_proxy_kafka_queue_dropped_total`
+
+### Changed
+
+- **ACL regex precompilation** — regex patterns compiled on rule load/update; no `Mutex` on hot-path evaluation ([#109](https://github.com/onixus/bsdm-proxy/issues/109))
+- `docs/performance.md` — document `PERF_FAST_CACHE_HIT` and `KAFKA_QUEUE_CAPACITY`
+
 ## [0.3.1] - 2026-07-01
 
 Milestone **M3 maintenance**: ClickHouse-only analytics, Search API, documentation and project structure cleanup.
