@@ -118,6 +118,55 @@ h3 {
     margin-bottom: 20px;
 }
 
+.form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+.nested {
+    margin-top: 12px;
+    padding-left: 12px;
+    border-left: 2px solid var(--border);
+}
+
+.help.warn {
+    color: var(--warning);
+}
+
+header code {
+    background: var(--bg-primary);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+.footer-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    width: 100%;
+}
+
+.import-label {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+
+footer {
+    background: var(--bg-primary);
+    padding: 20px 30px;
+    border-top: 2px solid var(--border);
+    flex-wrap: wrap;
+}
+
+footer .btn {
+    flex: 0 1 auto;
+    min-width: 120px;
+}
+
 label {
     display: block;
     margin-bottom: 8px;
@@ -176,15 +225,6 @@ label:has(input[type="checkbox"]) {
     margin-top: 20px;
     font-size: 14px;
     line-height: 1.6;
-}
-
-footer {
-    background: var(--bg-primary);
-    padding: 20px 30px;
-    display: flex;
-    gap: 10px;
-    border-top: 2px solid var(--border);
-    flex-wrap: wrap;
 }
 
 .btn {
@@ -276,6 +316,10 @@ footer {
 
 /* Responsive */
 @media (max-width: 768px) {
+    .form-row {
+        grid-template-columns: 1fr;
+    }
+
     .container {
         border-radius: 0;
     }

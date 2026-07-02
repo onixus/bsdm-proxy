@@ -1,385 +1,515 @@
-// Tab switching
-const tabs = document.querySelectorAll('.tab');
-const tabContents = document.querySelectorAll('.tab-content');
+// BSDM-Proxy web config generator
 
-tabs.forEach(tab => {
-    tab.addEventListener('click', () => {
-        const target = tab.getAttribute('data-tab');
-        
-        tabs.forEach(t => t.classList.remove('active'));
-        tabContents.forEach(tc => tc.classList.remove('active'));
-        
-        tab.classList.add('active');
-        document.getElementById(target).classList.add('active');
-    });
-});
-
-// Authentication toggle
-const authEnabled = document.getElementById('auth_enabled');
-const authOptions = document.getElementById('auth_options');
-const authBackend = document.getElementById('auth_backend');
-const ldapSettings = document.getElementById('ldap_settings');
-const ntlmSettings = document.getElementById('ntlm_settings');
-
-authEnabled.addEventListener('change', () => {
-    authOptions.style.display = authEnabled.checked ? 'block' : 'none';
-});
-
-authBackend.addEventListener('change', () => {
-    ldapSettings.style.display = authBackend.value === 'ldap' ? 'block' : 'none';
-    ntlmSettings.style.display = authBackend.value === 'ntlm' ? 'block' : 'none';
-});
-
-// ACL toggle
-const aclEnabled = document.getElementById('acl_enabled');
-const aclOptions = document.getElementById('acl_options');
-
-aclEnabled.addEventListener('change', () => {
-    aclOptions.style.display = aclEnabled.checked ? 'block' : 'none';
-});
-
-// Categorization toggle
-const categorizationEnabled = document.getElementById('categorization_enabled');
-const categorizationOptions = document.getElementById('categorization_options');
-
-categorizationEnabled.addEventListener('change', () => {
-    categorizationOptions.style.display = categorizationEnabled.checked ? 'block' : 'none';
-});
-
-// Cache statistics
-const cacheCapacity = document.getElementById('cache_capacity');
-const cacheStats = document.getElementById('cache_stats');
-
-cacheCapacity.addEventListener('input', () => {
-    const entries = parseInt(cacheCapacity.value) || 10000;
-    const memoryMB = (entries * 120 / 1024 / 1024).toFixed(2);
-    cacheStats.textContent = `${entries.toLocaleString()} entries ≈ ${memoryMB} MB memory`;
-});
-
-// Generate configuration
-function generateConfig() {
-    const config = collectConfig();
-    const output = formatConfig(config);
-    showModal('Environment Variables', output);
+function el(id) {
+    return document.getElementById(id);
 }
 
-// Collect configuration from form
-function collectConfig() {
-    const config = {
-        // General
-        HTTP_PORT: document.getElementById('http_port').value,
-        METRICS_PORT: document.getElementById('metrics_port').value,
-        RUST_LOG: document.getElementById('log_level').value,
-        MAX_CACHE_BODY_SIZE: (parseInt(document.getElementById('max_body_size').value) * 1024 * 1024).toString(),
-        
-        // Cache
-        CACHE_CAPACITY: document.getElementById('cache_capacity').value,
-        CACHE_TTL_SECONDS: document.getElementById('cache_ttl').value,
-        
-        // Kafka
-        KAFKA_BROKERS: document.getElementById('kafka_brokers').value,
-        KAFKA_TOPIC: document.getElementById('kafka_topic').value,
-        KAFKA_BATCH_SIZE: document.getElementById('kafka_batch_size').value,
-        KAFKA_BATCH_TIMEOUT: document.getElementById('kafka_batch_timeout').value,
-        
-        // Authentication
-        AUTH_ENABLED: document.getElementById('auth_enabled').checked.toString(),
-        AUTH_BACKEND: document.getElementById('auth_backend').value,
-        AUTH_REALM: document.getElementById('auth_realm').value,
-        AUTH_CACHE_TTL: document.getElementById('auth_cache_ttl').value,
-        
-        // LDAP (if enabled)
-        ...(document.getElementById('auth_backend').value === 'ldap' && document.getElementById('auth_enabled').checked ? {
-            LDAP_SERVERS: document.getElementById('ldap_servers').value,
-            LDAP_BASE_DN: document.getElementById('ldap_base_dn').value,
-            LDAP_BIND_DN: document.getElementById('ldap_bind_dn').value,
-            LDAP_BIND_PASSWORD: document.getElementById('ldap_bind_password').value,
-            LDAP_USER_FILTER: document.getElementById('ldap_user_filter').value,
-            LDAP_USE_TLS: document.getElementById('ldap_use_tls').checked.toString(),
-        } : {}),
-        
-        // NTLM (if enabled)
-        ...(document.getElementById('auth_backend').value === 'ntlm' && document.getElementById('auth_enabled').checked ? {
-            NTLM_DOMAIN: document.getElementById('ntlm_domain').value,
-            NTLM_WORKSTATION: document.getElementById('ntlm_workstation').value,
-        } : {}),
-        
-        // ACL
-        ACL_ENABLED: document.getElementById('acl_enabled').checked.toString(),
-        ...(document.getElementById('acl_enabled').checked ? {
-            ACL_DEFAULT_ACTION: document.getElementById('acl_default_action').value,
-            ACL_RULES_PATH: document.getElementById('acl_rules_path').value,
-        } : {}),
-        
-        // Categorization
-        CATEGORIZATION_ENABLED: document.getElementById('categorization_enabled').checked.toString(),
-        ...(document.getElementById('categorization_enabled').checked ? {
-            CATEGORIZATION_CACHE_TTL: document.getElementById('categorization_cache_ttl').value,
-            UT1_ENABLED: document.getElementById('ut1_enabled').checked.toString(),
-            UT1_PATH: document.getElementById('ut1_path').value,
-            URLHAUS_ENABLED: document.getElementById('urlhaus_enabled').checked.toString(),
-            URLHAUS_API: document.getElementById('urlhaus_api').value,
-            PHISHTANK_ENABLED: document.getElementById('phishtank_enabled').checked.toString(),
-            PHISHTANK_API: document.getElementById('phishtank_api').value,
-            CUSTOM_DB_ENABLED: document.getElementById('custom_db_enabled').checked.toString(),
-            CUSTOM_DB_PATH: document.getElementById('custom_db_path').value,
-        } : {}),
-        
-        // Monitoring
-        PROMETHEUS_ENABLED: document.getElementById('prometheus_enabled').checked.toString(),
-        GRAFANA_ENABLED: document.getElementById('grafana_enabled').checked.toString(),
-        CLICKHOUSE_URL: document.getElementById('clickhouse_url').value,
-        CLICKHOUSE_DATABASE: document.getElementById('clickhouse_database').value,
-        CLICKHOUSE_TABLE: document.getElementById('clickhouse_table').value,
+function val(id, fallback = '') {
+    const node = el(id);
+    return node ? node.value : fallback;
+}
+
+function checked(id) {
+    const node = el(id);
+    return node ? node.checked : false;
+}
+
+function setChecked(id, on) {
+    const node = el(id);
+    if (node) node.checked = !!on;
+}
+
+function setVal(id, value) {
+    const node = el(id);
+    if (node) node.value = value;
+}
+
+function truthyEnv(v) {
+    return ['1', 'true', 'yes', 'on'].includes(String(v).trim().toLowerCase());
+}
+
+function toggleSection(checkboxId, sectionId) {
+    const cb = el(checkboxId);
+    const section = el(sectionId);
+    if (!cb || !section) return;
+    const update = () => {
+        section.style.display = cb.checked ? 'block' : 'none';
     };
-    
+    cb.addEventListener('change', update);
+    update();
+}
+
+function initTabs() {
+    document.querySelectorAll('.tab').forEach((tab) => {
+        tab.addEventListener('click', () => {
+            const target = tab.getAttribute('data-tab');
+            document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach((tc) => tc.classList.remove('active'));
+            tab.classList.add('active');
+            const panel = el(target);
+            if (panel) panel.classList.add('active');
+        });
+    });
+}
+
+function updateCacheStats() {
+    const stats = el('cache_stats');
+    const cap = parseInt(val('cache_capacity', '10000'), 10) || 10000;
+    const memoryMB = ((cap * 120) / 1024 / 1024).toFixed(2);
+    if (stats) {
+        stats.textContent = `${cap.toLocaleString()} entries ≈ ${memoryMB} MB metadata`;
+    }
+}
+
+function updateAuthBackendPanels() {
+    const backend = val('auth_backend', 'basic');
+    const ldap = el('ldap_settings');
+    const ntlm = el('ntlm_settings');
+    if (ldap) ldap.style.display = backend === 'ldap' ? 'block' : 'none';
+    if (ntlm) ntlm.style.display = backend === 'ntlm' ? 'block' : 'none';
+}
+
+function collectConfig() {
+    const maxBodyMb = parseInt(val('max_body_size', '10'), 10) || 10;
+    const spillKb = parseInt(val('spill_threshold', '256'), 10) || 0;
+
+    const config = {
+        HTTP_PORT: val('http_port', '1488'),
+        METRICS_PORT: val('metrics_port', '9090'),
+        RUST_LOG: val('log_level', 'info,bsdm_proxy=info'),
+        SHUTDOWN_TIMEOUT_SECONDS: val('shutdown_timeout', '30'),
+        MAX_CACHE_BODY_SIZE: String(maxBodyMb * 1024 * 1024),
+        MITM_ENABLED: String(checked('mitm_enabled')),
+
+        CACHE_CAPACITY: val('cache_capacity', '10000'),
+        CACHE_TTL_SECONDS: val('cache_ttl', '3600'),
+        CACHE_SHARDS: val('cache_shards', '16'),
+        CACHE_HONOR_CACHE_CONTROL: String(checked('cache_honor_cache_control')),
+        NEGATIVE_CACHE_ENABLED: String(checked('negative_cache_enabled')),
+        NEGATIVE_CACHE_TTL_SECONDS: val('negative_cache_ttl', '120'),
+        CACHE_SPILL_THRESHOLD_BYTES: String(spillKb * 1024),
+
+        WORKER_COUNT: val('worker_count', '1'),
+        PERF_FAST_CACHE_HIT: String(checked('perf_fast_cache_hit')),
+        STREAMING_MISS_ENABLED: String(checked('streaming_miss_enabled')),
+        KAFKA_SAMPLE_RATE: val('kafka_sample_rate', '0'),
+        METRICS_SAMPLE_RATE: val('metrics_sample_rate', '0'),
+        KAFKA_QUEUE_CAPACITY: val('kafka_queue_capacity', '8192'),
+
+        KAFKA_BROKERS: val('kafka_brokers', 'kafka:9092'),
+        KAFKA_TOPIC: val('kafka_topic', 'cache-events'),
+        KAFKA_ACKS: val('kafka_acks', '1'),
+        KAFKA_BATCH_SIZE: val('kafka_batch_size', '100'),
+        KAFKA_BATCH_TIMEOUT: val('kafka_batch_timeout', '5000'),
+
+        AUTH_ENABLED: String(checked('auth_enabled')),
+        AUTH_BACKEND: val('auth_backend', 'basic'),
+        AUTH_REALM: val('auth_realm', 'BSDM-Proxy'),
+        AUTH_CACHE_TTL: val('auth_cache_ttl', '300'),
+
+        ACL_ENABLED: String(checked('acl_enabled')),
+        ACL_DEFAULT_ACTION: val('acl_default_action', 'allow'),
+        ACL_RULES_PATH: val('acl_rules_path', '/etc/bsdm-proxy/acl-rules.json'),
+        ACL_AUTO_RELOAD: String(checked('acl_auto_reload')),
+        ACL_RELOAD_INTERVAL: val('acl_reload_interval', '60'),
+
+        CATEGORIZATION_ENABLED: String(checked('categorization_enabled')),
+        CATEGORIZATION_CACHE_TTL: val('categorization_cache_ttl', '3600'),
+        UT1_ENABLED: String(checked('ut1_enabled')),
+        UT1_PATH: val('ut1_path', '/var/lib/ut1-blacklists'),
+        URLHAUS_ENABLED: String(checked('urlhaus_enabled')),
+        URLHAUS_API: val('urlhaus_api', ''),
+        PHISHTANK_ENABLED: String(checked('phishtank_enabled')),
+        PHISHTANK_API: val('phishtank_api', ''),
+        CUSTOM_DB_ENABLED: String(checked('custom_db_enabled')),
+        CUSTOM_DB_PATH: val('custom_db_path', ''),
+
+        CLICKHOUSE_URL: val('clickhouse_url', 'http://clickhouse:8123'),
+        CLICKHOUSE_DATABASE: val('clickhouse_database', 'bsdm'),
+        CLICKHOUSE_TABLE: val('clickhouse_table', 'http_cache'),
+
+        PROMETHEUS_ENABLED: String(checked('prometheus_enabled')),
+        GRAFANA_ENABLED: String(checked('grafana_enabled')),
+    };
+
+    if (checked('auth_enabled') && val('auth_backend') === 'ldap') {
+        Object.assign(config, {
+            LDAP_SERVERS: val('ldap_servers'),
+            LDAP_BASE_DN: val('ldap_base_dn'),
+            LDAP_BIND_DN: val('ldap_bind_dn'),
+            LDAP_BIND_PASSWORD: val('ldap_bind_password'),
+            LDAP_USER_FILTER: val('ldap_user_filter'),
+            LDAP_USE_TLS: String(checked('ldap_use_tls')),
+        });
+    }
+
+    if (checked('auth_enabled') && val('auth_backend') === 'ntlm') {
+        Object.assign(config, {
+            NTLM_DOMAIN: val('ntlm_domain'),
+            NTLM_WORKSTATION: val('ntlm_workstation'),
+        });
+    }
+
+    if (checked('redis_l2_enabled')) {
+        Object.assign(config, {
+            REDIS_L2_ENABLED: 'true',
+            REDIS_URL: val('redis_url', 'redis://redis:6379'),
+            REDIS_KEY_PREFIX: val('redis_key_prefix', 'bsdm:http:'),
+        });
+    }
+
+    const apiToken = val('acl_api_token');
+    if (apiToken) config.ACL_API_TOKEN = apiToken;
+
+    const searchToken = val('search_api_token');
+    if (searchToken) config.SEARCH_API_TOKEN = searchToken;
+
     return config;
 }
 
-// Generate ACL rules JSON
 function generateAclRules() {
-    if (!document.getElementById('acl_enabled').checked) {
-        return null;
-    }
-    
+    if (!checked('acl_enabled')) return null;
+
     const rules = [];
     let priority = 100;
-    
-    if (document.getElementById('acl_block_malware').checked) {
+
+    const addCategory = (id, name, category, enabled) => {
+        if (!enabled) return;
         rules.push({
-            id: 'block-malware',
-            name: 'Block malware URLs',
+            id,
+            name,
             enabled: true,
             priority: priority++,
             action: 'deny',
-            rule_type: { Category: 'malware' }
+            rule_type: { Category: category },
+            redirect_url: null,
+            comment: null,
         });
-    }
-    
-    if (document.getElementById('acl_block_phishing').checked) {
-        rules.push({
-            id: 'block-phishing',
-            name: 'Block phishing URLs',
-            enabled: true,
-            priority: priority++,
-            action: 'deny',
-            rule_type: { Category: 'phishing' }
-        });
-    }
-    
-    if (document.getElementById('acl_block_adult').checked) {
-        rules.push({
-            id: 'block-adult',
-            name: 'Block adult content',
-            enabled: true,
-            priority: priority++,
-            action: 'deny',
-            rule_type: { Category: 'adult' }
-        });
-    }
-    
-    if (document.getElementById('acl_block_gambling').checked) {
-        rules.push({
-            id: 'block-gambling',
-            name: 'Block gambling sites',
-            enabled: true,
-            priority: priority++,
-            action: 'deny',
-            rule_type: { Category: 'gambling' }
-        });
-    }
-    
+    };
+
+    addCategory('block-malware', 'Block malware URLs', 'malware', checked('acl_block_malware'));
+    addCategory('block-phishing', 'Block phishing URLs', 'phishing', checked('acl_block_phishing'));
+    addCategory('block-adult', 'Block adult content', 'adult', checked('acl_block_adult'));
+    addCategory('block-gambling', 'Block gambling sites', 'gambling', checked('acl_block_gambling'));
+
     return {
-        default_action: document.getElementById('acl_default_action').value,
-        rules: rules
+        default_action: val('acl_default_action', 'allow'),
+        rules,
     };
 }
 
-// Format configuration as environment variables
-function formatConfig(config) {
-    let output = Object.entries(config)
-        .map(([key, value]) => `${key}=${value}`)
-        .join('\n');
-    
-    // Add ACL rules if enabled
-    const aclRules = generateAclRules();
-    if (aclRules) {
-        output += '\n\n# ACL Rules (save to ' + config.ACL_RULES_PATH + '):\n';
-        output += '# ' + JSON.stringify(aclRules, null, 2).split('\n').join('\n# ');
+function formatEnv(config) {
+    const lines = [
+        '# Generated by BSDM-Proxy web-config',
+        '# See packaging/config/bsdm-proxy.env.example for full reference',
+        '',
+    ];
+
+    const order = [
+        'HTTP_PORT', 'METRICS_PORT', 'MITM_ENABLED', 'SHUTDOWN_TIMEOUT_SECONDS', 'RUST_LOG',
+        'CACHE_CAPACITY', 'CACHE_TTL_SECONDS', 'MAX_CACHE_BODY_SIZE', 'CACHE_SHARDS',
+        'CACHE_HONOR_CACHE_CONTROL', 'NEGATIVE_CACHE_ENABLED', 'NEGATIVE_CACHE_TTL_SECONDS',
+        'CACHE_SPILL_THRESHOLD_BYTES',
+        'REDIS_L2_ENABLED', 'REDIS_URL', 'REDIS_KEY_PREFIX',
+        'WORKER_COUNT', 'PERF_FAST_CACHE_HIT', 'STREAMING_MISS_ENABLED',
+        'KAFKA_SAMPLE_RATE', 'METRICS_SAMPLE_RATE', 'KAFKA_QUEUE_CAPACITY',
+        'KAFKA_BROKERS', 'KAFKA_TOPIC', 'KAFKA_ACKS',
+        'AUTH_ENABLED', 'AUTH_BACKEND', 'AUTH_REALM', 'AUTH_CACHE_TTL',
+        'LDAP_SERVERS', 'LDAP_BASE_DN', 'LDAP_BIND_DN', 'LDAP_BIND_PASSWORD',
+        'LDAP_USER_FILTER', 'LDAP_USE_TLS',
+        'NTLM_DOMAIN', 'NTLM_WORKSTATION',
+        'ACL_ENABLED', 'ACL_DEFAULT_ACTION', 'ACL_RULES_PATH', 'ACL_AUTO_RELOAD',
+        'ACL_RELOAD_INTERVAL', 'ACL_API_TOKEN',
+        'CATEGORIZATION_ENABLED', 'CATEGORIZATION_CACHE_TTL',
+        'UT1_ENABLED', 'UT1_PATH', 'URLHAUS_ENABLED', 'URLHAUS_API',
+        'PHISHTANK_ENABLED', 'PHISHTANK_API', 'CUSTOM_DB_ENABLED', 'CUSTOM_DB_PATH',
+    ];
+
+    const written = new Set();
+    for (const key of order) {
+        if (config[key] !== undefined && config[key] !== '') {
+            lines.push(`${key}=${config[key]}`);
+            written.add(key);
+        }
     }
-    
-    return output;
+    for (const [key, value] of Object.entries(config)) {
+        if (!written.has(key) && value !== '') {
+            lines.push(`${key}=${value}`);
+        }
+    }
+
+    return lines.join('\n') + '\n';
 }
 
-// Export .env file
-function exportEnv() {
-    const config = collectConfig();
-    const content = formatConfig(config);
-    downloadFile('.env', content);
+function proxyEnvBlock(config) {
+    const keys = [
+        'HTTP_PORT', 'METRICS_PORT', 'RUST_LOG', 'MITM_ENABLED', 'SHUTDOWN_TIMEOUT_SECONDS',
+        'CACHE_CAPACITY', 'CACHE_TTL_SECONDS', 'MAX_CACHE_BODY_SIZE', 'CACHE_SHARDS',
+        'CACHE_HONOR_CACHE_CONTROL', 'NEGATIVE_CACHE_ENABLED', 'NEGATIVE_CACHE_TTL_SECONDS',
+        'CACHE_SPILL_THRESHOLD_BYTES', 'REDIS_L2_ENABLED', 'REDIS_URL', 'REDIS_KEY_PREFIX',
+        'WORKER_COUNT', 'PERF_FAST_CACHE_HIT', 'STREAMING_MISS_ENABLED',
+        'KAFKA_SAMPLE_RATE', 'METRICS_SAMPLE_RATE', 'KAFKA_QUEUE_CAPACITY',
+        'KAFKA_BROKERS', 'KAFKA_TOPIC', 'KAFKA_ACKS',
+        'AUTH_ENABLED', 'AUTH_BACKEND', 'AUTH_REALM', 'AUTH_CACHE_TTL',
+        'LDAP_SERVERS', 'LDAP_BASE_DN', 'LDAP_BIND_DN', 'LDAP_BIND_PASSWORD',
+        'LDAP_USER_FILTER', 'LDAP_USE_TLS', 'NTLM_DOMAIN', 'NTLM_WORKSTATION',
+        'ACL_ENABLED', 'ACL_DEFAULT_ACTION', 'ACL_RULES_PATH', 'ACL_AUTO_RELOAD',
+        'ACL_RELOAD_INTERVAL', 'ACL_API_TOKEN',
+        'CATEGORIZATION_ENABLED', 'CATEGORIZATION_CACHE_TTL', 'UT1_ENABLED', 'UT1_PATH',
+        'URLHAUS_ENABLED', 'URLHAUS_API', 'PHISHTANK_ENABLED', 'PHISHTANK_API',
+        'CUSTOM_DB_ENABLED', 'CUSTOM_DB_PATH',
+    ];
+    return keys
+        .filter((k) => config[k] !== undefined && config[k] !== '')
+        .map((k) => `      - ${k}=${config[k]}`)
+        .join('\n');
 }
 
-// Export docker-compose.yml
-function exportDockerCompose() {
-    const config = collectConfig();
-    const compose = generateDockerCompose(config);
-    downloadFile('docker-compose.yml', compose);
-}
-
-// Generate docker-compose.yml content
 function generateDockerCompose(config) {
-    return `version: '3.8'
+    const prom = config.PROMETHEUS_ENABLED === 'true';
+    const graf = config.GRAFANA_ENABLED === 'true';
 
-services:
+    return `services:
   zookeeper:
-    image: confluentinc/cp-zookeeper:latest
+    image: confluentinc/cp-zookeeper:7.9.8
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
-    networks:
-      - bsdm-network
+    networks: [bsdm-net]
+    restart: unless-stopped
 
   kafka:
-    image: confluentinc/cp-kafka:latest
-    depends_on:
-      - zookeeper
+    image: confluentinc/cp-kafka:7.9.8
+    depends_on: [zookeeper]
+    ports: ["9092:9092"]
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-    networks:
-      - bsdm-network
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    networks: [bsdm-net]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
 
   clickhouse:
     image: clickhouse/clickhouse-server:24.12
-    ports:
-      - "8123:8123"
-      - "9000:9000"
+    ports: ["8123:8123", "9000:9000"]
     environment:
       CLICKHOUSE_DB: ${config.CLICKHOUSE_DATABASE}
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     volumes:
       - clickhouse-data:/var/lib/clickhouse
       - ./scripts/clickhouse/http_cache.sql:/docker-entrypoint-initdb.d/01-http_cache.sql:ro
-    networks:
-      - bsdm-network
-${config.PROMETHEUS_ENABLED === 'true' ? `
+    networks: [bsdm-net]
+    restart: unless-stopped
+${prom ? `
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v2.55.1
     volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-    ports:
-      - "9091:9090"
-    networks:
-      - bsdm-network
-` : ''}
-${config.GRAFANA_ENABLED === 'true' ? `
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports: ["9091:9090"]
+    networks: [bsdm-net]
+    restart: unless-stopped
+` : ''}${graf ? `
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.4.0
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_AUTH_ANONYMOUS_ENABLED=false
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
     volumes:
-      - ./grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
-      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
-    ports:
-      - "3000:3000"
-    depends_on:
-      - prometheus
-    networks:
-      - bsdm-network
+      - ./grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+    ports: ["3000:3000"]
+    depends_on: [prometheus]
+    networks: [bsdm-net]
+    restart: unless-stopped
 ` : ''}
   proxy:
-    build: ./proxy
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: proxy
     ports:
       - "${config.HTTP_PORT}:${config.HTTP_PORT}"
       - "${config.METRICS_PORT}:${config.METRICS_PORT}"
     environment:
-      - HTTP_PORT=${config.HTTP_PORT}
-      - METRICS_PORT=${config.METRICS_PORT}
-      - RUST_LOG=${config.RUST_LOG}
-      - CACHE_CAPACITY=${config.CACHE_CAPACITY}
-      - CACHE_TTL_SECONDS=${config.CACHE_TTL_SECONDS}
-      - MAX_CACHE_BODY_SIZE=${config.MAX_CACHE_BODY_SIZE}
-      - KAFKA_BROKERS=${config.KAFKA_BROKERS}
-      - AUTH_ENABLED=${config.AUTH_ENABLED}
-${config.AUTH_ENABLED === 'true' ? `      - AUTH_BACKEND=${config.AUTH_BACKEND}
-      - AUTH_REALM=${config.AUTH_REALM}
-      - AUTH_CACHE_TTL=${config.AUTH_CACHE_TTL}` : ''}
-${config.LDAP_SERVERS ? `      - LDAP_SERVERS=${config.LDAP_SERVERS}
-      - LDAP_BASE_DN=${config.LDAP_BASE_DN}
-      - LDAP_BIND_DN=${config.LDAP_BIND_DN}
-      - LDAP_BIND_PASSWORD=${config.LDAP_BIND_PASSWORD}
-      - LDAP_USER_FILTER=${config.LDAP_USER_FILTER}
-      - LDAP_USE_TLS=${config.LDAP_USE_TLS}` : ''}
-${config.NTLM_DOMAIN ? `      - NTLM_DOMAIN=${config.NTLM_DOMAIN}
-      - NTLM_WORKSTATION=${config.NTLM_WORKSTATION}` : ''}
-${config.ACL_ENABLED === 'true' ? `      - ACL_ENABLED=${config.ACL_ENABLED}
-      - ACL_DEFAULT_ACTION=${config.ACL_DEFAULT_ACTION}
-      - ACL_RULES_PATH=${config.ACL_RULES_PATH}` : ''}
-${config.CATEGORIZATION_ENABLED === 'true' ? `      - CATEGORIZATION_ENABLED=${config.CATEGORIZATION_ENABLED}
-      - CATEGORIZATION_CACHE_TTL=${config.CATEGORIZATION_CACHE_TTL}
-      - UT1_ENABLED=${config.UT1_ENABLED}
-      - UT1_PATH=${config.UT1_PATH}
-      - URLHAUS_ENABLED=${config.URLHAUS_ENABLED}
-      - URLHAUS_API=${config.URLHAUS_API}
-      - PHISHTANK_ENABLED=${config.PHISHTANK_ENABLED}
-      - PHISHTANK_API=${config.PHISHTANK_API}
-      - CUSTOM_DB_ENABLED=${config.CUSTOM_DB_ENABLED}
-      - CUSTOM_DB_PATH=${config.CUSTOM_DB_PATH}` : ''}
+${proxyEnvBlock(config)}
     volumes:
-${config.UT1_ENABLED === 'true' ? `      - ${config.UT1_PATH}:${config.UT1_PATH}:ro
-` : ''}${config.ACL_ENABLED === 'true' ? `      - ./acl-rules.json:${config.ACL_RULES_PATH}:ro
-` : ''}${config.CUSTOM_DB_ENABLED === 'true' ? `      - ./custom-categories.json:${config.CUSTOM_DB_PATH}:ro
-` : ''}    depends_on:
-      - kafka
-    networks:
-      - bsdm-network
+      - ./certs:/certs:ro
+${config.ACL_ENABLED === 'true' ? `      - ./acl-rules.json:${config.ACL_RULES_PATH}:ro\n` : ''}${config.UT1_ENABLED === 'true' ? `      - ${config.UT1_PATH}:${config.UT1_PATH}:ro\n` : ''}${config.CUSTOM_DB_ENABLED === 'true' ? `      - ./custom-categories.json:${config.CUSTOM_DB_PATH}:ro\n` : ''}    depends_on:
+      kafka:
+        condition: service_healthy
+    networks: [bsdm-net]
+    restart: unless-stopped
 
   cache-indexer:
-    build: ./cache-indexer
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: cache-indexer
     environment:
       - KAFKA_BROKERS=${config.KAFKA_BROKERS}
       - KAFKA_TOPIC=${config.KAFKA_TOPIC}
+      - KAFKA_BATCH_SIZE=${config.KAFKA_BATCH_SIZE}
+      - KAFKA_BATCH_TIMEOUT=${config.KAFKA_BATCH_TIMEOUT}
       - CLICKHOUSE_URL=${config.CLICKHOUSE_URL}
       - CLICKHOUSE_DATABASE=${config.CLICKHOUSE_DATABASE}
       - CLICKHOUSE_TABLE=${config.CLICKHOUSE_TABLE}
-      - KAFKA_BATCH_SIZE=${config.KAFKA_BATCH_SIZE}
-      - KAFKA_BATCH_TIMEOUT=${config.KAFKA_BATCH_TIMEOUT}
-    depends_on:
-      - kafka
-      - clickhouse
-    networks:
-      - bsdm-network
+${config.SEARCH_API_TOKEN ? `      - SEARCH_API_TOKEN=${config.SEARCH_API_TOKEN}\n` : ''}    depends_on: [kafka, clickhouse]
+    networks: [bsdm-net]
+    restart: unless-stopped
 
 volumes:
   clickhouse-data:
 
 networks:
-  bsdm-network:
+  bsdm-net:
     driver: bridge
 `;
 }
 
-// Modal functions
+function generateConfig() {
+    showModal('bsdm-proxy.env', formatEnv(collectConfig()));
+}
+
+function exportEnv() {
+    downloadFile('bsdm-proxy.env', formatEnv(collectConfig()));
+}
+
+function exportDockerCompose() {
+    downloadFile('docker-compose.yml', generateDockerCompose(collectConfig()));
+}
+
+function exportAclRules() {
+    const rules = generateAclRules();
+    if (!rules) {
+        alert('Enable ACL first');
+        return;
+    }
+    downloadFile('acl-rules.json', JSON.stringify(rules, null, 2) + '\n');
+}
+
+function importEnvFile(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => applyEnvText(String(reader.result || ''));
+    reader.readAsText(file);
+    event.target.value = '';
+}
+
+function applyEnvText(text) {
+    const map = {};
+    for (const line of text.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const eq = trimmed.indexOf('=');
+        if (eq < 1) continue;
+        map[trimmed.slice(0, eq)] = trimmed.slice(eq + 1);
+    }
+
+    if (map.HTTP_PORT) setVal('http_port', map.HTTP_PORT);
+    if (map.METRICS_PORT) setVal('metrics_port', map.METRICS_PORT);
+    if (map.RUST_LOG) setVal('log_level', map.RUST_LOG);
+    if (map.SHUTDOWN_TIMEOUT_SECONDS) setVal('shutdown_timeout', map.SHUTDOWN_TIMEOUT_SECONDS);
+    if (map.MAX_CACHE_BODY_SIZE) {
+        setVal('max_body_size', String(Math.round(parseInt(map.MAX_CACHE_BODY_SIZE, 10) / 1024 / 1024)));
+    }
+    setChecked('mitm_enabled', truthyEnv(map.MITM_ENABLED));
+
+    if (map.CACHE_CAPACITY) setVal('cache_capacity', map.CACHE_CAPACITY);
+    if (map.CACHE_TTL_SECONDS) setVal('cache_ttl', map.CACHE_TTL_SECONDS);
+    if (map.CACHE_SHARDS) setVal('cache_shards', map.CACHE_SHARDS);
+    setChecked('cache_honor_cache_control', map.CACHE_HONOR_CACHE_CONTROL !== 'false');
+    setChecked('negative_cache_enabled', truthyEnv(map.NEGATIVE_CACHE_ENABLED));
+    if (map.NEGATIVE_CACHE_TTL_SECONDS) setVal('negative_cache_ttl', map.NEGATIVE_CACHE_TTL_SECONDS);
+    if (map.CACHE_SPILL_THRESHOLD_BYTES) {
+        setVal('spill_threshold', String(Math.round(parseInt(map.CACHE_SPILL_THRESHOLD_BYTES, 10) / 1024)));
+    }
+    setChecked('redis_l2_enabled', truthyEnv(map.REDIS_L2_ENABLED));
+    if (map.REDIS_URL) setVal('redis_url', map.REDIS_URL);
+    if (map.REDIS_KEY_PREFIX) setVal('redis_key_prefix', map.REDIS_KEY_PREFIX);
+
+    if (map.WORKER_COUNT) setVal('worker_count', map.WORKER_COUNT);
+    setChecked('perf_fast_cache_hit', truthyEnv(map.PERF_FAST_CACHE_HIT));
+    setChecked('streaming_miss_enabled', map.STREAMING_MISS_ENABLED !== 'false');
+    if (map.KAFKA_SAMPLE_RATE) setVal('kafka_sample_rate', map.KAFKA_SAMPLE_RATE);
+    if (map.METRICS_SAMPLE_RATE) setVal('metrics_sample_rate', map.METRICS_SAMPLE_RATE);
+    if (map.KAFKA_QUEUE_CAPACITY) setVal('kafka_queue_capacity', map.KAFKA_QUEUE_CAPACITY);
+
+    if (map.KAFKA_BROKERS) setVal('kafka_brokers', map.KAFKA_BROKERS);
+    if (map.KAFKA_TOPIC) setVal('kafka_topic', map.KAFKA_TOPIC);
+    if (map.KAFKA_ACKS) setVal('kafka_acks', map.KAFKA_ACKS);
+    if (map.KAFKA_BATCH_SIZE) setVal('kafka_batch_size', map.KAFKA_BATCH_SIZE);
+    if (map.KAFKA_BATCH_TIMEOUT) setVal('kafka_batch_timeout', map.KAFKA_BATCH_TIMEOUT);
+
+    setChecked('auth_enabled', truthyEnv(map.AUTH_ENABLED));
+    if (map.AUTH_BACKEND) setVal('auth_backend', map.AUTH_BACKEND);
+    if (map.AUTH_REALM) setVal('auth_realm', map.AUTH_REALM);
+    if (map.AUTH_CACHE_TTL) setVal('auth_cache_ttl', map.AUTH_CACHE_TTL);
+    if (map.LDAP_SERVERS) setVal('ldap_servers', map.LDAP_SERVERS);
+    if (map.LDAP_BASE_DN) setVal('ldap_base_dn', map.LDAP_BASE_DN);
+    if (map.LDAP_BIND_DN) setVal('ldap_bind_dn', map.LDAP_BIND_DN);
+    if (map.LDAP_BIND_PASSWORD) setVal('ldap_bind_password', map.LDAP_BIND_PASSWORD);
+    if (map.LDAP_USER_FILTER) setVal('ldap_user_filter', map.LDAP_USER_FILTER);
+    setChecked('ldap_use_tls', map.LDAP_USE_TLS !== 'false');
+    if (map.NTLM_DOMAIN) setVal('ntlm_domain', map.NTLM_DOMAIN);
+    if (map.NTLM_WORKSTATION) setVal('ntlm_workstation', map.NTLM_WORKSTATION);
+
+    setChecked('acl_enabled', truthyEnv(map.ACL_ENABLED));
+    if (map.ACL_DEFAULT_ACTION) setVal('acl_default_action', map.ACL_DEFAULT_ACTION);
+    if (map.ACL_RULES_PATH) setVal('acl_rules_path', map.ACL_RULES_PATH);
+    setChecked('acl_auto_reload', truthyEnv(map.ACL_AUTO_RELOAD));
+    if (map.ACL_RELOAD_INTERVAL) setVal('acl_reload_interval', map.ACL_RELOAD_INTERVAL);
+    if (map.ACL_API_TOKEN) setVal('acl_api_token', map.ACL_API_TOKEN);
+
+    setChecked('categorization_enabled', truthyEnv(map.CATEGORIZATION_ENABLED));
+    if (map.CATEGORIZATION_CACHE_TTL) setVal('categorization_cache_ttl', map.CATEGORIZATION_CACHE_TTL);
+    setChecked('ut1_enabled', truthyEnv(map.UT1_ENABLED));
+    if (map.UT1_PATH) setVal('ut1_path', map.UT1_PATH);
+    setChecked('urlhaus_enabled', truthyEnv(map.URLHAUS_ENABLED));
+    if (map.URLHAUS_API) setVal('urlhaus_api', map.URLHAUS_API);
+    setChecked('phishtank_enabled', truthyEnv(map.PHISHTANK_ENABLED));
+    if (map.PHISHTANK_API) setVal('phishtank_api', map.PHISHTANK_API);
+    setChecked('custom_db_enabled', truthyEnv(map.CUSTOM_DB_ENABLED));
+    if (map.CUSTOM_DB_PATH) setVal('custom_db_path', map.CUSTOM_DB_PATH);
+
+    if (map.CLICKHOUSE_URL) setVal('clickhouse_url', map.CLICKHOUSE_URL);
+    if (map.CLICKHOUSE_DATABASE) setVal('clickhouse_database', map.CLICKHOUSE_DATABASE);
+    if (map.CLICKHOUSE_TABLE) setVal('clickhouse_table', map.CLICKHOUSE_TABLE);
+    if (map.SEARCH_API_TOKEN) setVal('search_api_token', map.SEARCH_API_TOKEN);
+
+    updateCacheStats();
+    updateAuthBackendPanels();
+    el('auth_options').style.display = checked('auth_enabled') ? 'block' : 'none';
+    el('acl_options').style.display = checked('acl_enabled') ? 'block' : 'none';
+    el('categorization_options').style.display = checked('categorization_enabled') ? 'block' : 'none';
+    el('redis_l2_options').style.display = checked('redis_l2_enabled') ? 'block' : 'none';
+
+    alert('Imported ' + Object.keys(map).length + ' variables');
+}
+
 function showModal(title, content) {
-    document.getElementById('modal-title').textContent = title;
-    document.getElementById('modal-output').textContent = content;
-    document.getElementById('output-modal').style.display = 'block';
+    el('modal-title').textContent = title;
+    el('modal-output').textContent = content;
+    el('output-modal').style.display = 'block';
 }
 
 function closeModal() {
-    document.getElementById('output-modal').style.display = 'none';
+    el('output-modal').style.display = 'none';
 }
 
 function copyToClipboard() {
-    const output = document.getElementById('modal-output').textContent;
-    navigator.clipboard.writeText(output).then(() => {
-        alert('Copied to clipboard!');
-    });
+    const output = el('modal-output').textContent;
+    navigator.clipboard.writeText(output).then(() => alert('Copied'));
 }
 
-// Download file
 function downloadFile(filename, content) {
     const blob = new Blob([content], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
@@ -392,10 +522,27 @@ function downloadFile(filename, content) {
     URL.revokeObjectURL(url);
 }
 
-// Close modal on outside click
-window.onclick = function(event) {
-    const modal = document.getElementById('output-modal');
-    if (event.target === modal) {
-        closeModal();
-    }
+window.onclick = function (event) {
+    const modal = el('output-modal');
+    if (event.target === modal) closeModal();
 };
+
+document.addEventListener('DOMContentLoaded', () => {
+    initTabs();
+    toggleSection('auth_enabled', 'auth_options');
+    toggleSection('acl_enabled', 'acl_options');
+    toggleSection('categorization_enabled', 'categorization_options');
+    toggleSection('redis_l2_enabled', 'redis_l2_options');
+
+    const authBackend = el('auth_backend');
+    if (authBackend) {
+        authBackend.addEventListener('change', updateAuthBackendPanels);
+        updateAuthBackendPanels();
+    }
+
+    const cacheCap = el('cache_capacity');
+    if (cacheCap) {
+        cacheCap.addEventListener('input', updateCacheStats);
+        updateCacheStats();
+    }
+});
