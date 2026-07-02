@@ -7,8 +7,8 @@ use bsdm_proxy::{
     htcp_peer_port, htcp_server_bind_addr, http_cache_key, icp_server_bind_addr,
     load_hierarchy_config, metrics_server, run_peer_discovery, should_start_htcp_server,
     should_start_icp_server, wait_shutdown_signal, AclAction, AuthManager, CacheConfig, CertCache,
-    HtcpServer, IcpServer, L2CacheConfig, Metrics, PeerDiscoveryConfig, PerfConfig,
-    PolicyCacheConfig, PolicyDecisionCache, ProxyPolicy, ProxyService, RateLimitConfig,
+    HtcpServer, IcpServer, KafkaEventPipeline, L2CacheConfig, Metrics, PeerDiscoveryConfig,
+    PerfConfig, PolicyCacheConfig, PolicyDecisionCache, ProxyPolicy, ProxyService, RateLimitConfig,
     RedisL2Cache, UpstreamTlsConfig,
 };
 use policy_config::{load_policy_config, reload_acl_engine};
@@ -135,6 +135,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cert_cache = CertCache::load_for_startup(mitm_enabled).await?;
     let kafka_brokers = std::env::var("KAFKA_BROKERS").ok();
     let kafka_topic = std::env::var("KAFKA_TOPIC").unwrap_or_else(|_| "cache-events".to_string());
+    let kafka_pipeline = kafka_brokers
+        .as_deref()
+        .and_then(|brokers| KafkaEventPipeline::spawn(brokers, kafka_topic, metrics.clone()));
     let cache_config = CacheConfig::from_env();
     if cache_config.spill_threshold_bytes > 0 {
         if let Err(e) = ensure_private_spill_dir(&cache_config.spill_dir) {
@@ -191,8 +194,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         cert_cache,
         cache_config.clone(),
         l2_cache,
-        kafka_brokers,
-        kafka_topic,
+        kafka_pipeline,
         metrics.clone(),
         mitm_enabled,
         auth,
@@ -334,7 +336,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         http_port, worker_count
     );
     if perf.fast_cache_hit {
-        info!("⚡ PERF_FAST_CACHE_HIT enabled — L1 HIT skips policy/Kafka on hot path");
+        info!("⚡ PERF_FAST_CACHE_HIT enabled — cache serve (HIT/REVALIDATED/NEGATIVE/L2) skips policy on hot path");
     }
     if perf.worker_count > 1 {
         info!("⚡ WORKER_COUNT={} (SO_REUSEPORT)", perf.worker_count);
