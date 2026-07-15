@@ -1,0 +1,18 @@
+{{- if and .Values.indexer .Values.indexer.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "bsdm.fullname" . }}-indexer
+  labels:
+    {{- include "bsdm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cache-indexer
+spec:
+  type: ClusterIP
+  ports:
+    - name: admin
+      port: {{ .Values.indexer.service.port }}
+      targetPort: admin
+      protocol: TCP
+  selector:
+    {{- include "bsdm.indexerSelectorLabels" . | nindent 4 }}
+{{- end }}

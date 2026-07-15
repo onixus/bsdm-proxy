@@ -1,0 +1,71 @@
+# Example ClickHouseInstallation for Altinity ClickHouse Operator.
+# Deploy into namespace bsdm-analytics AFTER installing the operator:
+#
+#   helm repo add altinity https://docs.altinity.com/clickhouse-operator/
+#   helm install clickhouse-operator altinity/altinity-clickhouse-operator \
+#     -n clickhouse-operator --create-namespace
+#
+#   kubectl apply -f charts/bsdm/examples/clickhouse-installation.yaml
+#
+# Schema init (once cluster is Ready):
+#   kubectl -n bsdm-analytics exec -it chi-bsdm-bsdm-0-0-0 -- \
+#     clickhouse-client --multiquery < scripts/clickhouse/http_cache.sql
+#
+# HTTP endpoint for cache-indexer:
+#   http://clickhouse-bsdm.bsdm-analytics.svc.cluster.local:8123
+#
+# Native TCP (Grafana plugin):
+#   clickhouse-bsdm.bsdm-analytics.svc.cluster.local:9000
+#
+# See docs/k8s-architecture.md § Analytics plane.
+
+apiVersion: "clickhouse.altinity.com/v1"
+kind: ClickHouseInstallation
+metadata:
+  name: bsdm
+  namespace: bsdm-analytics
+  labels:
+    app.kubernetes.io/part-of: bsdm
+    app.kubernetes.io/component: clickhouse
+spec:
+  configuration:
+    clusters:
+      - name: bsdm
+        layout:
+          shardsCount: 1
+          replicasCount: 1
+        templates:
+          podTemplate: bsdm-pod
+          volumeClaimTemplate: bsdm-data
+    databases:
+      - name: bsdm
+    settings:
+      # JSONEachRow inserts from cache-indexer
+      max_memory_usage: "10000000000"
+      max_concurrent_queries: 100
+  templates:
+    podTemplates:
+      - name: bsdm-pod
+        spec:
+          containers:
+            - name: clickhouse
+              image: clickhouse/clickhouse-server:24.12
+              resources:
+                requests:
+                  cpu: "2"
+                  memory: 8Gi
+                limits:
+                  cpu: "8"
+                  memory: 32Gi
+    volumeClaimTemplates:
+      - name: bsdm-data
+        reclaimPolicy: Retain
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              # Former OpenSearch StatefulSet guidance was ~64Gi; CH MergeTree
+              # for http_cache (TTL 42d) typically needs less for the same
+              # event volume — start at 100Gi and grow with retention.
+              storage: 100Gi

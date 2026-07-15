@@ -1,0 +1,62 @@
+# Optional analytics-plane overlay for cache-indexer → external ClickHouse.
+# Proxy data-plane values remain in values.yaml / values-prod.yaml.
+#
+# Prerequisites:
+#   - Kafka bootstrap reachable (e.g. kafka-bootstrap.bsdm-analytics.svc:9092)
+#   - ClickHouse HTTP :8123 (Operator CHI or managed CH / ClickHouse Cloud)
+#   - Schema applied: scripts/clickhouse/http_cache.sql
+#
+# Install indexer into analytics namespace:
+#   helm upgrade --install bsdm-indexer ./charts/bsdm \
+#     -f charts/bsdm/values-analytics.yaml \
+#     -n bsdm-analytics --create-namespace
+#
+# Or enable indexer alongside proxy in one release (same cluster DNS):
+#   indexer.enabled=true + clickhouse.url pointing at CHI service.
+#
+# Full guide: docs/k8s-architecture.md
+
+# Disable proxy Deployment when installing indexer-only release into analytics ns
+fullnameOverride: bsdm
+replicaCount: 0
+
+indexer:
+  enabled: true
+  replicaCount: 2
+  image:
+    repository: ghcr.io/onixus/bsdm-cache-indexer
+    tag: "0.3.2"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: "250m"
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  service:
+    port: 8080
+  kafka:
+    brokers: "kafka-bootstrap.bsdm-analytics.svc:9092"
+    topic: cache-events
+    groupId: cache-indexer-group
+  clickhouse:
+    # Altinity CHI default Service name pattern: clickhouse-<chi-name>
+    url: "http://clickhouse-bsdm.bsdm-analytics.svc.cluster.local:8123"
+    database: bsdm
+    table: http_cache
+    # Prefer existing Secret with keys username / password when set
+    existingSecret: ""
+    user: ""
+    password: ""
+  searchApi:
+    enabled: true
+    token: ""
+    maxLimit: 10000
+    defaultDays: 30
+  rustLog: "info,cache_indexer=info"
+
+# Proxy Kafka still pointed from values-prod when co-located; unused if replicaCount=0
+proxy:
+  kafkaBrokers: "kafka-bootstrap.bsdm-analytics.svc:9092"
+  kafkaTopic: cache-events

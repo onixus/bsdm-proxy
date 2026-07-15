@@ -127,6 +127,42 @@ serviceMonitor:
   interval: 30s
   labels: {}
 
+# Optional cache-indexer (Kafka → ClickHouse). Prefer a separate release in
+# bsdm-analytics with values-analytics.yaml, or enable alongside proxy.
+indexer:
+  enabled: false
+  replicaCount: 2
+  image:
+    repository: ghcr.io/onixus/bsdm-cache-indexer
+    tag: "0.3.2"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: "250m"
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  service:
+    port: 8080
+  kafka:
+    brokers: "kafka-bootstrap.bsdm-analytics.svc:9092"
+    topic: cache-events
+    groupId: cache-indexer-group
+  clickhouse:
+    url: "http://clickhouse-bsdm.bsdm-analytics.svc.cluster.local:8123"
+    database: bsdm
+    table: http_cache
+    existingSecret: ""
+    user: ""
+    password: ""
+  searchApi:
+    enabled: true
+    token: ""
+    maxLimit: 10000
+    defaultDays: 30
+  rustLog: "info,cache_indexer=info"
+
 nodeSelector: {}
 tolerations: []
 affinity: {}

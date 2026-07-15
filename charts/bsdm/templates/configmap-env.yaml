@@ -1,3 +1,4 @@
+{{- if gt (int .Values.replicaCount) 0 }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -33,3 +34,4 @@ data:
   {{- if .Values.proxy.kafkaBrokers }}
   KAFKA_BROKERS: {{ .Values.proxy.kafkaBrokers | quote }}
   {{- end }}
+{{- end }}

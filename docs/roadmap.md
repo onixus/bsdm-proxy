@@ -122,8 +122,8 @@ proxy → Kafka → cache-indexer → ClickHouse
 
 ### Текущий gap
 
-- CSV/JSON export polish for SOC playbooks (Search API already supports `format=csv`)
 - Session correlation across multi-node proxies (today: per-node soft sessions)
+- k8s production soak of CHI example (#135 docs/Helm shipped)
 
 ### Задачи
 
@@ -136,7 +136,8 @@ proxy → Kafka → cache-indexer → ClickHouse
 - [x] **Default compose on ClickHouse** — `docker compose up` ([#132](https://github.com/onixus/bsdm-proxy/issues/132))
 - [x] **Remove OpenSearch backend** — ClickHouse-only cache-indexer ([#134](https://github.com/onixus/bsdm-proxy/issues/134))
 - [x] **Session correlation** — `session_id`, redirect chains (`parent_event_id` / `redirect_url`)
-- [ ] **Экспорт** — CSV/JSON для SOC
+- [x] **Экспорт** — CSV/JSON для SOC (`/api/search?format=csv|json`)
+- [x] **k8s ClickHouse Operator plane** — CHI example + Helm indexer ([#135](https://github.com/onixus/bsdm-proxy/issues/135))
 
 **Критерий завершения M3:** аналитик находит «кто ходил на domain X за 30 дней» через Dashboards **или** Grafana/CH SQL; CH indexer в production path.
 
