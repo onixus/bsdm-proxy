@@ -7,9 +7,9 @@ use bsdm_proxy::{
     htcp_peer_port, htcp_server_bind_addr, http_cache_key, icp_server_bind_addr,
     load_hierarchy_config, metrics_server, run_peer_discovery, should_start_htcp_server,
     should_start_icp_server, wait_shutdown_signal, AclAction, AuthManager, CacheConfig, CertCache,
-    HtcpServer, IcpServer, KafkaEventPipeline, L2CacheConfig, Metrics, PeerDiscoveryConfig,
-    PerfConfig, PolicyCacheConfig, PolicyDecisionCache, ProxyPolicy, ProxyService, RateLimitConfig,
-    RedisL2Cache, UpstreamTlsConfig,
+    HtcpServer, HttpEventPipeline, IcpServer, KafkaEventPipeline, L2CacheConfig, Metrics,
+    PeerDiscoveryConfig, PerfConfig, PolicyCacheConfig, PolicyDecisionCache, ProxyPolicy,
+    ProxyService, RateLimitConfig, RedisL2Cache, UpstreamTlsConfig,
 };
 use policy_config::{load_policy_config, reload_acl_engine};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -138,6 +138,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let kafka_pipeline = kafka_brokers
         .as_deref()
         .and_then(|brokers| KafkaEventPipeline::spawn(brokers, kafka_topic, metrics.clone()));
+    let http_pipeline = if kafka_pipeline.is_none() {
+        std::env::var("EVENT_SINK_URL")
+            .ok()
+            .filter(|u| !u.is_empty())
+            .and_then(|url| {
+                let token = std::env::var("EVENT_SINK_TOKEN")
+                    .ok()
+                    .filter(|t| !t.is_empty());
+                HttpEventPipeline::spawn(url, token, metrics.clone())
+            })
+    } else {
+        None
+    };
     let cache_config = CacheConfig::from_env();
     if cache_config.spill_threshold_bytes > 0 {
         if let Err(e) = ensure_private_spill_dir(&cache_config.spill_dir) {
@@ -195,6 +208,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         cache_config.clone(),
         l2_cache,
         kafka_pipeline,
+        http_pipeline,
         metrics.clone(),
         mitm_enabled,
         auth,

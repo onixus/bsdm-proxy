@@ -69,7 +69,8 @@ CMD ["proxy"]
 FROM alpine:3.21 AS cache-indexer
 RUN apk add --no-cache \
     ca-certificates \
-    libgcc
+    libgcc \
+    wget
 
 # Копируем скомпилированный бинарник
 COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/cache-indexer /usr/local/bin/cache-indexer

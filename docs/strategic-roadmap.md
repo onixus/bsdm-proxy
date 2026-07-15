@@ -15,10 +15,10 @@
 
 *Фокус: снижение порога входа и адаптация под небольшие инфраструктуры (VPS, edge-узлы).*
 
-- **Отвязка от тяжелых зависимостей:** рефакторинг `cache-indexer` для работы без обязательной связки с Kafka и ClickHouse. *(pending)*
-- **Встроенное хранилище:** SQLite или in-memory для индексов и метаданных по умолчанию. *(pending)*
-- **Standalone-архитектура:** независимый бинарник / lightweight container — proxy уже работает без `KAFKA_BROKERS`. *(partial)*
-- **Zero-Config профили:** ✅ [`docker-compose.lite.yml`](../docker-compose.lite.yml) + [`scripts/gen-ca.sh`](../scripts/gen-ca.sh) — см. [lite.md](lite.md).
+- **Отвязка от тяжелых зависимостей:** ✅ `INDEX_STORE=sqlite|memory` + optional Kafka; HTTP `POST /api/events` (см. [lite.md](lite.md)).
+- **Встроенное хранилище:** ✅ SQLite / in-memory event store на cache-indexer.
+- **Standalone-архитектура:** независимый бинарник / lightweight container — proxy уже работает без `KAFKA_BROKERS`; Lite compose + SQLite. *(partial — rdkafka still linked, B21)*
+- **Zero-Config профили:** ✅ [`docker-compose.lite.yml`](../docker-compose.lite.yml) + [`scripts/gen-ca.sh`](../scripts/gen-ca.sh).
 
 ---
 

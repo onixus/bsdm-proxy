@@ -2,15 +2,8 @@
 
 use bsdm_events::json_each_row_lines;
 use bsdm_events::CacheEvent;
-use rdkafka::consumer::{CommitMode, Consumer, StreamConsumer};
-use rdkafka::message::Message;
 use reqwest::Client;
-use std::sync::Arc;
-use std::time::Instant;
-use tracing::{error, info, warn};
-
-use crate::kafka::create_consumer;
-use crate::metrics::IndexerMetrics;
+use tracing::{error, info};
 
 pub struct ClickHouseConfig {
     pub url: String,
@@ -132,96 +125,6 @@ impl ClickHouseWriter {
             let err_body = response.text().await.unwrap_or_default();
             error!("ClickHouse insert failed (HTTP {}): {}", status, err_body);
             Err(format!("ClickHouse insert failed: {err_body}").into())
-        }
-    }
-}
-
-pub struct ClickHouseIndexer {
-    writer: Arc<ClickHouseWriter>,
-    consumer: StreamConsumer,
-    metrics: Arc<IndexerMetrics>,
-}
-
-impl ClickHouseIndexer {
-    pub async fn new(
-        kafka_brokers: &str,
-        kafka_topic: &str,
-        kafka_group: &str,
-        writer: Arc<ClickHouseWriter>,
-        metrics: Arc<IndexerMetrics>,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
-        let consumer = create_consumer(kafka_brokers, kafka_topic, kafka_group)?;
-        Ok(Self {
-            writer,
-            consumer,
-            metrics,
-        })
-    }
-
-    pub async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let mut batch: Vec<CacheEvent> = Vec::new();
-        let batch_size = 50;
-        let batch_timeout = std::time::Duration::from_secs(5);
-        let mut last_commit = tokio::time::Instant::now();
-
-        loop {
-            match tokio::time::timeout(batch_timeout, self.consumer.recv()).await {
-                Ok(Ok(message)) => {
-                    if let Some(payload) = message.payload() {
-                        match serde_json::from_slice::<CacheEvent>(payload) {
-                            Ok(event) => {
-                                batch.push(event);
-                                if batch.len() >= batch_size {
-                                    self.flush_batch(&batch).await?;
-                                    batch.clear();
-                                    self.consumer.commit_consumer_state(CommitMode::Async)?;
-                                    last_commit = tokio::time::Instant::now();
-                                }
-                            }
-                            Err(e) => {
-                                warn!(
-                                    "Failed to parse event: {} - Payload: {}",
-                                    e,
-                                    String::from_utf8_lossy(payload)
-                                );
-                            }
-                        }
-                    }
-                }
-                Ok(Err(e)) => {
-                    error!("Kafka error: {}", e);
-                }
-                Err(_) => {
-                    if !batch.is_empty() {
-                        self.flush_batch(&batch).await?;
-                        batch.clear();
-                        self.consumer.commit_consumer_state(CommitMode::Async)?;
-                        last_commit = tokio::time::Instant::now();
-                    }
-                }
-            }
-
-            if last_commit.elapsed() > std::time::Duration::from_secs(30) && !batch.is_empty() {
-                self.flush_batch(&batch).await?;
-                batch.clear();
-                self.consumer.commit_consumer_state(CommitMode::Async)?;
-                last_commit = tokio::time::Instant::now();
-            }
-        }
-    }
-
-    async fn flush_batch(&self, batch: &[CacheEvent]) -> Result<(), Box<dyn std::error::Error>> {
-        let started = Instant::now();
-        match self.writer.insert_batch(batch).await {
-            Ok(()) => {
-                self.metrics
-                    .record_success("clickhouse", batch.len(), started);
-                Ok(())
-            }
-            Err(e) => {
-                self.metrics.record_error("clickhouse");
-                Err(e)
-            }
         }
     }
 }
