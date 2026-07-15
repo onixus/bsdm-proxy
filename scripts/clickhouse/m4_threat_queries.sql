@@ -42,3 +42,6 @@
 -- GROUP BY domain
 -- ORDER BY requests DESC
 -- LIMIT 50;
+
+-- Wired into alert-worker rules (blocked_burst, domain_burst, off_hours_threat,
+-- high_entropy_domain). See docs/alerting.md and cargo crate alert-worker/.

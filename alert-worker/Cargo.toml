@@ -1,0 +1,30 @@
+[package]
+name = "alert-worker"
+version = "0.3.2"
+edition = "2021"
+license = "MIT"
+authors = ["BSDM-Proxy Contributors"]
+description = "ClickHouse rule evaluator that posts threat alerts to a SIEM/webhook"
+repository = "https://github.com/onixus/bsdm-proxy"
+keywords = ["clickhouse", "alerting", "webhook", "siem"]
+categories = ["network-programming"]
+
+[[bin]]
+name = "alert-worker"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+chrono = { workspace = true }
+prometheus = "0.14"
+sha2 = "0.11"
+hex = "0.4"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tokio = { workspace = true }

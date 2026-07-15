@@ -4,8 +4,9 @@
 
 BSDM-Proxy is a single Rust/Cargo product: a caching HTTPS forward proxy with MITM
 TLS, auth, ACL, Prometheus metrics, and an optional Kafka → cache-indexer → ClickHouse
-analytics pipeline. The Cargo workspace has four crates: `proxy/` (bin `proxy`),
-`cache-indexer/` (bin `cache-indexer`), `bsdm-events/` (shared event types), and
+analytics pipeline (plus optional `alert-worker` webhook alerts). The Cargo workspace has
+five crates: `proxy/` (bin `proxy`), `cache-indexer/` (bin `cache-indexer`),
+`alert-worker/` (bin `alert-worker`), `bsdm-events/` (shared event types), and
 `e2e/` (test harness). Standard build,
 lint, test, and run commands live in `README.md` and `docs/development.md` — use those
 as the source of truth.

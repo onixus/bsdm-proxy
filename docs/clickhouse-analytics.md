@@ -73,6 +73,17 @@ LIMIT 50;
 
 Метрики: `cache_indexer_inserts_total{backend="clickhouse"}`, `cache_indexer_insert_errors_total{backend}`, `cache_indexer_batch_duration_seconds`.
 
+## Alert worker (M4 / B19)
+
+`alert-worker` polls `bsdm.http_cache` and POSTs findings to `ALERT_WEBHOOK_URL` (compose profile `alerts`).
+
+```bash
+ALERT_WEBHOOK_URL=https://siem.example/hooks/bsdm \
+  docker compose --profile alerts up -d --build alert-worker
+```
+
+See [alerting.md](alerting.md).
+
 ## Миграция OpenSearch → ClickHouse (завершена)
 
 | Фаза | Статус |

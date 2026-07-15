@@ -9,12 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Alert worker (B19 / #50)** — `alert-worker` polls ClickHouse threat rules and POSTs SIEM JSON webhooks; compose profile `alerts`, Dockerfile target, Prometheus scrape, docs [`docs/alerting.md`](docs/alerting.md)
 - **Web config GUI** — restored General/Cache/Kafka/Auth tabs; Performance, import `.env`, export `acl-rules.json`; compose aligned with root `docker-compose.yml` (P2-5)
 
 ### Changed
 
 - **ACL lock-free snapshot** — `AclEngineHandle` with `arc-swap`; hot path `check_access` without `tokio::RwLock` ([#40](https://github.com/onixus/bsdm-proxy/issues/40) / B9)
 - **Docs cleanup** — roadmap/README/wiki synced to v0.3.2 (M3 done, M4 started); blockers aligned with ClickHouse path; removed outdated `OPTIMIZATIONS.md` and duplicate hierarchy stub; archived GitHub bootstrap scripts under `scripts/archive/`
+- **M4 roadmap** — webhook alerting pipeline marked done; remaining: Grafana alert rules, C&C heuristics, PhishTank key
 
 ## [0.3.2] - 2026-07-02
 
