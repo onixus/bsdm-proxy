@@ -427,7 +427,8 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test, cargo-audi
 | [docs/search-api.md](docs/search-api.md) | REST Search API (`/api/search`) |
 | [docs/adr/0002-clickhouse-analytics.md](docs/adr/0002-clickhouse-analytics.md) | ADR: ClickHouse как analytics store |
 | [docs/architecture.md](docs/architecture.md) | Архитектура и блокеры |
-| [docs/roadmap.md](docs/roadmap.md) | Roadmap и milestones |
+| [docs/roadmap.md](docs/roadmap.md) | Roadmap и milestones (M1–M5) |
+| [docs/strategic-roadmap.md](docs/strategic-roadmap.md) | Стратегия: Lite, DX, Wasm, AI |
 | [docs/capacity-planning.md](docs/capacity-planning.md) | Планирование ёмкости (корп. сценарии) |
 | [CHANGELOG.md](CHANGELOG.md) | История изменений |
 | [docs/releases/v0.3.2.md](docs/releases/v0.3.2.md) | Release notes 0.3.2 |
@@ -439,7 +440,9 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test, cargo-audi
 
 Цель: **альтернатива Squid с ретропоиском и ML** для аномалий, фишинга и C&C.
 
-Полный план: **[docs/roadmap.md](docs/roadmap.md)** · SWG gap mapping: [docs/swg-backlog-mapping.md](docs/swg-backlog-mapping.md)
+План работ (M1–M5): **[docs/roadmap.md](docs/roadmap.md)** · Стратегия (Lite / DX / Wasm / AI): **[docs/strategic-roadmap.md](docs/strategic-roadmap.md)** · SWG: [docs/swg-backlog-mapping.md](docs/swg-backlog-mapping.md)
+
+### Engineering milestones
 
 | Milestone | Версия | Фокус | Статус |
 |-----------|--------|-------|--------|
@@ -450,7 +453,20 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test, cargo-audi
 | **M4** Threat analytics | v0.5.x | Rule-based алерты, C&C heuristics | ~15% |
 | **M5** ML security | v1.0.x | ML anomaly, phishing, C&C detection | ~0% |
 
-Кратко: **M3 closed** (proxy → Kafka → ClickHouse → Grafana/`/api/search`). **M4** — categorization metrics shipped; alerts/heuristics next. Полный план: [docs/roadmap.md](docs/roadmap.md).
+Кратко: **M3 closed** (proxy → Kafka → ClickHouse → Grafana/`/api/search`). **M4** — categorization metrics shipped; alerts/heuristics next.
+
+### Стратегические фазы
+
+Вектор рыночной ценности и удобства (детально — [strategic-roadmap.md](docs/strategic-roadmap.md)):
+
+| Фаза | Фокус |
+|------|--------|
+| **1. Lite** | Прокси без обязательных Kafka/ClickHouse; SQLite/in-memory; `docker-compose.lite.yml` |
+| **2. DX** | Control Plane API, hot reload, cache purge, lite metrics без Grafana |
+| **3. Wasm** | Wasmtime-плагины, SDK, модульность ядра |
+| **4. AI-трафик** | Token-bucket RL, semantic cache для LLM, request coalescing |
+
+Порядок по умолчанию: Lite → DX → Wasm / AI.
 
 ## Лицензия
 
