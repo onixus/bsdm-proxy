@@ -170,8 +170,8 @@ impl MissCompletionHandle {
         if self.perf.should_emit_kafka_event() {
             if let Ok(timestamp) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
                 let event_id = new_event_id();
-                let redirect_url = header_ci(headers_map, "location")
-                    .map(|loc| resolve_location(url, loc));
+                let redirect_url =
+                    header_ci(headers_map, "location").map(|loc| resolve_location(url, loc));
                 let corr = self.sessions.begin_request(
                     client_ip,
                     username.as_deref(),
@@ -364,12 +364,9 @@ impl ProxyService {
                 .iter()
                 .find(|(k, _)| k.eq_ignore_ascii_case("location"))
                 .map(|(_, v)| resolve_location(url, v));
-            let corr = self.sessions.begin_request(
-                client_ip,
-                username.as_deref(),
-                user_agent,
-                url,
-            );
+            let corr = self
+                .sessions
+                .begin_request(client_ip, username.as_deref(), user_agent, url);
             self.sessions.note_redirect(
                 client_ip,
                 &event_id,
@@ -436,19 +433,11 @@ impl ProxyService {
                 .redirect_url
                 .as_deref()
                 .map(|loc| resolve_location(url, loc));
-            let corr = self.sessions.begin_request(
-                client_ip,
-                username.as_deref(),
-                user_agent,
-                url,
-            );
-            self.sessions.note_redirect(
-                client_ip,
-                &event_id,
-                status,
-                url,
-                redirect_url.as_deref(),
-            );
+            let corr = self
+                .sessions
+                .begin_request(client_ip, username.as_deref(), user_agent, url);
+            self.sessions
+                .note_redirect(client_ip, &event_id, status, url, redirect_url.as_deref());
             let event = CacheEvent {
                 url: url.to_string(),
                 method: method.to_string(),

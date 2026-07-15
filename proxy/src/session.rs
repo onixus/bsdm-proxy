@@ -247,12 +247,8 @@ mod tests {
 
     #[test]
     fn same_client_reuses_session() {
-        let c = SessionCorrelator::new(
-            Duration::from_secs(60),
-            Duration::from_secs(30),
-            1000,
-            1000,
-        );
+        let c =
+            SessionCorrelator::new(Duration::from_secs(60), Duration::from_secs(30), 1000, 1000);
         let a = c.begin_request("10.0.0.1", Some("alice"), Some("curl/8"), "https://a.com/");
         let b = c.begin_request("10.0.0.1", Some("alice"), Some("curl/8"), "https://b.com/");
         assert_eq!(a.session_id, b.session_id);
@@ -261,12 +257,8 @@ mod tests {
 
     #[test]
     fn different_ua_new_session() {
-        let c = SessionCorrelator::new(
-            Duration::from_secs(60),
-            Duration::from_secs(30),
-            1000,
-            1000,
-        );
+        let c =
+            SessionCorrelator::new(Duration::from_secs(60), Duration::from_secs(30), 1000, 1000);
         let a = c.begin_request("10.0.0.1", Some("alice"), Some("curl/8"), "https://a.com/");
         let b = c.begin_request("10.0.0.1", Some("alice"), Some("Firefox"), "https://a.com/");
         assert_ne!(a.session_id, b.session_id);
@@ -288,12 +280,8 @@ mod tests {
 
     #[test]
     fn redirect_chain_links_parent() {
-        let c = SessionCorrelator::new(
-            Duration::from_secs(60),
-            Duration::from_secs(30),
-            1000,
-            1000,
-        );
+        let c =
+            SessionCorrelator::new(Duration::from_secs(60), Duration::from_secs(30), 1000, 1000);
         let first = c.begin_request(
             "10.0.0.2",
             Some("bob"),

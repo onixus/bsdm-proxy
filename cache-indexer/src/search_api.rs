@@ -64,8 +64,7 @@ impl SearchApi {
     ) -> Result<(u16, String, Vec<u8>), Box<dyn std::error::Error>> {
         let domain = sanitize_filter(query.get("domain").map(String::as_str).unwrap_or(""));
         let username = sanitize_filter(query.get("username").map(String::as_str).unwrap_or(""));
-        let session_id =
-            sanitize_filter(query.get("session_id").map(String::as_str).unwrap_or(""));
+        let session_id = sanitize_filter(query.get("session_id").map(String::as_str).unwrap_or(""));
         let limit = query
             .get("limit")
             .and_then(|v| v.parse::<u32>().ok())
