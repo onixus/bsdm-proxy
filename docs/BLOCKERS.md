@@ -42,9 +42,9 @@
 | B15 | [#46](https://github.com/onixus/bsdm-proxy/issues/46) | Design analytics/ML worker service | ❌ |
 | B16 | [#47](https://github.com/onixus/bsdm-proxy/issues/47) | Extend event schema for threat analytics | ✅ |
 | B17 | [#48](https://github.com/onixus/bsdm-proxy/issues/48) | Analytics UI (Grafana + ClickHouse; was OS Dashboards) | ✅ |
-| B18 | [#49](https://github.com/onixus/bsdm-proxy/issues/49) | Behavioral threat signals (beyond blocklists) | ❌ |
+| B18 | [#49](https://github.com/onixus/bsdm-proxy/issues/49) | Behavioral threat signals (beyond blocklists) | ✅ beacon_periodic |
 | B19 | [#50](https://github.com/onixus/bsdm-proxy/issues/50) | Alerting pipeline to SIEM/webhook | ✅ |
-| B20 | [#51](https://github.com/onixus/bsdm-proxy/issues/51) | Security analytics dashboards (historical) | 🔄 CH panels started |
+| B20 | [#51](https://github.com/onixus/bsdm-proxy/issues/51) | Security analytics dashboards (historical) | 🔄 CH threat + beacon panels |
 
 ## Structural
 

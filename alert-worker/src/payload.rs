@@ -29,6 +29,7 @@ pub struct Finding {
     pub description: String,
     pub value: f64,
     pub labels: BTreeMap<String, String>,
+    pub window_secs: u64,
 }
 
 impl Finding {
@@ -36,12 +37,7 @@ impl Finding {
         fingerprint_for(&self.rule, &self.labels)
     }
 
-    pub fn into_payload(
-        self,
-        source: &str,
-        window_secs: u64,
-        fired_at: DateTime<Utc>,
-    ) -> AlertPayload {
+    pub fn into_payload(self, source: &str, fired_at: DateTime<Utc>) -> AlertPayload {
         let fingerprint = self.fingerprint();
         AlertPayload {
             version: 1,
@@ -52,7 +48,7 @@ impl Finding {
             title: self.title,
             description: self.description,
             fired_at: fired_at.to_rfc3339(),
-            window_secs,
+            window_secs: self.window_secs,
             value: self.value,
             labels: self.labels,
             fingerprint,
@@ -99,8 +95,9 @@ mod tests {
             description: "too many".into(),
             value: 99.0,
             labels,
+            window_secs: 300,
         };
-        let payload = finding.into_payload("test", 300, Utc::now());
+        let payload = finding.into_payload("test", Utc::now());
         let json = serde_json::to_string(&payload).unwrap();
         assert!(json.contains("\"version\":1"));
         assert!(json.contains("domain_burst"));

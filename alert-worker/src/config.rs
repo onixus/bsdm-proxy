@@ -23,6 +23,12 @@ pub struct Config {
     pub domain_burst_threshold: u64,
     pub high_entropy_min_requests: u64,
     pub off_hours_min_events: u64,
+    pub beacon_lookback: Duration,
+    pub beacon_min_hits: u64,
+    pub beacon_min_interval_secs: u64,
+    pub beacon_max_interval_secs: u64,
+    /// Max coefficient of variation of inter-request gaps (0.0–1.0 scale as percent×100 avoided — use float via string parse).
+    pub beacon_max_gap_cv: f64,
 }
 
 impl Config {
@@ -38,7 +44,7 @@ impl Config {
         )?;
 
         let rules = parse_rules_list(&std::env::var("ALERT_RULES").unwrap_or_else(|_| {
-            "blocked_burst,domain_burst,off_hours_threat,high_entropy_domain".into()
+            "blocked_burst,domain_burst,off_hours_threat,high_entropy_domain,beacon_periodic".into()
         }));
 
         Ok(Self {
@@ -68,6 +74,11 @@ impl Config {
             domain_burst_threshold: env_u64("ALERT_DOMAIN_BURST_THRESHOLD", 50),
             high_entropy_min_requests: env_u64("ALERT_HIGH_ENTROPY_MIN_REQUESTS", 5),
             off_hours_min_events: env_u64("ALERT_OFF_HOURS_MIN_EVENTS", 1),
+            beacon_lookback: Duration::from_secs(env_u64("ALERT_BEACON_LOOKBACK_SECS", 3600)),
+            beacon_min_hits: env_u64("ALERT_BEACON_MIN_HITS", 5),
+            beacon_min_interval_secs: env_u64("ALERT_BEACON_MIN_INTERVAL_SECS", 45),
+            beacon_max_interval_secs: env_u64("ALERT_BEACON_MAX_INTERVAL_SECS", 900),
+            beacon_max_gap_cv: env_f64("ALERT_BEACON_MAX_GAP_CV", 0.25),
         })
     }
 
@@ -77,6 +88,13 @@ impl Config {
 }
 
 fn env_u64(name: &str, default: u64) -> u64 {
+    std::env::var(name)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
+}
+
+fn env_f64(name: &str, default: f64) -> f64 {
     std::env::var(name)
         .ok()
         .and_then(|v| v.parse().ok())

@@ -147,7 +147,7 @@ services:
       - ALERT_POLL_INTERVAL_SECS=${ALERT_POLL_INTERVAL_SECS:-60}
       - ALERT_LOOKBACK_SECS=${ALERT_LOOKBACK_SECS:-300}
       - ALERT_DEDUPE_TTL_SECS=${ALERT_DEDUPE_TTL_SECS:-3600}
-      - ALERT_RULES=${ALERT_RULES:-blocked_burst,domain_burst,off_hours_threat,high_entropy_domain}
+      - ALERT_RULES=${ALERT_RULES:-blocked_burst,domain_burst,off_hours_threat,high_entropy_domain,beacon_periodic}
       - CLICKHOUSE_URL=http://clickhouse:8123
       - CLICKHOUSE_DATABASE=bsdm
       - CLICKHOUSE_TABLE=http_cache

@@ -474,7 +474,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test, cargo-audi
 | **M2** Squid parity | v0.3.x | L2, ACL API, NTLM/Kerberos, hierarchy Phase 4 | ✅ Done |
 | **M2.5** Data plane | v0.3.1–0.3.2 | Tiered L1, streaming MISS, P1 hot path | ✅ Done |
 | **M3** Retro-search | v0.3.1+ | ClickHouse, Grafana, Search API, k8s CHI | ✅ Done |
-| **M4** Threat analytics | v0.5.x | Rule-based алерты, C&C heuristics | ~15% |
+| **M4** Threat analytics | v0.5.x | Rule-based алерты, C&C heuristics | ~40% |
 | **M5** ML security | v1.0.x | ML anomaly, phishing, C&C detection | ~0% |
 
 Кратко: **M3 closed** (proxy → Kafka → ClickHouse → Grafana/`/api/search`). **M4** — categorization metrics shipped; alerts/heuristics next.

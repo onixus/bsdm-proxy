@@ -341,6 +341,36 @@
       ],
       "title": "Burst domains (≥50 req in range)",
       "type": "table"
+    },
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "inspect": false },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 50 },
+      "id": 11,
+      "options": {
+        "cellHeight": "sm",
+        "footer": { "countRows": false, "fields": "", "reducer": ["sum"], "show": false },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+          "editorType": "sql",
+          "format": 0,
+          "queryType": "sql",
+          "rawSql": "WITH ordered AS (\n  SELECT\n    toString(client_ip) AS client_ip,\n    domain,\n    ts,\n    dateDiff('second', lagInFrame(ts) OVER (PARTITION BY client_ip, domain ORDER BY ts), ts) AS gap_sec\n  FROM bsdm.http_cache\n  WHERE $__timeFilter(ts)\n    AND domain != ''\n)\nSELECT\n  client_ip,\n  domain,\n  count() AS gaps,\n  round(avg(gap_sec), 1) AS avg_gap_secs,\n  round(if(avg(gap_sec) = 0, 1, stddevPop(gap_sec) / avg(gap_sec)), 3) AS gap_cv\nFROM ordered\nWHERE gap_sec IS NOT NULL\n  AND gap_sec BETWEEN 45 AND 900\nGROUP BY client_ip, domain\nHAVING gaps >= 5 AND gap_cv <= 0.25\nORDER BY gaps DESC\nLIMIT 50",
+          "refId": "A"
+        }
+      ],
+      "title": "Beacon candidates (periodic client→domain)",
+      "type": "table"
     }
   ],
   "refresh": "30s",

@@ -84,7 +84,7 @@ async fn evaluate_once(
                 continue;
             }
         };
-        let findings = findings_from_rows(&rule, &rows);
+        let findings = findings_from_rows(&rule, &rows, config);
         for finding in findings {
             metrics
                 .findings
@@ -95,7 +95,7 @@ async fn evaluate_once(
                 metrics.dedupe_suppressed.inc();
                 continue;
             }
-            let payload = finding.into_payload(&config.source, config.lookback.as_secs(), fired_at);
+            let payload = finding.into_payload(&config.source, fired_at);
             match webhook.send(&payload).await {
                 Ok(()) => metrics.webhook_sent.inc(),
                 Err(e) => {
