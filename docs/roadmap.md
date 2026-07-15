@@ -12,6 +12,8 @@
 
 Текущая версия: **0.3.2** · [Releases](https://github.com/onixus/bsdm-proxy/releases) · [CHANGELOG](../CHANGELOG.md)
 
+Стратегический вектор (Lite → DX → Wasm → AI): **[strategic-roadmap.md](strategic-roadmap.md)**
+
 ---
 
 ## Обзор milestones
@@ -157,10 +159,26 @@ Backlog mapping: [swg-backlog-mapping.md](swg-backlog-mapping.md)
 
 ---
 
+## Стратегические фазы (рыночный вектор)
+
+Параллельный трек к M1–M5 — снижение порога входа, DX, расширяемость и AI-трафик. Полный текст: **[strategic-roadmap.md](strategic-roadmap.md)**.
+
+| Фаза | Фокус | Ключевые элементы |
+|------|--------|-------------------|
+| **1. Lite** | VPS / edge, низкий порог | indexer без обязательных Kafka/CH; SQLite/in-memory; `docker-compose.lite.yml` |
+| **2. DX** | Control plane | REST/gRPC API, hot reload ACL/upstream, cache purge по tags/regex, lite metrics |
+| **3. Wasm** | Плагины | Wasmtime в request/response pipeline, SDK (Rust/Go/AS), PoC auth-as-plugin |
+| **4. AI-трафик** | LLM / API proxy | token-bucket RL, semantic cache (vector DB prep), request coalescing |
+
+Порядок реализации по умолчанию: **Lite → DX → Wasm / AI** (AI coalescing может частично пересекаться с perf-треком раньше Wasm).
+
+---
+
 ## Связанные документы
 
 | Документ | Тема |
 |----------|------|
+| [strategic-roadmap.md](strategic-roadmap.md) | Стратегические фазы Lite / DX / Wasm / AI |
 | [architecture.md](architecture.md) | Компоненты, блокеры |
 | [adr/0002-clickhouse-analytics.md](adr/0002-clickhouse-analytics.md) | ClickHouse ADR |
 | [clickhouse-analytics.md](clickhouse-analytics.md) | Compose + SQL |
@@ -171,4 +189,4 @@ Backlog mapping: [swg-backlog-mapping.md](swg-backlog-mapping.md)
 
 ---
 
-*Обновлено: 2026-07 — M2.5/M3 done, M4 started (cat metrics), docs cleanup*
+*Обновлено: 2026-07 — M2.5/M3 done, M4 started; strategic roadmap (Lite/DX/Wasm/AI) added*
