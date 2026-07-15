@@ -28,6 +28,7 @@ GET /api/search
 |-------|----------|-------------|
 | `domain` | no | Filter by domain (alphanumeric, `.@_-%` only) |
 | `username` | no | Filter by username |
+| `session_id` | no | Soft browsing session id (orders timeline ascending) |
 | `from` | no | Unix timestamp (seconds); default: now − `days` |
 | `to` | no | Unix timestamp (seconds); default: now |
 | `days` | no | Lookback days if `from` omitted (default 30) |
@@ -48,6 +49,9 @@ curl -s 'http://127.0.0.1:8080/api/search?limit=10' | jq .
 # Filter by domain
 curl -s 'http://127.0.0.1:8080/api/search?domain=httpbin.org&days=7'
 
+# Filter by session (redirect chain / browsing timeline)
+curl -s 'http://127.0.0.1:8080/api/search?session_id=<id>&days=1'
+
 # CSV export for SOC
 curl -s 'http://127.0.0.1:8080/api/search?domain=example.com&format=csv' -o traffic.csv
 
@@ -58,7 +62,7 @@ curl -H "Authorization: Bearer secret" 'http://127.0.0.1:8080/api/search?limit=5
 
 ### Response
 
-JSON array of objects with fields: `ts`, `username`, `client_ip`, `url`, `method`, `status`, `cache_status`, `domain`, `event_id`.
+JSON array of objects with fields: `ts`, `username`, `client_ip`, `url`, `method`, `status`, `cache_status`, `domain`, `event_id`, `session_id`, `parent_event_id`, `redirect_url`.
 
 Errors: `401` (unauthorized), `404` (search disabled), `500` (query failure).
 

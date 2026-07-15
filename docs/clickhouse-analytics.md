@@ -25,18 +25,26 @@ Search API: `http://localhost:8080/api/search` — см. [search-api.md](search-
 
 `scripts/clickhouse/http_cache.sql` — таблица `bsdm.http_cache`, TTL 42 дня, партиции по дню.
 
-Поля соответствуют `bsdm-events::CacheEvent` (включая `threat_sources`, `acl_action`).
+Поля соответствуют `bsdm-events::CacheEvent` (включая `threat_sources`, `acl_action`, `session_id`, `parent_event_id`, `redirect_url`).
+
+Session correlation: soft `session_id` (IP + user + UA, idle TTL) и цепочки редиректов через `parent_event_id` ← `Location`. См. migration `scripts/clickhouse/migrations/001_session_correlation.sql` для существующих volume.
 
 ## Примеры SQL (M3)
 
 ```sql
 -- Кто ходил на домен за 30 дней
-SELECT ts, username, client_ip, url, method, status, cache_status
+SELECT ts, username, client_ip, url, method, status, cache_status, session_id
 FROM bsdm.http_cache
 WHERE domain = 'example.com'
   AND ts >= now() - INTERVAL 30 DAY
 ORDER BY ts DESC
 LIMIT 1000;
+
+-- Redirect / browsing timeline for a session
+SELECT ts, event_id, parent_event_id, status, url, redirect_url
+FROM bsdm.http_cache
+WHERE session_id = '...'
+ORDER BY ts ASC;
 
 -- Top domains per user (7 дней)
 SELECT username, domain, count() AS requests, sum(response_size) AS bytes

@@ -274,8 +274,16 @@ async fn handle_connect_tunnel(
 
                     if let Ok(timestamp) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)
                     {
+                        let event_id = new_event_id();
+                        let url = format!("https://{}", authority);
+                        let corr = service.sessions().begin_request(
+                            &client_ip,
+                            username.as_deref(),
+                            None,
+                            &url,
+                        );
                         let event = CacheEvent {
-                            url: format!("https://{}", authority),
+                            url,
                             method: "CONNECT".to_string(),
                             status: 200,
                             cache_key: service
@@ -295,7 +303,10 @@ async fn handle_connect_tunnel(
                             categories: vec![],
                             threat_sources: vec![],
                             acl_action: None,
-                            event_id: new_event_id(),
+                            session_id: corr.session_id,
+                            parent_event_id: corr.parent_event_id,
+                            redirect_url: None,
+                            event_id,
                         };
                         service.send_cache_event(event);
                     }

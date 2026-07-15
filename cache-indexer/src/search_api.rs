@@ -64,6 +64,8 @@ impl SearchApi {
     ) -> Result<(u16, String, Vec<u8>), Box<dyn std::error::Error>> {
         let domain = sanitize_filter(query.get("domain").map(String::as_str).unwrap_or(""));
         let username = sanitize_filter(query.get("username").map(String::as_str).unwrap_or(""));
+        let session_id =
+            sanitize_filter(query.get("session_id").map(String::as_str).unwrap_or(""));
         let limit = query
             .get("limit")
             .and_then(|v| v.parse::<u32>().ok())
@@ -87,18 +89,27 @@ impl SearchApi {
             .unwrap_or(now);
 
         let format = query.get("format").map(String::as_str).unwrap_or("json");
+        let order = if session_id.is_empty() {
+            "ts DESC"
+        } else {
+            // Session timeline: chronological redirect chain
+            "ts ASC"
+        };
 
         let sql = format!(
-            "SELECT ts, username, client_ip, url, method, status, cache_status, domain, event_id \
+            "SELECT ts, username, client_ip, url, method, status, cache_status, domain, \
+             event_id, session_id, parent_event_id, redirect_url \
              FROM {table} \
              WHERE ts >= fromUnixTimestamp({{from:UInt32}}) \
                AND ts <= fromUnixTimestamp({{to:UInt32}}) \
                AND (length({{domain:String}}) = 0 OR domain = {{domain:String}}) \
                AND (length({{username:String}}) = 0 OR username = {{username:String}}) \
-             ORDER BY ts DESC \
+               AND (length({{session_id:String}}) = 0 OR session_id = {{session_id:String}}) \
+             ORDER BY {order} \
              LIMIT {{limit:UInt32}} \
              FORMAT JSONEachRow",
-            table = self.table_fqn
+            table = self.table_fqn,
+            order = order
         );
 
         let params = vec![
@@ -106,6 +117,7 @@ impl SearchApi {
             ("to", to.to_string()),
             ("domain", domain),
             ("username", username),
+            ("session_id", session_id),
             ("limit", limit.to_string()),
         ];
 

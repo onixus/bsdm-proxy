@@ -37,6 +37,7 @@ use crate::perf::PerfConfig;
 use crate::pipeline::{flush_kafka, new_event_id, CacheEvent, KafkaEventPipeline};
 use crate::policy_cache::PolicyDecisionCache;
 use crate::rate_limit::{RateLimitViolation, RateLimiter};
+use crate::session::{header_ci, resolve_location, SessionCorrelator};
 use crate::sharded_cache::HttpL1Cache;
 use crate::streaming_miss::TeeMissBody;
 use crate::tls::CertCache;
@@ -58,6 +59,7 @@ struct MissCompletionHandle {
     kafka_pipeline: Option<Arc<KafkaEventPipeline>>,
     perf: PerfConfig,
     digest_registry: Option<Arc<DigestRegistry>>,
+    sessions: Arc<SessionCorrelator>,
 }
 
 impl MissCompletionHandle {
@@ -102,6 +104,7 @@ impl MissCompletionHandle {
         stored: bool,
         user_id: Option<String>,
         username: Option<String>,
+        user_agent: Option<String>,
         client_ip: &str,
         categories: &[String],
         threat_sources: &[String],
@@ -166,6 +169,22 @@ impl MissCompletionHandle {
 
         if self.perf.should_emit_kafka_event() {
             if let Ok(timestamp) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
+                let event_id = new_event_id();
+                let redirect_url = header_ci(headers_map, "location")
+                    .map(|loc| resolve_location(url, loc));
+                let corr = self.sessions.begin_request(
+                    client_ip,
+                    username.as_deref(),
+                    user_agent.as_deref(),
+                    url,
+                );
+                self.sessions.note_redirect(
+                    client_ip,
+                    &event_id,
+                    status,
+                    url,
+                    redirect_url.as_deref(),
+                );
                 let event = CacheEvent {
                     url: url.to_string(),
                     method: method.to_string(),
@@ -180,12 +199,18 @@ impl MissCompletionHandle {
                     domain: domain.to_string(),
                     response_size: body_size as u64,
                     request_duration_ms: request_start.elapsed().as_millis() as u64,
-                    content_type: headers_map.get("content-type").cloned(),
-                    user_agent: headers_map.get("user-agent").cloned(),
+                    content_type: headers_map
+                        .iter()
+                        .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+                        .map(|(_, v)| v.clone()),
+                    user_agent,
                     categories: categories.to_vec(),
                     threat_sources: threat_sources.to_vec(),
                     acl_action: None,
-                    event_id: new_event_id(),
+                    session_id: corr.session_id,
+                    parent_event_id: corr.parent_event_id,
+                    redirect_url,
+                    event_id,
                 };
                 self.send_cache_event(event);
             }
@@ -219,6 +244,7 @@ pub struct ProxyService {
     rate_limiter: Arc<RateLimiter>,
     perf: PerfConfig,
     policy_cache: Arc<PolicyDecisionCache>,
+    sessions: Arc<SessionCorrelator>,
 }
 
 impl ProxyService {
@@ -252,6 +278,7 @@ impl ProxyService {
             kafka_pipeline: self.kafka_pipeline.clone(),
             perf: self.perf.clone(),
             digest_registry: self.digest_registry.clone(),
+            sessions: self.sessions.clone(),
         }
     }
 
@@ -302,7 +329,12 @@ impl ProxyService {
             rate_limiter: Arc::new(RateLimiter::new(rate_limit_config)),
             perf,
             policy_cache,
+            sessions: Arc::new(SessionCorrelator::from_env()),
         }
+    }
+
+    pub(crate) fn sessions(&self) -> Arc<SessionCorrelator> {
+        self.sessions.clone()
     }
 
     fn parse_client_ip(client_ip: &str) -> Option<IpAddr> {
@@ -319,12 +351,32 @@ impl ProxyService {
         cached: &CachedResponse,
         user_id: &Option<String>,
         username: &Option<String>,
+        user_agent: Option<&str>,
         client_ip: &str,
         categories: &[String],
         threat_sources: &[String],
         request_start: Instant,
     ) {
         if let Ok(timestamp) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
+            let event_id = new_event_id();
+            let redirect_url = cached
+                .headers
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case("location"))
+                .map(|(_, v)| resolve_location(url, v));
+            let corr = self.sessions.begin_request(
+                client_ip,
+                username.as_deref(),
+                user_agent,
+                url,
+            );
+            self.sessions.note_redirect(
+                client_ip,
+                &event_id,
+                cached.status,
+                url,
+                redirect_url.as_deref(),
+            );
             let event = CacheEvent {
                 url: url.to_string(),
                 method: method.to_string(),
@@ -344,11 +396,14 @@ impl ProxyService {
                     .iter()
                     .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
                     .map(|(_, v)| v.to_string()),
-                user_agent: None,
+                user_agent: user_agent.map(str::to_string),
                 categories: categories.to_vec(),
                 threat_sources: threat_sources.to_vec(),
                 acl_action: None,
-                event_id: new_event_id(),
+                session_id: corr.session_id,
+                parent_event_id: corr.parent_event_id,
+                redirect_url,
+                event_id,
             };
             self.send_cache_event(event);
         }
@@ -363,6 +418,7 @@ impl ProxyService {
         decision: &AclDecision,
         user_id: &Option<String>,
         username: &Option<String>,
+        user_agent: Option<&str>,
         client_ip: &str,
         domain: &str,
         categories: &[String],
@@ -375,6 +431,24 @@ impl ProxyService {
                 AclAction::Redirect => 302,
                 AclAction::Allow => 200,
             };
+            let event_id = new_event_id();
+            let redirect_url = decision
+                .redirect_url
+                .as_deref()
+                .map(|loc| resolve_location(url, loc));
+            let corr = self.sessions.begin_request(
+                client_ip,
+                username.as_deref(),
+                user_agent,
+                url,
+            );
+            self.sessions.note_redirect(
+                client_ip,
+                &event_id,
+                status,
+                url,
+                redirect_url.as_deref(),
+            );
             let event = CacheEvent {
                 url: url.to_string(),
                 method: method.to_string(),
@@ -390,11 +464,14 @@ impl ProxyService {
                 response_size: 0,
                 request_duration_ms: request_start.elapsed().as_millis() as u64,
                 content_type: None,
-                user_agent: None,
+                user_agent: user_agent.map(str::to_string),
                 categories: categories.to_vec(),
                 threat_sources: threat_sources.to_vec(),
                 acl_action: Some(decision.action.to_string()),
-                event_id: new_event_id(),
+                session_id: corr.session_id,
+                parent_event_id: corr.parent_event_id,
+                redirect_url,
+                event_id,
             };
             self.send_cache_event(event);
         }
@@ -537,6 +614,7 @@ impl ProxyService {
         method: &str,
         user_id: &Option<String>,
         username: &Option<String>,
+        user_agent: Option<&str>,
         client_ip: &str,
         categories: &[String],
         threat_sources: &[String],
@@ -560,6 +638,7 @@ impl ProxyService {
                 cached,
                 user_id,
                 username,
+                user_agent,
                 client_ip,
                 categories,
                 threat_sources,
@@ -659,6 +738,7 @@ impl ProxyService {
             let refreshed = cached.refreshed_after_not_modified(ttl);
             self.store_in_l1_and_l2(cache_key.clone(), refreshed.clone());
             debug!("Cache REVALIDATED (304): {} {}", method, url);
+            let user_agent = Self::request_header_str(req, "user-agent");
             return Some(self.serve_l1_hit(
                 &refreshed,
                 cache_key,
@@ -666,6 +746,7 @@ impl ProxyService {
                 method,
                 user_id,
                 username,
+                user_agent.as_deref(),
                 client_ip,
                 categories,
                 threat_sources,
@@ -824,6 +905,13 @@ impl ProxyService {
             .unwrap_or_else(|| "unknown".to_string())
     }
 
+    fn request_header_str(req: &Request<Incoming>, name: &str) -> Option<String> {
+        req.headers()
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string())
+    }
+
     fn extract_user_info(req: &Request<Incoming>) -> (Option<String>, Option<String>) {
         if let Some(auth_header) = req.headers().get(AUTHORIZATION) {
             if let Ok(auth_str) = auth_header.to_str() {
@@ -915,6 +1003,7 @@ impl ProxyService {
         stored: bool,
         user_id: Option<String>,
         username: Option<String>,
+        user_agent: Option<String>,
         client_ip: &str,
         categories: &[String],
         threat_sources: &[String],
@@ -937,6 +1026,7 @@ impl ProxyService {
             stored,
             user_id,
             username,
+            user_agent,
             client_ip,
             categories,
             threat_sources,
@@ -973,6 +1063,7 @@ impl ProxyService {
         let no_user: Option<String> = None;
         let no_cats: Vec<String> = Vec::new();
         let no_threats: Vec<String> = Vec::new();
+        let user_agent = Self::request_header_str(req, "user-agent");
         let cache_lookup_start = Instant::now();
 
         if let Some(cached) = self.http_cache.get(cache_key) {
@@ -998,6 +1089,7 @@ impl ProxyService {
                     method,
                     &no_user,
                     &no_user,
+                    user_agent.as_deref(),
                     client_ip,
                     &no_cats,
                     &no_threats,
@@ -1058,6 +1150,7 @@ impl ProxyService {
                     &cached,
                     &no_user,
                     &no_user,
+                    user_agent.as_deref(),
                     client_ip,
                     &no_cats,
                     &no_threats,
@@ -1112,6 +1205,7 @@ impl ProxyService {
         } else {
             Self::extract_user_info(&req)
         };
+        let user_agent = Self::request_header_str(&req, "user-agent");
 
         if let Some(resp) = self.check_rate_limit(&client_ip, username.as_deref()) {
             if let Some(g) = guard.take() {
@@ -1158,6 +1252,7 @@ impl ProxyService {
                 &decision,
                 &user_id,
                 &username,
+                user_agent.as_deref(),
                 &client_ip,
                 &domain,
                 &categories,
@@ -1190,6 +1285,7 @@ impl ProxyService {
                     method,
                     &user_id,
                     &username,
+                    user_agent.as_deref(),
                     &client_ip,
                     &categories,
                     &threat_sources,
@@ -1252,6 +1348,7 @@ impl ProxyService {
                     &cached,
                     &user_id,
                     &username,
+                    user_agent.as_deref(),
                     &client_ip,
                     &categories,
                     &threat_sources,
@@ -1342,6 +1439,7 @@ impl ProxyService {
                     let store_precheck_cb = store_precheck.clone();
                     let user_id_cb = user_id.clone();
                     let username_cb = username.clone();
+                    let user_agent_cb = user_agent.clone();
                     let client_ip_cb = client_ip.clone();
                     let categories_cb = categories.clone();
                     let threat_sources_cb = threat_sources.clone();
@@ -1377,6 +1475,7 @@ impl ProxyService {
                                 stored && final_decision.store,
                                 user_id_cb,
                                 username_cb,
+                                user_agent_cb,
                                 &client_ip_cb,
                                 &categories_cb,
                                 &threat_sources_cb,
@@ -1438,6 +1537,7 @@ impl ProxyService {
                     store_decision.store,
                     user_id,
                     username,
+                    user_agent,
                     &client_ip,
                     &categories,
                     &threat_sources,

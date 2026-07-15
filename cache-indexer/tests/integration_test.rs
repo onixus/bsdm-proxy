@@ -26,6 +26,9 @@ mod tests {
             categories: vec!["malware".to_string()],
             threat_sources: vec!["urlhaus".to_string()],
             acl_action: None,
+            session_id: String::new(),
+            parent_event_id: None,
+            redirect_url: None,
             event_id: "evt-1".to_string(),
         };
 
@@ -60,6 +63,9 @@ mod tests {
             categories: vec!["malware".to_string()],
             threat_sources: vec!["urlhaus".to_string()],
             acl_action: None,
+            session_id: String::new(),
+            parent_event_id: None,
+            redirect_url: None,
             event_id: "evt-1".to_string(),
         };
 
@@ -113,6 +119,9 @@ mod tests {
             categories: vec!["malware".to_string()],
             threat_sources: vec!["ut1".to_string()],
             acl_action: Some("deny".to_string()),
+            session_id: String::new(),
+            parent_event_id: None,
+            redirect_url: None,
             event_id: "evt-block".to_string(),
         };
 
@@ -145,6 +154,9 @@ mod tests {
                 categories: vec![],
                 threat_sources: vec![],
                 acl_action: None,
+                session_id: String::new(),
+                parent_event_id: None,
+                redirect_url: None,
                 event_id: format!("evt-{i}"),
             });
         }
@@ -179,6 +191,9 @@ mod tests {
             categories: vec!["malware".to_string()],
             threat_sources: vec!["ut1".to_string()],
             acl_action: Some("deny".to_string()),
+            session_id: String::new(),
+            parent_event_id: None,
+            redirect_url: None,
             event_id: "evt-block".to_string(),
         };
 
