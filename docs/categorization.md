@@ -106,7 +106,23 @@ Stub only (`ML_ENABLED`); not used in production paths yet.
 
 ## Policy integration
 
-Categories feed URL filtering and policy rules. Events include `category`, `category_source` (`ut1`, `otx`, `ml`, `none`), and `category_confidence` in Kafka / ClickHouse.
+Categories feed URL filtering and policy rules. Events include `categories`, `threat_sources` (`ut1`, `urlhaus`, `phishtank`, …), and `acl_action` in Kafka / ClickHouse.
+
+## Prometheus metrics (M4)
+
+Exported on the proxy metrics port (`/metrics`):
+
+| Metric | Labels | Description |
+|--------|--------|-------------|
+| `bsdm_proxy_categorization_lookups_total` | `source`, `result` | Hot-path lookups (`source`: ut1/custom/cache/unknown; `result`: hit/miss) |
+| `bsdm_proxy_categorization_cache_hits_total` | — | In-memory category cache hits |
+| `bsdm_proxy_categorization_cache_misses_total` | — | Cache miss → local DB scan |
+| `bsdm_proxy_categorization_duration_seconds` | — | Histogram of `categorize_local` latency |
+| `bsdm_proxy_categorization_category_total` | `category` | Categories returned |
+| `bsdm_proxy_categorization_blocked_total` | `category`, `action` | ACL deny/redirect with those categories |
+| `bsdm_proxy_categorization_online_enrich_scheduled_total` | — | Background URLhaus/PhishTank tasks |
+
+Grafana: panels on **BSDM Proxy Dashboard** + SQL threat panels on **BSDM HTTP Traffic (ClickHouse)**.
 
 ## Configuration reference
 

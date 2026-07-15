@@ -493,9 +493,11 @@ impl ProxyService {
         let Some(engine) = &self.categorization else {
             return (Vec::new(), Vec::new());
         };
+        let start = Instant::now();
         let result = engine.categorize_local(url);
         if result.categories.is_empty() && engine.online_enrichment_enabled() {
             engine.schedule_online_enrichment(url);
+            self.metrics.record_categorization_online_enrich_scheduled();
         }
         let categories: Vec<String> = result
             .categories
@@ -504,10 +506,16 @@ impl ProxyService {
             .filter(|name| !name.is_empty())
             .collect();
         let threat_sources = if result.source != "unknown" && !categories.is_empty() {
-            vec![result.source]
+            vec![result.source.clone()]
         } else {
             Vec::new()
         };
+        self.metrics.record_categorization_lookup(
+            &result.source,
+            result.cached,
+            &categories,
+            start.elapsed().as_secs_f64(),
+        );
         (categories, threat_sources)
     }
 
@@ -554,6 +562,8 @@ impl ProxyService {
             None
         } else {
             info!("ACL {} for {}: {}", decision.action, url, decision.reason);
+            self.metrics
+                .record_categorization_blocked(category_names, &action_label);
             Some(decision)
         }
     }

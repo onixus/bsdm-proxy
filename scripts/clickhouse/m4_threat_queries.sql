@@ -1,0 +1,44 @@
+-- M4 threat / SOC example queries for bsdm.http_cache
+-- Run ad-hoc or wire into Grafana alerts / materialized views later.
+
+-- Top blocked categories (7d)
+-- SELECT arrayJoin(categories) AS category, count() AS events
+-- FROM bsdm.http_cache
+-- WHERE ts >= now() - INTERVAL 7 DAY
+--   AND acl_action IN ('deny', 'redirect')
+-- GROUP BY category
+-- ORDER BY events DESC
+-- LIMIT 20;
+
+-- Burst domains: same domain > N requests / 5 minutes from one client
+-- SELECT
+--   client_ip,
+--   domain,
+--   count() AS requests,
+--   min(ts) AS first_ts,
+--   max(ts) AS last_ts
+-- FROM bsdm.http_cache
+-- WHERE ts >= now() - INTERVAL 1 HOUR
+-- GROUP BY client_ip, domain
+-- HAVING requests >= 50
+-- ORDER BY requests DESC
+-- LIMIT 100;
+
+-- Off-hours traffic (UTC): 22:00–06:00 with threat sources
+-- SELECT ts, username, client_ip, domain, url, threat_sources, categories
+-- FROM bsdm.http_cache
+-- WHERE ts >= now() - INTERVAL 7 DAY
+--   AND (toHour(ts) >= 22 OR toHour(ts) < 6)
+--   AND length(threat_sources) > 0
+-- ORDER BY ts DESC
+-- LIMIT 200;
+
+-- High-entropy / short-lived domains (simple heuristic: long labels, many digits)
+-- SELECT domain, count() AS requests, uniqExact(client_ip) AS clients
+-- FROM bsdm.http_cache
+-- WHERE ts >= now() - INTERVAL 1 DAY
+--   AND length(domain) >= 25
+--   AND match(domain, '[0-9]{4,}')
+-- GROUP BY domain
+-- ORDER BY requests DESC
+-- LIMIT 50;
