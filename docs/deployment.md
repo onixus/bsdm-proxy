@@ -18,15 +18,20 @@
 
 ## Docker Compose (рекомендуется для dev/lab)
 
+### Lite — только прокси
+
+```bash
+./scripts/gen-ca.sh
+docker compose -f docker-compose.lite.yml up -d --build
+```
+
+Один caching HTTPS proxy (MITM + L1), без Kafka/ClickHouse. Подробнее: [lite.md](lite.md).
+
 ### Полный стек
 
 ```bash
 # 1. CA для MITM (если MITM_ENABLED=true)
-mkdir -p certs && cd certs
-openssl genrsa -out ca.key 4096
-openssl req -new -x509 -days 3650 -key ca.key -out ca.crt \
-  -subj "/C=RU/ST=Moscow/L=Moscow/O=BSDM/CN=BSDM Root CA"
-cd ..
+./scripts/gen-ca.sh
 
 # 2. Запуск
 docker compose up -d --build

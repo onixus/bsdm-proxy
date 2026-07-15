@@ -39,6 +39,7 @@ bsdm-proxy/
 ├── certs/                  # MITM CA (gitignored, генерируется локально)
 ├── Dockerfile              # Multi-stage: proxy + cache-indexer + alert-worker
 ├── docker-compose.yml      # Полный стек (+ profile `alerts`)
+├── docker-compose.lite.yml # Lite: standalone proxy (Phase 1)
 ├── docker-compose.*.yml    # Профили: test, redis-l2, hierarchy, ha
 └── AGENTS.md               # Инструкции для Cursor Cloud Agent
 ```
@@ -47,6 +48,7 @@ bsdm-proxy/
 
 | Файл | Сервисы |
 |------|---------|
+| `docker-compose.lite.yml` | proxy only (MITM + L1 spill, no Kafka/CH) |
 | `docker-compose.yml` | proxy, cache-indexer, kafka, zookeeper, clickhouse, prometheus, grafana; optional `alert-worker` (`--profile alerts`) |
 | `docker-compose.test.yml` | Минимальный стек для smoke/E2E |
 | `docker-compose.redis-l2.yml` | 2× proxy + Redis L2 |
