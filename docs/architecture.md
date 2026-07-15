@@ -108,21 +108,21 @@ TCP accept
 
 ### Ограничения request path
 
-- Вся логика в **binary crate** (`main.rs` ~1300 строк) — `ProxyService` не в `lib.rs` (B7)
-- Categorization с online API на **критическом пути** каждого запроса
+- Hot path: L1 → (optional policy) → upstream; Kafka enqueue is non-blocking (bounded queue)
+- Online threat feeds (URLhaus/PhishTank) — **async** enrich only (`categorize_local` on hot path)
 - ACL uses `AclEngineHandle` (`arc-swap`) — no `RwLock` on hot-path checks
-- Hierarchy metrics (`bsdm_proxy_hierarchy_*`) экспортируются в Prometheus при `HIERARCHY_ENABLED=true`
-- Нет `docker-compose.hierarchy.yml` для multi-instance E2E
+- Soft `session_id` is per-proxy-node (not shared across replicas)
+- Hierarchy metrics (`bsdm_proxy_hierarchy_*`) при `HIERARCHY_ENABLED=true`
 
 ---
 
 ## Поток данных (analytics path)
 
 ```
-CacheEvent (main.rs)
-  → Kafka topic "cache-events" (hardcoded, acks=0)
+CacheEvent (proxy_service / pipeline)
+  → Kafka topic cache-events (env KAFKA_*, bounded queue)
   → cache-indexer consumer
-  → ClickHouse INSERT `bsdm.http_cache`
+  → ClickHouse INSERT `bsdm.http_cache` (JSONEachRow)
 ```
 
 ```mermaid
@@ -133,8 +133,8 @@ sequenceDiagram
   participant C as ClickHouse
 
   P->>P: handle_request completes
-  P-->>K: CacheEvent JSON (async, acks=0)
-  Note over P,K: categories sent by proxy
+  P-->>K: CacheEvent JSON (async, bounded queue)
+  Note over P,K: categories, session_id, threat_sources
   K->>I: consume batch
   I->>C: JSONEachRow insert
   Note over I,C: full CacheEvent schema in CH
@@ -187,7 +187,7 @@ Local L1 miss → ICP query siblings → select parent → fetch_via_peer → or
 
 Идентификаторы **B1–B25** — GitHub Issues [#32–#56](https://github.com/onixus/bsdm-proxy/issues?q=is%3Aissue+in%3Atitle+B).
 
-Чеклист: [BLOCKERS.md](BLOCKERS.md) · Создать заново: `./scripts/create-blocker-issues.sh`
+Чеклист: [BLOCKERS.md](BLOCKERS.md) · *(bootstrap script archived: `scripts/archive/`)*
 
 ### 🔴 Critical — M1 Foundation
 
@@ -198,19 +198,19 @@ Local L1 miss → ICP query siblings → select parent → fetch_via_peer → or
 | **B3** | Hierarchy без HTTP fetch к peer | ✅ Done | `peer_fetch.rs`, `main.rs` |
 | **B4** | ICP server не запускается | ✅ Done | `icp.rs`, `main.rs` |
 | **B5** | `ca.key` обязателен при старте | ✅ Done | `tls.rs` |
-| **B6** | Rate limiting отсутствует | ❌ Open | `main.rs` |
+| **B6** | Rate limiting | ✅ Done | `rate_limit.rs` |
 
 ### 🟠 High — M2 Squid parity / M3 Retro-search
 
 | ID | Блокер | Файлы | Milestone |
 |----|--------|-------|-----------|
-| **B7** | Монолит `main.rs` | `main.rs` | M1–M2 |
-| **B8** | Categorization на hot path (external HTTP) | `categorization.rs`, `main.rs` | M2 |
-| **B9** | ACL lock-free snapshot | `acl.rs` (`AclEngineHandle`) | M2 |
-| **B10** | Kafka `acks=0`, topic hardcoded | `main.rs:361-365` | M3 |
+| **B7** | Монолит `main.rs` → ProxyService | ✅ Done | `proxy_service.rs` |
+| **B8** | Online categorization off hot path | ✅ Done | `categorization.rs` (#104) |
+| **B9** | ACL lock-free snapshot | ✅ Done | `acl.rs` |
+| **B10** | Kafka topic env + acks + queue | ✅ Done | `pipeline.rs` |
 | **B11** | Schema drift: `categories` в indexer | ✅ Done | `cache-indexer/src/main.rs` | M3 |
-| **B12** | Нет shared event crate | `proxy`, `cache-indexer` | M3 |
-| **B13** | NTLM — не реализован (документация исправлена) | `auth.rs` | M2 impl |
+| **B12** | Shared `bsdm-events` crate | ✅ Done | `bsdm-events/` |
+| **B13** | NTLM / Kerberos | ✅ Done | `auth.rs` |
 | **B14** | ACL TimeWindow + group rules — реализовано | `acl.rs` | M2 ✅ |
 
 ### 🟡 Medium — M4 Threat / M5 ML
@@ -218,11 +218,11 @@ Local L1 miss → ICP query siblings → select parent → fetch_via_peer → or
 | ID | Блокер | Описание | Milestone |
 |----|--------|----------|-----------|
 | **B15** | Нет analytics/ML сервиса | Нужен worker для scoring, alerts | M4–M5 |
-| **B16** | Бедная event schema | Нет session_id, acl_action, threat_score | M4 |
-| **B17** | OpenSearch Dashboards в compose | ✅ Done | `docker-compose.yml` | M3 |
+| **B16** | Event schema for analytics | ✅ Done (`session_id`, `acl_action`, `threat_sources`) | M3–M4 |
+| **B17** | Analytics UI in compose | ✅ Done (Grafana + ClickHouse; OS Dashboards removed) | M3 |
 | **B18** | Только URL-level threat | Нет DNS/timing/beacon signals | M4–M5 |
-| **B19** | Нет alerting pipeline | OS Alerting / webhook / SIEM | M4 |
-| **B20** | Grafana ≠ security analytics | Prometheus only, не historical threats | M3–M4 |
+| **B19** | Alerting pipeline | ❌ Open (CH/Grafana / webhook) | M4 |
+| **B20** | Historical threat analytics UI | 🔄 CH panels started (#105) | M4 |
 
 ### 🔵 Structural — технический долг
 
@@ -240,37 +240,27 @@ Local L1 miss → ICP query siblings → select parent → fetch_via_peer → or
 ## Блокеры по milestones
 
 ```
-M1  █████████████░  B6 B7 (B1–B5 ✅)
-M2  ██████████████  B7 B8 B9 B13 B14 B21 B22 B23 B25
-M3  ████████████░░  B10 B11 B12 B17 B20
-M4  ██████████████  B15 B16 B18 B19 + M3
-M5  ██████████████  B15 B16 B18 + M4
+M1  ██████████████  B1–B6 ✅
+M2  ██████████████  B7–B9 B13–B14 B21–B25 ✅
+M3  █████████████░  B10–B12 B17 ✅ · B20 🔄
+M4  ███░░░░░░░░░░░  B16 ✅ · B15 B18 B19 · B20 🔄
+M5  ░░░░░░░░░░░░░░  + M4
 ```
 
 ---
 
 ## Приоритет разблокировки
 
-### Волна 1 — завершить M1
+### Волны 1–2 — M1/M2/M3
 
-1. ~~**B5** — optional CA при `MITM_ENABLED=false`~~ ✅
-2. ~~**B1 + B2** — подключить hierarchy modules + `rand`~~ ✅
-3. ~~**B3 + B4** — HTTP fetch к peer + ICP server~~ ✅
-4. **B6** — rate limiting
-5. **B7** — начать вынос `ProxyService` в `lib.rs`
-
-### Волна 2 — разблокировать M3 (параллельно)
-
-1. **B12** — crate `bsdm-events` с общей схемой
-2. **B11** — indexer принимает `categories`, `acl_action`
-3. **B10** — `KAFKA_TOPIC` env, `acks=1`
-4. **B17** — OpenSearch Dashboards в compose
+Critical/high блокеры B1–B14, B17, B22–B26 — **закрыты**. Analytics path: ClickHouse.
 
 ### Волна 3 — M4/M5 foundation
 
-1. **B16** — расширить schema (session_id, threat_score)
-2. **B15** — analytics worker (отдельный crate или Python sidecar)
-3. **B8** — вынести online categorization с hot path
+1. ~~**B16** — rich event schema~~ ✅ (`session_id`, `acl_action`, `threat_sources`)
+2. **B15** — analytics / alerting worker
+3. **B18 / B19** — behavioral signals + SIEM webhook
+4. ~~**B8** — online categorization off hot path~~ ✅ (#104)
 
 ---
 
@@ -302,4 +292,4 @@ flowchart LR
 
 ---
 
-*Версия документа: 0.3.1 · M1–M2 done · M3 ClickHouse retro-search в работе*
+*Версия документа: 0.3.2 · M1–M3 done · M4 threat analytics started*

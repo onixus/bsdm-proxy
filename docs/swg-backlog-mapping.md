@@ -13,13 +13,13 @@
 | Deployment | self-hosted forward proxy | cloud PoP / multitenant SaaS |
 | Сильная сторона | Squid-parity cache + hierarchy + retro-search pipeline | single-pass inline security at scale |
 | Слабая сторона | data plane throughput, policy on hot path | не ваш on-prem control plane |
-| Уникальность | Kafka → OpenSearch ретропоиск + ML roadmap | commodity cloud SWG |
+| Уникальность | Kafka → ClickHouse ретропоиск + ML roadmap | commodity cloud SWG |
 
 **Цель mapping:** не копировать cloud SWG целиком, а взять **data-plane и policy patterns**, которые закрывают измеримые gaps (HTTP Archive bench, enterprise proxy shops).
 
 ---
 
-## Матрица: лидеры vs BSDM (v0.3.1 + PR #93)
+## Матрица: лидеры vs BSDM (v0.3.2)
 
 Легенда: ✅ есть · ⚠️ частично · ❌ нет · 🎯 backlog
 
@@ -77,8 +77,8 @@
 | Identity-aware policy | user/device/location | user/group/IP/time | device posture **P4** |
 | Global PoP / anycast | 120–150+ DC | single node / K8s | HA guide **P2** |
 | Async telemetry (не на hot path) | yes | ⚠️ Kafka inline (sampled) | **P1** async-only events |
-| Retro-search / SOC | cloud logs | Kafka→OpenSearch | M3 Search API |
-| SIEM export | native | OpenSearch/Kafka | ILM + schema **M3** |
+| Retro-search / SOC | cloud logs | Kafka→ClickHouse | M3 Search API ✅ |
+| SIEM export | native | Kafka / CSV Search API | schema **M3** |
 
 ---
 
@@ -115,7 +115,7 @@
 | P2-1 | **Rock-equivalent tuning guide** — spill threshold vs object size distribution | Squid `cache_dir rock` | `capacity-planning.md` |
 | P2-2 | **Peer mTLS** | hierarchy security | `peer_fetch.rs` |
 | P2-3 | **HA deployment** — Redis L2 + sticky-less LB + shared spill dir or no-spill | cloud PoP equivalent | docs + compose |
-| P2-4 | OpenSearch Search API (M3) | retro-search differentiator | `cache-indexer` |
+| P2-4 | ClickHouse Search API (M3) | retro-search differentiator | `cache-indexer` ✅ |
 | P2-5 | Web config UI for ACL | Palo Alto console lite | `web-config/` ✅ generator |
 
 ### P3 — Threat plane (async, не inline)
@@ -124,7 +124,7 @@
 |----|--------|--------|---------|
 | P3-1 | ICAP adapter (optional AV/URL) | legacy enterprise | sidecar pattern |
 | P3-2 | Event enrichment: `acl_action`, `threat_sources` | Netskope data lake | M3 schema |
-| P3-3 | Categorization Prometheus metrics | all | M4 |
+| P3-3 ✅ | Categorization Prometheus metrics | all | M4 |
 | P3-4 | DNS sinkhole module (optional) | Cisco Umbrella layer 1 | separate crate |
 
 ### P4+ — Не копировать в v1
@@ -233,7 +233,7 @@ gantt
 |-----------|------------------------|------------------|
 | M2 done | Squid hierarchy + rock-like store | L1/L2, ICP, spill |
 | M2.5 (new) | Zscaler/Netskope data plane | P0 streaming + policy cache |
-| M3 | Netskope data lake (async) | OpenSearch retro-search |
+| M3 | Netskope data lake (async) | ClickHouse retro-search ✅ |
 | M4 | PANW threat intel (rules) | beacon heuristics, enrichment |
 | M5 | ML inline scoring (optional) | anomaly score in index |
 
@@ -260,7 +260,7 @@ gantt
 | P2-5 | [#112](https://github.com/onixus/bsdm-proxy/issues/112) Web config ACL UI | P2 |
 | P3-1 | [#99](https://github.com/onixus/bsdm-proxy/issues/99) ICAP adapter | P3 |
 | P3-2 | [#102](https://github.com/onixus/bsdm-proxy/issues/102) Event schema enrichment | P3 |
-| P3-3 | [#105](https://github.com/onixus/bsdm-proxy/issues/105) Categorization metrics | P3 |
+| P3-3 ✅ | [#105](https://github.com/onixus/bsdm-proxy/issues/105) Categorization metrics | P3 |
 | P3-4 | [#108](https://github.com/onixus/bsdm-proxy/issues/108) DNS sinkhole module | P3 |
 
 P0-1 / P0-2 tracked by PR [#93](https://github.com/onixus/bsdm-proxy/pull/93) and PR [#92](https://github.com/onixus/bsdm-proxy/pull/92).
@@ -294,4 +294,4 @@ P0-1 / P0-2 tracked by PR [#93](https://github.com/onixus/bsdm-proxy/pull/93) an
 - [Gartner SSE MQ 2025 leaders](https://www.crn.com/news/security/2025/zscaler-netskope-palo-alto-networks-lead-gartner-s-sse-magic-quadrant-for-2025)
 - [ADR 0001 tiered sharded L1](adr/0001-tiered-sharded-l1-cache.md)
 
-*Последнее обновление: 2026-06, BSDM v0.3.1 + PR #93*
+*Последнее обновление: 2026-07, BSDM v0.3.2*

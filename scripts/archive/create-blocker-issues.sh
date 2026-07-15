@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# ARCHIVED — do not re-run. See scripts/archive/README.md
 # Create GitHub issues for architecture blockers B1–B25.
 # Requires: gh auth with issues write scope
 # Usage: ./scripts/create-blocker-issues.sh [--dry-run]

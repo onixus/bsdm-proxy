@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# ARCHIVED — do not re-run. See scripts/archive/README.md
 # Create GitHub milestones for BSDM-Proxy roadmap.
 # Requires: gh auth with repo admin scope
 # Usage: ./scripts/create-milestones.sh
@@ -25,7 +26,7 @@ create_milestone "M2: Squid parity (v0.3.x)" \
   "Cache hierarchy Phase 4, Redis L2, HTTP/2, compression, full ACL, NTLM. docs/roadmap.md"
 
 create_milestone "M3: Retro-search (v0.4.x)" \
-  "OpenSearch schema, dashboards, saved searches, historical traffic analytics. docs/roadmap.md"
+  "ClickHouse analytics, Search API, Grafana. docs/roadmap.md"
 
 create_milestone "M4: Threat analytics (v0.5.x)" \
   "Rule-based anomaly alerts, C&C heuristics, threat enrichment, SIEM export. docs/roadmap.md"

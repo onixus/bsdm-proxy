@@ -2,11 +2,12 @@
 
 Краткий реестр блокеров. Полное описание: [architecture.md](architecture.md)
 
-| GitHub | Скрипт |
-|--------|--------|
-| Issues [#32–#56](https://github.com/onixus/bsdm-proxy/issues?q=is%3Aissue+in%3Atitle+B) | `./scripts/create-blocker-issues.sh` |
+| GitHub | Примечание |
+|--------|-----------|
+| Issues [#32–#56](https://github.com/onixus/bsdm-proxy/issues?q=is%3Aissue+in%3Atitle+B) | Live tracker |
 | Закрыть блокер вручную | `./scripts/close-blocker-issue.sh <id> [pr]` |
 | Auto-close при merge PR | [.github/workflows/close-blockers.yml](../.github/workflows/close-blockers.yml) |
+| Bootstrap (archived) | `scripts/archive/create-blocker-issues.sh` — do not re-run |
 
 ---
 
@@ -39,11 +40,11 @@
 | ID | Issue | Блокер | Статус |
 |----|-------|--------|--------|
 | B15 | [#46](https://github.com/onixus/bsdm-proxy/issues/46) | Design analytics/ML worker service | ❌ |
-| B16 | [#47](https://github.com/onixus/bsdm-proxy/issues/47) | Extend event schema for threat analytics | 🔄 |
-| B17 | [#48](https://github.com/onixus/bsdm-proxy/issues/48) | OpenSearch Dashboards in docker-compose | ✅ |
+| B16 | [#47](https://github.com/onixus/bsdm-proxy/issues/47) | Extend event schema for threat analytics | ✅ |
+| B17 | [#48](https://github.com/onixus/bsdm-proxy/issues/48) | Analytics UI (Grafana + ClickHouse; was OS Dashboards) | ✅ |
 | B18 | [#49](https://github.com/onixus/bsdm-proxy/issues/49) | Behavioral threat signals (beyond blocklists) | ❌ |
 | B19 | [#50](https://github.com/onixus/bsdm-proxy/issues/50) | Alerting pipeline to SIEM/webhook | ❌ |
-| B20 | [#51](https://github.com/onixus/bsdm-proxy/issues/51) | Security analytics dashboards (historical) | 🔄 |
+| B20 | [#51](https://github.com/onixus/bsdm-proxy/issues/51) | Security analytics dashboards (historical) | 🔄 CH panels started |
 
 ## Structural
 

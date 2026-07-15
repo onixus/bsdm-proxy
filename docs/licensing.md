@@ -1,6 +1,6 @@
 # Лицензирование и third-party компоненты
 
-Обзор лицензий переиспользуемого ПО в BSDM-Proxy v0.3.1.
+Обзор лицензий переиспользуемого ПО в BSDM-Proxy v0.3.2.
 
 > См. также: [NOTICE](../NOTICE) · [LICENSE](../LICENSE)
 
@@ -50,7 +50,7 @@ cargo install cargo-license
 cargo license --avoid-dev-deps --avoid-build-deps
 ```
 
-На момент v0.3.1: **~282** runtime crate, все с permissive-лицензиями (MIT, Apache-2.0, BSD-3-Clause, ISC и dual Apache/MIT).
+На момент v0.3.2: **~282** runtime crate, все с permissive-лицензиями (MIT, Apache-2.0, BSD-3-Clause, ISC и dual Apache/MIT).
 
 ### Прямые зависимости proxy
 
@@ -169,7 +169,7 @@ cargo audit
 
 ### Исторические компоненты (удалены)
 
-Следующие компоненты **больше не используются** в v0.3.1:
+Следующие компоненты **больше не используются** (с v0.3.1):
 
 - Pingora (ранний HTTP stack)
 - OpenSearch Rust client (заменён на ClickHouse)
@@ -186,4 +186,4 @@ cargo audit
 
 ---
 
-*Последний аудит: 2026-06 · v0.3.1 · `cargo license` + compose manifest*
+*Последний аудит: 2026-07 · v0.3.2 · `cargo license` + compose manifest*
