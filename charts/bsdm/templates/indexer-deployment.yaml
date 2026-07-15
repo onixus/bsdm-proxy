@@ -1,0 +1,68 @@
+{{- if and .Values.indexer .Values.indexer.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "bsdm.fullname" . }}-indexer
+  labels:
+    {{- include "bsdm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cache-indexer
+spec:
+  replicas: {{ .Values.indexer.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "bsdm.indexerSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/indexer-configmap.yaml") . | sha256sum }}
+      labels:
+        {{- include "bsdm.indexerSelectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "bsdm.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: cache-indexer
+          image: "{{ .Values.indexer.image.repository }}:{{ .Values.indexer.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.indexer.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: admin
+              containerPort: {{ .Values.indexer.service.port }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "bsdm.fullname" . }}-indexer-env
+          {{- if .Values.indexer.clickhouse.existingSecret }}
+          env:
+            - name: CLICKHOUSE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.indexer.clickhouse.existingSecret }}
+                  key: username
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.indexer.clickhouse.existingSecret }}
+                  key: password
+          {{- else if .Values.indexer.clickhouse.password }}
+          env:
+            - name: CLICKHOUSE_PASSWORD
+              value: {{ .Values.indexer.clickhouse.password | quote }}
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: admin
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: admin
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.indexer.resources | nindent 12 }}
+{{- end }}

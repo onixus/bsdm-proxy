@@ -46,3 +46,9 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{- define "bsdm.indexerSelectorLabels" -}}
+app.kubernetes.io/name: {{ include "bsdm.name" . }}-indexer
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: cache-indexer
+{{- end }}

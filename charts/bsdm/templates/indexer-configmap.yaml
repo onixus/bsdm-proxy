@@ -1,0 +1,27 @@
+{{- if and .Values.indexer .Values.indexer.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "bsdm.fullname" . }}-indexer-env
+  labels:
+    {{- include "bsdm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cache-indexer
+data:
+  METRICS_PORT: {{ .Values.indexer.service.port | quote }}
+  KAFKA_BROKERS: {{ .Values.indexer.kafka.brokers | quote }}
+  KAFKA_TOPIC: {{ .Values.indexer.kafka.topic | quote }}
+  KAFKA_GROUP_ID: {{ .Values.indexer.kafka.groupId | quote }}
+  CLICKHOUSE_URL: {{ .Values.indexer.clickhouse.url | quote }}
+  CLICKHOUSE_DATABASE: {{ .Values.indexer.clickhouse.database | quote }}
+  CLICKHOUSE_TABLE: {{ .Values.indexer.clickhouse.table | quote }}
+  SEARCH_API_ENABLED: {{ .Values.indexer.searchApi.enabled | quote }}
+  SEARCH_API_MAX_LIMIT: {{ .Values.indexer.searchApi.maxLimit | quote }}
+  SEARCH_API_DEFAULT_DAYS: {{ .Values.indexer.searchApi.defaultDays | quote }}
+  RUST_LOG: {{ .Values.indexer.rustLog | quote }}
+  {{- if .Values.indexer.clickhouse.user }}
+  CLICKHOUSE_USER: {{ .Values.indexer.clickhouse.user | quote }}
+  {{- end }}
+  {{- if and .Values.indexer.searchApi.token (ne .Values.indexer.searchApi.token "") }}
+  SEARCH_API_TOKEN: {{ .Values.indexer.searchApi.token | quote }}
+  {{- end }}
+{{- end }}

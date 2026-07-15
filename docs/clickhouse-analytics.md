@@ -82,9 +82,16 @@ LIMIT 50;
 | 2 | Grafana + Search API ([#129](https://github.com/onixus/bsdm-proxy/issues/129), [#130](https://github.com/onixus/bsdm-proxy/issues/130)) |
 | 3 | Default compose ([#132](https://github.com/onixus/bsdm-proxy/issues/132)) |
 | 4 | Remove OpenSearch code ([#134](https://github.com/onixus/bsdm-proxy/issues/134)) |
+| 5 | k8s ClickHouse Operator + Helm indexer ([#135](https://github.com/onixus/bsdm-proxy/issues/135)) |
 
 Epic: [#125](https://github.com/onixus/bsdm-proxy/issues/125).
 
 ## k8s
 
-См. [k8s-architecture.md](k8s-architecture.md) — ClickHouse Operator / Altinity chart в analytics namespace.
+Analytics plane: Kafka → cache-indexer → **ClickHouse** (no OpenSearch).
+
+1. Install [Altinity ClickHouse Operator](https://github.com/Altinity/clickhouse-operator).
+2. Apply CHI example: [`charts/bsdm/examples/clickhouse-installation.yaml`](../charts/bsdm/examples/clickhouse-installation.yaml).
+3. Deploy indexer: `helm upgrade --install bsdm-indexer ./charts/bsdm -f charts/bsdm/values-analytics.yaml -n bsdm-analytics`.
+
+Details: [k8s-architecture.md](k8s-architecture.md) § Analytics plane · issue [#135](https://github.com/onixus/bsdm-proxy/issues/135).
