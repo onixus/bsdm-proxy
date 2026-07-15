@@ -10,7 +10,7 @@
 [![Version](https://img.shields.io/badge/version-0.3.2-blue.svg)](https://github.com/onixus/bsdm-proxy/releases)
 [![Rust](https://img.shields.io/badge/rust-1.88+-orange.svg)](https://www.rust-lang.org)
 
-> **Текущая версия:** `0.3.2` (M2.5 perf P1) · **M2.5** P1 perf + offline categorization · **M3** retro-search — см. [Releases](https://github.com/onixus/bsdm-proxy/releases) · [CHANGELOG](CHANGELOG.md) · [roadmap](docs/roadmap.md)
+> **Текущая версия:** `0.3.2` · M2.5/M3 done · M4 threat analytics started — см. [Releases](https://github.com/onixus/bsdm-proxy/releases) · [CHANGELOG](CHANGELOG.md) · [roadmap](docs/roadmap.md)
 
 ⚠️ **MITM-прокси для HTTPS.** Используйте только в корпоративной среде с согласия пользователей и в рамках законодательства.
 
@@ -133,13 +133,13 @@ Grafana: http://localhost:3000 → **BSDM HTTP Traffic (ClickHouse)** и **BSDM 
 ./scripts/build-package.sh
 ```
 
-Архив: `dist/bsdm-proxy-0.3.1-linux-<arch>.tar.gz`
+Архив: `dist/bsdm-proxy-0.3.2-linux-<arch>.tar.gz`
 
 Установка:
 
 ```bash
-tar xzf dist/bsdm-proxy-0.3.1-linux-x86_64.tar.gz
-cd bsdm-proxy-0.3.1-linux-x86_64
+tar xzf dist/bsdm-proxy-0.3.2-linux-x86_64.tar.gz
+cd bsdm-proxy-0.3.2-linux-x86_64
 sudo ./install.sh --create-user --systemd
 sudo cp certs/ca.key certs/ca.crt /certs/
 sudo systemctl start bsdm-proxy
@@ -430,9 +430,9 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test, cargo-audi
 | [docs/roadmap.md](docs/roadmap.md) | Roadmap и milestones |
 | [docs/capacity-planning.md](docs/capacity-planning.md) | Планирование ёмкости (корп. сценарии) |
 | [CHANGELOG.md](CHANGELOG.md) | История изменений |
+| [docs/releases/v0.3.2.md](docs/releases/v0.3.2.md) | Release notes 0.3.2 |
 | [docs/releases/v0.3.1.md](docs/releases/v0.3.1.md) | Release notes 0.3.1 |
 | [packaging/README.md](packaging/README.md) | Release-пакет и systemd |
-| [OPTIMIZATIONS.md](OPTIMIZATIONS.md) | Оптимизации v2.0 |
 | [docker-compose.yml](docker-compose.yml) | Полный стек |
 
 ## Roadmap
@@ -445,30 +445,12 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test, cargo-audi
 |-----------|--------|-------|--------|
 | **M1** Foundation | v0.2.x | Прокси, ACL, категоризация, observability | ✅ Done |
 | **M2** Squid parity | v0.3.x | L2, ACL API, NTLM/Kerberos, hierarchy Phase 4 | ✅ Done |
-| **M2.5** Data plane | v0.3.1 | Tiered L1, streaming MISS, auth/policy cache, bench | ✅ P0 done |
-| **M3** Retro-search | v0.4.x | ClickHouse, Grafana, Search API | ~85% |
-| **M4** Threat analytics | v0.5.x | Rule-based алерты, C&C heuristics | ~5% |
+| **M2.5** Data plane | v0.3.1–0.3.2 | Tiered L1, streaming MISS, P1 hot path | ✅ Done |
+| **M3** Retro-search | v0.3.1+ | ClickHouse, Grafana, Search API, k8s CHI | ✅ Done |
+| **M4** Threat analytics | v0.5.x | Rule-based алерты, C&C heuristics | ~15% |
 | **M5** ML security | v1.0.x | ML anomaly, phishing, C&C detection | ~0% |
 
-### M2.5 — P0 закрыт
-
-### M2.5 — P0 закрыт
-
-- [x] Tiered L1 (mmap spill + shards), P0 perf, k8s/Helm docs
-- [x] Streaming MISS, connection auth cache, policy decision cache
-- [x] HTTP Archive bench profiles (`BENCH_PROFILE=warm|cold`)
-- [x] Spill files `mode 0o600` + private `CACHE_SPILL_DIR` ([#98](https://github.com/onixus/bsdm-proxy/issues/98))
-
-**Gate M2.5:** warm goodput на HTTP Archive sites bench ≥ Squid −5% (валидация bench).
-
-### M3 — retro-search (в работе)
-
-- [x] ClickHouse schema + indexer (JSONEachRow)
-- [x] Grafana **BSDM HTTP Traffic (ClickHouse)** + Search API
-- [x] Default `docker compose up` на ClickHouse; OpenSearch удалён ([#125](https://github.com/onixus/bsdm-proxy/issues/125))
-- [x] Session correlation (`session_id`, redirect chains)
-
-**Gate M3:** «кто ходил на domain X за 30 дней» — Grafana/CH SQL или `/api/search`.
+Кратко: **M3 closed** (proxy → Kafka → ClickHouse → Grafana/`/api/search`). **M4** — categorization metrics shipped; alerts/heuristics next. Полный план: [docs/roadmap.md](docs/roadmap.md).
 
 ## Лицензия
 

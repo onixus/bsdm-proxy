@@ -10,7 +10,7 @@
   color: "1D76DB"
 
 - name: milestone:m3
-  description: M3 Retro-search (v0.4.x) — OpenSearch analytics
+  description: M3 Retro-search — ClickHouse analytics / Search API
   color: "5319E7"
 
 - name: milestone:m4

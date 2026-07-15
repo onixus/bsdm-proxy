@@ -2,7 +2,7 @@
 
 REST endpoint for SOC retro-search over `bsdm.http_cache`. Implemented in **cache-indexer** admin HTTP server (same port as `/metrics`).
 
-Part of OpenSearch → ClickHouse migration ([#125](https://github.com/onixus/bsdm-proxy/issues/125), [#130](https://github.com/onixus/bsdm-proxy/issues/130)).
+REST retro-search over ClickHouse (shipped in [#125](https://github.com/onixus/bsdm-proxy/issues/125) / [#130](https://github.com/onixus/bsdm-proxy/issues/130)).
 
 ## Enable
 
