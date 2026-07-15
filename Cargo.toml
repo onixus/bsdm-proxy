@@ -4,6 +4,7 @@ members = [
     "bsdm-events",
     "proxy",
     "cache-indexer",
+    "alert-worker",
     "e2e",
 ]
 

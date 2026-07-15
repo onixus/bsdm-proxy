@@ -118,9 +118,9 @@ Rule-based обнаружение угроз поверх ClickHouse.
 - [x] Schema enrichment / blocked threat events in CH ([#102](https://github.com/onixus/bsdm-proxy/issues/102))
 - [x] Categorization Prometheus metrics ([#105](https://github.com/onixus/bsdm-proxy/issues/105))
 - [x] Starter threat panels + SQL (`scripts/clickhouse/m4_threat_queries.sql`)
-- [ ] Rule-based alerts (Grafana / webhook)
-- [ ] C&C heuristics (beacon, high-entropy domains)
-- [ ] Alerting pipeline to SIEM ([#50](https://github.com/onixus/bsdm-proxy/issues/50))
+- [x] Alerting pipeline to SIEM / webhook ([#50](https://github.com/onixus/bsdm-proxy/issues/50) / B19) — `alert-worker`, see [alerting.md](alerting.md)
+- [ ] Rule-based alerts in Grafana (optional panels / Alertmanager)
+- [ ] C&C heuristics (beacon, richer high-entropy)
 - [ ] PhishTank API key wiring
 
 **Критерий:** автоалерт на beacon-паттерн + threat dashboard.

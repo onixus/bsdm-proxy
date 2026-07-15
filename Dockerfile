@@ -34,6 +34,7 @@ COPY Cargo.toml Cargo.lock ./
 COPY bsdm-events ./bsdm-events
 COPY proxy ./proxy
 COPY cache-indexer ./cache-indexer
+COPY alert-worker ./alert-worker
 COPY e2e ./e2e
 
 # Настройка окружения для статической линковки
@@ -42,8 +43,9 @@ ENV OPENSSL_STATIC=1 \
     OPENSSL_INCLUDE_DIR=/usr/include \
     RUSTFLAGS="-C target-feature=+crt-static"
 
-# Собираем оба бинарника в release режиме
-RUN cargo build --release --target x86_64-unknown-linux-musl
+# Собираем бинарники workspace в release режиме
+RUN cargo build --release --target x86_64-unknown-linux-musl \
+    -p bsdm-proxy -p cache-indexer -p alert-worker
 
 # ============================================================
 # Proxy runtime
@@ -74,3 +76,17 @@ COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/cache-indexe
 
 EXPOSE 8080
 CMD ["cache-indexer"]
+
+# ============================================================
+# Alert-worker runtime (ClickHouse → webhook / SIEM)
+# ============================================================
+FROM alpine:3.21 AS alert-worker
+RUN apk add --no-cache \
+    ca-certificates \
+    libgcc \
+    wget
+
+COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/alert-worker /usr/local/bin/alert-worker
+
+EXPOSE 8090
+CMD ["alert-worker"]

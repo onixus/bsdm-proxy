@@ -10,7 +10,7 @@
 
 | Файл | Назначение |
 |------|------------|
-| `docker-compose.yml` | Полный стек: proxy, cache-indexer, kafka, zookeeper, clickhouse, prometheus, grafana |
+| `docker-compose.yml` | Полный стек: proxy, cache-indexer, kafka, zookeeper, clickhouse, prometheus, grafana; optional `alert-worker` (`--profile alerts`) |
 | `docker-compose.test.yml` | Smoke/E2E external (upstream + proxy) |
 | `docker-compose.redis-l2.yml` | Два proxy + Redis L2 |
 | `docker-compose.hierarchy.yml` | Multi-instance + ICP |
@@ -25,12 +25,13 @@ Dockerfile — multi-stage: `rust:1-alpine` (builder) → `alpine:3.21` (runtime
 ```bash
 docker build --target proxy -t bsdm-proxy:proxy .
 docker build --target cache-indexer -t bsdm-proxy:indexer .
+docker build --target alert-worker -t bsdm-proxy:alert-worker .
 docker compose build proxy cache-indexer
 ```
 
 ### Требования к сборке
 
-- Workspace members в builder: `bsdm-events`, `proxy`, `cache-indexer`, `e2e`.
+- Workspace members в builder: `bsdm-events`, `proxy`, `cache-indexer`, `alert-worker`, `e2e`.
 - Rust: `rust:1-alpine` (stable ≥ 1.88).
 - Статическая линковка musl (см. Dockerfile).
 
@@ -44,6 +45,15 @@ docker compose ps
 docker compose logs -f proxy
 ```
 
+### Alert worker (SIEM webhook)
+
+```bash
+ALERT_WEBHOOK_URL=https://siem.example/hooks/bsdm \
+  docker compose --profile alerts up -d --build alert-worker
+```
+
+Docs: [alerting.md](alerting.md).
+
 ### Health checks
 
 | Сервис | Проверка |
@@ -51,6 +61,7 @@ docker compose logs -f proxy
 | proxy | `wget -q -O- http://127.0.0.1:9090/health \| grep -q ok` |
 | kafka | `kafka-broker-api-versions --bootstrap-server localhost:9092` |
 | clickhouse | HTTP `:8123/ping` |
+| alert-worker | `wget … /health` (profile `alerts`) |
 | prometheus | `wget --spider http://localhost:9090/-/healthy` |
 | grafana | `curl -f http://localhost:3000/api/health` |
 

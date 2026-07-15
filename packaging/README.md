@@ -10,6 +10,7 @@
 |------|-------------|
 | `bin/proxy` | HTTPS caching proxy |
 | `bin/cache-indexer` | Kafka → ClickHouse indexer |
+| `bin/alert-worker` | ClickHouse → SIEM/webhook alerts (optional) |
 | `config/*.example` | Environment and ACL templates |
 | `systemd/` | systemd unit files |
 | `install.sh` | Installer script |

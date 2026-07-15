@@ -424,6 +424,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test, cargo-audi
 | [docs/licensing.md](docs/licensing.md) | Лицензии, third-party, AGPL-заметки |
 | [NOTICE](NOTICE) | Реестр third-party компонентов |
 | [docs/clickhouse-analytics.md](docs/clickhouse-analytics.md) | ClickHouse analytics, compose, SQL |
+| [docs/alerting.md](docs/alerting.md) | Alert worker → SIEM/webhook (B19) |
 | [docs/search-api.md](docs/search-api.md) | REST Search API (`/api/search`) |
 | [docs/adr/0002-clickhouse-analytics.md](docs/adr/0002-clickhouse-analytics.md) | ADR: ClickHouse как analytics store |
 | [docs/architecture.md](docs/architecture.md) | Архитектура и блокеры |
