@@ -1,6 +1,6 @@
 # Lite mode (Strategic Phase 1)
 
-Standalone caching HTTPS proxy without Kafka, ClickHouse, Prometheus, Grafana, or `cache-indexer`.
+Standalone caching HTTPS proxy with optional SQLite Search API — **no Kafka or ClickHouse**.
 
 See [strategic-roadmap.md](strategic-roadmap.md) Phase 1.
 
@@ -13,35 +13,43 @@ docker compose -f docker-compose.lite.yml up -d --build
 
 | Service | Port | Notes |
 |---------|------|--------|
-| proxy | 1488 | Forward proxy, MITM on, L1 + spill volume |
-| metrics | 9090 | `/health`, `/ready`, `/metrics` (no Grafana needed) |
+| proxy | 1488 | Forward proxy, MITM, L1 + spill |
+| proxy metrics | 9090 | `/health`, `/metrics` |
+| cache-indexer | 8080 | `INDEX_STORE=sqlite`, `/api/search`, `POST /api/events` |
 
-Kafka is **not** configured (`KAFKA_BROKERS` unset) — events are not published.
+Proxy posts `CacheEvent` JSON to `EVENT_SINK_URL` (Kafka unset).
 
 ## Verify
 
 ```bash
 curl http://127.0.0.1:9090/health
 curl --cacert certs/ca.crt -x http://127.0.0.1:1488 https://httpbin.org/get
-curl --cacert certs/ca.crt -x http://127.0.0.1:1488 https://httpbin.org/get   # expect cache HIT on 2nd
-curl http://127.0.0.1:9090/metrics | grep bsdm_proxy_cache
+sleep 1
+curl 'http://127.0.0.1:8080/api/search?domain=httpbin.org&limit=5'
 ```
 
-## Defaults
+## Indexer stores
 
-| Env | Lite default |
-|-----|----------------|
-| `MITM_ENABLED` | `true` (needs `./certs` from `gen-ca.sh`) |
-| `CACHE_CAPACITY` | `5000` |
-| `CACHE_SPILL_DIR` | `/var/cache/bsdm-spill` (named volume) |
-| Auth / ACL / categorization | off |
+| `INDEX_STORE` | Needs | Notes |
+|---------------|-------|--------|
+| `sqlite` | `SQLITE_PATH` | Default for Lite compose |
+| `memory` | — | Ring buffer; tests / ephemeral |
+| `clickhouse` | `CLICKHOUSE_*` | Full-stack default; Kafka optional |
+
+| Env | Default | Description |
+|-----|---------|-------------|
+| `SQLITE_PATH` | `/var/lib/cache-indexer/events.db` | File or `:memory:` |
+| `SQLITE_MAX_ROWS` | `1000000` | Prune oldest when exceeded |
+| `KAFKA_BROKERS` | unset = off | Optional Kafka → store |
+| `EVENT_SINK_URL` | — | Proxy → `POST /api/events` |
+| `EVENT_SINK_TOKEN` / `INGEST_API_TOKEN` | — | Optional Bearer |
 
 ## Full analytics stack
 
-Use root [`docker-compose.yml`](../docker-compose.yml) when you need Kafka → ClickHouse → Search API / Grafana / `alert-worker`.
+Root [`docker-compose.yml`](../docker-compose.yml): Kafka → ClickHouse → Grafana / `alert-worker`.
 
-## Roadmap leftovers (not in this slice)
+## Roadmap leftovers
 
-- [ ] `cache-indexer` without mandatory Kafka/ClickHouse
-- [ ] SQLite / in-memory metadata store
-- [ ] Cargo features to drop `rdkafka` from Lite binary (related: B21 / #52)
+- [x] `cache-indexer` without mandatory Kafka/ClickHouse (`INDEX_STORE` + HTTP ingest)
+- [x] SQLite / in-memory metadata store
+- [ ] Cargo features to drop `rdkafka` from Lite binary (B21 / #52)

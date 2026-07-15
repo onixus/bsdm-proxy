@@ -34,7 +34,9 @@ use crate::metrics::{FastRequestScope, Metrics, RequestMetricsGuard};
 use crate::peer_fetch::fetch_via_peer;
 use crate::peers::CachePeer;
 use crate::perf::PerfConfig;
-use crate::pipeline::{flush_kafka, new_event_id, CacheEvent, KafkaEventPipeline};
+use crate::pipeline::{
+    flush_kafka, new_event_id, CacheEvent, HttpEventPipeline, KafkaEventPipeline,
+};
 use crate::policy_cache::PolicyDecisionCache;
 use crate::rate_limit::{RateLimitViolation, RateLimiter};
 use crate::session::{header_ci, resolve_location, SessionCorrelator};
@@ -57,6 +59,7 @@ struct MissCompletionHandle {
     hierarchy: Option<Arc<HierarchyManager>>,
     metrics: Arc<Metrics>,
     kafka_pipeline: Option<Arc<KafkaEventPipeline>>,
+    http_pipeline: Option<Arc<HttpEventPipeline>>,
     perf: PerfConfig,
     digest_registry: Option<Arc<DigestRegistry>>,
     sessions: Arc<SessionCorrelator>,
@@ -86,6 +89,8 @@ impl MissCompletionHandle {
             return;
         }
         if let Some(pipeline) = &self.kafka_pipeline {
+            pipeline.try_enqueue(event, &self.metrics);
+        } else if let Some(pipeline) = &self.http_pipeline {
             pipeline.try_enqueue(event, &self.metrics);
         }
     }
@@ -232,6 +237,7 @@ pub struct ProxyService {
     l2_cache: Option<RedisL2Cache>,
     cache_config: CacheConfig,
     kafka_pipeline: Option<Arc<KafkaEventPipeline>>,
+    http_pipeline: Option<Arc<HttpEventPipeline>>,
     http_client:
         hyper_util::client::legacy::Client<hyper_rustls::HttpsConnector<HttpConnector>, Body>,
     pub(crate) metrics: Arc<Metrics>,
@@ -276,6 +282,7 @@ impl ProxyService {
             hierarchy: self.hierarchy.clone(),
             metrics: self.metrics.clone(),
             kafka_pipeline: self.kafka_pipeline.clone(),
+            http_pipeline: self.http_pipeline.clone(),
             perf: self.perf.clone(),
             digest_registry: self.digest_registry.clone(),
             sessions: self.sessions.clone(),
@@ -288,6 +295,7 @@ impl ProxyService {
         cache_config: CacheConfig,
         l2_cache: Option<RedisL2Cache>,
         kafka_pipeline: Option<Arc<KafkaEventPipeline>>,
+        http_pipeline: Option<Arc<HttpEventPipeline>>,
         metrics: Arc<Metrics>,
         mitm_enabled: bool,
         auth: Option<Arc<AuthManager>>,
@@ -318,6 +326,7 @@ impl ProxyService {
             l2_cache,
             cache_config,
             kafka_pipeline,
+            http_pipeline,
             http_client,
             metrics,
             mitm_enabled,
@@ -933,6 +942,8 @@ impl ProxyService {
             return;
         }
         if let Some(pipeline) = &self.kafka_pipeline {
+            pipeline.try_enqueue(event, &self.metrics);
+        } else if let Some(pipeline) = &self.http_pipeline {
             pipeline.try_enqueue(event, &self.metrics);
         }
     }

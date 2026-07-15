@@ -485,7 +485,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test, cargo-audi
 
 | Фаза | Фокус |
 |------|--------|
-| **1. Lite** | Прокси без обязательных Kafka/ClickHouse; SQLite/in-memory; `docker-compose.lite.yml` ([docs/lite.md](docs/lite.md) — compose shipped) |
+| **1. Lite** | Прокси без обязательных Kafka/ClickHouse; SQLite Search API; `docker-compose.lite.yml` ([docs/lite.md](docs/lite.md)) |
 | **2. DX** | Control Plane API, hot reload, cache purge, lite metrics без Grafana |
 | **3. Wasm** | Wasmtime-плагины, SDK, модульность ядра |
 | **4. AI-трафик** | Token-bucket RL, semantic cache для LLM, request coalescing |

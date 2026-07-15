@@ -1,25 +1,26 @@
-# Search API (ClickHouse)
+# Search API
 
-REST endpoint for SOC retro-search over `bsdm.http_cache`. Implemented in **cache-indexer** admin HTTP server (same port as `/metrics`).
-
-REST retro-search over ClickHouse (shipped in [#125](https://github.com/onixus/bsdm-proxy/issues/125) / [#130](https://github.com/onixus/bsdm-proxy/issues/130)).
+REST retro-search on **cache-indexer** admin port (same as `/metrics`). Backends: ClickHouse (full stack), SQLite / memory (Lite).
 
 ## Enable
 
-Enabled by default on cache-indexer admin port.
-
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `INDEX_STORE` | `clickhouse` | `clickhouse` \| `sqlite` \| `memory` |
 | `SEARCH_API_ENABLED` | `true` | `true` / `false` |
-| `SEARCH_API_TOKEN` | — | Bearer token; if set, `Authorization: Bearer <token>` required |
+| `SEARCH_API_TOKEN` | — | Bearer for `GET /api/search` |
+| `INGEST_API_TOKEN` | = search token | Bearer for `POST /api/events` |
 | `SEARCH_API_MAX_LIMIT` | `10000` | Max rows per request |
 | `SEARCH_API_DEFAULT_DAYS` | `30` | Default lookback when `from` omitted |
-| `METRICS_PORT` | `8080` | Admin port (`/metrics`, `/health`, `/api/search`) |
+| `METRICS_PORT` | `8080` | Admin port |
+| `SQLITE_PATH` | `/var/lib/cache-indexer/events.db` | When `INDEX_STORE=sqlite` |
+| `KAFKA_BROKERS` | unset = off | Optional Kafka consumer → store |
 
-## Endpoint
+## Endpoints
 
 ```
-GET /api/search
+GET  /api/search
+POST /api/events
 ```
 
 ### Query parameters
@@ -62,18 +63,24 @@ curl -H "Authorization: Bearer secret" 'http://127.0.0.1:8080/api/search?limit=5
 
 ### Response
 
-JSON array of objects with fields: `ts`, `username`, `client_ip`, `url`, `method`, `status`, `cache_status`, `domain`, `event_id`, `session_id`, `parent_event_id`, `redirect_url`.
+JSON array of objects with fields: `ts` (unix seconds), `username`, `client_ip`, `url`, `method`, `status`, `cache_status`, `domain`, `event_id`, `session_id`, `parent_event_id`, `redirect_url`.
 
 Errors: `401` (unauthorized), `404` (search disabled), `500` (query failure).
+
+## Ingest (`POST /api/events`)
+
+Body: one `CacheEvent` JSON, a JSON array, `{"events":[...]}`, or NDJSON. Response `202 {"accepted":N}`.
+
+Lite proxy sets `EVENT_SINK_URL=http://cache-indexer:8080/api/events` (no Kafka). See [lite.md](lite.md).
 
 ## Security
 
 - Filters are sanitized server-side; invalid characters are rejected (empty filter).
-- Queries use ClickHouse parameterized SQL (`{param:Type}`), not string concatenation.
-- Prefer setting `SEARCH_API_TOKEN` in production; do not expose port 8080 publicly without auth.
+- ClickHouse queries use parameterized SQL (`{param:Type}`); SQLite uses bound params.
+- Prefer setting `SEARCH_API_TOKEN` / `INGEST_API_TOKEN` in production; do not expose port 8080 publicly without auth.
 
 ## Grafana alternative
 
-For interactive dashboards use Grafana + ClickHouse datasource (`docker compose up`). Search API is for scripted export and integrations.
+For interactive dashboards use Grafana + ClickHouse datasource (`docker compose up`). Lite uses SQLite Search API only.
 
-See [clickhouse-analytics.md](clickhouse-analytics.md).
+See [clickhouse-analytics.md](clickhouse-analytics.md) · [lite.md](lite.md).

@@ -1,15 +1,42 @@
-# Zero-config Lite profile: standalone caching HTTPS proxy.
-# No Kafka, ClickHouse, Prometheus, Grafana, or cache-indexer.
+# Zero-config Lite profile: caching HTTPS proxy + optional SQLite search.
+# No Kafka / ClickHouse / Prometheus / Grafana.
 #
 # Usage:
 #   ./scripts/gen-ca.sh
 #   docker compose -f docker-compose.lite.yml up -d --build
 #   curl --cacert certs/ca.crt -x http://127.0.0.1:1488 https://httpbin.org/get
-#   curl http://127.0.0.1:9090/health
+#   curl 'http://127.0.0.1:8080/api/search?limit=5'
 #
 # Docs: docs/lite.md · docs/strategic-roadmap.md (Phase 1)
 
 services:
+  cache-indexer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: cache-indexer
+    ports:
+      - "8080:8080"
+    environment:
+      - INDEX_STORE=sqlite
+      - SQLITE_PATH=/var/lib/cache-indexer/events.db
+      - SQLITE_MAX_ROWS=1000000
+      - METRICS_PORT=8080
+      - SEARCH_API_ENABLED=true
+      # KAFKA_BROKERS / CLICKHOUSE_* intentionally unset
+      - RUST_LOG=info,cache_indexer=info
+    volumes:
+      - lite-indexer:/var/lib/cache-indexer
+    networks:
+      - bsdm-lite
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8080/health | grep -q ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
   proxy:
     build:
       context: .
@@ -32,12 +59,16 @@ services:
       - CACHE_SPILL_DIR=/var/cache/bsdm-spill
       - CACHE_SPILL_THRESHOLD_BYTES=65536
       - SHUTDOWN_TIMEOUT_SECONDS=30
-      # Kafka intentionally unset — standalone Lite (no analytics bus)
+      - EVENT_SINK_URL=http://cache-indexer:8080/api/events
+      # Kafka intentionally unset — HTTP sink to SQLite indexer
       - RUST_LOG=info,bsdm_proxy=info
       - RUST_BACKTRACE=0
     volumes:
       - ./certs:/certs:ro
       - lite-spill:/var/cache/bsdm-spill
+    depends_on:
+      cache-indexer:
+        condition: service_healthy
     networks:
       - bsdm-lite
     restart: unless-stopped
@@ -54,4 +85,6 @@ networks:
 
 volumes:
   lite-spill:
+    driver: local
+  lite-indexer:
     driver: local

@@ -1,6 +1,7 @@
-//! REST Search API over ClickHouse (`/api/search` on cache-indexer admin port).
+//! REST Search API (`/api/search`) and HTTP ingest (`/api/events`).
 
-use crate::clickhouse::ClickHouseWriter;
+use crate::store::{EventStore, SearchQuery};
+use bsdm_events::CacheEvent;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::warn;
@@ -8,6 +9,7 @@ use tracing::warn;
 #[derive(Clone)]
 pub struct SearchApiConfig {
     pub api_token: Option<String>,
+    pub ingest_token: Option<String>,
     pub max_limit: u32,
     pub default_days: u32,
 }
@@ -17,6 +19,10 @@ impl SearchApiConfig {
         let api_token = std::env::var("SEARCH_API_TOKEN")
             .ok()
             .filter(|t| !t.is_empty());
+        let ingest_token = std::env::var("INGEST_API_TOKEN")
+            .ok()
+            .filter(|t| !t.is_empty())
+            .or_else(|| api_token.clone());
         let max_limit = std::env::var("SEARCH_API_MAX_LIMIT")
             .ok()
             .and_then(|v| v.parse().ok())
@@ -27,6 +33,7 @@ impl SearchApiConfig {
             .unwrap_or(30);
         Self {
             api_token,
+            ingest_token,
             max_limit,
             default_days,
         }
@@ -34,28 +41,21 @@ impl SearchApiConfig {
 }
 
 pub struct SearchApi {
-    clickhouse: Arc<ClickHouseWriter>,
+    store: Arc<EventStore>,
     config: SearchApiConfig,
-    table_fqn: String,
 }
 
 impl SearchApi {
-    pub fn new(clickhouse: Arc<ClickHouseWriter>, config: SearchApiConfig) -> Self {
-        let table_fqn = format!("{}.{}", clickhouse.database(), clickhouse.table());
-        Self {
-            clickhouse,
-            config,
-            table_fqn,
-        }
+    pub fn new(store: Arc<EventStore>, config: SearchApiConfig) -> Self {
+        Self { store, config }
     }
 
     pub fn is_authorized(&self, auth_header: Option<&str>) -> bool {
-        let Some(expected) = &self.config.api_token else {
-            return true;
-        };
-        auth_header
-            .and_then(|v| v.strip_prefix("Bearer "))
-            .is_some_and(|token| token == expected)
+        check_bearer(self.config.api_token.as_deref(), auth_header)
+    }
+
+    pub fn is_ingest_authorized(&self, auth_header: Option<&str>) -> bool {
+        check_bearer(self.config.ingest_token.as_deref(), auth_header)
     }
 
     pub async fn handle_get(
@@ -88,58 +88,60 @@ impl SearchApi {
             .unwrap_or(now);
 
         let format = query.get("format").map(String::as_str).unwrap_or("json");
-        let order = if session_id.is_empty() {
-            "ts DESC"
-        } else {
-            // Session timeline: chronological redirect chain
-            "ts ASC"
+        let search = SearchQuery {
+            from_ts: from,
+            to_ts: to,
+            domain,
+            username,
+            session_id: session_id.clone(),
+            limit,
+            session_timeline: !session_id.is_empty(),
         };
 
-        let sql = format!(
-            "SELECT ts, username, client_ip, url, method, status, cache_status, domain, \
-             event_id, session_id, parent_event_id, redirect_url \
-             FROM {table} \
-             WHERE ts >= fromUnixTimestamp({{from:UInt32}}) \
-               AND ts <= fromUnixTimestamp({{to:UInt32}}) \
-               AND (length({{domain:String}}) = 0 OR domain = {{domain:String}}) \
-               AND (length({{username:String}}) = 0 OR username = {{username:String}}) \
-               AND (length({{session_id:String}}) = 0 OR session_id = {{session_id:String}}) \
-             ORDER BY {order} \
-             LIMIT {{limit:UInt32}} \
-             FORMAT JSONEachRow",
-            table = self.table_fqn,
-            order = order
-        );
-
-        let params = vec![
-            ("from", from.to_string()),
-            ("to", to.to_string()),
-            ("domain", domain),
-            ("username", username),
-            ("session_id", session_id),
-            ("limit", limit.to_string()),
-        ];
-
-        let body = self.clickhouse.query_with_params(&sql, &params).await?;
-
+        let hits = self
+            .store
+            .search(&search)
+            .await
+            .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
         if format == "csv" {
-            let csv = json_each_row_to_csv(&body)?;
+            let csv = hits_to_csv(&hits);
             return Ok((200, "text/csv; charset=utf-8".to_string(), csv.into_bytes()));
         }
 
-        let json = if body.trim().is_empty() {
-            "[]".to_string()
-        } else {
-            let rows: Vec<serde_json::Value> = body
-                .lines()
-                .filter(|l| !l.trim().is_empty())
-                .filter_map(|line| serde_json::from_str(line).ok())
-                .collect();
-            serde_json::to_string(&rows)?
-        };
-
+        let rows: Vec<serde_json::Value> = hits.iter().map(|h| h.to_json()).collect();
+        let json = serde_json::to_string(&rows)?;
         Ok((200, "application/json".to_string(), json.into_bytes()))
     }
+
+    pub async fn handle_ingest(
+        &self,
+        body: &[u8],
+    ) -> Result<(u16, String, Vec<u8>), Box<dyn std::error::Error>> {
+        let events = parse_ingest_body(body)?;
+        if events.is_empty() {
+            return Ok((
+                400,
+                "application/json".into(),
+                br#"{"error":"no events"}"#.to_vec(),
+            ));
+        }
+        let n = events.len();
+        self.store
+            .insert_batch(&events)
+            .await
+            .map_err(|e| -> Box<dyn std::error::Error> { e.to_string().into() })?;
+        let msg = format!(r#"{{"accepted":{n}}}"#);
+        Ok((202, "application/json".into(), msg.into_bytes()))
+    }
+}
+
+fn check_bearer(expected: Option<&str>, auth_header: Option<&str>) -> bool {
+    let Some(expected) = expected else {
+        return true;
+    };
+    auth_header
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .is_some_and(|token| token == expected)
 }
 
 fn sanitize_filter(value: &str) -> String {
@@ -157,46 +159,88 @@ fn sanitize_filter(value: &str) -> String {
     }
 }
 
-fn json_each_row_to_csv(ndjson: &str) -> Result<String, Box<dyn std::error::Error>> {
-    let mut lines = ndjson.lines().filter(|l| !l.trim().is_empty());
-    let Some(first) = lines.next() else {
-        return Ok(String::new());
-    };
-    let row: serde_json::Map<String, serde_json::Value> = serde_json::from_str(first)?;
-    let headers: Vec<&str> = row.keys().map(String::as_str).collect();
-    let mut out = headers.join(",");
-    out.push('\n');
-    out.push_str(&csv_row(&row, &headers));
-    for line in lines {
-        let row: serde_json::Map<String, serde_json::Value> = serde_json::from_str(line)?;
-        out.push('\n');
-        out.push_str(&csv_row(&row, &headers));
+pub fn parse_ingest_body(body: &[u8]) -> Result<Vec<CacheEvent>, Box<dyn std::error::Error>> {
+    let text = std::str::from_utf8(body)?;
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Ok(Vec::new());
+    }
+    if trimmed.starts_with('[') {
+        return Ok(serde_json::from_str(trimmed)?);
+    }
+    if trimmed.starts_with('{') {
+        // Single object or {"events":[...]}
+        let v: serde_json::Value = serde_json::from_str(trimmed)?;
+        if let Some(arr) = v.get("events").and_then(|e| e.as_array()) {
+            let mut out = Vec::with_capacity(arr.len());
+            for item in arr {
+                out.push(serde_json::from_value(item.clone())?);
+            }
+            return Ok(out);
+        }
+        return Ok(vec![serde_json::from_value(v)?]);
+    }
+    // NDJSON
+    let mut out = Vec::new();
+    for line in trimmed.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        out.push(serde_json::from_str(line)?);
     }
     Ok(out)
 }
 
-fn csv_row(row: &serde_json::Map<String, serde_json::Value>, headers: &[&str]) -> String {
-    headers
-        .iter()
-        .map(|h| {
-            let v = row.get(*h).map(value_to_csv).unwrap_or_default();
-            if v.contains(',') || v.contains('"') {
-                format!("\"{}\"", v.replace('"', "\"\""))
-            } else {
-                v
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
-fn value_to_csv(v: &serde_json::Value) -> String {
-    match v {
-        serde_json::Value::String(s) => s.clone(),
-        serde_json::Value::Number(n) => n.to_string(),
-        serde_json::Value::Null => String::new(),
-        other => other.to_string(),
+fn hits_to_csv(hits: &[crate::store::SearchHit]) -> String {
+    let headers = [
+        "ts",
+        "username",
+        "client_ip",
+        "url",
+        "method",
+        "status",
+        "cache_status",
+        "domain",
+        "event_id",
+        "session_id",
+        "parent_event_id",
+        "redirect_url",
+    ];
+    let mut out = headers.join(",");
+    out.push('\n');
+    for (i, h) in hits.iter().enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        let row = [
+            h.ts.to_string(),
+            h.username.clone().unwrap_or_default(),
+            h.client_ip.clone(),
+            h.url.clone(),
+            h.method.clone(),
+            h.status.to_string(),
+            h.cache_status.clone(),
+            h.domain.clone(),
+            h.event_id.clone(),
+            h.session_id.clone(),
+            h.parent_event_id.clone().unwrap_or_default(),
+            h.redirect_url.clone().unwrap_or_default(),
+        ];
+        out.push_str(
+            &row.iter()
+                .map(|v| {
+                    if v.contains(',') || v.contains('"') {
+                        format!("\"{}\"", v.replace('"', "\"\""))
+                    } else {
+                        v.clone()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(","),
+        );
     }
+    out
 }
 
 #[cfg(test)]
@@ -214,10 +258,10 @@ mod tests {
     }
 
     #[test]
-    fn csv_from_ndjson() {
-        let ndjson = "{\"domain\":\"a.com\",\"status\":200}\n";
-        let csv = json_each_row_to_csv(ndjson).unwrap();
-        assert!(csv.contains("domain,status"));
-        assert!(csv.contains("a.com,200"));
+    fn parse_single_and_array() {
+        let one = br#"{"url":"https://a/","method":"GET","status":200,"cache_key":"k","timestamp":1,"client_ip":"1.1.1.1","domain":"a","response_size":0,"request_duration_ms":1,"event_id":"e1"}"#;
+        assert_eq!(parse_ingest_body(one).unwrap().len(), 1);
+        let arr = format!("[{}]", std::str::from_utf8(one).unwrap());
+        assert_eq!(parse_ingest_body(arr.as_bytes()).unwrap().len(), 1);
     }
 }

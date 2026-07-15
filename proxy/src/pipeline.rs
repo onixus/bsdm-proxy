@@ -1,4 +1,4 @@
-//! Kafka cache-event pipeline with bounded in-memory queue (#106).
+//! HTTP and Kafka cache-event pipelines with bounded in-memory queue (#106).
 
 use rdkafka::config::ClientConfig;
 use rdkafka::producer::{FutureProducer, FutureRecord, Producer};
@@ -104,6 +104,76 @@ impl KafkaEventPipeline {
 
     pub fn producer(&self) -> Arc<FutureProducer> {
         self.producer.clone()
+    }
+}
+
+/// HTTP POST sink for Lite indexer (`EVENT_SINK_URL` → POST /api/events).
+pub struct HttpEventPipeline {
+    sender: mpsc::Sender<CacheEvent>,
+}
+
+impl HttpEventPipeline {
+    pub fn spawn(url: String, token: Option<String>, metrics: Arc<Metrics>) -> Option<Arc<Self>> {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .ok()?;
+        let capacity = queue_capacity_from_env();
+        let (sender, mut receiver) = mpsc::channel::<CacheEvent>(capacity);
+        let metrics_worker = metrics.clone();
+
+        let url_log = url.clone();
+        tokio::spawn(async move {
+            while let Some(event) = receiver.recv().await {
+                match serde_json::to_vec(&event) {
+                    Ok(payload) => {
+                        let mut req = client
+                            .post(&url)
+                            .header("Content-Type", "application/json")
+                            .body(payload);
+                        if let Some(t) = &token {
+                            req = req.bearer_auth(t);
+                        }
+                        match req.send().await {
+                            Ok(resp)
+                                if resp.status().is_success() || resp.status().as_u16() == 202 =>
+                            {
+                                metrics_worker.kafka_events_sent.inc();
+                            }
+                            Ok(resp) => {
+                                warn!("EVENT_SINK_URL HTTP {}", resp.status());
+                                metrics_worker.kafka_send_errors.inc();
+                            }
+                            Err(e) => {
+                                warn!("EVENT_SINK_URL send failed: {e}");
+                                metrics_worker.kafka_send_errors.inc();
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("Event serialization failed: {}", e);
+                        metrics_worker.kafka_send_errors.inc();
+                    }
+                }
+            }
+        });
+
+        info!(
+            "HTTP event sink started (url={url_log}, queue capacity={capacity}, drop=policy:drop_new)"
+        );
+        Some(Arc::new(Self { sender }))
+    }
+
+    pub fn try_enqueue(&self, event: CacheEvent, metrics: &Metrics) {
+        match self.sender.try_send(event) {
+            Ok(()) => {}
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                metrics.kafka_queue_dropped_total.inc();
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => {
+                metrics.kafka_send_errors.inc();
+            }
+        }
     }
 }
 
