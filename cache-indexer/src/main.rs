@@ -1,14 +1,18 @@
 mod admin_server;
 mod clickhouse;
 mod kafka;
+mod kafka_ingest;
 mod metrics;
 mod search_api;
+mod store;
 
 use admin_server::run_admin_server;
-use clickhouse::{load_config_from_env, ClickHouseIndexer, ClickHouseWriter};
+use clickhouse::{load_config_from_env, ClickHouseWriter};
+use kafka_ingest::KafkaStoreIndexer;
 use metrics::IndexerMetrics;
 use search_api::{SearchApi, SearchApiConfig};
 use std::sync::Arc;
+use store::EventStore;
 use tracing::info;
 
 fn metrics_port() -> u16 {
@@ -25,11 +29,21 @@ fn search_api_enabled() -> bool {
     true
 }
 
-async fn bootstrap_clickhouse_writer() -> Result<Arc<ClickHouseWriter>, Box<dyn std::error::Error>>
-{
-    Ok(Arc::new(
-        ClickHouseWriter::bootstrap(load_config_from_env()).await?,
-    ))
+fn index_store_kind() -> String {
+    std::env::var("INDEX_STORE")
+        .unwrap_or_else(|_| "clickhouse".into())
+        .to_ascii_lowercase()
+}
+
+async fn bootstrap_store() -> Result<Arc<EventStore>, Box<dyn std::error::Error>> {
+    match index_store_kind().as_str() {
+        "clickhouse" => {
+            let writer = Arc::new(ClickHouseWriter::bootstrap(load_config_from_env()).await?);
+            Ok(Arc::new(EventStore::ClickHouse(writer)))
+        }
+        "memory" | "sqlite" => store::open_from_env().map_err(|e| e.to_string().into()),
+        other => Err(format!("unknown INDEX_STORE={other}").into()),
+    }
 }
 
 #[tokio::main]
@@ -41,15 +55,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .init();
 
-    let kafka_brokers = std::env::var("KAFKA_BROKERS").unwrap_or_else(|_| "kafka:9092".to_string());
+    let kafka_brokers = std::env::var("KAFKA_BROKERS")
+        .ok()
+        .filter(|s| !s.is_empty());
     let kafka_topic = std::env::var("KAFKA_TOPIC").unwrap_or_else(|_| "cache-events".to_string());
     let kafka_group =
         std::env::var("KAFKA_GROUP_ID").unwrap_or_else(|_| "cache-indexer-group".to_string());
     let metrics = Arc::new(IndexerMetrics::new()?);
-    let ch_writer = bootstrap_clickhouse_writer().await?;
+    let store = bootstrap_store().await?;
+    let backend = store.backend_name();
+
     let search_api = if search_api_enabled() {
         Some(Arc::new(SearchApi::new(
-            ch_writer.clone(),
+            store.clone(),
             SearchApiConfig::from_env(),
         )))
     } else {
@@ -64,26 +82,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
     };
 
-    info!("Starting cache-indexer (backend=clickhouse)");
-    info!("ClickHouse URL: {}", load_config_from_env().url);
-    info!("Kafka brokers: {kafka_brokers}");
-    info!("Kafka topic: {kafka_topic}");
-    info!("Kafka group: {kafka_group}");
+    info!("Starting cache-indexer (backend={backend})");
+    if backend == "clickhouse" {
+        info!("ClickHouse URL: {}", load_config_from_env().url);
+    }
     info!("Admin port: {port}");
     if search_api.is_some() {
-        info!("Search API enabled on :{port}/api/search");
+        info!("Search API on :{port}/api/search · ingest POST :{port}/api/events");
     }
 
-    let indexer = ClickHouseIndexer::new(
-        &kafka_brokers,
-        &kafka_topic,
-        &kafka_group,
-        ch_writer,
-        metrics,
-    )
-    .await?;
+    let result = if let Some(brokers) = kafka_brokers {
+        info!("Kafka brokers: {brokers}");
+        info!("Kafka topic: {kafka_topic}");
+        info!("Kafka group: {kafka_group}");
+        let indexer =
+            KafkaStoreIndexer::new(&brokers, &kafka_topic, &kafka_group, store, metrics).await?;
+        indexer.run().await
+    } else {
+        info!("KAFKA_BROKERS unset — HTTP ingest only (POST /api/events)");
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+        }
+    };
 
-    let result = indexer.run().await;
     admin_task.abort();
     result
 }

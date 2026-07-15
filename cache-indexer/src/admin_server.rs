@@ -1,4 +1,4 @@
-//! HTTP admin server: /metrics, /health, /api/search
+//! HTTP admin server: /metrics, /health, /api/search, /api/events
 
 use crate::metrics::IndexerMetrics;
 use crate::search_api::SearchApi;
@@ -22,12 +22,11 @@ pub async fn run_admin_server(
             return;
         }
     };
-    let search_note = if search_api.is_some() {
-        ", /api/search"
-    } else {
-        ""
+    let extras = match &search_api {
+        Some(_) => ", /api/search, /api/events",
+        None => "",
     };
-    info!("cache-indexer admin on {bind_addr} (/metrics, /health{search_note})");
+    info!("cache-indexer admin on {bind_addr} (/metrics, /health{extras})");
 
     loop {
         let Ok((mut socket, _)) = listener.accept().await else {
@@ -36,24 +35,76 @@ pub async fn run_admin_server(
         let metrics = metrics.clone();
         let search_api = search_api.clone();
         tokio::spawn(async move {
-            let mut buf = vec![0u8; 8192];
+            let mut buf = vec![0u8; 64 * 1024];
             let n = socket.read(&mut buf).await.unwrap_or(0);
             if n == 0 {
                 return;
             }
-            let req = String::from_utf8_lossy(&buf[..n]);
-            let response = handle_request(&req, &metrics, search_api.as_deref()).await;
+            let (header_end, content_length) = match parse_header_end_and_cl(&buf[..n]) {
+                Some(v) => v,
+                None => {
+                    let _ = socket
+                        .write_all(&http_response(400, "text/plain", b"bad request"))
+                        .await;
+                    return;
+                }
+            };
+            let mut body = if header_end < n {
+                buf[header_end..n].to_vec()
+            } else {
+                Vec::new()
+            };
+            while body.len() < content_length {
+                let mut chunk = vec![0u8; 64 * 1024];
+                let m = socket.read(&mut chunk).await.unwrap_or(0);
+                if m == 0 {
+                    break;
+                }
+                body.extend_from_slice(&chunk[..m]);
+                if body.len() >= content_length {
+                    break;
+                }
+            }
+            if body.len() > content_length {
+                body.truncate(content_length);
+            }
+            let header = String::from_utf8_lossy(&buf[..header_end.min(n)]);
+            let response = handle_request(&header, &body, &metrics, search_api.as_deref()).await;
             let _ = socket.write_all(&response).await;
         });
     }
 }
 
+fn parse_header_end_and_cl(buf: &[u8]) -> Option<(usize, usize)> {
+    let header_end = find_header_end(buf)?;
+    let header = std::str::from_utf8(&buf[..header_end]).ok()?;
+    let mut content_length = 0usize;
+    for line in header.lines().skip(1) {
+        if line.is_empty() {
+            break;
+        }
+        if let Some(v) = line
+            .strip_prefix("Content-Length:")
+            .or_else(|| line.strip_prefix("content-length:"))
+        {
+            content_length = v.trim().parse().unwrap_or(0);
+        }
+    }
+    // Cap POST body for ingest to 4 MiB
+    Some((header_end, content_length.min(4 * 1024 * 1024)))
+}
+
+fn find_header_end(buf: &[u8]) -> Option<usize> {
+    buf.windows(4).position(|w| w == b"\r\n\r\n").map(|i| i + 4)
+}
+
 async fn handle_request(
-    req: &str,
+    header: &str,
+    body: &[u8],
     metrics: &IndexerMetrics,
     search_api: Option<&SearchApi>,
 ) -> Vec<u8> {
-    let mut lines = req.lines();
+    let mut lines = header.lines();
     let Some(request_line) = lines.next() else {
         return http_response(400, "text/plain", b"bad request");
     };
@@ -99,17 +150,38 @@ async fn handle_request(
             return http_response(401, "application/json", br#"{"error":"unauthorized"}"#);
         }
         let query = parse_query_string(path_query);
-        match api.handle_get(&query).await {
+        return match api.handle_get(&query).await {
             Ok((code, content_type, body)) => http_response(code, &content_type, &body),
             Err(e) => {
                 warn!("search api error: {e}");
                 let msg = format!(r#"{{"error":"{}"}}"#, escape_json(&e.to_string()));
                 http_response(500, "application/json", msg.as_bytes())
             }
-        }
-    } else {
-        http_response(404, "text/plain", b"not found")
+        };
     }
+
+    if method == "POST" && path_query.starts_with("/api/events") {
+        let Some(api) = search_api else {
+            return http_response(
+                404,
+                "application/json",
+                br#"{"error":"ingest api disabled"}"#,
+            );
+        };
+        if !api.is_ingest_authorized(auth.as_deref()) {
+            return http_response(401, "application/json", br#"{"error":"unauthorized"}"#);
+        }
+        return match api.handle_ingest(body).await {
+            Ok((code, content_type, body)) => http_response(code, &content_type, &body),
+            Err(e) => {
+                warn!("ingest api error: {e}");
+                let msg = format!(r#"{{"error":"{}"}}"#, escape_json(&e.to_string()));
+                http_response(400, "application/json", msg.as_bytes())
+            }
+        };
+    }
+
+    http_response(404, "text/plain", b"not found")
 }
 
 fn parse_query_string(path_query: &str) -> HashMap<String, String> {
@@ -155,6 +227,7 @@ fn escape_json(s: &str) -> String {
 fn http_response(status_code: u16, content_type: &str, body: &[u8]) -> Vec<u8> {
     let status = match status_code {
         200 => "200 OK",
+        202 => "202 Accepted",
         400 => "400 Bad Request",
         401 => "401 Unauthorized",
         404 => "404 Not Found",
@@ -179,5 +252,13 @@ mod tests {
         let q = parse_query_string("/api/search?domain=example.com&limit=10");
         assert_eq!(q.get("domain").map(String::as_str), Some("example.com"));
         assert_eq!(q.get("limit").map(String::as_str), Some("10"));
+    }
+
+    #[test]
+    fn finds_header_end() {
+        let req = b"POST /api/events HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}";
+        let (end, cl) = parse_header_end_and_cl(req).unwrap();
+        assert_eq!(cl, 2);
+        assert!(end > 10);
     }
 }
