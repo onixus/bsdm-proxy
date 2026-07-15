@@ -71,6 +71,19 @@ pub struct Metrics {
     pub hierarchy_icp_queries_total: CounterVec,
     pub hierarchy_digest_skipped_total: Counter,
     pub hierarchy_lookup_duration_seconds: Histogram,
+
+    // Categorization metrics (M4 / #105)
+    /// Lookups on the hot path: `source` = ut1|custom|cache|unknown|none, `result` = hit|miss.
+    pub categorization_lookups_total: CounterVec,
+    pub categorization_cache_hits_total: Counter,
+    pub categorization_cache_misses_total: Counter,
+    pub categorization_duration_seconds: Histogram,
+    /// Category labels observed on a lookup (local DB / cache hit).
+    pub categorization_category_total: CounterVec,
+    /// Policy deny/redirect while URL had these categories.
+    pub categorization_blocked_total: CounterVec,
+    /// Background URLhaus/PhishTank enrich tasks scheduled.
+    pub categorization_online_enrich_scheduled_total: Counter,
 }
 
 impl Metrics {
@@ -332,6 +345,64 @@ impl Metrics {
         )?;
         registry.register(Box::new(hierarchy_lookup_duration_seconds.clone()))?;
 
+        let categorization_lookups_total = CounterVec::new(
+            Opts::new(
+                "bsdm_proxy_categorization_lookups_total",
+                "URL categorization lookups on the hot path",
+            ),
+            &["source", "result"],
+        )?;
+        registry.register(Box::new(categorization_lookups_total.clone()))?;
+
+        let categorization_cache_hits_total = Counter::new(
+            "bsdm_proxy_categorization_cache_hits_total",
+            "In-memory categorization cache hits",
+        )?;
+        registry.register(Box::new(categorization_cache_hits_total.clone()))?;
+
+        let categorization_cache_misses_total = Counter::new(
+            "bsdm_proxy_categorization_cache_misses_total",
+            "In-memory categorization cache misses",
+        )?;
+        registry.register(Box::new(categorization_cache_misses_total.clone()))?;
+
+        let categorization_duration_seconds = Histogram::with_opts(
+            HistogramOpts::new(
+                "bsdm_proxy_categorization_duration_seconds",
+                "Hot-path categorize_local duration in seconds",
+            )
+            .buckets(vec![
+                0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05,
+            ]),
+        )?;
+        registry.register(Box::new(categorization_duration_seconds.clone()))?;
+
+        let categorization_category_total = CounterVec::new(
+            Opts::new(
+                "bsdm_proxy_categorization_category_total",
+                "Categories returned by categorization lookups",
+            ),
+            &["category"],
+        )?;
+        registry.register(Box::new(categorization_category_total.clone()))?;
+
+        let categorization_blocked_total = CounterVec::new(
+            Opts::new(
+                "bsdm_proxy_categorization_blocked_total",
+                "ACL deny/redirect decisions with categorized URLs",
+            ),
+            &["category", "action"],
+        )?;
+        registry.register(Box::new(categorization_blocked_total.clone()))?;
+
+        let categorization_online_enrich_scheduled_total = Counter::new(
+            "bsdm_proxy_categorization_online_enrich_scheduled_total",
+            "Background URLhaus/PhishTank enrichment tasks scheduled",
+        )?;
+        registry.register(Box::new(
+            categorization_online_enrich_scheduled_total.clone(),
+        ))?;
+
         Ok(Metrics {
             registry,
             requests_total,
@@ -369,7 +440,56 @@ impl Metrics {
             hierarchy_icp_queries_total,
             hierarchy_digest_skipped_total,
             hierarchy_lookup_duration_seconds,
+            categorization_lookups_total,
+            categorization_cache_hits_total,
+            categorization_cache_misses_total,
+            categorization_duration_seconds,
+            categorization_category_total,
+            categorization_blocked_total,
+            categorization_online_enrich_scheduled_total,
         })
+    }
+
+    pub fn record_categorization_lookup(
+        &self,
+        source: &str,
+        from_cache: bool,
+        categories: &[String],
+        duration_secs: f64,
+    ) {
+        let result = if categories.is_empty() { "miss" } else { "hit" };
+        self.categorization_lookups_total
+            .with_label_values(&[source, result])
+            .inc();
+        if from_cache {
+            self.categorization_cache_hits_total.inc();
+        } else {
+            self.categorization_cache_misses_total.inc();
+        }
+        self.categorization_duration_seconds.observe(duration_secs);
+        for cat in categories {
+            self.categorization_category_total
+                .with_label_values(&[cat])
+                .inc();
+        }
+    }
+
+    pub fn record_categorization_blocked(&self, categories: &[String], action: &str) {
+        if categories.is_empty() {
+            self.categorization_blocked_total
+                .with_label_values(&["none", action])
+                .inc();
+            return;
+        }
+        for cat in categories {
+            self.categorization_blocked_total
+                .with_label_values(&[cat, action])
+                .inc();
+        }
+    }
+
+    pub fn record_categorization_online_enrich_scheduled(&self) {
+        self.categorization_online_enrich_scheduled_total.inc();
     }
 
     pub fn record_hierarchy_resolution(&self, result: &str) {
@@ -508,5 +628,21 @@ mod tests {
         assert!(out.contains("bsdm_proxy_hierarchy_icp_queries_total"));
         assert!(out.contains("bsdm_proxy_hierarchy_peer_requests_total"));
         assert!(out.contains("parent_hit"));
+    }
+
+    #[test]
+    fn categorization_metrics_exported() {
+        let m = Metrics::new().unwrap();
+        m.record_categorization_lookup("ut1", false, &["malware".to_string()], 0.0002);
+        m.record_categorization_lookup("cache", true, &["news".to_string()], 0.00005);
+        m.record_categorization_blocked(&["malware".to_string()], "deny");
+        m.record_categorization_online_enrich_scheduled();
+        let out = String::from_utf8(m.export().unwrap()).unwrap();
+        assert!(out.contains("bsdm_proxy_categorization_lookups_total"));
+        assert!(out.contains("bsdm_proxy_categorization_cache_hits_total"));
+        assert!(out.contains("bsdm_proxy_categorization_duration_seconds"));
+        assert!(out.contains("bsdm_proxy_categorization_blocked_total"));
+        assert!(out.contains("bsdm_proxy_categorization_online_enrich_scheduled_total"));
+        assert!(out.contains(r#"category="malware""#));
     }
 }

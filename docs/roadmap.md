@@ -149,12 +149,12 @@ Rule-based обнаружение угроз (без ML). Запросы и ал
 
 ### Задачи
 
-- [ ] **Обогащение событий** — reputation, URLhaus/PhishTank metadata ([#102](https://github.com/onixus/bsdm-proxy/issues/102))
-- [ ] **Rule-based alerts** — burst domain, off-hours, blocked burst
+- [x] **Обогащение событий** — `acl_action`, `threat_sources` in CH / Search API ([#102](https://github.com/onixus/bsdm-proxy/issues/102))
+- [ ] **Rule-based alerts** — burst domain, off-hours, blocked burst (starter SQL: `scripts/clickhouse/m4_threat_queries.sql`)
 - [ ] **C&C heuristics** — beacon pattern, high-entropy domains
 - [ ] **Alerting** — CH/Grafana alerting или webhook worker
-- [ ] **Threat dashboard** — Grafana + CH
-- [ ] **Categorization metrics** ([#105](https://github.com/onixus/bsdm-proxy/issues/105))
+- [ ] **Threat dashboard** — Grafana + CH (panels: top blocked categories, burst domains)
+- [x] **Categorization metrics** ([#105](https://github.com/onixus/bsdm-proxy/issues/105))
 - [ ] **PhishTank API key** (`PHISHTANK_API_KEY`)
 
 **Критерий завершения M4:** автоматический алерт на beacon-паттерн; threat dashboard с top blocked categories.
