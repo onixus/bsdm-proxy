@@ -34,6 +34,7 @@
 | [categorization.md](categorization.md) | UT1 Blacklists, metrics, OTX |
 | [hierarchical-caching.md](hierarchical-caching.md) | ICP/HTCP hierarchy |
 | [clickhouse-analytics.md](clickhouse-analytics.md) | ClickHouse analytics |
+| [alerting.md](alerting.md) | Alert worker → SIEM/webhook (M4 / B19) |
 | [search-api.md](search-api.md) | REST Search API |
 
 ## Архитектура и roadmap

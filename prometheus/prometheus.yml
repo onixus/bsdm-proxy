@@ -20,6 +20,14 @@ scrape_configs:
           service: 'cache-indexer'
           component: 'bsdm-indexer'
 
+  # Present when compose profile `alerts` is enabled (scrapes fail quietly otherwise).
+  - job_name: 'alert-worker'
+    static_configs:
+      - targets: ['alert-worker:8090']
+        labels:
+          service: 'alert-worker'
+          component: 'bsdm-alerts'
+
   - job_name: 'prometheus'
     static_configs:
       - targets: ['localhost:9090']

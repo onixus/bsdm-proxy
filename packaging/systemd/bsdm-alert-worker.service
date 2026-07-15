@@ -1,0 +1,19 @@
+[Unit]
+Description=BSDM-Proxy alert-worker (ClickHouse to SIEM webhook)
+Documentation=https://github.com/onixus/bsdm-proxy/blob/main/docs/alerting.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bsdm-proxy
+Group=bsdm-proxy
+EnvironmentFile=-/etc/bsdm-proxy/alert-worker.env
+ExecStart=/opt/bsdm-proxy/bin/alert-worker
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

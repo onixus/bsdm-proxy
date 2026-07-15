@@ -75,6 +75,7 @@ fi
 install -d -m 0755 "${PREFIX}/bin"
 install -m 0755 "${SCRIPT_DIR}/bin/proxy" "${PREFIX}/bin/proxy"
 install -m 0755 "${SCRIPT_DIR}/bin/cache-indexer" "${PREFIX}/bin/cache-indexer"
+install -m 0755 "${SCRIPT_DIR}/bin/alert-worker" "${PREFIX}/bin/alert-worker"
 
 install -d -m 0755 "${ETC_DIR}"
 if [[ ! -f "${ETC_DIR}/bsdm-proxy.env" ]]; then
@@ -84,6 +85,10 @@ fi
 if [[ ! -f "${ETC_DIR}/cache-indexer.env" ]]; then
   install -m 0640 "${SCRIPT_DIR}/config/cache-indexer.env.example" "${ETC_DIR}/cache-indexer.env"
   echo "Installed ${ETC_DIR}/cache-indexer.env"
+fi
+if [[ ! -f "${ETC_DIR}/alert-worker.env" ]]; then
+  install -m 0640 "${SCRIPT_DIR}/config/alert-worker.env.example" "${ETC_DIR}/alert-worker.env"
+  echo "Installed ${ETC_DIR}/alert-worker.env"
 fi
 if [[ ! -f "${ETC_DIR}/acl-rules.json" ]]; then
   install -m 0644 "${SCRIPT_DIR}/config/acl-rules.example.json" "${ETC_DIR}/acl-rules.json"
@@ -97,7 +102,7 @@ if $CREATE_USER; then
 fi
 
 if $INSTALL_SYSTEMD; then
-  for unit in bsdm-proxy bsdm-cache-indexer; do
+  for unit in bsdm-proxy bsdm-cache-indexer bsdm-alert-worker; do
     sed "s|/opt/bsdm-proxy|${PREFIX}|g" \
       "${SCRIPT_DIR}/systemd/${unit}.service" \
       >"/etc/systemd/system/${unit}.service"
@@ -106,6 +111,7 @@ if $INSTALL_SYSTEMD; then
   echo "Systemd units installed. Start with:"
   echo "  systemctl enable --now bsdm-proxy"
   echo "  systemctl enable --now bsdm-cache-indexer  # optional"
+  echo "  systemctl enable --now bsdm-alert-worker   # optional; set ALERT_WEBHOOK_URL first"
 fi
 
 cat <<EOF
