@@ -1,4 +1,4 @@
-//! Built-in ClickHouse alerting rules (M4 starters).
+//! Built-in ClickHouse alerting rules (M4 starters + C&C beacon).
 
 use crate::config::Config;
 use crate::payload::Finding;
@@ -75,6 +75,44 @@ LIMIT 50
 FORMAT JSONEachRow"#,
                 threshold = config.high_entropy_min_requests
             )),
+            "beacon_periodic" => {
+                let beacon_lb = config.beacon_lookback.as_secs();
+                Some(format!(
+                    r#"WITH ordered AS (
+  SELECT
+    toString(client_ip) AS client_ip,
+    domain,
+    ts,
+    dateDiff(
+      'second',
+      lagInFrame(ts) OVER (PARTITION BY client_ip, domain ORDER BY ts),
+      ts
+    ) AS gap_sec
+  FROM {table}
+  WHERE ts >= now() - INTERVAL {beacon_lb} SECOND
+    AND domain != ''
+)
+SELECT
+  client_ip,
+  domain,
+  count() AS value,
+  avg(gap_sec) AS avg_gap,
+  if(avg(gap_sec) = 0, 1, stddevPop(gap_sec) / avg(gap_sec)) AS gap_cv
+FROM ordered
+WHERE gap_sec IS NOT NULL
+  AND gap_sec BETWEEN {min_gap} AND {max_gap}
+GROUP BY client_ip, domain
+HAVING value >= {min_hits}
+  AND gap_cv <= {max_cv}
+ORDER BY value DESC
+LIMIT 100
+FORMAT JSONEachRow"#,
+                    min_gap = config.beacon_min_interval_secs,
+                    max_gap = config.beacon_max_interval_secs,
+                    min_hits = config.beacon_min_hits,
+                    max_cv = config.beacon_max_gap_cv,
+                ))
+            }
             other => {
                 tracing::warn!("unknown ALERT_RULES entry ignored: {other}");
                 None
@@ -87,13 +125,13 @@ FORMAT JSONEachRow"#,
     out
 }
 
-pub fn findings_from_rows(rule: &str, rows: &[Value]) -> Vec<Finding> {
+pub fn findings_from_rows(rule: &str, rows: &[Value], config: &Config) -> Vec<Finding> {
     rows.iter()
-        .filter_map(|row| find_from_row(rule, row))
+        .filter_map(|row| find_from_row(rule, row, config))
         .collect()
 }
 
-fn find_from_row(rule: &str, row: &Value) -> Option<Finding> {
+fn find_from_row(rule: &str, row: &Value, config: &Config) -> Option<Finding> {
     let value = json_number(row.get("value")?)?;
     let mut labels = BTreeMap::new();
     for key in ["username", "client_ip", "domain"] {
@@ -106,19 +144,27 @@ fn find_from_row(rule: &str, row: &Value) -> Option<Finding> {
     if let Some(clients) = row.get("clients").and_then(json_number) {
         labels.insert("clients".into(), clients.to_string());
     }
+    if let Some(avg_gap) = row.get("avg_gap").and_then(json_number) {
+        labels.insert("avg_gap_secs".into(), format!("{avg_gap:.1}"));
+    }
+    if let Some(gap_cv) = row.get("gap_cv").and_then(json_number) {
+        labels.insert("gap_cv".into(), format!("{gap_cv:.3}"));
+    }
 
-    let (severity, title, description) = match rule {
+    let (severity, title, description, window_secs) = match rule {
         "blocked_burst" => (
             "critical",
             "ACL deny burst".to_string(),
             format!(
                 "Client hit {value} blocked requests in the lookback window (user/IP threshold exceeded)"
             ),
+            config.lookback.as_secs(),
         ),
         "domain_burst" => (
             "warning",
             "Domain request burst".to_string(),
             format!("Same client issued {value} requests to one domain in the lookback window"),
+            config.lookback.as_secs(),
         ),
         "off_hours_threat" => (
             "warning",
@@ -126,6 +172,7 @@ fn find_from_row(rule: &str, row: &Value) -> Option<Finding> {
             format!(
                 "{value} threat-tagged request(s) between 22:00–06:00 UTC in the lookback window"
             ),
+            config.lookback.as_secs(),
         ),
         "high_entropy_domain" => (
             "warning",
@@ -133,7 +180,23 @@ fn find_from_row(rule: &str, row: &Value) -> Option<Finding> {
             format!(
                 "Domain matched long/numeric heuristic with {value} request(s) in the lookback window"
             ),
+            config.lookback.as_secs(),
         ),
+        "beacon_periodic" => {
+            let avg = labels
+                .get("avg_gap_secs")
+                .cloned()
+                .unwrap_or_else(|| "?".into());
+            let cv = labels.get("gap_cv").cloned().unwrap_or_else(|| "?".into());
+            (
+                "warning",
+                "Periodic C&C beacon candidate".to_string(),
+                format!(
+                    "Client→domain shows {value} regular intervals (avg_gap={avg}s, cv={cv}) — possible beacon"
+                ),
+                config.beacon_lookback.as_secs(),
+            )
+        }
         _ => return None,
     };
 
@@ -144,6 +207,7 @@ fn find_from_row(rule: &str, row: &Value) -> Option<Finding> {
         description,
         value,
         labels,
+        window_secs,
     })
 }
 
@@ -180,6 +244,11 @@ mod tests {
             domain_burst_threshold: 50,
             high_entropy_min_requests: 5,
             off_hours_min_events: 1,
+            beacon_lookback: Duration::from_secs(3600),
+            beacon_min_hits: 5,
+            beacon_min_interval_secs: 45,
+            beacon_max_interval_secs: 900,
+            beacon_max_gap_cv: 0.25,
         }
     }
 
@@ -190,23 +259,28 @@ mod tests {
             "domain_burst",
             "off_hours_threat",
             "high_entropy_domain",
+            "beacon_periodic",
             "nope",
         ]));
-        assert_eq!(q.len(), 4);
+        assert_eq!(q.len(), 5);
         assert!(q[0].1.contains("acl_action = 'deny'"));
         assert!(q[1].1.contains("HAVING value >= 50"));
         assert!(q[2].1.contains("toHour(ts)"));
         assert!(q[3].1.contains("length(domain) >= 25"));
+        assert!(q[4].1.contains("lagInFrame"));
+        assert!(q[4].1.contains("gap_cv"));
+        assert!(q[4].1.contains("INTERVAL 3600 SECOND"));
     }
 
     #[test]
     fn maps_blocked_burst_row() {
+        let cfg = sample_config(&["blocked_burst"]);
         let row = serde_json::json!({
             "username": "alice",
             "client_ip": "10.0.0.1",
             "value": 15
         });
-        let findings = findings_from_rows("blocked_burst", &[row]);
+        let findings = findings_from_rows("blocked_burst", &[row], &cfg);
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].severity, "critical");
         assert_eq!(
@@ -214,5 +288,27 @@ mod tests {
             Some("alice")
         );
         assert_eq!(findings[0].value, 15.0);
+        assert_eq!(findings[0].window_secs, 300);
+    }
+
+    #[test]
+    fn maps_beacon_row() {
+        let cfg = sample_config(&["beacon_periodic"]);
+        let row = serde_json::json!({
+            "client_ip": "10.0.0.9",
+            "domain": "c2.example",
+            "value": 8,
+            "avg_gap": 60.2,
+            "gap_cv": 0.12
+        });
+        let findings = findings_from_rows("beacon_periodic", &[row], &cfg);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].rule, "beacon_periodic");
+        assert_eq!(findings[0].window_secs, 3600);
+        assert_eq!(
+            findings[0].labels.get("domain").map(String::as_str),
+            Some("c2.example")
+        );
+        assert!(findings[0].description.contains("beacon"));
     }
 }

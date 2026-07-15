@@ -44,4 +44,33 @@
 -- LIMIT 50;
 
 -- Wired into alert-worker rules (blocked_burst, domain_burst, off_hours_threat,
--- high_entropy_domain). See docs/alerting.md and cargo crate alert-worker/.
+-- high_entropy_domain, beacon_periodic). See docs/alerting.md.
+
+-- Periodic C&C beacon candidates (client→domain regular gaps)
+-- WITH ordered AS (
+--   SELECT
+--     toString(client_ip) AS client_ip,
+--     domain,
+--     ts,
+--     dateDiff(
+--       'second',
+--       lagInFrame(ts) OVER (PARTITION BY client_ip, domain ORDER BY ts),
+--       ts
+--     ) AS gap_sec
+--   FROM bsdm.http_cache
+--   WHERE ts >= now() - INTERVAL 1 HOUR
+--     AND domain != ''
+-- )
+-- SELECT
+--   client_ip,
+--   domain,
+--   count() AS gaps,
+--   avg(gap_sec) AS avg_gap,
+--   if(avg(gap_sec) = 0, 1, stddevPop(gap_sec) / avg(gap_sec)) AS gap_cv
+-- FROM ordered
+-- WHERE gap_sec IS NOT NULL
+--   AND gap_sec BETWEEN 45 AND 900
+-- GROUP BY client_ip, domain
+-- HAVING gaps >= 5 AND gap_cv <= 0.25
+-- ORDER BY gaps DESC
+-- LIMIT 100;

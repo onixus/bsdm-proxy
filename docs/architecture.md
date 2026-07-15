@@ -220,9 +220,9 @@ Local L1 miss → ICP query siblings → select parent → fetch_via_peer → or
 | **B15** | Нет analytics/ML сервиса | Нужен worker для scoring, alerts | M4–M5 |
 | **B16** | Event schema for analytics | ✅ Done (`session_id`, `acl_action`, `threat_sources`) | M3–M4 |
 | **B17** | Analytics UI in compose | ✅ Done (Grafana + ClickHouse; OS Dashboards removed) | M3 |
-| **B18** | Только URL-level threat | Нет DNS/timing/beacon signals | M4–M5 |
+| **B18** | Behavioral / beacon signals | ✅ Done (`beacon_periodic` in alert-worker) | M4 |
 | **B19** | Alerting pipeline | ✅ Done (`alert-worker` → webhook) | M4 |
-| **B20** | Historical threat analytics UI | 🔄 CH panels started (#105) | M4 |
+| **B20** | Historical threat analytics UI | 🔄 CH threat + beacon panels | M4 |
 
 ### 🔵 Structural — технический долг
 
@@ -243,7 +243,7 @@ Local L1 miss → ICP query siblings → select parent → fetch_via_peer → or
 M1  ██████████████  B1–B6 ✅
 M2  ██████████████  B7–B9 B13–B14 B21–B25 ✅
 M3  █████████████░  B10–B12 B17 ✅ · B20 🔄
-M4  █████░░░░░░░░░  B16 ✅ · B19 ✅ · B15 B18 · B20 🔄
+M4  ████████░░░░░░  B16 ✅ · B18 ✅ · B19 ✅ · B15 · B20 🔄
 M5  ░░░░░░░░░░░░░░  + M4
 ```
 
@@ -259,7 +259,7 @@ Critical/high блокеры B1–B14, B17, B22–B26 — **закрыты**. An
 
 1. ~~**B16** — rich event schema~~ ✅ (`session_id`, `acl_action`, `threat_sources`)
 2. **B15** — analytics / ML worker (scoring beyond rule alerts)
-3. **B18** — behavioral / beacon signals (extends `alert-worker` rules)
+3. ~~**B18** — behavioral / beacon signals~~ ✅ (`beacon_periodic`)
 4. ~~**B19** — SIEM webhook~~ ✅ (`alert-worker`)
 5. ~~**B8** — online categorization off hot path~~ ✅ (#104)
 

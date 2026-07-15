@@ -50,8 +50,9 @@ Identical fingerprints are suppressed for `ALERT_DEDUPE_TTL_SECS` (default 1h).
 | `domain_burst` | warning | ≥50 requests per client+domain |
 | `off_hours_threat` | warning | ≥1 threat-tagged event 22:00–06:00 UTC |
 | `high_entropy_domain` | warning | ≥5 hits on long/numeric domains |
+| `beacon_periodic` | warning | ≥5 regular gaps (CV≤0.25) client→domain over beacon lookback |
 
-Enable a subset: `ALERT_RULES=blocked_burst,domain_burst`.
+Enable a subset: `ALERT_RULES=blocked_burst,beacon_periodic`.
 
 Starter SQL live in [`scripts/clickhouse/m4_threat_queries.sql`](../scripts/clickhouse/m4_threat_queries.sql).
 
@@ -63,13 +64,18 @@ Starter SQL live in [`scripts/clickhouse/m4_threat_queries.sql`](../scripts/clic
 | `ALERT_WEBHOOK_HEADERS` | `{}` | Extra headers JSON, e.g. `{"Authorization":"Bearer …"}` |
 | `ALERT_WEBHOOK_TIMEOUT_SECS` | `10` | HTTP timeout |
 | `ALERT_POLL_INTERVAL_SECS` | `60` | Eval cycle period |
-| `ALERT_LOOKBACK_SECS` | `300` | Query window |
+| `ALERT_LOOKBACK_SECS` | `300` | Query window (most rules) |
 | `ALERT_DEDUPE_TTL_SECS` | `3600` | Fingerprint cooldown |
-| `ALERT_RULES` | all four | Comma-separated rule ids |
+| `ALERT_RULES` | all five | Comma-separated rule ids |
 | `ALERT_BLOCKED_BURST_THRESHOLD` | `10` | |
 | `ALERT_DOMAIN_BURST_THRESHOLD` | `50` | |
 | `ALERT_HIGH_ENTROPY_MIN_REQUESTS` | `5` | |
 | `ALERT_OFF_HOURS_MIN_EVENTS` | `1` | |
+| `ALERT_BEACON_LOOKBACK_SECS` | `3600` | Beacon rule window (independent) |
+| `ALERT_BEACON_MIN_HITS` | `5` | Min inter-request gaps matching interval band |
+| `ALERT_BEACON_MIN_INTERVAL_SECS` | `45` | Min gap seconds |
+| `ALERT_BEACON_MAX_INTERVAL_SECS` | `900` | Max gap seconds |
+| `ALERT_BEACON_MAX_GAP_CV` | `0.25` | Max coeff. of variation of gaps |
 | `ALERT_SOURCE` | `bsdm-proxy-alert-worker` | Payload `source` |
 | `CLICKHOUSE_URL` | `http://127.0.0.1:8123` | |
 | `CLICKHOUSE_DATABASE` / `TABLE` | `bsdm` / `http_cache` | |
