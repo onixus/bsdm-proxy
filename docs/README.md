@@ -45,6 +45,7 @@
 | [BLOCKERS.md](BLOCKERS.md) | Реестр блокеров B1–B25 |
 | [roadmap.md](roadmap.md) | Milestones Squid + ретропоиск + ML (M1–M5) |
 | [strategic-roadmap.md](strategic-roadmap.md) | Стратегия: Lite, DX, Wasm, AI-трафик |
+| [lite.md](lite.md) | Lite mode: `docker-compose.lite.yml` |
 | [swg-backlog-mapping.md](swg-backlog-mapping.md) | Mapping vs SWG vendors |
 | [adr/0001-tiered-sharded-l1-cache.md](adr/0001-tiered-sharded-l1-cache.md) | ADR tiered L1 |
 | [adr/0002-clickhouse-analytics.md](adr/0002-clickhouse-analytics.md) | ADR ClickHouse |

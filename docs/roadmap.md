@@ -165,7 +165,7 @@ Backlog mapping: [swg-backlog-mapping.md](swg-backlog-mapping.md)
 
 | Фаза | Фокус | Ключевые элементы |
 |------|--------|-------------------|
-| **1. Lite** | VPS / edge, низкий порог | indexer без обязательных Kafka/CH; SQLite/in-memory; `docker-compose.lite.yml` |
+| **1. Lite** | VPS / edge, низкий порог | ✅ `docker-compose.lite.yml`; next: indexer без Kafka/CH, SQLite |
 | **2. DX** | Control plane | REST/gRPC API, hot reload ACL/upstream, cache purge по tags/regex, lite metrics |
 | **3. Wasm** | Плагины | Wasmtime в request/response pipeline, SDK (Rust/Go/AS), PoC auth-as-plugin |
 | **4. AI-трафик** | LLM / API proxy | token-bucket RL, semantic cache (vector DB prep), request coalescing |
@@ -179,6 +179,7 @@ Backlog mapping: [swg-backlog-mapping.md](swg-backlog-mapping.md)
 | Документ | Тема |
 |----------|------|
 | [strategic-roadmap.md](strategic-roadmap.md) | Стратегические фазы Lite / DX / Wasm / AI |
+| [lite.md](lite.md) | Lite compose: standalone proxy |
 | [architecture.md](architecture.md) | Компоненты, блокеры |
 | [adr/0002-clickhouse-analytics.md](adr/0002-clickhouse-analytics.md) | ClickHouse ADR |
 | [clickhouse-analytics.md](clickhouse-analytics.md) | Compose + SQL |

@@ -1,0 +1,57 @@
+# Zero-config Lite profile: standalone caching HTTPS proxy.
+# No Kafka, ClickHouse, Prometheus, Grafana, or cache-indexer.
+#
+# Usage:
+#   ./scripts/gen-ca.sh
+#   docker compose -f docker-compose.lite.yml up -d --build
+#   curl --cacert certs/ca.crt -x http://127.0.0.1:1488 https://httpbin.org/get
+#   curl http://127.0.0.1:9090/health
+#
+# Docs: docs/lite.md · docs/strategic-roadmap.md (Phase 1)
+
+services:
+  proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: proxy
+    ports:
+      - "1488:1488"
+      - "9090:9090"
+    environment:
+      - HTTP_PORT=1488
+      - METRICS_PORT=9090
+      - MITM_ENABLED=true
+      - AUTH_ENABLED=false
+      - ACL_ENABLED=false
+      - ACL_DEFAULT_ACTION=allow
+      - CATEGORIZATION_ENABLED=false
+      - CACHE_CAPACITY=5000
+      - CACHE_TTL_SECONDS=3600
+      - MAX_CACHE_BODY_SIZE=10485760
+      - CACHE_SPILL_DIR=/var/cache/bsdm-spill
+      - CACHE_SPILL_THRESHOLD_BYTES=65536
+      - SHUTDOWN_TIMEOUT_SECONDS=30
+      # Kafka intentionally unset — standalone Lite (no analytics bus)
+      - RUST_LOG=info,bsdm_proxy=info
+      - RUST_BACKTRACE=0
+    volumes:
+      - ./certs:/certs:ro
+      - lite-spill:/var/cache/bsdm-spill
+    networks:
+      - bsdm-lite
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:9090/health | grep -q ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+networks:
+  bsdm-lite:
+    driver: bridge
+
+volumes:
+  lite-spill:
+    driver: local

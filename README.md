@@ -69,7 +69,27 @@
 
 ## Быстрый старт (Docker)
 
-### 1. CA для MITM
+### Lite — только прокси (без Kafka / ClickHouse)
+
+```bash
+./scripts/gen-ca.sh
+docker compose -f docker-compose.lite.yml up -d --build
+curl --cacert certs/ca.crt -x http://127.0.0.1:1488 https://httpbin.org/get
+curl http://127.0.0.1:9090/health
+```
+
+Подробнее: [docs/lite.md](docs/lite.md) · Strategic Phase 1: [docs/strategic-roadmap.md](docs/strategic-roadmap.md)
+
+### Полный стек (analytics)
+
+#### 1. CA для MITM
+
+```bash
+./scripts/gen-ca.sh   # или вручную openssl — см. ниже
+```
+
+<details>
+<summary>Ручная генерация CA</summary>
 
 ```bash
 mkdir -p certs && cd certs
@@ -79,7 +99,9 @@ openssl req -new -x509 -days 3650 -key ca.key -out ca.crt \
 cd ..
 ```
 
-### 2. Запуск стека
+</details>
+
+#### 2. Запуск стека
 
 ```bash
 docker compose up -d --build
@@ -88,7 +110,7 @@ docker compose ps
 
 Подробнее: [docs/docker.md](docs/docker.md) · [docs/deployment.md](docs/deployment.md)
 
-### 3. Доверие клиенту к CA
+#### 3. Доверие клиенту к CA
 
 **Linux:**
 ```bash
@@ -102,7 +124,7 @@ sudo security add-trusted-cert -d -r trustRoot \
   -k /Library/Keychains/System.keychain certs/ca.crt
 ```
 
-### 4. Проверка
+#### 4. Проверка
 
 ```bash
 curl -x http://localhost:1488 https://httpbin.org/get
@@ -120,11 +142,11 @@ Grafana: http://localhost:3000 → **BSDM HTTP Traffic (ClickHouse)** и **BSDM 
 
 | Файл | Назначение |
 |------|------------|
+| [docker-compose.lite.yml](docker-compose.lite.yml) | **Lite:** один proxy (MITM + L1), без analytics |
 | [docker-compose.yml](docker-compose.yml) | Полный стек: proxy, Kafka, ClickHouse, cache-indexer, Prometheus, Grafana |
 | [docker-compose.test.yml](docker-compose.test.yml) | Минимальный стек для smoke/E2E |
 | [docker-compose.redis-l2.yml](docker-compose.redis-l2.yml) | Два proxy + Redis L2 |
 | [docker-compose.hierarchy.yml](docker-compose.hierarchy.yml) | Multi-instance + ICP |
-
 ## Установка (native package)
 
 Сборка пакета из исходников:
@@ -411,6 +433,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test, cargo-audi
 | [docs/README.md](docs/README.md) | **Оглавление wiki** |
 | [docs/deployment.md](docs/deployment.md) | Развёртывание: Docker, native, k8s |
 | [docs/docker.md](docs/docker.md) | Docker Compose, сборка образов, troubleshooting |
+| [docs/lite.md](docs/lite.md) | Lite: standalone proxy compose |
 | [docs/kubernetes.md](docs/kubernetes.md) | Kubernetes: манифесты, probes, Helm chart |
 | [docs/k8s-architecture.md](docs/k8s-architecture.md) | Kubernetes / HA deployment |
 | [docs/development.md](docs/development.md) | Сборка, тесты, CI |
@@ -462,7 +485,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test, cargo-audi
 
 | Фаза | Фокус |
 |------|--------|
-| **1. Lite** | Прокси без обязательных Kafka/ClickHouse; SQLite/in-memory; `docker-compose.lite.yml` |
+| **1. Lite** | Прокси без обязательных Kafka/ClickHouse; SQLite/in-memory; `docker-compose.lite.yml` ([docs/lite.md](docs/lite.md) — compose shipped) |
 | **2. DX** | Control Plane API, hot reload, cache purge, lite metrics без Grafana |
 | **3. Wasm** | Wasmtime-плагины, SDK, модульность ядра |
 | **4. AI-трафик** | Token-bucket RL, semantic cache для LLM, request coalescing |

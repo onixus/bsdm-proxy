@@ -10,6 +10,7 @@
 
 | Файл | Назначение |
 |------|------------|
+| `docker-compose.lite.yml` | **Lite:** один caching proxy (MITM + L1 spill), без Kafka/CH |
 | `docker-compose.yml` | Полный стек: proxy, cache-indexer, kafka, zookeeper, clickhouse, prometheus, grafana; optional `alert-worker` (`--profile alerts`) |
 | `docker-compose.test.yml` | Smoke/E2E external (upstream + proxy) |
 | `docker-compose.redis-l2.yml` | Два proxy + Redis L2 |
@@ -36,6 +37,15 @@ docker compose build proxy cache-indexer
 - Статическая линковка musl (см. Dockerfile).
 
 ---
+
+## Lite (standalone proxy)
+
+```bash
+./scripts/gen-ca.sh
+docker compose -f docker-compose.lite.yml up -d --build
+```
+
+Один сервис `proxy`, без analytics plane. Docs: [lite.md](lite.md).
 
 ## Полный стек
 
