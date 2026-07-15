@@ -466,7 +466,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test, cargo-audi
 - [x] ClickHouse schema + indexer (JSONEachRow)
 - [x] Grafana **BSDM HTTP Traffic (ClickHouse)** + Search API
 - [x] Default `docker compose up` на ClickHouse; OpenSearch удалён ([#125](https://github.com/onixus/bsdm-proxy/issues/125))
-- [ ] Session correlation (`session_id`, redirect chains)
+- [x] Session correlation (`session_id`, redirect chains)
 
 **Gate M3:** «кто ходил на domain X за 30 дней» — Grafana/CH SQL или `/api/search`.
 

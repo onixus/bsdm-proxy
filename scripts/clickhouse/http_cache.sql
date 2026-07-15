@@ -23,6 +23,9 @@ CREATE TABLE IF NOT EXISTS bsdm.http_cache
     categories Array(LowCardinality(String)),
     threat_sources Array(LowCardinality(String)),
     acl_action LowCardinality(Nullable(String)),
+    session_id String DEFAULT '',
+    parent_event_id Nullable(String),
+    redirect_url Nullable(String),
     headers String DEFAULT '{}'
 )
 ENGINE = MergeTree
@@ -32,13 +35,19 @@ TTL ts + INTERVAL 42 DAY
 SETTINGS index_granularity = 8192;
 
 -- M3: who accessed domain X (30 days)
--- SELECT ts, username, client_ip, url, method, status, cache_status
+-- SELECT ts, username, client_ip, url, method, status, cache_status, session_id
 -- FROM bsdm.http_cache
 -- WHERE domain = {domain:String} AND ts >= now() - INTERVAL 30 DAY
 -- ORDER BY ts DESC LIMIT 1000;
 
+-- M3: redirect chain for a session
+-- SELECT ts, event_id, parent_event_id, status, url, redirect_url
+-- FROM bsdm.http_cache
+-- WHERE session_id = {session_id:String}
+-- ORDER BY ts ASC;
+
 -- M4: blocked events with threat sources
--- SELECT ts, username, domain, url, categories, threat_sources, acl_action
+-- SELECT ts, username, domain, url, categories, threat_sources, acl_action, session_id
 -- FROM bsdm.http_cache
 -- WHERE cache_status = 'DENY' OR acl_action = 'deny'
 --   AND ts >= now() - INTERVAL 7 DAY;

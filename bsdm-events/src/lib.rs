@@ -39,6 +39,15 @@ pub struct CacheEvent {
     /// ACL decision when request was denied or redirected: deny, redirect.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acl_action: Option<String>,
+    /// Soft browsing session (same IP + principal + UA within idle window).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub session_id: String,
+    /// Prior redirect event that led to this request (`Location` match).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_event_id: Option<String>,
+    /// Absolute `Location` when this response was an HTTP redirect.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub redirect_url: Option<String>,
     #[serde(default)]
     pub event_id: String,
 }
@@ -80,6 +89,9 @@ mod tests {
             categories: vec![],
             threat_sources: vec![],
             acl_action: None,
+            session_id: String::new(),
+            parent_event_id: None,
+            redirect_url: None,
             event_id: "evt-1".to_string(),
         };
         assert_eq!(document_id(&event), "evt-1");
@@ -128,10 +140,36 @@ mod tests {
             categories: vec!["malware".to_string()],
             threat_sources: vec!["urlhaus".to_string()],
             acl_action: Some("deny".to_string()),
+            session_id: "sess-1".to_string(),
+            parent_event_id: Some("evt-redir".to_string()),
+            redirect_url: None,
             event_id: "evt-block".to_string(),
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("\"acl_action\":\"deny\""));
         assert!(json.contains("\"threat_sources\":[\"urlhaus\"]"));
+        assert!(json.contains("\"session_id\":\"sess-1\""));
+        assert!(json.contains("\"parent_event_id\":\"evt-redir\""));
+    }
+
+    #[test]
+    fn deserializes_without_session_fields() {
+        let json = r#"{
+            "url": "https://example.com",
+            "method": "GET",
+            "status": 200,
+            "cache_key": "key",
+            "cache_status": "MISS",
+            "timestamp": 1,
+            "client_ip": "10.0.0.1",
+            "domain": "example.com",
+            "response_size": 1,
+            "request_duration_ms": 1,
+            "event_id": "evt-old"
+        }"#;
+        let event: CacheEvent = serde_json::from_str(json).unwrap();
+        assert!(event.session_id.is_empty());
+        assert!(event.parent_event_id.is_none());
+        assert!(event.redirect_url.is_none());
     }
 }

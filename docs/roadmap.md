@@ -122,8 +122,8 @@ proxy → Kafka → cache-indexer → ClickHouse
 
 ### Текущий gap
 
-- Search API и session correlation
-- Session correlation (`session_id`, redirect chains)
+- CSV/JSON export polish for SOC playbooks (Search API already supports `format=csv`)
+- Session correlation across multi-node proxies (today: per-node soft sessions)
 
 ### Задачи
 
@@ -135,7 +135,7 @@ proxy → Kafka → cache-indexer → ClickHouse
 - [x] **Grafana + Search API** — CH dashboards, `/api/search` ([#129](https://github.com/onixus/bsdm-proxy/issues/129), [#130](https://github.com/onixus/bsdm-proxy/issues/130))
 - [x] **Default compose on ClickHouse** — `docker compose up` ([#132](https://github.com/onixus/bsdm-proxy/issues/132))
 - [x] **Remove OpenSearch backend** — ClickHouse-only cache-indexer ([#134](https://github.com/onixus/bsdm-proxy/issues/134))
-- [ ] **Session correlation** — `session_id`, redirect chains
+- [x] **Session correlation** — `session_id`, redirect chains (`parent_event_id` / `redirect_url`)
 - [ ] **Экспорт** — CSV/JSON для SOC
 
 **Критерий завершения M3:** аналитик находит «кто ходил на domain X за 30 дней» через Dashboards **или** Grafana/CH SQL; CH indexer в production path.

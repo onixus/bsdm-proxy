@@ -31,6 +31,11 @@ pub struct HttpCacheRow {
     pub threat_sources: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub acl_action: Option<String>,
+    pub session_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_event_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redirect_url: Option<String>,
     pub headers: String,
 }
 
@@ -59,6 +64,9 @@ pub fn cache_event_to_row(event: &CacheEvent) -> HttpCacheRow {
         categories: event.categories.clone(),
         threat_sources: event.threat_sources.clone(),
         acl_action: event.acl_action.clone(),
+        session_id: event.session_id.clone(),
+        parent_event_id: event.parent_event_id.clone(),
+        redirect_url: event.redirect_url.clone(),
         headers: headers_json(&event.headers),
     }
 }
@@ -124,6 +132,9 @@ mod tests {
             categories: vec!["news".to_string()],
             threat_sources: vec!["ut1".to_string()],
             acl_action: Some("allow".to_string()),
+            session_id: "sess-abc".to_string(),
+            parent_event_id: Some("evt-parent".to_string()),
+            redirect_url: Some("https://example.com/next".to_string()),
             event_id: "evt-ch-1".to_string(),
         }
     }
@@ -135,6 +146,12 @@ mod tests {
         assert_eq!(row.ts, "2023-11-14 22:13:21.000");
         assert_eq!(row.client_ip, "10.0.0.5");
         assert_eq!(row.request_duration_ms, 42);
+        assert_eq!(row.session_id, "sess-abc");
+        assert_eq!(row.parent_event_id.as_deref(), Some("evt-parent"));
+        assert_eq!(
+            row.redirect_url.as_deref(),
+            Some("https://example.com/next")
+        );
         assert_eq!(row.headers, r#"{"X-Test":"1"}"#);
     }
 
