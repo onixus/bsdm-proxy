@@ -68,7 +68,7 @@ flowchart TB
 | MITM | `proxy/src/tls.rs` | ✅ |
 | Hierarchy / ICP | `hierarchy.rs`, `peer_fetch.rs`, `icp.rs`, `hierarchy_config.rs` | ✅ opt-in (`HIERARCHY_ENABLED`) |
 | Event indexer | `cache-indexer/src/main.rs` | ✅ |
-| ML / analytics worker | — | ❌ не существует |
+| ML / analytics worker | `ml-worker` (:8091) | ✅ M5.1 scaffold (CH features + stub score); models TBD |
 
 ---
 
@@ -217,7 +217,7 @@ Local L1 miss → ICP query siblings → select parent → fetch_via_peer → or
 
 | ID | Блокер | Описание | Milestone |
 |----|--------|----------|-----------|
-| **B15** | Нет analytics/ML сервиса | Нужен worker для scoring, alerts | M4–M5 |
+| **B15** | Analytics/ML worker | ✅ M5.1 scaffold (`ml-worker` + CH feature store); models → M5.2+ | M5 |
 | **B16** | Event schema for analytics | ✅ Done (`session_id`, `acl_action`, `threat_sources`) | M3–M4 |
 | **B17** | Analytics UI in compose | ✅ Done (Grafana + ClickHouse; OS Dashboards removed) | M3 |
 | **B18** | Behavioral / beacon signals | ✅ Done (`beacon_periodic` in alert-worker) | M4 |
@@ -243,8 +243,8 @@ Local L1 miss → ICP query siblings → select parent → fetch_via_peer → or
 M1  ██████████████  B1–B6 ✅
 M2  ██████████████  B7–B9 B13–B14 B21–B25 ✅
 M3  █████████████░  B10–B12 B17 ✅ · B20 ✅
-M4  ██████████████  B16 ✅ · B18 ✅ · B19 ✅ · B20 ✅ · B15 → M5
-M5  ░░░░░░░░░░░░░░  B15 + ML```
+M4  ██████████████  B16 ✅ · B18 ✅ · B19 ✅ · B20 ✅
+M5  ██░░░░░░░░░░░░  B15 scaffold ✅ · models M5.2+```
 
 ---
 
@@ -257,7 +257,7 @@ Critical/high блокеры B1–B14, B17, B22–B26 — **закрыты**. An
 ### Волна 3 — M4/M5 foundation
 
 1. ~~**B16** — rich event schema~~ ✅ (`session_id`, `acl_action`, `threat_sources`)
-2. **B15** — analytics / ML worker (scoring beyond rule alerts)
+2. ~~**B15** — analytics / ML worker scaffold~~ ✅ (`ml-worker`, ADR 0003); trained models still open
 3. ~~**B18** — behavioral / beacon signals~~ ✅ (`beacon_periodic`)
 4. ~~**B19** — SIEM webhook~~ ✅ (`alert-worker`)
 5. ~~**B8** — online categorization off hot path~~ ✅ (#104)
@@ -292,4 +292,4 @@ flowchart LR
 
 ---
 
-*Версия документа: 0.5.0 · M1–M4 done · M5 ML next*
+*Версия документа: 0.5.0 · M1–M4 done · M5.1 ml-worker scaffold*

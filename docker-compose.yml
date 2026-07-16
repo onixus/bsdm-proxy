@@ -45,6 +45,7 @@ services:
     volumes:
       - clickhouse-data:/var/lib/clickhouse
       - ./scripts/clickhouse/http_cache.sql:/docker-entrypoint-initdb.d/01-http_cache.sql:ro
+      - ./scripts/clickhouse/ml_features.sql:/docker-entrypoint-initdb.d/02-ml_features.sql:ro
     networks:
       - bsdm-net
     restart: unless-stopped
@@ -163,6 +164,44 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8090/health | grep -q ok"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # Optional M5 feature store / scoring (ADR 0003).
+  #   docker compose --profile ml up -d --build ml-worker
+  # Optional SIEM: ML_WEBHOOK_URL=https://hooks.example/siem
+  ml-worker:
+    profiles: ["ml"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: ml-worker
+    ports:
+      - "8091:8091"
+    environment:
+      - CLICKHOUSE_URL=http://clickhouse:8123
+      - CLICKHOUSE_DATABASE=bsdm
+      - CLICKHOUSE_TABLE=http_cache
+      - ML_FEATURES_TABLE=entity_features
+      - ML_SCORES_TABLE=ml_scores
+      - ML_POLL_INTERVAL_SECS=${ML_POLL_INTERVAL_SECS:-120}
+      - ML_LOOKBACK_SECS=${ML_LOOKBACK_SECS:-300}
+      - ML_ENTITY_TYPES=${ML_ENTITY_TYPES:-client_ip}
+      - ML_MIN_REQUESTS=${ML_MIN_REQUESTS:-10}
+      - ML_MODEL=${ML_MODEL:-anomaly_stub_v0}
+      - ML_SCORE_THRESHOLD=${ML_SCORE_THRESHOLD:-0.8}
+      - ML_WEBHOOK_URL=${ML_WEBHOOK_URL:-}
+      - METRICS_PORT=8091
+      - RUST_LOG=info,ml_worker=info
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    networks:
+      - bsdm-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8091/health | grep -q ok"]
       interval: 15s
       timeout: 5s
       retries: 5

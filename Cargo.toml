@@ -5,6 +5,7 @@ members = [
     "proxy",
     "cache-indexer",
     "alert-worker",
+    "ml-worker",
     "e2e",
 ]
 

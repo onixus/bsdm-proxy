@@ -11,6 +11,7 @@
 | `bin/proxy` | HTTPS caching proxy |
 | `bin/cache-indexer` | Kafka → ClickHouse indexer |
 | `bin/alert-worker` | ClickHouse → SIEM/webhook alerts (optional) |
+| `bin/ml-worker` | ClickHouse → entity features + ML scores (M5, optional) |
 | `config/*.example` | Environment and ACL templates |
 | `systemd/` | systemd unit files |
 | `install.sh` | Installer script |
@@ -36,6 +37,8 @@ sudo systemctl start bsdm-proxy
 
 Optional SIEM alerts: configure `config/alert-worker.env.example` → `/etc/bsdm-proxy/alert-worker.env`, then `systemctl enable --now bsdm-alert-worker`.
 
+Optional M5 ML worker: apply `scripts/clickhouse/ml_features.sql`, configure `ml-worker.env`, then `systemctl enable --now bsdm-ml-worker` (see [docs/ml-security.md](../docs/ml-security.md)).
+
 ## Manual run
 
 ```bash
@@ -54,6 +57,7 @@ set +a
 | Metrics / health | 9090 |
 | cache-indexer admin / Search API | 8080 |
 | alert-worker metrics | 8090 |
+| ml-worker metrics | 8091 |
 
 ## Verify
 

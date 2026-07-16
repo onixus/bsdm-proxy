@@ -35,6 +35,7 @@ COPY bsdm-events ./bsdm-events
 COPY proxy ./proxy
 COPY cache-indexer ./cache-indexer
 COPY alert-worker ./alert-worker
+COPY ml-worker ./ml-worker
 COPY e2e ./e2e
 
 # Настройка окружения для статической линковки
@@ -45,7 +46,7 @@ ENV OPENSSL_STATIC=1 \
 
 # Собираем бинарники workspace в release режиме
 RUN cargo build --release --target x86_64-unknown-linux-musl \
-    -p bsdm-proxy -p cache-indexer -p alert-worker
+    -p bsdm-proxy -p cache-indexer -p alert-worker -p ml-worker
 
 # ============================================================
 # Proxy runtime
@@ -91,3 +92,17 @@ COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/alert-worker
 
 EXPOSE 8090
 CMD ["alert-worker"]
+
+# ============================================================
+# ML-worker runtime (ClickHouse features + scores, M5)
+# ============================================================
+FROM alpine:3.21 AS ml-worker
+RUN apk add --no-cache \
+    ca-certificates \
+    libgcc \
+    wget
+
+COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/ml-worker /usr/local/bin/ml-worker
+
+EXPOSE 8091
+CMD ["ml-worker"]

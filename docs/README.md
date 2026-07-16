@@ -36,6 +36,8 @@
 | [hierarchical-caching.md](hierarchical-caching.md) | ICP/HTCP hierarchy |
 | [clickhouse-analytics.md](clickhouse-analytics.md) | ClickHouse analytics |
 | [alerting.md](alerting.md) | Alert worker + Grafana/AM (M4) |
+| [ml-security.md](ml-security.md) | ML worker + feature store (M5) |
+| [adr/0003-ml-worker-feature-store.md](adr/0003-ml-worker-feature-store.md) | ADR: CH feature store |
 | [search-api.md](search-api.md) | REST Search API |
 
 ## Архитектура и roadmap

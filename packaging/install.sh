@@ -76,6 +76,9 @@ install -d -m 0755 "${PREFIX}/bin"
 install -m 0755 "${SCRIPT_DIR}/bin/proxy" "${PREFIX}/bin/proxy"
 install -m 0755 "${SCRIPT_DIR}/bin/cache-indexer" "${PREFIX}/bin/cache-indexer"
 install -m 0755 "${SCRIPT_DIR}/bin/alert-worker" "${PREFIX}/bin/alert-worker"
+if [[ -x "${SCRIPT_DIR}/bin/ml-worker" ]]; then
+  install -m 0755 "${SCRIPT_DIR}/bin/ml-worker" "${PREFIX}/bin/ml-worker"
+fi
 
 install -d -m 0755 "${ETC_DIR}"
 if [[ ! -f "${ETC_DIR}/bsdm-proxy.env" ]]; then
@@ -90,6 +93,10 @@ if [[ ! -f "${ETC_DIR}/alert-worker.env" ]]; then
   install -m 0640 "${SCRIPT_DIR}/config/alert-worker.env.example" "${ETC_DIR}/alert-worker.env"
   echo "Installed ${ETC_DIR}/alert-worker.env"
 fi
+if [[ -f "${SCRIPT_DIR}/config/ml-worker.env.example" && ! -f "${ETC_DIR}/ml-worker.env" ]]; then
+  install -m 0640 "${SCRIPT_DIR}/config/ml-worker.env.example" "${ETC_DIR}/ml-worker.env"
+  echo "Installed ${ETC_DIR}/ml-worker.env"
+fi
 if [[ ! -f "${ETC_DIR}/acl-rules.json" ]]; then
   install -m 0644 "${SCRIPT_DIR}/config/acl-rules.example.json" "${ETC_DIR}/acl-rules.json"
   echo "Installed ${ETC_DIR}/acl-rules.json"
@@ -102,16 +109,19 @@ if $CREATE_USER; then
 fi
 
 if $INSTALL_SYSTEMD; then
-  for unit in bsdm-proxy bsdm-cache-indexer bsdm-alert-worker; do
-    sed "s|/opt/bsdm-proxy|${PREFIX}|g" \
-      "${SCRIPT_DIR}/systemd/${unit}.service" \
-      >"/etc/systemd/system/${unit}.service"
+  for unit in bsdm-proxy bsdm-cache-indexer bsdm-alert-worker bsdm-ml-worker; do
+    if [[ -f "${SCRIPT_DIR}/systemd/${unit}.service" ]]; then
+      sed "s|/opt/bsdm-proxy|${PREFIX}|g" \
+        "${SCRIPT_DIR}/systemd/${unit}.service" \
+        >"/etc/systemd/system/${unit}.service"
+    fi
   done
   systemctl daemon-reload
   echo "Systemd units installed. Start with:"
   echo "  systemctl enable --now bsdm-proxy"
   echo "  systemctl enable --now bsdm-cache-indexer  # optional"
   echo "  systemctl enable --now bsdm-alert-worker   # optional; set ALERT_WEBHOOK_URL first"
+  echo "  systemctl enable --now bsdm-ml-worker      # optional; M5 feature store"
 fi
 
 cat <<EOF

@@ -25,7 +25,7 @@
 | [M2.5 — Data plane](#m25--data-plane-throughput-v03x) | v0.3.x–0.3.2 | Tiered L1, streaming, P1 hot path | ✅ Done |
 | [M3 — Retro-search](#m3--retro-search) | v0.3.1+ | ClickHouse, Search API, Grafana, k8s CHI | ✅ Done (~95%) |
 | [M4 — Threat analytics](#m4--threat-analytics-v05x) | v0.5.x | Rule-based угрозы, алерты, C&C / Shannon | ✅ Done |
-| [M5 — ML security](#m5--ml-security-v10x) | v1.0.x | ML anomaly, phishing, C&C ML | ~0% |
+| [M5 — ML security](#m5--ml-security-v10x) | v1.0.x | Feature store, anomaly / phishing / C&C ML | ~10% (M5.1 scaffold) |
 
 ```mermaid
 gantt
@@ -130,18 +130,32 @@ Rule-based обнаружение угроз поверх ClickHouse. **Крит
 
 ## M5 — ML security (v1.0.x)
 
-- [ ] Feature store, anomaly / phishing / C&C ML, optional inline score
+Async scoring off the proxy hot path. Design: [ADR 0003](adr/0003-ml-worker-feature-store.md) · Ops: [ml-security.md](ml-security.md).
+
+### M5.1 — Scaffolding (in progress / this release track)
+
+- [x] ADR 0003 — CH feature store + `ml-worker` (closes design half of [#46](https://github.com/onixus/bsdm-proxy/issues/46) / B15)
+- [x] DDL `bsdm.entity_features` + `bsdm.ml_scores` (`scripts/clickhouse/ml_features.sql`)
+- [x] Crate `ml-worker` — extract → insert features → `anomaly_stub_v0` scores → optional webhook
+- [x] Compose profile `ml`, packaging/systemd, docs
+
+### Planned
+
+- [ ] **M5.2** Unsupervised UEBA / anomaly on entity windows (replace stub)
+- [ ] **M5.3** Lexical phishing score + weak labels (PhishTank / UT1)
+- [ ] **M5.4** C&C ML augmenting `beacon_periodic`
+- [ ] **M5.5** Optional `threat_score` write-back / cached inline score (not on hot path until proven)
 
 ---
 
 ## Матрица зрелости
 
-| Столп | Сейчас (0.5.0) | После M4 | После M5 |
-|-------|----------------|----------|----------|
-| Squid parity | **~92%** | ~92% | ~93% |
-| Ретропоиск | **~90%** | ~92% | ~95% |
-| ML / C&C / phishing | **~25%** | ~25% | ~75% |
-| **Итого** | **~70%** | ~70% | ~85% |
+| Столп | Сейчас (0.5.0 + M5.1) | После M5 |
+|-------|----------------------|----------|
+| Squid parity | **~92%** | ~93% |
+| Ретропоиск | **~90%** | ~95% |
+| ML / C&C / phishing | **~30%** | ~75% |
+| **Итого** | **~72%** | ~85% |
 
 ---
 
@@ -154,7 +168,7 @@ Rule-based обнаружение угроз поверх ClickHouse. **Крит
 | M2.5 Data plane | 0.3.1–0.3.2 | #94–#109 |
 | M3 Retro-search | 0.3.1+ | #114, #125, #135 |
 | M4 Threat analytics | 0.5.0 | #50, #105, #51 |
-| M5 ML security | 1.0.x | — |
+| M5 ML security | 1.0.x | [#165](https://github.com/onixus/bsdm-proxy/issues/165) epic · [#46](https://github.com/onixus/bsdm-proxy/issues/46) · [#166](https://github.com/onixus/bsdm-proxy/issues/166)–[#169](https://github.com/onixus/bsdm-proxy/issues/169) |
 
 Backlog mapping: [swg-backlog-mapping.md](swg-backlog-mapping.md)
 
@@ -191,4 +205,4 @@ Backlog mapping: [swg-backlog-mapping.md](swg-backlog-mapping.md)
 
 ---
 
-*Обновлено: 2026-07-16 — v0.5.0 (M4 done); next M5 ML; strategic roadmap (Lite/DX/Wasm/AI)*
+*Обновлено: 2026-07-16 — v0.5.0 (M4 done); M5.1 ml-worker + feature store scaffold; next M5.2 anomaly*
