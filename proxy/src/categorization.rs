@@ -134,6 +134,8 @@ pub struct CategorizationResult {
 #[derive(Clone)]
 struct CategoryCache {
     categories: HashSet<Category>,
+    /// Feed id for Kafka/CH (`ut1`, `phishtank`, `urlhaus`, …).
+    source: String,
     cached_at: Instant,
     ttl: Duration,
 }
@@ -155,6 +157,8 @@ pub struct CategorizationConfig {
     pub urlhaus_api: String,
     pub phishtank_enabled: bool,
     pub phishtank_api: String,
+    /// PhishTank `app_key` (optional but recommended for rate limits).
+    pub phishtank_api_key: Option<String>,
     pub custom_db_enabled: bool,
     pub custom_db_path: Option<String>,
 }
@@ -170,6 +174,7 @@ impl Default for CategorizationConfig {
             urlhaus_api: "https://urlhaus-api.abuse.ch/v1/url/".to_string(),
             phishtank_enabled: false,
             phishtank_api: "https://checkurl.phishtank.com/checkurl/".to_string(),
+            phishtank_api_key: None,
             custom_db_enabled: false,
             custom_db_path: None,
         }
@@ -197,6 +202,7 @@ impl CategorizationEngine {
             custom_db: None,
             http_client: Client::builder()
                 .timeout(Duration::from_secs(5))
+                .user_agent("bsdm-proxy/0.3.2 (+https://github.com/onixus/bsdm-proxy)")
                 .build()
                 .expect("Failed to create HTTP client"),
         };
@@ -243,7 +249,7 @@ impl CategorizationEngine {
 
         if let Some(cached) = self.get_cached(&domain) {
             debug!("Category cache hit for: {}", domain);
-            return self.create_result(url, &domain, cached.categories, "cache", true);
+            return self.create_result(url, &domain, cached.categories, &cached.source, true);
         }
 
         let mut categories = HashSet::new();
@@ -268,7 +274,7 @@ impl CategorizationEngine {
         }
 
         if !categories.is_empty() {
-            self.cache_categories(&domain, categories.clone());
+            self.cache_categories(&domain, categories.clone(), source);
         }
 
         self.create_result(url, &domain, categories, source, false)
@@ -329,7 +335,7 @@ impl CategorizationEngine {
             return Ok(());
         }
 
-        self.cache_categories(&domain, categories);
+        self.cache_categories(&domain, categories, source);
         debug!(
             "Online categorization enriched {} (source={})",
             domain, source
@@ -375,12 +381,13 @@ impl CategorizationEngine {
         None
     }
 
-    /// Check PhishTank API
+    /// Check PhishTank API (`app_key` when `PHISHTANK_API_KEY` is set).
     async fn check_phishtank(&self, url: &str) -> Option<HashSet<Category>> {
+        let form = phishtank_form_fields(url, self.config.phishtank_api_key.as_deref());
         let response = self
             .http_client
             .post(&self.config.phishtank_api)
-            .form(&[("url", url), ("format", "json")])
+            .form(&form)
             .send()
             .await
             .ok()?;
@@ -478,13 +485,14 @@ impl CategorizationEngine {
         cache.get(domain).filter(|c| !c.is_expired()).cloned()
     }
 
-    /// Cache categories (sync).
-    fn cache_categories(&self, domain: &str, categories: HashSet<Category>) {
+    /// Cache categories (sync) with feed provenance for `threat_sources`.
+    fn cache_categories(&self, domain: &str, categories: HashSet<Category>, source: &str) {
         if let Ok(mut cache) = self.cache.write() {
             cache.insert(
                 domain.to_string(),
                 CategoryCache {
                     categories,
+                    source: source.to_string(),
                     cached_at: Instant::now(),
                     ttl: self.config.cache_ttl,
                 },
@@ -519,6 +527,18 @@ impl CategorizationEngine {
             cache.retain(|_, entry| !entry.is_expired());
         }
     }
+}
+
+/// Form fields for PhishTank checkurl POST (`app_key` when API key is set).
+pub(crate) fn phishtank_form_fields<'a>(
+    url: &'a str,
+    api_key: Option<&'a str>,
+) -> Vec<(&'a str, &'a str)> {
+    let mut form = vec![("url", url), ("format", "json")];
+    if let Some(key) = api_key.filter(|k| !k.is_empty()) {
+        form.push(("app_key", key));
+    }
+    form
 }
 
 #[cfg(test)]
@@ -595,16 +615,36 @@ mod tests {
     }
 
     #[test]
-    fn test_cache() {
+    fn test_cache_preserves_source() {
         let config = CategorizationConfig::default();
         let engine = CategorizationEngine::new(config);
 
         let mut cats = HashSet::new();
-        cats.insert(Category::News);
-        engine.cache_categories("example.com", cats.clone());
+        cats.insert(Category::Phishing);
+        engine.cache_categories("phish.example", cats.clone(), "phishtank");
 
-        let cached = engine.get_cached("example.com");
-        assert!(cached.is_some());
-        assert_eq!(cached.unwrap().categories, cats);
+        let cached = engine.get_cached("phish.example").unwrap();
+        assert_eq!(cached.categories, cats);
+        assert_eq!(cached.source, "phishtank");
+
+        let result = engine.categorize_local("https://phish.example/login");
+        assert!(result.cached);
+        assert_eq!(result.source, "phishtank");
+        assert!(result.categories.contains(&Category::Phishing));
+    }
+
+    #[test]
+    fn phishtank_form_includes_app_key_when_set() {
+        let with_key = phishtank_form_fields("https://evil.test/", Some("secret-key"));
+        assert!(with_key.contains(&("url", "https://evil.test/")));
+        assert!(with_key.contains(&("format", "json")));
+        assert!(with_key.contains(&("app_key", "secret-key")));
+
+        let no_key = phishtank_form_fields("https://evil.test/", None);
+        assert_eq!(no_key.len(), 2);
+        assert!(!no_key.iter().any(|(k, _)| *k == "app_key"));
+
+        let empty_key = phishtank_form_fields("https://evil.test/", Some(""));
+        assert!(!empty_key.iter().any(|(k, _)| *k == "app_key"));
     }
 }

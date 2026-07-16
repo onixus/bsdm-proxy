@@ -62,6 +62,9 @@ fn load_categorization_config() -> CategorizationConfig {
         phishtank_enabled: env_flag("PHISHTANK_ENABLED"),
         phishtank_api: std::env::var("PHISHTANK_API")
             .unwrap_or_else(|_| "https://checkurl.phishtank.com/checkurl/".to_string()),
+        phishtank_api_key: std::env::var("PHISHTANK_API_KEY")
+            .ok()
+            .filter(|s| !s.is_empty()),
         custom_db_enabled: env_flag("CUSTOM_DB_ENABLED"),
         custom_db_path: std::env::var("CUSTOM_DB_PATH").ok(),
     }
