@@ -47,7 +47,7 @@ dependencies = [
 
 [[package]]
 name = "alert-worker"
-version = "0.3.2"
+version = "0.5.0"
 dependencies = [
  "chrono",
  "hex",
@@ -325,7 +325,7 @@ dependencies = [
 
 [[package]]
 name = "bsdm-events"
-version = "0.3.2"
+version = "0.5.0"
 dependencies = [
  "chrono",
  "serde",
@@ -334,7 +334,7 @@ dependencies = [
 
 [[package]]
 name = "bsdm-proxy"
-version = "0.3.2"
+version = "0.5.0"
 dependencies = [
  "arc-swap",
  "base64",
@@ -423,7 +423,7 @@ checksum = "8ae3f5d315924270530207e2a68396c3cc547f6dca3fbdca317cfb1a51edb593"
 
 [[package]]
 name = "cache-indexer"
-version = "0.3.2"
+version = "0.5.0"
 dependencies = [
  "bsdm-events",
  "bytes",

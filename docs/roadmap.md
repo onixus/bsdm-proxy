@@ -10,7 +10,7 @@
 | **Ретропоиск** | Поиск и аналитика по историческому HTTP-трафику |
 | **ML-безопасность** | Аномалии, фишинг и C&C поверх логов и поведенческих сигналов |
 
-Текущая версия: **0.3.2** · [Releases](https://github.com/onixus/bsdm-proxy/releases) · [CHANGELOG](../CHANGELOG.md)
+Текущая версия: **0.5.0** · [Releases](https://github.com/onixus/bsdm-proxy/releases) · [CHANGELOG](../CHANGELOG.md)
 
 Стратегический вектор (Lite → DX → Wasm → AI): **[strategic-roadmap.md](strategic-roadmap.md)**
 
@@ -136,7 +136,7 @@ Rule-based обнаружение угроз поверх ClickHouse. **Крит
 
 ## Матрица зрелости
 
-| Столп | Сейчас (0.3.2) | После M4 | После M5 |
+| Столп | Сейчас (0.5.0) | После M4 | После M5 |
 |-------|----------------|----------|----------|
 | Squid parity | **~92%** | ~92% | ~93% |
 | Ретропоиск | **~90%** | ~92% | ~95% |
@@ -153,7 +153,7 @@ Rule-based обнаружение угроз поверх ClickHouse. **Крит
 | M2 Squid parity | 0.3.x | hierarchy, L2, ACL API |
 | M2.5 Data plane | 0.3.1–0.3.2 | #94–#109 |
 | M3 Retro-search | 0.3.1+ | #114, #125, #135 |
-| M4 Threat analytics | 0.5.x | #50, #105 |
+| M4 Threat analytics | 0.5.0 | #50, #105, #51 |
 | M5 ML security | 1.0.x | — |
 
 Backlog mapping: [swg-backlog-mapping.md](swg-backlog-mapping.md)
@@ -191,4 +191,4 @@ Backlog mapping: [swg-backlog-mapping.md](swg-backlog-mapping.md)
 
 ---
 
-*Обновлено: 2026-07 — M2.5/M3/M4 done; next M5 ML; strategic roadmap (Lite/DX/Wasm/AI)*
+*Обновлено: 2026-07-16 — v0.5.0 (M4 done); next M5 ML; strategic roadmap (Lite/DX/Wasm/AI)*

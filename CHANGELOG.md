@@ -7,23 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-16
+
+Milestone **M4 Threat analytics**: rule-based alerts, C&C / Shannon heuristics, Grafana Unified Alerting.
+
 ### Added
 
 - **M4 Grafana Unified Alerting + Alertmanager** — provisioned rules (`grafana/alerting/`), Prometheus `m4_threat` alerts, compose `alertmanager` service; closes M4 roadmap
 - **M4 Shannon / high-entropy domains** — `high_entropy_domain` uses Shannon entropy on the leftmost DNS label (`ALERT_SHANNON_MIN_BITS`, modes `shannon|legacy|either`); Grafana long-domain candidates panel
 - **PhishTank API key** — `PHISHTANK_API_KEY` sent as `app_key`; category cache keeps feed source for `threat_sources`
 - **M4 beacon heuristic (B18)** — `beacon_periodic` rule in `alert-worker` (regular client→domain gaps); Grafana “Beacon candidates” panel; docs
-- **Lite SQLite indexer** — `INDEX_STORE=sqlite|memory`, `POST /api/events`, proxy `EVENT_SINK_URL`; Lite compose includes indexer ([#Lite](docs/lite.md))
+- **Lite SQLite indexer** — `INDEX_STORE=sqlite|memory`, `POST /api/events`, proxy `EVENT_SINK_URL`; Lite compose includes indexer ([docs/lite.md](docs/lite.md))
 - **Lite compose (Phase 1)** — [`docker-compose.lite.yml`](docker-compose.lite.yml) standalone proxy (no Kafka/CH); [`scripts/gen-ca.sh`](scripts/gen-ca.sh); docs [`docs/lite.md`](docs/lite.md)
 - **Alert worker (B19 / #50)** — `alert-worker` polls ClickHouse threat rules and POSTs SIEM JSON webhooks; compose profile `alerts`, Dockerfile target, Prometheus scrape, docs [`docs/alerting.md`](docs/alerting.md)
 - **Strategic roadmap** — Lite / DX / Wasm / AI-traffic phases in [`docs/strategic-roadmap.md`](docs/strategic-roadmap.md); linked from README and [`docs/roadmap.md`](docs/roadmap.md)
 - **Web config GUI** — restored General/Cache/Kafka/Auth tabs; Performance, import `.env`, export `acl-rules.json`; compose aligned with root `docker-compose.yml` (P2-5)
+- **Categorization Prometheus metrics** + M4 threat panels / SQL ([#105](https://github.com/onixus/bsdm-proxy/issues/105))
+- Soft `session_id` / redirect-chain correlation; k8s ClickHouse Operator analytics plane ([#135](https://github.com/onixus/bsdm-proxy/issues/135))
 
 ### Changed
 
 - **ACL lock-free snapshot** — `AclEngineHandle` with `arc-swap`; hot path `check_access` without `tokio::RwLock` ([#40](https://github.com/onixus/bsdm-proxy/issues/40) / B9)
-- **Docs cleanup** — roadmap/README/wiki synced to v0.3.2 (M3 done, M4 started); blockers aligned with ClickHouse path; removed outdated `OPTIMIZATIONS.md` and duplicate hierarchy stub; archived GitHub bootstrap scripts under `scripts/archive/`
-- **M4 roadmap** — threat analytics complete (webhook, beacon, Shannon, Grafana/AM); next: M5 ML
+- **Docs cleanup** — roadmap/README/wiki synced (M3/M4 done); blockers aligned with ClickHouse path; archived GitHub bootstrap scripts under `scripts/archive/`
+- **M4 roadmap** — threat analytics complete; next: M5 ML
+
+Release package: `./scripts/build-package.sh` → `dist/bsdm-proxy-0.5.0-linux-<arch>.tar.gz`  
+Notes: [docs/releases/v0.5.0.md](docs/releases/v0.5.0.md)
 
 ## [0.3.2] - 2026-07-02
 
@@ -144,6 +153,7 @@ Beta — hierarchical caching Phase 3, optional MITM CA.
 
 [GitHub Releases](https://github.com/onixus/bsdm-proxy/releases/tag/v0.2.2b)
 
+[0.5.0]: https://github.com/onixus/bsdm-proxy/compare/v0.3.2...v0.5.0
 [0.3.2]: https://github.com/onixus/bsdm-proxy/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/onixus/bsdm-proxy/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/onixus/bsdm-proxy/compare/v0.2.3-test...v0.3.0

@@ -2,7 +2,7 @@
 
 Установка из готового release-архива. Общая документация: [README.md](../README.md) · [docs/README.md](../docs/README.md)
 
-**Текущая версия пакета:** `0.3.1` — [release notes](../docs/releases/v0.3.1.md) · [CHANGELOG](../CHANGELOG.md)
+**Текущая версия пакета:** `0.5.0` — [release notes](../docs/releases/v0.5.0.md) · [CHANGELOG](../CHANGELOG.md)
 
 ## Contents
 
@@ -20,8 +20,8 @@
 ## Quick start
 
 ```bash
-tar xzf bsdm-proxy-0.3.1-linux-x86_64.tar.gz
-cd bsdm-proxy-0.3.1-linux-x86_64
+tar xzf bsdm-proxy-0.5.0-linux-x86_64.tar.gz
+cd bsdm-proxy-0.5.0-linux-x86_64
 sudo ./install.sh --create-user --systemd
 ```
 
@@ -33,6 +33,8 @@ sudo chown bsdm-proxy:bsdm-proxy /certs/ca.*
 sudo chmod 600 /certs/ca.key
 sudo systemctl start bsdm-proxy
 ```
+
+Optional SIEM alerts: configure `config/alert-worker.env.example` → `/etc/bsdm-proxy/alert-worker.env`, then `systemctl enable --now bsdm-alert-worker`.
 
 ## Manual run
 
@@ -50,6 +52,8 @@ set +a
 | Proxy HTTP/HTTPS | 1488 |
 | ICP (UDP, if `HIERARCHY_ENABLED=true`) | 3130 |
 | Metrics / health | 9090 |
+| cache-indexer admin / Search API | 8080 |
+| alert-worker metrics | 8090 |
 
 ## Verify
 
@@ -66,7 +70,7 @@ cat VERSION
 
 ```bash
 ./scripts/build-package.sh
-# → dist/bsdm-proxy-0.3.1-linux-<arch>.tar.gz
+# → dist/bsdm-proxy-0.5.0-linux-<arch>.tar.gz
 ```
 
 См. также [docs/development.md](../docs/development.md).
