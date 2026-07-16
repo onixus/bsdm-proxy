@@ -136,11 +136,17 @@ def main() -> int:
     print("")
     print(f"==> phase 2: warm ({args.warm_repeats} repeats to the same sites)")
     warm_bytes = 0
+    warm_hits = warm_misses = warm_reqs = 0
+    warm_elapsed = 0.0
     for rep in range(1, args.warm_repeats + 1):
         h, m, b, r, e = run_batch(
             urls, args.proxy, args.proxy_user, args.concurrency, args.timeout
         )
         warm_bytes += b
+        warm_hits += h
+        warm_misses += m
+        warm_reqs += r
+        warm_elapsed += e
         total_hits += h
         total_misses += m
         total_bytes += b
@@ -159,6 +165,9 @@ def main() -> int:
         )
         return 1
 
+    print("")
+    print("==> warm-only")
+    print_phase("warm phases", warm_hits, warm_misses, warm_bytes, warm_reqs, warm_elapsed)
     print("")
     print("==> totals")
     print_phase("all phases", total_hits, total_misses, total_bytes, total_reqs, total_elapsed)
