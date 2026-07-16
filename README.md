@@ -22,7 +22,7 @@
 | **Безопасность** | Proxy-auth (Basic / LDAP / NTLM / Kerberos), **connection-level auth cache**, ACL + REST API, **policy decision cache**, категоризация URL, rate limiting |
 | **Производительность** | Multi-worker accept (`WORKER_COUNT`), perf fast path (`PERF_FAST_CACHE_HIT`), HTTP Archive bench profiles (`BENCH_PROFILE=warm\|cold`) |
 | **Наблюдаемость** | Prometheus (proxy + cache-indexer), Grafana (Prometheus + ClickHouse), `/health`, `/ready`, `/metrics` |
-| **Аналитика** | Kafka → cache-indexer → **ClickHouse** (`bsdm.http_cache`); Grafana **HTTP Traffic**; REST **Search API** (`/api/search`) |
+| **Аналитика** | Kafka → cache-indexer → **ClickHouse** (`bsdm.http_cache`); Grafana **HTTP Traffic**; REST **Search API** (`/api/search`); optional **ml-worker** features/scores (M5) |
 | **Эксплуатация** | Graceful shutdown, Helm chart `charts/bsdm/`, release-пакет + systemd |
 
 ## Архитектура
@@ -62,6 +62,7 @@
 | **ICP** | 3130 | UDP-запросы между cache peers (при `HIERARCHY_ENABLED=true`) |
 | **metrics** | 9090 | `/health`, `/ready`, `/metrics` |
 | **cache-indexer** | 8080 | Kafka → ClickHouse, `/api/search` |
+| **ml-worker** | 8091 | M5: entity features + scores (compose profile `ml`) |
 | **Kafka** | 9092 | Очередь событий кеша |
 | **ClickHouse** | 8123 / 9000 | Аналитика HTTP-трафика |
 | **Prometheus** | 9091 | Сбор метрик |

@@ -1,0 +1,19 @@
+[Unit]
+Description=BSDM-Proxy ML worker (ClickHouse features + scores)
+Documentation=https://github.com/onixus/bsdm-proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bsdm-proxy
+Group=bsdm-proxy
+EnvironmentFile=-/etc/bsdm-proxy/ml-worker.env
+ExecStart=/opt/bsdm-proxy/bin/ml-worker
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

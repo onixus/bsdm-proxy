@@ -15,13 +15,18 @@ PACKAGE_NAME="bsdm-proxy-${PACKAGE_VERSION}-${OS}-${ARCH}"
 STAGING="${ROOT}/dist/${PACKAGE_NAME}"
 
 echo "==> Building release binaries (v${VERSION})"
-cargo build --release -p bsdm-proxy --bin proxy -p cache-indexer --bin cache-indexer -p alert-worker --bin alert-worker
+cargo build --release \
+  -p bsdm-proxy --bin proxy \
+  -p cache-indexer --bin cache-indexer \
+  -p alert-worker --bin alert-worker \
+  -p ml-worker --bin ml-worker
 
 echo "==> Assembling package ${PACKAGE_NAME}"
 rm -rf "$STAGING"
 mkdir -p "$STAGING"/{bin,config,systemd}
 
-cp target/release/proxy target/release/cache-indexer target/release/alert-worker "$STAGING/bin/"
+cp target/release/proxy target/release/cache-indexer \
+  target/release/alert-worker target/release/ml-worker "$STAGING/bin/"
 cp packaging/config/*.example "$STAGING/config/"
 cp config/acl-rules.example.json "$STAGING/config/"
 cp packaging/systemd/*.service "$STAGING/systemd/"
