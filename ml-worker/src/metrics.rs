@@ -1,6 +1,6 @@
 //! Prometheus metrics for ml-worker.
 
-use prometheus::{IntCounter, IntGauge, Opts, Registry, TextEncoder, Encoder};
+use prometheus::{Encoder, IntCounter, IntGauge, Opts, Registry, TextEncoder};
 use std::sync::Arc;
 
 #[derive(Clone)]

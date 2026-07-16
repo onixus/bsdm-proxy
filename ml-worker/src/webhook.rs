@@ -25,10 +25,7 @@ impl WebhookClient {
         }))
     }
 
-    pub async fn post_score(
-        &self,
-        score: &ScoreResult,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn post_score(&self, score: &ScoreResult) -> Result<(), Box<dyn std::error::Error>> {
         let body = serde_json::json!({
             "alert_id": Uuid::new_v4().to_string(),
             "rule": "ml_anomaly",

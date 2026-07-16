@@ -92,13 +92,16 @@ async fn cycle_once(
     ch.insert_json_each_row(&config.fq_features(), &feature_jsons)
         .await?;
     metrics.features_written.inc_by(feature_jsons.len() as u64);
-    metrics
-        .last_cycle_features
-        .set(feature_jsons.len() as i64);
+    metrics.last_cycle_features.set(feature_jsons.len() as i64);
 
     let mut score_jsons = Vec::new();
     for f in &all_features {
-        let scored = score_features(f, &config.model, config.min_requests, config.score_threshold);
+        let scored = score_features(
+            f,
+            &config.model,
+            config.min_requests,
+            config.score_threshold,
+        );
         if let Some(wh) = webhook {
             if scored.score >= config.score_threshold {
                 if let Err(e) = wh.post_score(&scored).await {

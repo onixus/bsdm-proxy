@@ -50,12 +50,12 @@ pub fn anomaly_stub_v0(features: &EntityFeatures, min_requests: u64) -> f64 {
     };
     let domain_spread = ((features.unique_domains as f64) / 20.0).min(1.0);
     // Low gap_cv with high rate can hint periodicity (beacon-like); mild contribution.
-    let beacon_hint = if features.request_count >= 5 && features.gap_cv > 0.0 && features.gap_cv < 0.25
-    {
-        0.15
-    } else {
-        0.0
-    };
+    let beacon_hint =
+        if features.request_count >= 5 && features.gap_cv > 0.0 && features.gap_cv < 0.25 {
+            0.15
+        } else {
+            0.0
+        };
 
     let raw = 0.35 * rate_component
         + 0.30 * deny_ratio

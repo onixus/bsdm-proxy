@@ -25,11 +25,12 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> Result<Self, String> {
-        let entity_types = parse_list(&std::env::var("ML_ENTITY_TYPES").unwrap_or_else(|_| {
-            "client_ip".into()
-        }));
+        let entity_types =
+            parse_list(&std::env::var("ML_ENTITY_TYPES").unwrap_or_else(|_| "client_ip".into()));
         if entity_types.is_empty() {
-            return Err("ML_ENTITY_TYPES must list at least one of client_ip,username,domain".into());
+            return Err(
+                "ML_ENTITY_TYPES must list at least one of client_ip,username,domain".into(),
+            );
         }
         for t in &entity_types {
             if !matches!(t.as_str(), "client_ip" | "username" | "domain") {
@@ -51,8 +52,7 @@ impl Config {
                 .unwrap_or_else(|_| "http_cache".into()),
             features_table: std::env::var("ML_FEATURES_TABLE")
                 .unwrap_or_else(|_| "entity_features".into()),
-            scores_table: std::env::var("ML_SCORES_TABLE")
-                .unwrap_or_else(|_| "ml_scores".into()),
+            scores_table: std::env::var("ML_SCORES_TABLE").unwrap_or_else(|_| "ml_scores".into()),
             clickhouse_user: std::env::var("CLICKHOUSE_USER")
                 .ok()
                 .filter(|s| !s.is_empty()),
@@ -68,8 +68,7 @@ impl Config {
             webhook_url,
             webhook_timeout: Duration::from_secs(env_u64("ML_WEBHOOK_TIMEOUT_SECS", 10)),
             metrics_port: env_u64("METRICS_PORT", 8091) as u16,
-            source: std::env::var("ML_SOURCE")
-                .unwrap_or_else(|_| "bsdm-proxy-ml-worker".into()),
+            source: std::env::var("ML_SOURCE").unwrap_or_else(|_| "bsdm-proxy-ml-worker".into()),
         })
     }
 
