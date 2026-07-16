@@ -25,7 +25,7 @@ B15 originally said “read OpenSearch/Kafka”. Analytics storage is now **Clic
 ## Consequences
 
 - New workspace member `ml-worker`, compose profile `ml`, packaging unit/env.
-- M5.1 ships scaffolding + stub scorer; M5.2+ replace stub with trained models offline → ONNX/score file load.
+- M5.1 shipped scaffolding + stub scorer; M5.2 adds unsupervised `ueba_zscore_v0` (population baseline / optional JSON artifact). Later: phishing/C&C models, optional ONNX.
 - Closes the design half of B15/#46; implementation tracked under M5 epic issues.
 
 ## Non-goals (M5.1)

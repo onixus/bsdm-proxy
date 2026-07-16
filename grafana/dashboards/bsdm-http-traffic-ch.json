@@ -401,11 +401,41 @@
       ],
       "title": "Long-domain candidates (Shannon post-filter in alert-worker)",
       "type": "table"
+    },
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "inspect": false },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 66 },
+      "id": 13,
+      "options": {
+        "cellHeight": "sm",
+        "footer": { "countRows": false, "fields": "", "reducer": ["sum"], "show": false },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+          "editorType": "sql",
+          "format": 0,
+          "queryType": "sql",
+          "rawSql": "SELECT\n  entity_type,\n  entity_id,\n  max(score) AS max_score,\n  argMax(severity, score) AS severity,\n  argMax(model, score) AS model,\n  max(scored_at) AS last_scored\nFROM bsdm.ml_scores\nWHERE $__timeFilter(scored_at)\n  AND startsWith(model, 'ueba_zscore')\nGROUP BY entity_type, entity_id\nORDER BY max_score DESC\nLIMIT 50",
+          "refId": "A"
+        }
+      ],
+      "title": "Top anomalous entities (UEBA z-score / ml-worker)",
+      "type": "table"
     }
   ],
   "refresh": "30s",
   "schemaVersion": 39,
-  "tags": ["bsdm", "http-cache", "clickhouse", "m4"],
+  "tags": ["bsdm", "http-cache", "clickhouse", "m4", "m5"],
   "templating": {
     "list": [
       {

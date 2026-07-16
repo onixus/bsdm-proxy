@@ -25,7 +25,7 @@
 | [M2.5 — Data plane](#m25--data-plane-throughput-v03x) | v0.3.x–0.3.2 | Tiered L1, streaming, P1 hot path | ✅ Done |
 | [M3 — Retro-search](#m3--retro-search) | v0.3.1+ | ClickHouse, Search API, Grafana, k8s CHI | ✅ Done (~95%) |
 | [M4 — Threat analytics](#m4--threat-analytics-v05x) | v0.5.x | Rule-based угрозы, алерты, C&C / Shannon | ✅ Done |
-| [M5 — ML security](#m5--ml-security-v10x) | v1.0.x | Feature store, anomaly / phishing / C&C ML | ~10% (M5.1 scaffold) |
+| [M5 — ML security](#m5--ml-security-v10x) | v1.0.x | Feature store, anomaly / phishing / C&C ML | ~25% (M5.2 UEBA) |
 
 ```mermaid
 gantt
@@ -132,16 +132,20 @@ Rule-based обнаружение угроз поверх ClickHouse. **Крит
 
 Async scoring off the proxy hot path. Design: [ADR 0003](adr/0003-ml-worker-feature-store.md) · Ops: [ml-security.md](ml-security.md).
 
-### M5.1 — Scaffolding (in progress / this release track)
+### M5.1 — Scaffolding ✅
 
-- [x] ADR 0003 — CH feature store + `ml-worker` (closes design half of [#46](https://github.com/onixus/bsdm-proxy/issues/46) / B15)
-- [x] DDL `bsdm.entity_features` + `bsdm.ml_scores` (`scripts/clickhouse/ml_features.sql`)
-- [x] Crate `ml-worker` — extract → insert features → `anomaly_stub_v0` scores → optional webhook
-- [x] Compose profile `ml`, packaging/systemd, docs
+- [x] ADR 0003 — CH feature store + `ml-worker` ([#46](https://github.com/onixus/bsdm-proxy/issues/46) / B15)
+- [x] DDL + crate + compose profile `ml` ([#170](https://github.com/onixus/bsdm-proxy/pull/170))
+
+### M5.2 — UEBA z-score ✅ / in this PR
+
+- [x] Population baseline from `entity_features` (live CH or `ML_BASELINE_PATH`)
+- [x] Model `ueba_zscore_v0` (default); stub fallback when baseline empty
+- [x] `scripts/ml/export_baseline.py`, `compare_stub_vs_ueba.py`
+- [x] Grafana panel + `m5_ueba_queries.sql` ([#166](https://github.com/onixus/bsdm-proxy/issues/166))
 
 ### Planned
 
-- [ ] **M5.2** Unsupervised UEBA / anomaly on entity windows (replace stub)
 - [ ] **M5.3** Lexical phishing score + weak labels (PhishTank / UT1)
 - [ ] **M5.4** C&C ML augmenting `beacon_periodic`
 - [ ] **M5.5** Optional `threat_score` write-back / cached inline score (not on hot path until proven)
@@ -154,8 +158,8 @@ Async scoring off the proxy hot path. Design: [ADR 0003](adr/0003-ml-worker-feat
 |-------|----------------------|----------|
 | Squid parity | **~92%** | ~93% |
 | Ретропоиск | **~90%** | ~95% |
-| ML / C&C / phishing | **~30%** | ~75% |
-| **Итого** | **~72%** | ~85% |
+| ML / C&C / phishing | **~40%** | ~75% |
+| **Итого** | **~74%** | ~85% |
 
 ---
 
@@ -205,4 +209,4 @@ Backlog mapping: [swg-backlog-mapping.md](swg-backlog-mapping.md)
 
 ---
 
-*Обновлено: 2026-07-16 — v0.5.0 (M4 done); M5.1 ml-worker + feature store scaffold; next M5.2 anomaly*
+*Обновлено: 2026-07-16 — M5.2 UEBA z-score; next M5.3 phishing lexical*

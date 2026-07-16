@@ -1,3 +1,4 @@
+mod baseline;
 mod clickhouse;
 mod config;
 mod features;
@@ -5,11 +6,12 @@ mod metrics;
 mod scoring;
 mod webhook;
 
+use baseline::{baseline_sql, baselines_from_rows, BaselineSet};
 use clickhouse::ClickHouseClient;
 use config::Config;
 use features::{extract_sql, features_from_row};
 use metrics::WorkerMetrics;
-use scoring::score_features;
+use scoring::{score_features, ScoreContext, MODEL_UEBA};
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -54,8 +56,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         entities = ?config.entity_types,
         poll_secs = config.poll_interval.as_secs(),
         lookback_secs = config.lookback.as_secs(),
+        baseline_lookback_secs = config.baseline_lookback.as_secs(),
+        baseline_path = ?config.baseline_path,
         webhook = webhook.is_some(),
-        "ml-worker started (M5.1 feature store + anomaly_stub_v0)"
+        "ml-worker started (M5.2 UEBA z-score / stub)"
     );
 
     loop {
@@ -65,6 +69,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         tokio::time::sleep(config.poll_interval).await;
     }
+}
+
+async fn load_baselines(
+    config: &Config,
+    ch: &ClickHouseClient,
+) -> Result<BaselineSet, Box<dyn std::error::Error>> {
+    if let Some(path) = &config.baseline_path {
+        let set = BaselineSet::load_json_file(path)?;
+        info!(
+            path = %path.display(),
+            types = set.baselines.len(),
+            "loaded baseline artifact"
+        );
+        return Ok(set);
+    }
+    if config.model != MODEL_UEBA {
+        return Ok(BaselineSet::default());
+    }
+    let sql = baseline_sql(config);
+    let rows = ch.query_json_each_row(&sql).await?;
+    let set = baselines_from_rows(&rows, "clickhouse_live")?;
+    info!(
+        types = set.baselines.len(),
+        lookback_secs = config.baseline_lookback.as_secs(),
+        "loaded population baseline from ClickHouse"
+    );
+    Ok(set)
 }
 
 async fn cycle_once(
@@ -94,14 +125,28 @@ async fn cycle_once(
     metrics.features_written.inc_by(feature_jsons.len() as u64);
     metrics.last_cycle_features.set(feature_jsons.len() as i64);
 
+    // Refresh baseline after writing features so the current cycle can use prior history;
+    // first cycles with empty history fall back to stub.
+    let baselines = load_baselines(config, ch).await?;
+    if config.model == MODEL_UEBA && baselines.is_empty() {
+        warn!("UEBA baseline empty — falling back to anomaly_stub_v0 until enough history");
+    }
+
+    let ctx = ScoreContext {
+        model: &config.model,
+        min_requests: config.min_requests,
+        threshold: config.score_threshold,
+        z_clip: config.z_clip,
+        baselines: if baselines.is_empty() {
+            None
+        } else {
+            Some(&baselines)
+        },
+    };
+
     let mut score_jsons = Vec::new();
     for f in &all_features {
-        let scored = score_features(
-            f,
-            &config.model,
-            config.min_requests,
-            config.score_threshold,
-        );
+        let scored = score_features(f, &ctx);
         if let Some(wh) = webhook {
             if scored.score >= config.score_threshold {
                 if let Err(e) = wh.post_score(&scored).await {
@@ -122,6 +167,7 @@ async fn cycle_once(
     info!(
         features = feature_jsons.len(),
         scores = score_jsons.len(),
+        baseline_types = baselines.baselines.len(),
         "cycle complete"
     );
     Ok(())

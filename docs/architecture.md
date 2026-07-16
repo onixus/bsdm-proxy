@@ -68,7 +68,7 @@ flowchart TB
 | MITM | `proxy/src/tls.rs` | ✅ |
 | Hierarchy / ICP | `hierarchy.rs`, `peer_fetch.rs`, `icp.rs`, `hierarchy_config.rs` | ✅ opt-in (`HIERARCHY_ENABLED`) |
 | Event indexer | `cache-indexer/src/main.rs` | ✅ |
-| ML / analytics worker | `ml-worker` (:8091) | ✅ M5.1 scaffold (CH features + stub score); models TBD |
+| ML / analytics worker | `ml-worker` (:8091) | ✅ M5.2 UEBA z-score + feature store; phishing/C&C models TBD |
 
 ---
 
