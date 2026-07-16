@@ -49,10 +49,20 @@ Identical fingerprints are suppressed for `ALERT_DEDUPE_TTL_SECS` (default 1h).
 | `blocked_burst` | critical | ≥10 deny/`DENY` per user+IP in lookback |
 | `domain_burst` | warning | ≥50 requests per client+domain |
 | `off_hours_threat` | warning | ≥1 threat-tagged event 22:00–06:00 UTC |
-| `high_entropy_domain` | warning | ≥5 hits on long/numeric domains |
+| `high_entropy_domain` | warning | ≥5 hits on long domains; Shannon and/or legacy digit heuristic |
 | `beacon_periodic` | warning | ≥5 regular gaps (CV≤0.25) client→domain over beacon lookback |
 
 Enable a subset: `ALERT_RULES=blocked_burst,beacon_periodic`.
+
+### High-entropy / Shannon (`high_entropy_domain`)
+
+1. ClickHouse prefilter: `length(domain) >= ALERT_HIGH_ENTROPY_MIN_DOMAIN_LEN` and hit count.
+2. Worker post-filter on the **leftmost DNS label**:
+   - **Shannon** — entropy ≥ `ALERT_SHANNON_MIN_BITS` and label length ≥ `ALERT_SHANNON_MIN_LABEL_LEN`
+   - **Legacy** — domain length ≥ `ALERT_HIGH_ENTROPY_LEGACY_MIN_DOMAIN_LEN` and a run of ≥4 digits
+   - Mode `ALERT_HIGH_ENTROPY_MODE`: `shannon` | `legacy` | `either` (default)
+
+Alerts include labels `shannon_bits` and `entropy_match` (`shannon` / `legacy` / `shannon+legacy`).
 
 Starter SQL live in [`scripts/clickhouse/m4_threat_queries.sql`](../scripts/clickhouse/m4_threat_queries.sql).
 
@@ -69,7 +79,12 @@ Starter SQL live in [`scripts/clickhouse/m4_threat_queries.sql`](../scripts/clic
 | `ALERT_RULES` | all five | Comma-separated rule ids |
 | `ALERT_BLOCKED_BURST_THRESHOLD` | `10` | |
 | `ALERT_DOMAIN_BURST_THRESHOLD` | `50` | |
-| `ALERT_HIGH_ENTROPY_MIN_REQUESTS` | `5` | |
+| `ALERT_HIGH_ENTROPY_MIN_REQUESTS` | `5` | Min hits per domain in lookback |
+| `ALERT_HIGH_ENTROPY_MIN_DOMAIN_LEN` | `16` | SQL prefilter: min full domain length |
+| `ALERT_SHANNON_MIN_LABEL_LEN` | `12` | Min leftmost-label length for Shannon |
+| `ALERT_SHANNON_MIN_BITS` | `3.5` | Min Shannon entropy (bits/char) on leftmost label |
+| `ALERT_HIGH_ENTROPY_MODE` | `either` | `shannon` \| `legacy` \| `either` |
+| `ALERT_HIGH_ENTROPY_LEGACY_MIN_DOMAIN_LEN` | `25` | Legacy length+digit-run min domain length |
 | `ALERT_OFF_HOURS_MIN_EVENTS` | `1` | |
 | `ALERT_BEACON_LOOKBACK_SECS` | `3600` | Beacon rule window (independent) |
 | `ALERT_BEACON_MIN_HITS` | `5` | Min inter-request gaps matching interval band |

@@ -1,6 +1,7 @@
 //! Built-in ClickHouse alerting rules (M4 starters + C&C beacon).
 
 use crate::config::Config;
+use crate::entropy::matches_high_entropy;
 use crate::payload::Finding;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -66,14 +67,14 @@ FORMAT JSONEachRow"#,
   uniqExact(client_ip) AS clients
 FROM {table}
 WHERE ts >= now() - INTERVAL {lookback} SECOND
-  AND length(domain) >= 25
-  AND match(domain, '[0-9]{{4,}}')
+  AND length(domain) >= {min_len}
 GROUP BY domain
 HAVING value >= {threshold}
 ORDER BY value DESC
-LIMIT 50
+LIMIT 200
 FORMAT JSONEachRow"#,
-                threshold = config.high_entropy_min_requests
+                threshold = config.high_entropy_min_requests,
+                min_len = config.high_entropy_min_domain_len
             )),
             "beacon_periodic" => {
                 let beacon_lb = config.beacon_lookback.as_secs();
@@ -151,6 +152,20 @@ fn find_from_row(rule: &str, row: &Value, config: &Config) -> Option<Finding> {
         labels.insert("gap_cv".into(), format!("{gap_cv:.3}"));
     }
 
+    // Shannon / legacy post-filter for high_entropy_domain
+    if rule == "high_entropy_domain" {
+        let domain = labels.get("domain")?.clone();
+        let m = matches_high_entropy(
+            &domain,
+            config.high_entropy_mode,
+            config.shannon_min_bits,
+            config.shannon_min_label_len as usize,
+            config.high_entropy_legacy_min_domain_len as usize,
+        )?;
+        labels.insert("shannon_bits".into(), format!("{:.3}", m.entropy));
+        labels.insert("entropy_match".into(), m.kind_label().into());
+    }
+
     let (severity, title, description, window_secs) = match rule {
         "blocked_burst" => (
             "critical",
@@ -174,14 +189,24 @@ fn find_from_row(rule: &str, row: &Value, config: &Config) -> Option<Finding> {
             ),
             config.lookback.as_secs(),
         ),
-        "high_entropy_domain" => (
-            "warning",
-            "Suspicious high-entropy domain".to_string(),
-            format!(
-                "Domain matched long/numeric heuristic with {value} request(s) in the lookback window"
-            ),
-            config.lookback.as_secs(),
-        ),
+        "high_entropy_domain" => {
+            let bits = labels
+                .get("shannon_bits")
+                .cloned()
+                .unwrap_or_else(|| "?".into());
+            let kind = labels
+                .get("entropy_match")
+                .cloned()
+                .unwrap_or_else(|| "shannon".into());
+            (
+                "warning",
+                "Suspicious high-entropy domain".to_string(),
+                format!(
+                    "Domain matched {kind} heuristic (shannon={bits} bits/char) with {value} request(s) in the lookback window"
+                ),
+                config.lookback.as_secs(),
+            )
+        }
         "beacon_periodic" => {
             let avg = labels
                 .get("avg_gap_secs")
@@ -243,6 +268,11 @@ mod tests {
             blocked_burst_threshold: 10,
             domain_burst_threshold: 50,
             high_entropy_min_requests: 5,
+            high_entropy_min_domain_len: 16,
+            shannon_min_label_len: 12,
+            shannon_min_bits: 3.5,
+            high_entropy_mode: crate::entropy::HighEntropyMode::Either,
+            high_entropy_legacy_min_domain_len: 25,
             off_hours_min_events: 1,
             beacon_lookback: Duration::from_secs(3600),
             beacon_min_hits: 5,
@@ -266,7 +296,8 @@ mod tests {
         assert!(q[0].1.contains("acl_action = 'deny'"));
         assert!(q[1].1.contains("HAVING value >= 50"));
         assert!(q[2].1.contains("toHour(ts)"));
-        assert!(q[3].1.contains("length(domain) >= 25"));
+        assert!(q[3].1.contains("length(domain) >= 16"));
+        assert!(!q[3].1.contains("match(domain"));
         assert!(q[4].1.contains("lagInFrame"));
         assert!(q[4].1.contains("gap_cv"));
         assert!(q[4].1.contains("INTERVAL 3600 SECOND"));
@@ -310,5 +341,26 @@ mod tests {
             Some("c2.example")
         );
         assert!(findings[0].description.contains("beacon"));
+    }
+
+    #[test]
+    fn high_entropy_requires_shannon_or_legacy() {
+        let cfg = sample_config(&["high_entropy_domain"]);
+        let dga = serde_json::json!({
+            "domain": "xk9m2qp7wzb4cd.evil.net",
+            "value": 9,
+            "clients": 1
+        });
+        let findings = findings_from_rows("high_entropy_domain", &[dga], &cfg);
+        assert_eq!(findings.len(), 1);
+        assert!(findings[0].labels.contains_key("shannon_bits"));
+        assert!(findings[0].description.contains("shannon"));
+
+        let boring = serde_json::json!({
+            "domain": "cdn.example.com",
+            "value": 20,
+            "clients": 3
+        });
+        assert!(findings_from_rows("high_entropy_domain", &[boring], &cfg).is_empty());
     }
 }
