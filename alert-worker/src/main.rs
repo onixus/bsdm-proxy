@@ -1,6 +1,7 @@
 mod clickhouse;
 mod config;
 mod dedupe;
+mod entropy;
 mod metrics;
 mod payload;
 mod rules;

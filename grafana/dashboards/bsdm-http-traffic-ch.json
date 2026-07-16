@@ -371,6 +371,36 @@
       ],
       "title": "Beacon candidates (periodic client→domain)",
       "type": "table"
+    },
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "inspect": false },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 58 },
+      "id": 12,
+      "options": {
+        "cellHeight": "sm",
+        "footer": { "countRows": false, "fields": "", "reducer": ["sum"], "show": false },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+          "editorType": "sql",
+          "format": 0,
+          "queryType": "sql",
+          "rawSql": "SELECT\n  domain,\n  count() AS requests,\n  uniqExact(client_ip) AS clients,\n  length(domain) AS domain_len,\n  length(splitByChar('.', domain)[1]) AS label_len\nFROM bsdm.http_cache\nWHERE $__timeFilter(ts)\n  AND length(domain) >= 16\nGROUP BY domain\nHAVING requests >= 5\nORDER BY requests DESC\nLIMIT 50",
+          "refId": "A"
+        }
+      ],
+      "title": "Long-domain candidates (Shannon post-filter in alert-worker)",
+      "type": "table"
     }
   ],
   "refresh": "30s",

@@ -22,6 +22,15 @@ pub struct Config {
     pub blocked_burst_threshold: u64,
     pub domain_burst_threshold: u64,
     pub high_entropy_min_requests: u64,
+    /// SQL prefilter: minimum full domain length before Shannon post-filter.
+    pub high_entropy_min_domain_len: u64,
+    /// Minimum leftmost-label length for Shannon scoring.
+    pub shannon_min_label_len: u64,
+    /// Minimum Shannon entropy (bits/char) on leftmost label.
+    pub shannon_min_bits: f64,
+    pub high_entropy_mode: crate::entropy::HighEntropyMode,
+    /// Legacy digit-heuristic minimum domain length.
+    pub high_entropy_legacy_min_domain_len: u64,
     pub off_hours_min_events: u64,
     pub beacon_lookback: Duration,
     pub beacon_min_hits: u64,
@@ -73,6 +82,16 @@ impl Config {
             blocked_burst_threshold: env_u64("ALERT_BLOCKED_BURST_THRESHOLD", 10),
             domain_burst_threshold: env_u64("ALERT_DOMAIN_BURST_THRESHOLD", 50),
             high_entropy_min_requests: env_u64("ALERT_HIGH_ENTROPY_MIN_REQUESTS", 5),
+            high_entropy_min_domain_len: env_u64("ALERT_HIGH_ENTROPY_MIN_DOMAIN_LEN", 16),
+            shannon_min_label_len: env_u64("ALERT_SHANNON_MIN_LABEL_LEN", 12),
+            shannon_min_bits: env_f64("ALERT_SHANNON_MIN_BITS", 3.5),
+            high_entropy_mode: crate::entropy::HighEntropyMode::parse(
+                &std::env::var("ALERT_HIGH_ENTROPY_MODE").unwrap_or_else(|_| "either".into()),
+            ),
+            high_entropy_legacy_min_domain_len: env_u64(
+                "ALERT_HIGH_ENTROPY_LEGACY_MIN_DOMAIN_LEN",
+                25,
+            ),
             off_hours_min_events: env_u64("ALERT_OFF_HOURS_MIN_EVENTS", 1),
             beacon_lookback: Duration::from_secs(env_u64("ALERT_BEACON_LOOKBACK_SECS", 3600)),
             beacon_min_hits: env_u64("ALERT_BEACON_MIN_HITS", 5),

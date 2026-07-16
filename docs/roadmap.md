@@ -24,7 +24,7 @@
 | [M2 — Squid parity](#m2--squid-parity-v03x) | v0.3.x | L2, ACL, hierarchy, auth, compression | ✅ Done |
 | [M2.5 — Data plane](#m25--data-plane-throughput-v03x) | v0.3.x–0.3.2 | Tiered L1, streaming, P1 hot path | ✅ Done |
 | [M3 — Retro-search](#m3--retro-search) | v0.3.1+ | ClickHouse, Search API, Grafana, k8s CHI | ✅ Done (~95%) |
-| [M4 — Threat analytics](#m4--threat-analytics-v05x) | v0.5.x | Rule-based угрозы, алерты, C&C heuristics | ~50% |
+| [M4 — Threat analytics](#m4--threat-analytics-v05x) | v0.5.x | Rule-based угрозы, алерты, C&C / Shannon | ~70% |
 | [M5 — ML security](#m5--ml-security-v10x) | v1.0.x | ML anomaly, phishing, C&C ML | ~0% |
 
 ```mermaid
@@ -122,9 +122,9 @@ Rule-based обнаружение угроз поверх ClickHouse.
 - [x] C&C beacon heuristic (`beacon_periodic` in alert-worker + Grafana panel) — B18
 - [x] PhishTank API key wiring (`PHISHTANK_API_KEY` → `app_key`; cache preserves feed source)
 - [ ] Rule-based alerts in Grafana (optional Alertmanager / Unified Alerting)
-- [ ] Richer high-entropy / Shannon heuristics (beyond length+digits)
+- [x] Richer high-entropy / Shannon heuristics (`ALERT_SHANNON_*`, modes `shannon|legacy|either`)
 
-**Критерий:** автоалерт на beacon-паттерн + threat dashboard — **beacon webhook + panel done**; Grafana Alertmanager optional.
+**Критерий:** автоалерт на beacon-паттерн + threat dashboard — **beacon + Shannon webhook/panels done**; Grafana Alertmanager optional.
 
 ---
 

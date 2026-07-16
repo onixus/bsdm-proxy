@@ -33,13 +33,16 @@
 -- ORDER BY ts DESC
 -- LIMIT 200;
 
--- High-entropy / short-lived domains (simple heuristic: long labels, many digits)
+-- High-entropy domains:
+-- 1) SQL prefilter: length(domain) >= 16 (or ALERT_HIGH_ENTROPY_MIN_DOMAIN_LEN)
+-- 2) alert-worker post-filter: Shannon entropy on leftmost label (ALERT_SHANNON_MIN_BITS)
+--    and/or legacy digit-run heuristic (ALERT_HIGH_ENTROPY_MODE=shannon|legacy|either)
 -- SELECT domain, count() AS requests, uniqExact(client_ip) AS clients
 -- FROM bsdm.http_cache
 -- WHERE ts >= now() - INTERVAL 1 DAY
---   AND length(domain) >= 25
---   AND match(domain, '[0-9]{4,}')
+--   AND length(domain) >= 16
 -- GROUP BY domain
+-- HAVING requests >= 5
 -- ORDER BY requests DESC
 -- LIMIT 50;
 
