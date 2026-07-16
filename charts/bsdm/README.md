@@ -61,7 +61,7 @@ Set `mitm.existingSecret: bsdm-mitm-ca` in values.
 | `examples/clickhouse-installation.yaml` | Altinity `ClickHouseInstallation` CR |
 | `values-analytics.yaml` | Indexer-only release (`replicaCount: 0`) |
 
-Build indexer image: `docker build --target cache-indexer -t ghcr.io/onixus/bsdm-cache-indexer:0.3.2 .`
+Build indexer image: `docker build --target cache-indexer -t ghcr.io/onixus/bsdm-cache-indexer:0.5.0 .`
 
 ## Not included (deploy separately)
 

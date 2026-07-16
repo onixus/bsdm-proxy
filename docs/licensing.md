@@ -1,6 +1,6 @@
 # Лицензирование и third-party компоненты
 
-Обзор лицензий переиспользуемого ПО в BSDM-Proxy v0.3.2.
+Обзор лицензий переиспользуемого ПО в BSDM-Proxy v0.5.0.
 
 > См. также: [NOTICE](../NOTICE) · [LICENSE](../LICENSE)
 
@@ -16,6 +16,7 @@ Workspace-крейты:
 |-------|----------|
 | `bsdm-proxy` (proxy) | MIT |
 | `cache-indexer` | MIT |
+| `alert-worker` | MIT |
 | `bsdm-events` | MIT |
 | `bsdm-proxy-e2e` | MIT (только тесты, не в release) |
 
@@ -50,7 +51,7 @@ cargo install cargo-license
 cargo license --avoid-dev-deps --avoid-build-deps
 ```
 
-На момент v0.3.2: **~282** runtime crate, все с permissive-лицензиями (MIT, Apache-2.0, BSD-3-Clause, ISC и dual Apache/MIT).
+На момент v0.5.0: **~282** runtime crate, все с permissive-лицензиями (MIT, Apache-2.0, BSD-3-Clause, ISC и dual Apache/MIT).
 
 ### Прямые зависимости proxy
 
@@ -186,4 +187,4 @@ cargo audit
 
 ---
 
-*Последний аудит: 2026-07 · v0.3.2 · `cargo license` + compose manifest*
+*Последний аудит: 2026-07 · v0.5.0 · `cargo license` + compose manifest*

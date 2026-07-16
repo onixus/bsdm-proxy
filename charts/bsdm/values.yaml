@@ -5,7 +5,7 @@ replicaCount: 2
 
 image:
   repository: ghcr.io/onixus/bsdm-proxy
-  tag: "0.3.2"
+  tag: "0.5.0"
   pullPolicy: IfNotPresent
 
 nameOverride: ""
@@ -134,7 +134,7 @@ indexer:
   replicaCount: 2
   image:
     repository: ghcr.io/onixus/bsdm-cache-indexer
-    tag: "0.3.2"
+    tag: "0.5.0"
     pullPolicy: IfNotPresent
   resources:
     requests:

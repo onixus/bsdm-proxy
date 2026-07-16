@@ -365,4 +365,4 @@ helm install bsdm ./charts/bsdm \
 
 ---
 
-*Последнее обновление: 2026-07 · BSDM v0.3.2 · M3 CH Operator (#135)*
+*Последнее обновление: 2026-07 · BSDM v0.5.0 · M3 CH Operator (#135)*

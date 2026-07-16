@@ -292,4 +292,4 @@ flowchart LR
 
 ---
 
-*Версия документа: 0.3.2 · M1–M4 done · M5 ML next*
+*Версия документа: 0.5.0 · M1–M4 done · M5 ML next*

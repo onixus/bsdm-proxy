@@ -19,7 +19,7 @@
 
 ---
 
-## Матрица: лидеры vs BSDM (v0.3.2)
+## Матрица: лидеры vs BSDM (v0.5.0)
 
 Легенда: ✅ есть · ⚠️ частично · ❌ нет · 🎯 backlog
 
@@ -294,4 +294,4 @@ P0-1 / P0-2 tracked by PR [#93](https://github.com/onixus/bsdm-proxy/pull/93) an
 - [Gartner SSE MQ 2025 leaders](https://www.crn.com/news/security/2025/zscaler-netskope-palo-alto-networks-lead-gartner-s-sse-magic-quadrant-for-2025)
 - [ADR 0001 tiered sharded L1](adr/0001-tiered-sharded-l1-cache.md)
 
-*Последнее обновление: 2026-07, BSDM v0.3.2*
+*Последнее обновление: 2026-07, BSDM v0.5.0*

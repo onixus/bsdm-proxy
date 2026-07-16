@@ -178,7 +178,7 @@ cargo test -p bsdm-proxy-e2e --test e2e e2e_mitm_https_with_self_signed_ca -- --
 - примерами конфигурации и systemd unit-файлами
 - `install.sh` и `SHA256SUMS`
 
-Версия берётся из `proxy/Cargo.toml` (например `0.3.2` → пакет `0.3.2`, `0.2.3-test` → `0.2.3test`).
+Версия берётся из `proxy/Cargo.toml` (например `0.5.0` → пакет `0.5.0`, `0.2.3-test` → `0.2.3test`).
 
 ## Docker
 
@@ -201,8 +201,8 @@ Workflow [release.yml](../.github/workflows/release.yml) публикует rele
 
 ```bash
 git checkout main && git pull
-git tag -a v0.3.2 -m "BSDM-Proxy v0.3.2"
-git push origin v0.3.2
+git tag -a v0.5.0 -m "BSDM-Proxy v0.5.0"
+git push origin v0.5.0
 ```
 
 5. GitHub Actions: **Validate** → **Build** (linux x86_64 + aarch64) → **Publish GitHub Release** с tar.gz
@@ -210,7 +210,7 @@ git push origin v0.3.2
 Текст release notes берётся из `docs/releases/vX.Y.Z.md` (fallback — секция в `CHANGELOG.md`):
 
 ```bash
-./scripts/extract-release-notes.sh v0.3.2
+./scripts/extract-release-notes.sh v0.5.0
 ```
 
 ### Dry-run (без публикации)
