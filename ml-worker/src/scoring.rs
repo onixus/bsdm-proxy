@@ -1,8 +1,12 @@
-//! Scoring models. M5.1 ships `anomaly_stub_v0` only.
+//! Scoring models: stub (M5.1) + UEBA z-score (M5.2).
 
+use crate::baseline::{BaselineSet, EntityTypeBaseline};
 use crate::features::EntityFeatures;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
+
+pub const MODEL_STUB: &str = "anomaly_stub_v0";
+pub const MODEL_UEBA: &str = "ueba_zscore_v0";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ScoreResult {
@@ -31,10 +35,7 @@ impl ScoreResult {
     }
 }
 
-/// Heuristic anomaly score in \[0, 1\].
-///
-/// Combines request intensity (relative to min_requests), deny ratio, and threat hits.
-/// Not a trained model — baseline for M5.1 scaffolding and Grafana wiring.
+/// Heuristic anomaly score in \[0, 1\] (M5.1 baseline / fallback).
 pub fn anomaly_stub_v0(features: &EntityFeatures, min_requests: u64) -> f64 {
     let min_r = min_requests.max(1) as f64;
     let rate_component = ((features.request_count as f64) / (min_r * 5.0)).min(1.0);
@@ -49,7 +50,6 @@ pub fn anomaly_stub_v0(features: &EntityFeatures, min_requests: u64) -> f64 {
         features.threat_hit_count as f64 / features.request_count as f64
     };
     let domain_spread = ((features.unique_domains as f64) / 20.0).min(1.0);
-    // Low gap_cv with high rate can hint periodicity (beacon-like); mild contribution.
     let beacon_hint =
         if features.request_count >= 5 && features.gap_cv > 0.0 && features.gap_cv < 0.25 {
             0.15
@@ -65,6 +65,14 @@ pub fn anomaly_stub_v0(features: &EntityFeatures, min_requests: u64) -> f64 {
     raw.clamp(0.0, 1.0)
 }
 
+pub fn ueba_zscore_v0(
+    features: &EntityFeatures,
+    baseline: &EntityTypeBaseline,
+    z_clip: f64,
+) -> f64 {
+    baseline.score(features, z_clip)
+}
+
 pub fn severity_for(score: f64, threshold: f64) -> &'static str {
     if score >= threshold.max(0.9) {
         "critical"
@@ -77,27 +85,56 @@ pub fn severity_for(score: f64, threshold: f64) -> &'static str {
     }
 }
 
-pub fn score_features(
-    features: &EntityFeatures,
-    model: &str,
-    min_requests: u64,
-    threshold: f64,
-) -> ScoreResult {
-    let score = if model == "anomaly_stub_v0" || model.is_empty() {
-        anomaly_stub_v0(features, min_requests)
-    } else {
-        // Unknown model ids fall back to stub until M5.2+ loaders land.
-        anomaly_stub_v0(features, min_requests)
+pub struct ScoreContext<'a> {
+    pub model: &'a str,
+    pub min_requests: u64,
+    pub threshold: f64,
+    pub z_clip: f64,
+    pub baselines: Option<&'a BaselineSet>,
+}
+
+/// Score one entity. For `ueba_zscore_v0`, falls back to stub when baseline missing.
+pub fn score_features(features: &EntityFeatures, ctx: &ScoreContext<'_>) -> ScoreResult {
+    let (score, model_used) = match ctx.model {
+        MODEL_UEBA => {
+            if let Some(set) = ctx.baselines {
+                if let Some(b) = set.get(&features.entity_type) {
+                    (
+                        ueba_zscore_v0(features, b, ctx.z_clip),
+                        MODEL_UEBA.to_string(),
+                    )
+                } else {
+                    (
+                        anomaly_stub_v0(features, ctx.min_requests),
+                        format!("{MODEL_STUB}+fallback_no_baseline"),
+                    )
+                }
+            } else {
+                (
+                    anomaly_stub_v0(features, ctx.min_requests),
+                    format!("{MODEL_STUB}+fallback_no_baseline"),
+                )
+            }
+        }
+        other => (
+            anomaly_stub_v0(features, ctx.min_requests),
+            if other.is_empty() {
+                MODEL_STUB.to_string()
+            } else {
+                other.to_string()
+            },
+        ),
     };
+
     let features_json = serde_json::to_string(features).unwrap_or_else(|_| "{}".into());
     ScoreResult {
         scored_at: Utc::now(),
         entity_type: features.entity_type.clone(),
         entity_id: features.entity_id.clone(),
         window_start: features.window_start,
-        model: model.to_string(),
+        model: model_used,
         score,
-        severity: severity_for(score, threshold).to_string(),
+        severity: severity_for(score, ctx.threshold).to_string(),
         features_json,
     }
 }
@@ -105,6 +142,7 @@ pub fn score_features(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::baseline::{EntityTypeBaseline, FeatureMoments};
     use chrono::TimeZone;
 
     fn sample(requests: u64, deny: u64, threat: u64) -> EntityFeatures {
@@ -136,5 +174,37 @@ mod tests {
     fn burst_deny_scores_high() {
         let s = anomaly_stub_v0(&sample(100, 80, 40), 10);
         assert!(s >= 0.65, "score={s}");
+    }
+
+    #[test]
+    fn ueba_uses_baseline() {
+        let m = |mean: f64, std: f64| FeatureMoments { mean, std };
+        let b = EntityTypeBaseline {
+            entity_type: "client_ip".into(),
+            sample_count: 100,
+            request_count: m(20.0, 5.0),
+            unique_domains: m(3.0, 1.0),
+            unique_urls: m(5.0, 2.0),
+            deny_count: m(1.0, 1.0),
+            threat_hit_count: m(0.0, 0.5),
+            avg_response_size: m(100.0, 20.0),
+            avg_duration_ms: m(10.0, 3.0),
+            gap_cv: m(0.5, 0.2),
+            max_domain_len: m(12.0, 4.0),
+            deny_ratio: m(0.05, 0.05),
+            threat_ratio: m(0.0, 0.05),
+        };
+        let mut set = BaselineSet::default();
+        set.baselines.insert("client_ip".into(), b);
+        let ctx = ScoreContext {
+            model: MODEL_UEBA,
+            min_requests: 10,
+            threshold: 0.8,
+            z_clip: 4.0,
+            baselines: Some(&set),
+        };
+        let scored = score_features(&sample(200, 150, 0), &ctx);
+        assert_eq!(scored.model, MODEL_UEBA);
+        assert!(scored.score >= 0.5, "score={}", scored.score);
     }
 }

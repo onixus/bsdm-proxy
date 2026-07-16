@@ -1,0 +1,37 @@
+-- M5.2 UEBA / anomaly example queries for Grafana or ad-hoc SOC use.
+
+-- Top anomalous entities (last 24h), UEBA model
+-- SELECT
+--   entity_type,
+--   entity_id,
+--   max(score) AS max_score,
+--   argMax(severity, score) AS severity,
+--   argMax(model, score) AS model,
+--   max(scored_at) AS last_scored
+-- FROM bsdm.ml_scores
+-- WHERE scored_at >= now() - INTERVAL 1 DAY
+--   AND startsWith(model, 'ueba_zscore')
+-- GROUP BY entity_type, entity_id
+-- ORDER BY max_score DESC
+-- LIMIT 50;
+
+-- Score distribution by model
+-- SELECT
+--   model,
+--   count() AS n,
+--   avg(score) AS avg_score,
+--   quantile(0.95)(score) AS p95
+-- FROM bsdm.ml_scores
+-- WHERE scored_at >= now() - INTERVAL 1 DAY
+-- GROUP BY model
+-- ORDER BY n DESC;
+
+-- Baseline readiness: samples per entity_type in feature store
+-- SELECT
+--   entity_type,
+--   count() AS windows,
+--   min(extracted_at) AS first_seen,
+--   max(extracted_at) AS last_seen
+-- FROM bsdm.entity_features
+-- WHERE extracted_at >= now() - INTERVAL 1 DAY
+-- GROUP BY entity_type;

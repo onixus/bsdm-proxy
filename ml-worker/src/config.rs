@@ -1,5 +1,6 @@
 //! Runtime configuration from environment variables.
 
+use std::path::PathBuf;
 use std::time::Duration;
 
 #[derive(Debug, Clone)]
@@ -17,6 +18,13 @@ pub struct Config {
     pub min_requests: u64,
     pub model: String,
     pub score_threshold: f64,
+    /// Lookback for population baseline over `entity_features`.
+    pub baseline_lookback: Duration,
+    pub baseline_min_samples: u64,
+    /// Clip |z| before mapping to \[0,1\] for `ueba_zscore_v0`.
+    pub z_clip: f64,
+    /// Optional JSON artifact (`BaselineSet`) instead of live CH stats.
+    pub baseline_path: Option<PathBuf>,
     pub webhook_url: Option<String>,
     pub webhook_timeout: Duration,
     pub metrics_port: u16,
@@ -63,8 +71,16 @@ impl Config {
             lookback: Duration::from_secs(env_u64("ML_LOOKBACK_SECS", 300)),
             entity_types,
             min_requests: env_u64("ML_MIN_REQUESTS", 10),
-            model: std::env::var("ML_MODEL").unwrap_or_else(|_| "anomaly_stub_v0".into()),
+            model: std::env::var("ML_MODEL").unwrap_or_else(|_| "ueba_zscore_v0".into()),
             score_threshold: env_f64("ML_SCORE_THRESHOLD", 0.8)?,
+            baseline_lookback: Duration::from_secs(env_u64("ML_BASELINE_LOOKBACK_SECS", 86400)),
+            baseline_min_samples: env_u64("ML_BASELINE_MIN_SAMPLES", 30),
+            z_clip: env_f64("ML_ZSCORE_CLIP", 4.0)?,
+            baseline_path: std::env::var("ML_BASELINE_PATH")
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .map(PathBuf::from),
             webhook_url,
             webhook_timeout: Duration::from_secs(env_u64("ML_WEBHOOK_TIMEOUT_SECS", 10)),
             metrics_port: env_u64("METRICS_PORT", 8091) as u16,
