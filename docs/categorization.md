@@ -136,6 +136,15 @@ Grafana: panels on **BSDM Proxy Dashboard** + SQL threat panels on **BSDM HTTP T
 | `OTX_ENABLED` | `false` | OTX lookups |
 | `OTX_API_KEY` | — | OTX API key |
 | `OTX_CACHE_TTL_SECS` | `3600` | OTX cache TTL |
+| `URLHAUS_ENABLED` | `false` | Async URLhaus enrich |
+| `URLHAUS_API` | abuse.ch URL check | URLhaus endpoint |
+| `PHISHTANK_ENABLED` | `false` | Async PhishTank enrich |
+| `PHISHTANK_API` | `https://checkurl.phishtank.com/checkurl/` | PhishTank endpoint |
+| `PHISHTANK_API_KEY` | — | PhishTank `app_key` (recommended) |
+| `CUSTOM_DB_ENABLED` | `false` | JSON custom category DB |
+| `CUSTOM_DB_PATH` | — | Path to custom DB JSON |
 | `ML_ENABLED` | `false` | ML stub |
+
+After async enrich, category cache stores the feed id (`phishtank` / `urlhaus` / `multiple`) so subsequent requests emit `threat_sources` with that value (not only `cache`).
 
 Deprecated: `SHALLALIST_ENABLED`, `SHALLALIST_PATH` (mapped to UT1).

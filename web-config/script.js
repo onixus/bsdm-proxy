@@ -121,6 +121,7 @@ function collectConfig() {
         URLHAUS_API: val('urlhaus_api', ''),
         PHISHTANK_ENABLED: String(checked('phishtank_enabled')),
         PHISHTANK_API: val('phishtank_api', ''),
+        PHISHTANK_API_KEY: val('phishtank_api_key', ''),
         CUSTOM_DB_ENABLED: String(checked('custom_db_enabled')),
         CUSTOM_DB_PATH: val('custom_db_path', ''),
 
@@ -222,7 +223,7 @@ function formatEnv(config) {
         'ACL_RELOAD_INTERVAL', 'ACL_API_TOKEN',
         'CATEGORIZATION_ENABLED', 'CATEGORIZATION_CACHE_TTL',
         'UT1_ENABLED', 'UT1_PATH', 'URLHAUS_ENABLED', 'URLHAUS_API',
-        'PHISHTANK_ENABLED', 'PHISHTANK_API', 'CUSTOM_DB_ENABLED', 'CUSTOM_DB_PATH',
+        'PHISHTANK_ENABLED', 'PHISHTANK_API', 'PHISHTANK_API_KEY', 'CUSTOM_DB_ENABLED', 'CUSTOM_DB_PATH',
     ];
 
     const written = new Set();
@@ -256,7 +257,7 @@ function proxyEnvBlock(config) {
         'ACL_ENABLED', 'ACL_DEFAULT_ACTION', 'ACL_RULES_PATH', 'ACL_AUTO_RELOAD',
         'ACL_RELOAD_INTERVAL', 'ACL_API_TOKEN',
         'CATEGORIZATION_ENABLED', 'CATEGORIZATION_CACHE_TTL', 'UT1_ENABLED', 'UT1_PATH',
-        'URLHAUS_ENABLED', 'URLHAUS_API', 'PHISHTANK_ENABLED', 'PHISHTANK_API',
+        'URLHAUS_ENABLED', 'URLHAUS_API', 'PHISHTANK_ENABLED', 'PHISHTANK_API', 'PHISHTANK_API_KEY',
         'CUSTOM_DB_ENABLED', 'CUSTOM_DB_PATH',
     ];
     return keys
@@ -477,6 +478,7 @@ function applyEnvText(text) {
     if (map.URLHAUS_API) setVal('urlhaus_api', map.URLHAUS_API);
     setChecked('phishtank_enabled', truthyEnv(map.PHISHTANK_ENABLED));
     if (map.PHISHTANK_API) setVal('phishtank_api', map.PHISHTANK_API);
+    if (map.PHISHTANK_API_KEY) setVal('phishtank_api_key', map.PHISHTANK_API_KEY);
     setChecked('custom_db_enabled', truthyEnv(map.CUSTOM_DB_ENABLED));
     if (map.CUSTOM_DB_PATH) setVal('custom_db_path', map.CUSTOM_DB_PATH);
 
