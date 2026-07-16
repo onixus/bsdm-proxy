@@ -102,10 +102,16 @@ PAGE_CONCURRENCY=6 python3 scripts/httparchive-page-load.py \
 Warm goodput — фаза **warm repeats** из вывода `httparchive-sites-bench.py`.  
 Перемеряйте на своём железе: `BENCH_PROFILE=warm ./scripts/compare-squid-bsdm-httparchive.sh`.
 
-| Дата | Профиль | `WORKER_COUNT` | BSDM warm Mbit/s | Squid warm Mbit/s | Примечание |
-|------|---------|----------------|------------------|-------------------|------------|
-| 2026-03 (ADR 0001) | cold | 4 | ~500 | ~657 | до tiered L1 tuning |
-| 2026-06 (backlog) | cold | 4 | ~538 | ~593 | post P0 perf + tiered L1 |
-| — | **warm** | **1** | **цель ≥560** | ~593 | рекомендуемый профиль для M2.5 gate |
+| Дата | Версия | Профиль | `WORKER_COUNT` | BSDM warm Mbit/s | Squid warm Mbit/s | Примечание |
+|------|--------|---------|----------------|------------------|-------------------|------------|
+| 2026-03 (ADR 0001) | 0.3.x | cold | 4 | ~500 | ~657 | до tiered L1 tuning |
+| 2026-06 (backlog) | 0.3.x | cold | 4 | ~538 | ~593 | post P0 perf + tiered L1 |
+| 2026-07-01 | 0.3.x | cold* | 4 | ~478 | ~535 | total 481 vs 537; Squid rock×4 |
+| **2026-07-16** | **0.5.0** | **warm** | **1** | **477** | **527** | gate profile; Squid w1+mem (host SMP broken) |
+| **2026-07-16** | **0.5.0** | **cold** | **4** | **516** | **469** | BSDM cold path 714; Squid same w1+mem |
 
-Gap warm profile vs Squid: цель M2.5 — **≥ Squid −5%** на warm goodput ([roadmap](roadmap.md)).
+\*До введения `BENCH_PROFILE`; эквивалент сегодняшнего `cold` (`WORKER_COUNT=4`).
+
+Gap warm profile vs Squid: цель M2.5 — **≥ Squid −5%** на warm goodput ([roadmap](roadmap.md)).  
+Прогон 2026-07-16 warm: BSDM **477** vs Squid **527** → **−9.5%** (цель ≥560 / −5% не достигнута).  
+На том же хосте `cold` (WC=4) дал BSDM warm **516** (−3.4% к Squid rock×4 ~535 из 2026-07-01).

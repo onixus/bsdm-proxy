@@ -12,7 +12,7 @@ cd "$ROOT"
 source "${ROOT}/scripts/bench-profile.sh"
 apply_bench_profile
 
-SQUID_CONF="${ROOT}/scripts/squid-benchmark-tuned.conf"
+SQUID_CONF="${SQUID_CONF:-${ROOT}/scripts/squid-benchmark-tuned.conf}"
 SQUID_PORT=13128
 BSDM_PORT=12788
 BSDM_METRICS=19190
@@ -42,12 +42,22 @@ stop_squid() {
 
 start_squid() {
   stop_squid
+  sudo mkdir -p /var/spool/squid /var/log/squid
+  sudo chown proxy:proxy /var/spool/squid /var/log/squid 2>/dev/null \
+    || sudo chown squid:squid /var/spool/squid /var/log/squid
+  # Optional rock dir (only used if conf has cache_dir rock)
   sudo mkdir -p /var/spool/squid-rock
-  sudo chown proxy:proxy /var/spool/squid-rock 2>/dev/null || sudo chown squid:squid /var/spool/squid-rock
+  sudo chown proxy:proxy /var/spool/squid-rock 2>/dev/null || true
   sudo squid -k parse -f "$SQUID_CONF"
-  sudo squid -z -f "$SQUID_CONF" 2>&1 | tail -3
+  if grep -qE '^[[:space:]]*cache_dir[[:space:]]' "$SQUID_CONF"; then
+    sudo squid -z -f "$SQUID_CONF" 2>&1 | tail -3
+    sleep 2
+    sudo killall squid 2>/dev/null || true
+    sudo rm -f /run/squid.pid
+    sleep 1
+  fi
   sudo squid -f "$SQUID_CONF"
-  for _ in 1 2 3 4 5 6 7 8 9 10; do
+  for _ in $(seq 1 30); do
     if curl -sf -x "http://127.0.0.1:${SQUID_PORT}" "${UPSTREAM}/ping" >/dev/null 2>&1; then
       echo "Squid ready (${SQUID_PORT}), workers: $(pgrep -c -x squid || echo ?)"
       return 0
@@ -55,6 +65,7 @@ start_squid() {
     sleep 1
   done
   echo "Squid failed to start" >&2
+  sudo tail -40 /var/log/squid/cache.log 2>/dev/null || true
   exit 1
 }
 
