@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **M4 Grafana Unified Alerting + Alertmanager** — provisioned rules (`grafana/alerting/`), Prometheus `m4_threat` alerts, compose `alertmanager` service; closes M4 roadmap
 - **M4 Shannon / high-entropy domains** — `high_entropy_domain` uses Shannon entropy on the leftmost DNS label (`ALERT_SHANNON_MIN_BITS`, modes `shannon|legacy|either`); Grafana long-domain candidates panel
 - **PhishTank API key** — `PHISHTANK_API_KEY` sent as `app_key`; category cache keeps feed source for `threat_sources`
 - **M4 beacon heuristic (B18)** — `beacon_periodic` rule in `alert-worker` (regular client→domain gaps); Grafana “Beacon candidates” panel; docs
@@ -22,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **ACL lock-free snapshot** — `AclEngineHandle` with `arc-swap`; hot path `check_access` without `tokio::RwLock` ([#40](https://github.com/onixus/bsdm-proxy/issues/40) / B9)
 - **Docs cleanup** — roadmap/README/wiki synced to v0.3.2 (M3 done, M4 started); blockers aligned with ClickHouse path; removed outdated `OPTIMIZATIONS.md` and duplicate hierarchy stub; archived GitHub bootstrap scripts under `scripts/archive/`
-- **M4 roadmap** — webhook, beacon, PhishTank key, Shannon entropy done; remaining: Grafana Alertmanager
+- **M4 roadmap** — threat analytics complete (webhook, beacon, Shannon, Grafana/AM); next: M5 ML
 
 ## [0.3.2] - 2026-07-02
 

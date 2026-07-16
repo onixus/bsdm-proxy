@@ -82,7 +82,7 @@ ALERT_WEBHOOK_URL=https://siem.example/hooks/bsdm \
   docker compose --profile alerts up -d --build alert-worker
 ```
 
-See [alerting.md](alerting.md).
+See [alerting.md](alerting.md) for alert-worker, Grafana Unified Alerting, and Alertmanager.
 
 ## Миграция OpenSearch → ClickHouse (завершена)
 

@@ -10,7 +10,7 @@
 [![Version](https://img.shields.io/badge/version-0.3.2-blue.svg)](https://github.com/onixus/bsdm-proxy/releases)
 [![Rust](https://img.shields.io/badge/rust-1.88+-orange.svg)](https://www.rust-lang.org)
 
-> **Текущая версия:** `0.3.2` · M2.5/M3 done · M4 threat analytics started — см. [Releases](https://github.com/onixus/bsdm-proxy/releases) · [CHANGELOG](CHANGELOG.md) · [roadmap](docs/roadmap.md)
+> **Текущая версия:** `0.3.2` · M2.5/M3/M4 done · M5 ML next — см. [Releases](https://github.com/onixus/bsdm-proxy/releases) · [CHANGELOG](CHANGELOG.md) · [roadmap](docs/roadmap.md)
 
 ⚠️ **MITM-прокси для HTTPS.** Используйте только в корпоративной среде с согласия пользователей и в рамках законодательства.
 
@@ -447,7 +447,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test, cargo-audi
 | [docs/licensing.md](docs/licensing.md) | Лицензии, third-party, AGPL-заметки |
 | [NOTICE](NOTICE) | Реестр third-party компонентов |
 | [docs/clickhouse-analytics.md](docs/clickhouse-analytics.md) | ClickHouse analytics, compose, SQL |
-| [docs/alerting.md](docs/alerting.md) | Alert worker → SIEM/webhook (B19) |
+| [docs/alerting.md](docs/alerting.md) | Alert worker + Grafana/AM (M4) |
 | [docs/search-api.md](docs/search-api.md) | REST Search API (`/api/search`) |
 | [docs/adr/0002-clickhouse-analytics.md](docs/adr/0002-clickhouse-analytics.md) | ADR: ClickHouse как analytics store |
 | [docs/architecture.md](docs/architecture.md) | Архитектура и блокеры |
@@ -474,10 +474,10 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test, cargo-audi
 | **M2** Squid parity | v0.3.x | L2, ACL API, NTLM/Kerberos, hierarchy Phase 4 | ✅ Done |
 | **M2.5** Data plane | v0.3.1–0.3.2 | Tiered L1, streaming MISS, P1 hot path | ✅ Done |
 | **M3** Retro-search | v0.3.1+ | ClickHouse, Grafana, Search API, k8s CHI | ✅ Done |
-| **M4** Threat analytics | v0.5.x | Rule-based алерты, C&C / Shannon heuristics | ~70% |
+| **M4** Threat analytics | v0.5.x | Rule-based алерты, C&C / Shannon, Grafana/AM | ✅ Done |
 | **M5** ML security | v1.0.x | ML anomaly, phishing, C&C detection | ~0% |
 
-Кратко: **M3 closed** (proxy → Kafka → ClickHouse → Grafana/`/api/search`). **M4** — categorization metrics shipped; alerts/heuristics next.
+Кратко: **M3/M4 closed** (ClickHouse retro-search + threat analytics / Grafana Alerting). **M5** — ML anomaly / phishing / C&C.
 
 ### Стратегические фазы
 

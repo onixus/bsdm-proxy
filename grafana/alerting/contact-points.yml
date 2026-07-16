@@ -1,0 +1,14 @@
+# Grafana Unified Alerting — contact points (M4).
+# Notifications go to Alertmanager; set ALERT_WEBHOOK_URL on the alertmanager
+# service (compose) to forward to SIEM. Optional: override via UI after start.
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: bsdm-alertmanager
+    receivers:
+      - uid: bsdm_am_cp
+        type: prometheus-alertmanager
+        disableResolveMessage: false
+        settings:
+          url: http://alertmanager:9093

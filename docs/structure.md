@@ -33,8 +33,9 @@ bsdm-proxy/
 ├── packaging/              # Release tarball, systemd units, install.sh
 ├── scripts/                # build-package, pre-push-check, clickhouse SQL
 ├── docs/                   # Wiki / документация
-├── grafana/                # Provisioning: datasources + dashboards
-├── prometheus/             # Scrape config
+├── grafana/                # Provisioning: datasources + dashboards + alerting
+├── prometheus/             # Scrape config + M4 alert rules
+├── alertmanager/           # Alertmanager template + entrypoint
 ├── web-config/             # Web UI для генерации .env / compose
 ├── certs/                  # MITM CA (gitignored, генерируется локально)
 ├── Dockerfile              # Multi-stage: proxy + cache-indexer + alert-worker
@@ -49,7 +50,7 @@ bsdm-proxy/
 | Файл | Сервисы |
 |------|---------|
 | `docker-compose.lite.yml` | proxy only (MITM + L1 spill, no Kafka/CH) |
-| `docker-compose.yml` | proxy, cache-indexer, kafka, zookeeper, clickhouse, prometheus, grafana; optional `alert-worker` (`--profile alerts`) |
+| `docker-compose.yml` | proxy, cache-indexer, kafka, zookeeper, clickhouse, prometheus, alertmanager, grafana; optional `alert-worker` (`--profile alerts`) |
 | `docker-compose.test.yml` | Минимальный стек для smoke/E2E |
 | `docker-compose.redis-l2.yml` | 2× proxy + Redis L2 |
 | `docker-compose.hierarchy.yml` | Multi-instance + ICP |
@@ -61,6 +62,9 @@ bsdm-proxy/
 |------|------------|
 | `grafana/datasources.yml` | Prometheus + ClickHouse datasources |
 | `grafana/dashboards/` | Proxy metrics + HTTP Traffic (ClickHouse) |
+| `grafana/alerting/` | Unified Alerting rules / contact points (M4) |
+| `prometheus/alerts/` | Prometheus rule files (M4 threat) |
+| `alertmanager/` | Alertmanager template + entrypoint |
 | `scripts/clickhouse/http_cache.sql` | Схема `bsdm.http_cache` |
 | `packaging/config/*.env.example` | Примеры env для native install |
 | `config/acl-rules.*.json` | Примеры ACL |

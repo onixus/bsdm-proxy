@@ -1,0 +1,14 @@
+# Default notification policy: M4 alerts → Alertmanager.
+apiVersion: 1
+
+policies:
+  - orgId: 1
+    receiver: bsdm-alertmanager
+    group_by: [alertname, severity]
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 4h
+    routes:
+      - receiver: bsdm-alertmanager
+        object_matchers:
+          - ["team", "=", "bsdm-m4"]

@@ -97,6 +97,31 @@ Starter SQL live in [`scripts/clickhouse/m4_threat_queries.sql`](../scripts/clic
 | `CLICKHOUSE_USER` / `PASSWORD` | — | Optional basic auth |
 | `METRICS_PORT` | `8090` | `/metrics`, `/health` |
 
+## Grafana Unified Alerting + Alertmanager
+
+Full stack includes **Alertmanager** (`:9093`) and provisioned Grafana rules
+under [`grafana/alerting/`](../grafana/alerting/). Prometheus loads
+[`prometheus/alerts/m4_threat.yml`](../prometheus/alerts/m4_threat.yml).
+
+```
+alert-worker ──webhook──▶ SIEM          (profile alerts, rich CH findings)
+Prometheus rules ──▶ Alertmanager ──webhook──▶ SIEM   (ALERT_WEBHOOK_URL)
+Grafana Unified Alerting ──▶ Alertmanager ──┘
+```
+
+```bash
+# SIEM URL used by Alertmanager (and alert-worker when profile alerts is on)
+ALERT_WEBHOOK_URL=https://siem.example/hooks/bsdm docker compose up -d
+
+# Inspect
+open http://localhost:3000/alerting/list   # Grafana folder "BSDM M4"
+open http://localhost:9093                 # Alertmanager
+open http://localhost:9091/alerts          # Prometheus rule evaluation
+```
+
+Without `ALERT_WEBHOOK_URL`, Alertmanager still receives alerts but does not
+forward them (empty webhook receiver). Grafana Alerting UI still shows firing state.
+
 ## Metrics
 
 - `alert_worker_evaluations_total`
@@ -111,4 +136,6 @@ Prometheus scrape (when profile enabled): job `alert-worker` → `:8090`.
 ## Related
 
 - Blocker B19 / issue [#50](https://github.com/onixus/bsdm-proxy/issues/50)
-- [clickhouse-analytics.md](clickhouse-analytics.md) · [roadmap.md](roadmap.md) M4
+- [clickhouse-analytics.md](clickhouse-analytics.md) · [roadmap.md](roadmap.md) M4 ✅
+- Grafana provisioning: `grafana/alerting/` · Prometheus rules: `prometheus/alerts/`
+- Alertmanager: `alertmanager/` (compose service)
