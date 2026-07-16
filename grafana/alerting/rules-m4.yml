@@ -1,0 +1,391 @@
+# Grafana Unified Alerting rules for M4 threat analytics (Prometheus datasource).
+# Mirror of prometheus/alerts/m4_threat.yml — visible in Grafana Alerting UI.
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: bsdm_m4_threat
+    folder: BSDM M4
+    interval: 1m
+    rules:
+      - uid: bsdm_m4_beacon
+        title: Alert-worker beacon findings
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: increase(alert_worker_findings_total{rule="beacon_periodic"}[10m])
+              instant: true
+              intervalMs: 1000
+              legendFormat: __auto
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: []
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [B]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: $B > 0
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: math
+        noDataState: OK
+        execErrState: OK
+        for: 2m
+        annotations:
+          summary: C&C beacon findings from alert-worker
+          description: increase(alert_worker_findings_total{rule="beacon_periodic"}[10m]) > 0
+          dashboardUid: bsdm-http-traffic-ch
+        labels:
+          severity: warning
+          team: bsdm-m4
+          rule: beacon_periodic
+
+      - uid: bsdm_m4_shannon
+        title: Alert-worker high-entropy findings
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: increase(alert_worker_findings_total{rule="high_entropy_domain"}[10m])
+              instant: true
+              intervalMs: 1000
+              legendFormat: __auto
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: []
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [B]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: $B > 0
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: math
+        noDataState: OK
+        execErrState: OK
+        for: 2m
+        annotations:
+          summary: High-entropy / Shannon domain findings
+          description: increase(alert_worker_findings_total{rule="high_entropy_domain"}[10m]) > 0
+          dashboardUid: bsdm-http-traffic-ch
+        labels:
+          severity: warning
+          team: bsdm-m4
+          rule: high_entropy_domain
+
+      - uid: bsdm_m4_blocked
+        title: Alert-worker blocked burst findings
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: increase(alert_worker_findings_total{rule="blocked_burst"}[10m])
+              instant: true
+              intervalMs: 1000
+              legendFormat: __auto
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: []
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [B]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: $B > 0
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: math
+        noDataState: OK
+        execErrState: OK
+        for: 1m
+        annotations:
+          summary: ACL deny burst findings
+          description: increase(alert_worker_findings_total{rule="blocked_burst"}[10m]) > 0
+          dashboardUid: bsdm-http-traffic-ch
+        labels:
+          severity: critical
+          team: bsdm-m4
+          rule: blocked_burst
+
+      - uid: bsdm_m4_webhook_err
+        title: Alert-worker webhook errors
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: increase(alert_worker_webhook_errors_total[5m])
+              instant: true
+              intervalMs: 1000
+              legendFormat: __auto
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: []
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [B]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: $B > 0
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: math
+        noDataState: OK
+        execErrState: OK
+        for: 2m
+        annotations:
+          summary: alert-worker webhook delivery failing
+          description: increase(alert_worker_webhook_errors_total[5m]) > 0
+        labels:
+          severity: critical
+          team: bsdm-m4
+
+      - uid: bsdm_m4_acl_deny
+        title: Proxy ACL deny rate elevated
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: sum(rate(bsdm_proxy_acl_decisions_total{action="deny"}[5m]))
+              instant: true
+              intervalMs: 1000
+              legendFormat: __auto
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: []
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [B]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0.5]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: $B > 0.5
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: math
+        noDataState: OK
+        execErrState: OK
+        for: 5m
+        annotations:
+          summary: Sustained ACL deny rate on proxy
+          description: sum(rate(bsdm_proxy_acl_decisions_total{action="deny"}[5m])) > 0.5
+          dashboardUid: bsdm-http-traffic-ch
+        labels:
+          severity: warning
+          team: bsdm-m4

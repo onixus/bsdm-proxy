@@ -167,12 +167,32 @@ services:
       timeout: 5s
       retries: 5
 
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    ports:
+      - "9093:9093"
+    environment:
+      - ALERT_WEBHOOK_URL=${ALERT_WEBHOOK_URL:-}
+    volumes:
+      - ./alertmanager:/etc/alertmanager:ro
+      - alertmanager-data:/alertmanager
+    entrypoint: ["/bin/sh", "/etc/alertmanager/entrypoint.sh"]
+    networks:
+      - bsdm-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:9093/-/healthy || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   prometheus:
     image: prom/prometheus:v3.12.0
     ports:
       - "9091:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts:/etc/prometheus/alerts:ro
       - prometheus-data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -186,6 +206,7 @@ services:
     restart: unless-stopped
     depends_on:
       - proxy
+      - alertmanager
     healthcheck:
       test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:9090/-/healthy || exit 1"]
       interval: 10s
@@ -202,16 +223,19 @@ services:
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-clickhouse-datasource
       - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_UNIFIED_ALERTING_ENABLED=true
     volumes:
       - grafana-data:/var/lib/grafana
       - ./grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
       - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/alerting:/etc/grafana/provisioning/alerting:ro
     networks:
       - bsdm-net
     restart: unless-stopped
     depends_on:
       - prometheus
       - clickhouse
+      - alertmanager
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
       interval: 10s
@@ -228,4 +252,6 @@ volumes:
   prometheus-data:
     driver: local
   grafana-data:
+    driver: local
+  alertmanager-data:
     driver: local

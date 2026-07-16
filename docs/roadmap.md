@@ -24,7 +24,7 @@
 | [M2 — Squid parity](#m2--squid-parity-v03x) | v0.3.x | L2, ACL, hierarchy, auth, compression | ✅ Done |
 | [M2.5 — Data plane](#m25--data-plane-throughput-v03x) | v0.3.x–0.3.2 | Tiered L1, streaming, P1 hot path | ✅ Done |
 | [M3 — Retro-search](#m3--retro-search) | v0.3.1+ | ClickHouse, Search API, Grafana, k8s CHI | ✅ Done (~95%) |
-| [M4 — Threat analytics](#m4--threat-analytics-v05x) | v0.5.x | Rule-based угрозы, алерты, C&C / Shannon | ~70% |
+| [M4 — Threat analytics](#m4--threat-analytics-v05x) | v0.5.x | Rule-based угрозы, алерты, C&C / Shannon | ✅ Done |
 | [M5 — ML security](#m5--ml-security-v10x) | v1.0.x | ML anomaly, phishing, C&C ML | ~0% |
 
 ```mermaid
@@ -37,9 +37,9 @@ gantt
   M2.5 Data plane perf    :done, m25, 2026-06, 2026-07
   section Analytics
   M3 Retro-search         :done, m3, 2026-05, 2026-07
-  M4 Threat analytics     :active, m4, 2026-07, 2026-11
+  M4 Threat analytics     :done, m4, 2026-07, 2026-07
   section ML
-  M5 ML security          :m5, 2026-10, 2027-03
+  M5 ML security          :active, m5, 2026-10, 2027-03
 ```
 
 ---
@@ -111,9 +111,9 @@ proxy → Kafka → cache-indexer → ClickHouse (bsdm.http_cache)
 
 ---
 
-## M4 — Threat analytics (v0.5.x)
+## M4 — Threat analytics (v0.5.x) ✅
 
-Rule-based обнаружение угроз поверх ClickHouse.
+Rule-based обнаружение угроз поверх ClickHouse. **Критерий выполнен.**
 
 - [x] Schema enrichment / blocked threat events in CH ([#102](https://github.com/onixus/bsdm-proxy/issues/102))
 - [x] Categorization Prometheus metrics ([#105](https://github.com/onixus/bsdm-proxy/issues/105))
@@ -121,10 +121,10 @@ Rule-based обнаружение угроз поверх ClickHouse.
 - [x] Alerting pipeline to SIEM / webhook ([#50](https://github.com/onixus/bsdm-proxy/issues/50) / B19) — `alert-worker`, see [alerting.md](alerting.md)
 - [x] C&C beacon heuristic (`beacon_periodic` in alert-worker + Grafana panel) — B18
 - [x] PhishTank API key wiring (`PHISHTANK_API_KEY` → `app_key`; cache preserves feed source)
-- [ ] Rule-based alerts in Grafana (optional Alertmanager / Unified Alerting)
+- [x] Grafana Unified Alerting + Prometheus Alertmanager (`grafana/alerting/`, `prometheus/alerts/`)
 - [x] Richer high-entropy / Shannon heuristics (`ALERT_SHANNON_*`, modes `shannon|legacy|either`)
 
-**Критерий:** автоалерт на beacon-паттерн + threat dashboard — **beacon + Shannon webhook/panels done**; Grafana Alertmanager optional.
+**Критерий:** автоалерт на beacon-паттерн + threat dashboard — **выполнен** (alert-worker webhooks + Grafana/AM rules + CH panels).
 
 ---
 
@@ -140,8 +140,8 @@ Rule-based обнаружение угроз поверх ClickHouse.
 |-------|----------------|----------|----------|
 | Squid parity | **~92%** | ~92% | ~93% |
 | Ретропоиск | **~90%** | ~92% | ~95% |
-| ML / C&C / phishing | ~10% | ~25% | ~75% |
-| **Итого** | **~65%** | ~70% | ~85% |
+| ML / C&C / phishing | **~25%** | ~25% | ~75% |
+| **Итого** | **~70%** | ~70% | ~85% |
 
 ---
 
@@ -191,4 +191,4 @@ Backlog mapping: [swg-backlog-mapping.md](swg-backlog-mapping.md)
 
 ---
 
-*Обновлено: 2026-07 — M2.5/M3 done, M4 started; strategic roadmap (Lite/DX/Wasm/AI) added*
+*Обновлено: 2026-07 — M2.5/M3/M4 done; next M5 ML; strategic roadmap (Lite/DX/Wasm/AI)*

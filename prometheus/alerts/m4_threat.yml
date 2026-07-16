@@ -1,0 +1,89 @@
+# M4 threat / pipeline health alerts (Prometheus → Alertmanager).
+# Grafana Unified Alerting mirrors the key signals; see grafana/alerting/.
+groups:
+  - name: bsdm_m4_threat
+    interval: 30s
+    rules:
+      - alert: BsdmAlertWorkerBeaconFindings
+        expr: increase(alert_worker_findings_total{rule="beacon_periodic"}[10m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+          team: bsdm-m4
+          rule: beacon_periodic
+        annotations:
+          summary: "C&C beacon findings from alert-worker"
+          description: "alert-worker reported {{ $value }} beacon_periodic finding(s) in 10m. See docs/alerting.md."
+
+      - alert: BsdmAlertWorkerHighEntropyFindings
+        expr: increase(alert_worker_findings_total{rule="high_entropy_domain"}[10m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+          team: bsdm-m4
+          rule: high_entropy_domain
+        annotations:
+          summary: "High-entropy / Shannon domain findings"
+          description: "alert-worker reported {{ $value }} high_entropy_domain finding(s) in 10m."
+
+      - alert: BsdmAlertWorkerBlockedBurstFindings
+        expr: increase(alert_worker_findings_total{rule="blocked_burst"}[10m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          team: bsdm-m4
+          rule: blocked_burst
+        annotations:
+          summary: "ACL deny burst findings"
+          description: "alert-worker reported {{ $value }} blocked_burst finding(s) in 10m."
+
+      - alert: BsdmAlertWorkerOffHoursThreat
+        expr: increase(alert_worker_findings_total{rule="off_hours_threat"}[10m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+          team: bsdm-m4
+          rule: off_hours_threat
+        annotations:
+          summary: "Off-hours threat-tagged traffic"
+          description: "alert-worker reported {{ $value }} off_hours_threat finding(s) in 10m."
+
+      - alert: BsdmAlertWorkerWebhookErrors
+        expr: increase(alert_worker_webhook_errors_total[5m]) > 0
+        for: 2m
+        labels:
+          severity: critical
+          team: bsdm-m4
+        annotations:
+          summary: "alert-worker webhook delivery failing"
+          description: "{{ $value }} webhook error(s) in 5m — check ALERT_WEBHOOK_URL / SIEM."
+
+      - alert: BsdmAlertWorkerClickHouseErrors
+        expr: increase(alert_worker_clickhouse_errors_total[5m]) > 0
+        for: 2m
+        labels:
+          severity: critical
+          team: bsdm-m4
+        annotations:
+          summary: "alert-worker ClickHouse query errors"
+          description: "{{ $value }} ClickHouse error(s) in 5m."
+
+      - alert: BsdmProxyAclDenyBurst
+        expr: sum(rate(bsdm_proxy_acl_decisions_total{action="deny"}[5m])) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          team: bsdm-m4
+        annotations:
+          summary: "Sustained ACL deny rate on proxy"
+          description: "Deny rate {{ $value | humanize }}/s over 5m (threshold 0.5/s)."
+
+      - alert: BsdmProxyCategorizationBlocked
+        expr: sum(rate(bsdm_proxy_categorization_blocked_total[5m])) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+          team: bsdm-m4
+        annotations:
+          summary: "Categorization-driven blocks elevated"
+          description: "Blocked categorization rate {{ $value | humanize }}/s over 5m."

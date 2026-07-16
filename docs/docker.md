@@ -11,7 +11,7 @@
 | Файл | Назначение |
 |------|------------|
 | `docker-compose.lite.yml` | **Lite:** один caching proxy (MITM + L1 spill), без Kafka/CH |
-| `docker-compose.yml` | Полный стек: proxy, cache-indexer, kafka, zookeeper, clickhouse, prometheus, grafana; optional `alert-worker` (`--profile alerts`) |
+| `docker-compose.yml` | Полный стек: proxy, cache-indexer, kafka, zookeeper, clickhouse, prometheus, **alertmanager**, grafana; optional `alert-worker` (`--profile alerts`) |
 | `docker-compose.test.yml` | Smoke/E2E external (upstream + proxy) |
 | `docker-compose.redis-l2.yml` | Два proxy + Redis L2 |
 | `docker-compose.hierarchy.yml` | Multi-instance + ICP |
@@ -64,6 +64,18 @@ ALERT_WEBHOOK_URL=https://siem.example/hooks/bsdm \
 
 Docs: [alerting.md](alerting.md).
 
+### Grafana / Alertmanager (M4)
+
+Always-on with the full stack:
+
+| Endpoint | URL |
+|----------|-----|
+| Grafana Alerting | http://localhost:3000/alerting/list |
+| Alertmanager | http://localhost:9093 |
+| Prometheus alerts | http://localhost:9091/alerts |
+
+Set `ALERT_WEBHOOK_URL` so Alertmanager (and `alert-worker`) forward to SIEM.
+
 ### Health checks
 
 | Сервис | Проверка |
@@ -72,6 +84,7 @@ Docs: [alerting.md](alerting.md).
 | kafka | `kafka-broker-api-versions --bootstrap-server localhost:9092` |
 | clickhouse | HTTP `:8123/ping` |
 | alert-worker | `wget … /health` (profile `alerts`) |
+| alertmanager | `wget … /-/healthy` |
 | prometheus | `wget --spider http://localhost:9090/-/healthy` |
 | grafana | `curl -f http://localhost:3000/api/health` |
 
