@@ -22,16 +22,14 @@ Blockers B1–B26: all ✅ in [BLOCKERS.md](BLOCKERS.md) (GitHub #32–#56).
 | Issue | Title | Notes |
 |-------|-------|-------|
 | [#108](https://github.com/onixus/bsdm-proxy/issues/108) | DNS sinkhole / DNS security | P3 backlog |
-| [#99](https://github.com/onixus/bsdm-proxy/issues/99) | ICAP adapter | P3 backlog |
 
 ## Next strategic backlog
 
 | Issue | Phase |
 |-------|-------|
-| [#99](https://github.com/onixus/bsdm-proxy/issues/99) | P3 ICAP adapter |
 | [#108](https://github.com/onixus/bsdm-proxy/issues/108) | P3 DNS sinkhole |
 
-*(#101 / #103 / #189 / #187 / #188 closed via implementation PRs.)*
+*(#99 ICAP closed via implementation PR; #101 / #103 / #189 / #187 / #188 closed earlier.)*
 
 
 ---
