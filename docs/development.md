@@ -25,20 +25,23 @@ sudo apt-get install -y \
 bsdm-proxy/
 ├── proxy/              # Основной прокси (bin: proxy)
 │   └── src/
-│       ├── main.rs     # ProxyService, HTTP server, cache, Kafka
-│       ├── lib.rs      # acl, auth, categorization, hierarchy, icp, peers
-│       ├── peer_fetch.rs, hierarchy_config.rs, cache_key.rs
-│       └── tls.rs, metrics.rs, policy_config.rs
-├── cache-indexer/      # Kafka → ClickHouse indexer + Search API
-├── bsdm-events/        # Shared CacheEvent types (proxy ↔ indexer)
+│       ├── main.rs, proxy_service.rs, control_api.rs
+│       ├── miss_coalesce.rs, semantic_cache.rs, threat_score_cache.rs
+│       ├── hierarchy*, peers, icp/htcp, rate_limit, upstream, tls, metrics
+│       └── lib.rs
+├── cache-indexer/      # Kafka|HTTP → ClickHouse|SQLite + Search API
+├── ml-worker/          # M5 features/scores + threat-score API
+├── alert-worker/       # M4 webhook alerts
+├── bsdm-events/        # Shared CacheEvent types
 ├── e2e/                # Smoke и E2E тесты
+├── admin-console/      # Unified admin UI (React)
 ├── charts/bsdm/        # Helm chart для Kubernetes
 ├── config/             # Примеры ACL-правил
 ├── packaging/          # Release-пакет (systemd, install.sh)
 ├── scripts/            # build-package, run-*-tests, pre-push-check, clickhouse SQL
 ├── grafana/            # Datasources + dashboards (Prometheus, ClickHouse)
 ├── prometheus/         # Scrape config
-├── web-config/         # Web UI для генерации конфигурации
+├── web-config/         # Legacy static config generator
 └── docs/               # Документация
 ```
 
@@ -94,7 +97,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets
 ```
 
-Ожидаемый результат: **75 тестов** (proxy unit/integration, cache-indexer, e2e smoke + e2e).
+Ожидаемый результат: зелёный suite (сотни unit/integration по workspace + e2e/smoke). Точное число — в CI.
 
 ### Smoke-тесты
 

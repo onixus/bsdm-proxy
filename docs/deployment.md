@@ -18,14 +18,14 @@
 
 ## Docker Compose (рекомендуется для dev/lab)
 
-### Lite — только прокси
+### Lite — proxy + SQLite Search API
 
 ```bash
 ./scripts/gen-ca.sh
 docker compose -f docker-compose.lite.yml up -d --build
 ```
 
-Один caching HTTPS proxy (MITM + L1), без Kafka/ClickHouse. Подробнее: [lite.md](lite.md).
+Caching HTTPS proxy + SQLite indexer / Search API (MITM + L1), без Kafka/ClickHouse. Подробнее: [lite.md](lite.md).
 
 ### Полный стек
 

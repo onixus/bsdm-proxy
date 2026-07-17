@@ -25,7 +25,7 @@
 | [M2.5 — Data plane](#m25--data-plane-throughput-v03x) | v0.3.x–0.3.2 | Tiered L1, streaming, P1 hot path | ✅ Done |
 | [M3 — Retro-search](#m3--retro-search) | v0.3.1+ | ClickHouse, Search API, Grafana, k8s CHI | ✅ Done (~95%) |
 | [M4 — Threat analytics](#m4--threat-analytics-v05x) | v0.5.x | Rule-based угрозы, алерты, C&C / Shannon | ✅ Done |
-| [M5 — ML security](#m5--ml-security-v10x) | v1.0.x | Feature store, anomaly / phishing / C&C ML | ✅ Done |
+| [M5 — ML security](#m5--ml-security-v10x) | Unreleased / 0.5.x+ | Feature store, UEBA / phishing / C&C / write-back | ✅ Done |
 
 ```mermaid
 gantt
@@ -211,7 +211,7 @@ Backlog mapping: [swg-backlog-mapping.md](swg-backlog-mapping.md)
 | Документ | Тема |
 |----------|------|
 | [strategic-roadmap.md](strategic-roadmap.md) | Стратегические фазы Lite / DX / Wasm / AI |
-| [lite.md](lite.md) | Lite compose: standalone proxy |
+| [lite.md](lite.md) | Lite compose: proxy + SQLite Search API |
 | [architecture.md](architecture.md) | Компоненты, блокеры |
 | [adr/0002-clickhouse-analytics.md](adr/0002-clickhouse-analytics.md) | ClickHouse ADR |
 | [clickhouse-analytics.md](clickhouse-analytics.md) | Compose + SQL |

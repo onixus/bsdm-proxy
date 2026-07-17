@@ -6,9 +6,10 @@
 
 | Крейт | Путь | Назначение |
 |-------|------|------------|
-| `bsdm-proxy` | `proxy/` | HTTPS forward proxy (MITM, cache, auth, ACL, Kafka producer) |
-| `cache-indexer` | `cache-indexer/` | Kafka consumer → ClickHouse, Search API, `/metrics` |
+| `bsdm-proxy` | `proxy/` | HTTPS forward proxy (MITM, cache, auth, ACL, events) |
+| `cache-indexer` | `cache-indexer/` | Kafka|HTTP → ClickHouse|SQLite, Search API, `/metrics` |
 | `alert-worker` | `alert-worker/` | ClickHouse threat rules → SIEM/webhook (M4 / B19) |
+| `ml-worker` | `ml-worker/` | M5 features/scores + threat-score API |
 | `bsdm-events` | `bsdm-events/` | Общие типы событий (`CacheEvent`) для proxy и indexer |
 | `e2e` | `e2e/` | Smoke и E2E тесты (subprocess proxy + mock upstream) |
 
@@ -20,14 +21,16 @@
 bsdm-proxy/
 ├── proxy/                  # Основной прокси
 │   └── src/
-│       ├── main.rs         # HTTP server, cache, Kafka
-│       ├── lib.rs          # acl, auth, categorization, hierarchy, icp, peers
-│       ├── peer_fetch.rs, hierarchy_config.rs, cache_key.rs
-│       └── tls.rs, metrics.rs, policy_config.rs
-├── cache-indexer/          # Kafka → ClickHouse indexer + Search API
+│       ├── main.rs, proxy_service.rs, control_api.rs
+│       ├── miss_coalesce.rs, semantic_cache.rs, threat_score_cache.rs
+│       ├── hierarchy*, peers, icp/htcp, rate_limit, upstream, tls, metrics
+│       └── lib.rs
+├── cache-indexer/          # Kafka|HTTP → ClickHouse|SQLite + Search API
+├── ml-worker/              # M5 features/scores + threat-score API
 ├── alert-worker/           # CH rule polling → webhook / SIEM
 ├── bsdm-events/            # Shared event schema
 ├── e2e/                    # Integration tests
+├── admin-console/          # Unified admin UI (React)
 ├── charts/bsdm/            # Helm chart (K8s proxy Deployment)
 ├── config/                 # Примеры ACL-правил
 ├── packaging/              # Release tarball, systemd units, install.sh
@@ -36,11 +39,11 @@ bsdm-proxy/
 ├── grafana/                # Provisioning: datasources + dashboards + alerting
 ├── prometheus/             # Scrape config + M4 alert rules
 ├── alertmanager/           # Alertmanager template + entrypoint
-├── web-config/             # Web UI для генерации .env / compose
+├── web-config/             # Legacy static config generator
 ├── certs/                  # MITM CA (gitignored, генерируется локально)
-├── Dockerfile              # Multi-stage: proxy + cache-indexer + alert-worker
-├── docker-compose.yml      # Полный стек (+ profile `alerts`)
-├── docker-compose.lite.yml # Lite: standalone proxy (Phase 1)
+├── Dockerfile              # Multi-stage: proxy + cache-indexer + alert-worker + ml-worker
+├── docker-compose.yml      # Полный стек (+ profiles `alerts`, `ml`)
+├── docker-compose.lite.yml # Lite: proxy + SQLite indexer (Phase 1)
 ├── docker-compose.*.yml    # Профили: test, redis-l2, hierarchy, ha
 └── AGENTS.md               # Инструкции для Cursor Cloud Agent
 ```
@@ -49,8 +52,8 @@ bsdm-proxy/
 
 | Файл | Сервисы |
 |------|---------|
-| `docker-compose.lite.yml` | proxy only (MITM + L1 spill, no Kafka/CH) |
-| `docker-compose.yml` | proxy, cache-indexer, kafka, zookeeper, clickhouse, prometheus, alertmanager, grafana; optional `alert-worker` (`--profile alerts`) |
+| `docker-compose.lite.yml` | proxy + SQLite cache-indexer (MITM + L1 spill, no Kafka/CH) |
+| `docker-compose.yml` | proxy, cache-indexer, kafka, zookeeper, clickhouse, prometheus, alertmanager, grafana; optional `alert-worker` (`--profile alerts`), `ml-worker` (`--profile ml`) |
 | `docker-compose.test.yml` | Минимальный стек для smoke/E2E |
 | `docker-compose.redis-l2.yml` | 2× proxy + Redis L2 |
 | `docker-compose.hierarchy.yml` | Multi-instance + ICP |

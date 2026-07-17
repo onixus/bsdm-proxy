@@ -29,7 +29,7 @@ Running and testing:
   `./certs/ca.key` and `./certs/ca.crt`. These are git-ignored and NOT in the repo, so
   generate them first (`./scripts/gen-ca.sh` or "Быстрый старт" in `README.md`), otherwise MITM startup fails.
   For plain forward-proxy testing you can set `MITM_ENABLED=false` and skip the certs.
-  Standalone caching node (no Kafka/CH): `./scripts/gen-ca.sh && docker compose -f docker-compose.lite.yml up -d --build` (see `docs/lite.md`).
+  Lite node (proxy + SQLite indexer, no Kafka/CH): `./scripts/gen-ca.sh && docker compose -f docker-compose.lite.yml up -d --build` (see `docs/lite.md`).
 - Run locally: `HTTP_PORT=1488 METRICS_PORT=9090 cargo run -p bsdm-proxy --bin proxy`
   (or the built `./target/debug/proxy`). Verify with `curl http://127.0.0.1:9090/health`
   and `curl -x http://127.0.0.1:1488 http://httpbin.org/get`. HTTPS through MITM:

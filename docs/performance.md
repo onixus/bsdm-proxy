@@ -128,7 +128,7 @@ sudo perf report -i /tmp/bsdm-perf.data
 2. **`PERF_FAST_CACHE_HIT`**: HIT возвращается до ACL/categorization; Kafka и histograms опциональны.
 3. **`WORKER_COUNT`**: N процессов accept на одном порту (SO_REUSEPORT), общий L1 `Arc<HttpL1Cache>`.
 4. **Tiered bodies**: мелкие ответы inline, крупные (≥ `CACHE_SPILL_THRESHOLD_BYTES`) — mmap spill + zero-copy serve.
-4. **ACL**: `RwLock` + `check_access(&self)` — read-mostly без сериализации на каждый MISS.
+4. **ACL**: `AclEngineHandle` + `arc-swap` snapshot — lock-free read на hot path.
 5. **Kafka**: sampling через `KAFKA_SAMPLE_RATE`.
 
 ## Production vs bench
