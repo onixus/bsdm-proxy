@@ -63,6 +63,11 @@ jobs:
           cargo clippy -p bsdm-proxy --features grpc --all-targets -- -D warnings
           cargo test -p bsdm-proxy --features grpc --lib -- control_grpc
 
+      - name: Build and test Wasm plugin host feature
+        run: |
+          cargo clippy -p bsdm-proxy --features wasm --lib -- -D warnings
+          cargo test -p bsdm-proxy --features wasm --lib -- wasm_host
+
   security-audit:
     name: Security Audit
     runs-on: ubuntu-latest
