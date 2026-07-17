@@ -36,7 +36,8 @@ curl http://127.0.0.1:9090/api/stats
     "hit_ratio": 0.892,
     "entries": 842,
     "capacity": 10000,
-    "shards": 16
+    "shards": 16,
+    "tags": 12
   }
 }
 ```
@@ -49,11 +50,22 @@ curl -X POST http://127.0.0.1:9090/api/cache/purge \
   -H 'Content-Type: application/json' \
   -d '{"url":"https://example.com/asset.js"}'
 
+# By Cache-Tag / Surrogate-Key (indexed on L1 insert)
+curl -X POST http://127.0.0.1:9090/api/cache/purge \
+  -H 'Content-Type: application/json' \
+  -d '{"tag":"product-42"}'
+
+curl -X POST http://127.0.0.1:9090/api/cache/purge \
+  -H 'Content-Type: application/json' \
+  -d '{"tags":["catalog","homepage"]}'
+
 # Entire L1 (+ Redis L2 prefix when enabled)
 curl -X POST http://127.0.0.1:9090/api/cache/purge \
   -H 'Content-Type: application/json' \
   -d '{"all":true}'
 ```
+
+Tags are parsed from upstream response headers `Cache-Tag` (comma-separated) and `Surrogate-Key` (space-separated) when objects are stored in L1. Tag purge also deletes matching keys from Redis L2 when enabled.
 
 ## ACL CRUD
 
@@ -70,6 +82,6 @@ Requires `ACL_ENABLED=true`.
 
 ## Roadmap leftovers
 
+- [x] Cache-Tags / Surrogate-Key purge (`{"tag":"..."}`)
 - [ ] Upstream / hierarchy hot reload
-- [ ] Cache-Tags based purge
 - [ ] gRPC control plane

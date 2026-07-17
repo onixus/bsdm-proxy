@@ -45,7 +45,13 @@ export async function fetchProxyStats(): Promise<ProxyStats | null> {
   }
 }
 
-export async function purgeCache(body: { all?: boolean; url?: string; method?: string }): Promise<void> {
+export async function purgeCache(body: {
+  all?: boolean
+  url?: string
+  method?: string
+  tag?: string
+  tags?: string[]
+}): Promise<void> {
   const settings = loadApiSettings()
   await apiFetch('/api/cache/purge', {
     baseUrl: settings.metricsBaseUrl,

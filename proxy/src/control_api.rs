@@ -117,6 +117,7 @@ impl ControlApiState {
                 entries: self.http_cache.len(),
                 capacity: self.http_cache.capacity(),
                 shards: self.http_cache.shard_count(),
+                tags: self.http_cache.tag_count(),
             },
         };
         match serde_json::to_string(&payload) {
@@ -158,10 +159,38 @@ impl ControlApiState {
             );
         }
 
+        let tags = collect_purge_tags(&req);
+        if !tags.is_empty() {
+            let mut removed = 0usize;
+            for tag in &tags {
+                let keys = self.http_cache.keys_for_tag(tag);
+                for key in &keys {
+                    if self.http_cache.remove(key).is_some() {
+                        removed += 1;
+                    }
+                    if let Some(l2) = &self.l2_cache {
+                        l2.delete(key.as_ref()).await;
+                    }
+                }
+            }
+            info!("Control API: purged tags={tags:?} removed={removed}");
+            return json_response(
+                StatusCode::OK,
+                &format!(
+                    r#"{{"status":"purged","scope":"tag","tags":[{}],"removed":{}}}"#,
+                    tags.iter()
+                        .map(|t| format!("\"{}\"", escape_json(t)))
+                        .collect::<Vec<_>>()
+                        .join(","),
+                    removed
+                ),
+            );
+        }
+
         let Some(url) = req.url.as_deref().filter(|u| !u.is_empty()) else {
             return json_response(
                 StatusCode::BAD_REQUEST,
-                r#"{"error":"provide {\"url\":\"...\"} or {\"all\":true}"}"#,
+                r#"{"error":"provide {\"url\":\"...\"}, {\"tag\":\"...\"}, {\"tags\":[...]}, or {\"all\":true}"}"#,
             );
         };
 
@@ -200,6 +229,7 @@ struct CacheStats {
     entries: usize,
     capacity: usize,
     shards: usize,
+    tags: usize,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -208,6 +238,23 @@ struct PurgeRequest {
     all: bool,
     url: Option<String>,
     method: Option<String>,
+    tag: Option<String>,
+    #[serde(default)]
+    tags: Vec<String>,
+}
+
+fn collect_purge_tags(req: &PurgeRequest) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(t) = req.tag.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        out.push(t.to_string());
+    }
+    for t in &req.tags {
+        let t = t.trim();
+        if !t.is_empty() && !out.iter().any(|x| x == t) {
+            out.push(t.to_string());
+        }
+    }
+    out
 }
 
 fn json_response(status: StatusCode, body: &str) -> Response<Body> {
@@ -280,5 +327,44 @@ mod tests {
             .await;
         assert_eq!(resp.status(), StatusCode::OK);
         assert_eq!(cache.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn purge_by_tag() {
+        let metrics = Arc::new(Metrics::new().unwrap());
+        let cache = Arc::new(HttpL1Cache::new(100, 4));
+        let key = http_cache_key("GET", "http://example.com/product");
+        cache.insert(
+            key.clone(),
+            crate::cache::CachedResponse {
+                status: 200,
+                headers: Arc::from([(Arc::from("cache-tag"), Arc::from("product-42"))]),
+                body: crate::cache_body::CachedBody::inline(Bytes::from_static(b"x")),
+                body_encoding: crate::cache_compress::BodyEncoding::Raw,
+                uncompressed_len: 1,
+                cached_at: std::time::SystemTime::now(),
+                ttl: std::time::Duration::from_secs(60),
+                etag: None,
+                last_modified: None,
+                is_negative: false,
+                must_revalidate: false,
+            },
+        );
+        assert_eq!(cache.len(), 1);
+        let state = ControlApiState::new(metrics, cache.clone(), None, None);
+        let resp = state
+            .dispatch(
+                &Method::POST,
+                "/api/cache/purge",
+                Bytes::from_static(br#"{"tag":"product-42"}"#),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(cache.len(), 0);
+        let body = BodyExt::collect(resp.into_body()).await.unwrap().to_bytes();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["scope"], "tag");
+        assert_eq!(v["removed"], 1);
     }
 }

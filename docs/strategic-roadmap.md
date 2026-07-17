@@ -28,7 +28,7 @@
 
 - **Control Plane API:** ✅ REST на metrics port — ACL CRUD, `/api/stats`, `/api/cache/purge` ([control-plane.md](control-plane.md)). gRPC — later.
 - **Горячая перезагрузка (Hot Reload):** ✅ ACL (file auto-reload + API mutate/persist). Upstream/hierarchy — TBD.
-- **Умная инвалидация кэша:** ✅ URL / all purge (`POST /api/cache/purge`). Cache-Tags — TBD.
+- **Умная инвалидация кэша:** ✅ URL / tag / all purge (`POST /api/cache/purge`). Cache-Tag + Surrogate-Key index on L1.
 - **Встроенный мониторинг:** ✅ `GET /api/stats` JSON (Lite, без Grafana).
 
 ---
