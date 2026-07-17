@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.7+033] - 2026-07-17
+
+Release **0.5.07.033** (Cargo/semver `0.5.7+033`). Post-M5: DX control plane, Wasm, AI traffic helpers, P3 ICAP + DNS sinkhole.
+
 ### Added
 
 - **DNS sinkhole sidecar** — workspace crate `dns-sinkhole` (UDP RPZ-lite proxy); ADR 0004; compose profile `dns-sinkhole`; docs [dns-sinkhole.md](docs/dns-sinkhole.md) ([#108](https://github.com/onixus/bsdm-proxy/issues/108))
@@ -36,6 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Squid rock ↔ BSDM spill sizing** — [docs/capacity-planning.md](docs/capacity-planning.md) mapping + HA example ([#101](https://github.com/onixus/bsdm-proxy/issues/101))
 - **Issue tracker hygiene** — [docs/issue-tracker.md](docs/issue-tracker.md); close completed epics #165/#125/#102/#112; backlog #187 gRPC, #188 Wasm, #189 vector DB; BLOCKERS wave 3 strikethrough
 - **Project docs refresh** — README / architecture / development / structure / docker / deployment / wiki index / env.example aligned with M1–M5 done and DX/AI Unreleased (Lite = proxy+SQLite, control plane, event sink, hierarchy peers paths, threat-score vars)
+
+Release package: `./scripts/build-package.sh` → `dist/bsdm-proxy-0.5.7.033-linux-<arch>.tar.gz`  
+Notes: [docs/releases/v0.5.7+033.md](docs/releases/v0.5.7+033.md)
 
 ## [0.5.0] - 2026-07-16
 
@@ -183,6 +190,7 @@ Beta — hierarchical caching Phase 3, optional MITM CA.
 
 [GitHub Releases](https://github.com/onixus/bsdm-proxy/releases/tag/v0.2.2b)
 
+[0.5.7+033]: https://github.com/onixus/bsdm-proxy/compare/v0.5.0...v0.5.7+033
 [0.5.0]: https://github.com/onixus/bsdm-proxy/compare/v0.3.2...v0.5.0
 [0.3.2]: https://github.com/onixus/bsdm-proxy/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/onixus/bsdm-proxy/compare/v0.3.0...v0.3.1

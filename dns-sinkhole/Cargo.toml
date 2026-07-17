@@ -1,6 +1,6 @@
 [package]
 name = "dns-sinkhole"
-version = "0.5.0"
+version = "0.5.7+033"
 edition = "2021"
 license = "MIT"
 authors = ["BSDM-Proxy Contributors"]

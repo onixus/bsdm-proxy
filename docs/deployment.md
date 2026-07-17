@@ -58,8 +58,8 @@ docker compose -f docker-compose.test.yml up -d --build
 ```bash
 ./scripts/build-package.sh
 
-tar xzf dist/bsdm-proxy-0.5.0-linux-x86_64.tar.gz
-cd bsdm-proxy-0.5.0-linux-x86_64
+tar xzf dist/bsdm-proxy-0.5.7.033-linux-x86_64.tar.gz
+cd bsdm-proxy-0.5.7.033-linux-x86_64
 sudo ./install.sh --create-user --systemd
 sudo cp /path/to/ca.key /path/to/ca.crt /certs/
 sudo systemctl enable --now bsdm-proxy
@@ -136,7 +136,7 @@ proxy ──► Kafka ──► cache-indexer ──► ClickHouse (bsdm.http_ca
 
 | Артефакт | Версия |
 |----------|--------|
-| Текущий release | **0.5.0** |
+| Текущий release | **0.5.07.033** (`0.5.7+033`) |
 | Kafka (compose) | Confluent `7.9.8` |
 | ClickHouse (compose) | см. `docker-compose.yml` |
 | Rust (минимум) | `1.88+` |

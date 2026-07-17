@@ -2,7 +2,7 @@
 
 Установка из готового release-архива. Общая документация: [README.md](../README.md) · [docs/README.md](../docs/README.md)
 
-**Текущая версия пакета:** `0.5.0` — [release notes](../docs/releases/v0.5.0.md) · [CHANGELOG](../CHANGELOG.md)
+**Текущая версия пакета:** `0.5.7.033` (Cargo `0.5.7+033` / marketing `0.5.07.033`) — [release notes](../docs/releases/v0.5.7+033.md) · [CHANGELOG](../CHANGELOG.md)
 
 ## Contents
 
@@ -21,8 +21,8 @@
 ## Quick start
 
 ```bash
-tar xzf bsdm-proxy-0.5.0-linux-x86_64.tar.gz
-cd bsdm-proxy-0.5.0-linux-x86_64
+tar xzf bsdm-proxy-0.5.7.033-linux-x86_64.tar.gz
+cd bsdm-proxy-0.5.7.033-linux-x86_64
 sudo ./install.sh --create-user --systemd
 ```
 
@@ -74,7 +74,7 @@ cat VERSION
 
 ```bash
 ./scripts/build-package.sh
-# → dist/bsdm-proxy-0.5.0-linux-<arch>.tar.gz
+# → dist/bsdm-proxy-0.5.7.033-linux-<arch>.tar.gz
 ```
 
 См. также [docs/development.md](../docs/development.md).

@@ -10,7 +10,7 @@
 | **Ретропоиск** | Поиск и аналитика по историческому HTTP-трафику |
 | **ML-безопасность** | Аномалии, фишинг и C&C поверх логов и поведенческих сигналов |
 
-Текущая версия: **0.5.0** · [Releases](https://github.com/onixus/bsdm-proxy/releases) · [CHANGELOG](../CHANGELOG.md)
+Текущая версия: **0.5.07.033** (`0.5.7+033`) · [Releases](https://github.com/onixus/bsdm-proxy/releases) · [CHANGELOG](../CHANGELOG.md)
 
 Стратегический вектор (Lite → DX → Wasm → AI): **[strategic-roadmap.md](strategic-roadmap.md)**
 
