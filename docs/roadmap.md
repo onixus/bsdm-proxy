@@ -198,9 +198,9 @@ Backlog mapping: [swg-backlog-mapping.md](swg-backlog-mapping.md)
 | Фаза | Фокус | Ключевые элементы |
 |------|--------|-------------------|
 | **1. Lite** | VPS / edge, низкий порог | ✅ `docker-compose.lite.yml` + SQLite indexer; ✅ Cargo `kafka` feature (B21) |
-| **2. DX** | Control plane | ✅ REST ACL/stats/purge/hierarchy/upstream-TLS reload; next: gRPC control plane |
-| **3. Wasm** | Плагины | Wasmtime в request/response pipeline, SDK (Rust/Go/AS), PoC auth-as-plugin |
-| **4. AI-трафик** | LLM / API proxy | ✅ coalescing + API-key RL + LLM/semantic cache prep; next: external vector DB |
+| **2. DX** | Control plane | ✅ REST ACL/stats/purge/hierarchy/upstream-TLS reload; next: [gRPC #187](https://github.com/onixus/bsdm-proxy/issues/187) |
+| **3. Wasm** | Плагины | [Wasmtime plugin host #188](https://github.com/onixus/bsdm-proxy/issues/188) |
+| **4. AI-трафик** | LLM / API proxy | ✅ coalescing + API-key RL + LLM/semantic cache prep; next: [vector DB #189](https://github.com/onixus/bsdm-proxy/issues/189) |
 
 Порядок реализации по умолчанию: **Lite → DX → Wasm / AI** (AI coalescing может частично пересекаться с perf-треком раньше Wasm).
 
@@ -222,4 +222,4 @@ Backlog mapping: [swg-backlog-mapping.md](swg-backlog-mapping.md)
 
 ---
 
-*Обновлено: 2026-07-17 — M5.5 threat score write-back; M5 epic complete*
+*Обновлено: 2026-07-17 — M5 complete; issue tracker hygiene ([issue-tracker.md](issue-tracker.md))*
