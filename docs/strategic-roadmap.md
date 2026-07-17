@@ -17,7 +17,7 @@
 
 - **Отвязка от тяжелых зависимостей:** ✅ `INDEX_STORE=sqlite|memory` + optional Kafka; HTTP `POST /api/events` (см. [lite.md](lite.md)).
 - **Встроенное хранилище:** ✅ SQLite / in-memory event store на cache-indexer.
-- **Standalone-архитектура:** независимый бинарник / lightweight container — proxy уже работает без `KAFKA_BROKERS`; Lite compose + SQLite. *(partial — rdkafka still linked, B21)*
+- **Standalone-архитектура:** независимый бинарник / lightweight container — proxy уже работает без `KAFKA_BROKERS`; Lite compose + SQLite. ✅ `kafka` Cargo feature (B21) drops `rdkafka` from Lite builds.
 - **Zero-Config профили:** ✅ [`docker-compose.lite.yml`](../docker-compose.lite.yml) + [`scripts/gen-ca.sh`](../scripts/gen-ca.sh).
 
 ---

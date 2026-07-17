@@ -34,9 +34,9 @@ use crate::metrics::{FastRequestScope, Metrics, RequestMetricsGuard};
 use crate::peer_fetch::fetch_via_peer;
 use crate::peers::CachePeer;
 use crate::perf::PerfConfig;
-use crate::pipeline::{
-    flush_kafka, new_event_id, CacheEvent, HttpEventPipeline, KafkaEventPipeline,
-};
+use crate::pipeline::{dispatch_cache_event, new_event_id, CacheEvent, HttpEventPipeline};
+#[cfg(feature = "kafka")]
+use crate::pipeline::{flush_kafka, KafkaEventPipeline};
 use crate::policy_cache::PolicyDecisionCache;
 use crate::rate_limit::{RateLimitViolation, RateLimiter};
 use crate::session::{header_ci, resolve_location, SessionCorrelator};
@@ -59,6 +59,7 @@ struct MissCompletionHandle {
     l2_cache: Option<RedisL2Cache>,
     hierarchy: Option<Arc<HierarchyManager>>,
     metrics: Arc<Metrics>,
+    #[cfg(feature = "kafka")]
     kafka_pipeline: Option<Arc<KafkaEventPipeline>>,
     http_pipeline: Option<Arc<HttpEventPipeline>>,
     perf: PerfConfig,
@@ -89,11 +90,13 @@ impl MissCompletionHandle {
         if !self.perf.should_emit_kafka_event() {
             return;
         }
-        if let Some(pipeline) = &self.kafka_pipeline {
-            pipeline.try_enqueue(event, &self.metrics);
-        } else if let Some(pipeline) = &self.http_pipeline {
-            pipeline.try_enqueue(event, &self.metrics);
-        }
+        dispatch_cache_event(
+            #[cfg(feature = "kafka")]
+            self.kafka_pipeline.as_deref(),
+            self.http_pipeline.as_deref(),
+            event,
+            &self.metrics,
+        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -237,6 +240,7 @@ pub struct ProxyService {
     http_cache: Arc<HttpL1Cache>,
     l2_cache: Option<RedisL2Cache>,
     cache_config: CacheConfig,
+    #[cfg(feature = "kafka")]
     kafka_pipeline: Option<Arc<KafkaEventPipeline>>,
     http_pipeline: Option<Arc<HttpEventPipeline>>,
     http_client:
@@ -283,6 +287,7 @@ impl ProxyService {
             l2_cache: self.l2_cache.clone(),
             hierarchy: self.hierarchy.clone(),
             metrics: self.metrics.clone(),
+            #[cfg(feature = "kafka")]
             kafka_pipeline: self.kafka_pipeline.clone(),
             http_pipeline: self.http_pipeline.clone(),
             perf: self.perf.clone(),
@@ -296,7 +301,7 @@ impl ProxyService {
         cert_cache: CertCache,
         cache_config: CacheConfig,
         l2_cache: Option<RedisL2Cache>,
-        kafka_pipeline: Option<Arc<KafkaEventPipeline>>,
+        #[cfg(feature = "kafka")] kafka_pipeline: Option<Arc<KafkaEventPipeline>>,
         http_pipeline: Option<Arc<HttpEventPipeline>>,
         metrics: Arc<Metrics>,
         mitm_enabled: bool,
@@ -328,6 +333,7 @@ impl ProxyService {
             http_cache,
             l2_cache,
             cache_config,
+            #[cfg(feature = "kafka")]
             kafka_pipeline,
             http_pipeline,
             http_client,
@@ -962,19 +968,25 @@ impl ProxyService {
         if !self.perf.should_emit_kafka_event() {
             return;
         }
-        if let Some(pipeline) = &self.kafka_pipeline {
-            pipeline.try_enqueue(event, &self.metrics);
-        } else if let Some(pipeline) = &self.http_pipeline {
-            pipeline.try_enqueue(event, &self.metrics);
-        }
+        dispatch_cache_event(
+            #[cfg(feature = "kafka")]
+            self.kafka_pipeline.as_deref(),
+            self.http_pipeline.as_deref(),
+            event,
+            &self.metrics,
+        );
     }
 
     pub async fn flush_kafka(&self, timeout: Duration) {
-        let Some(pipeline) = self.kafka_pipeline.as_ref() else {
-            return;
-        };
-
-        flush_kafka(pipeline.producer(), timeout).await;
+        #[cfg(feature = "kafka")]
+        {
+            let Some(pipeline) = self.kafka_pipeline.as_ref() else {
+                return;
+            };
+            flush_kafka(pipeline.producer(), timeout).await;
+        }
+        #[cfg(not(feature = "kafka"))]
+        let _ = timeout;
     }
 
     fn finish_request_metrics(

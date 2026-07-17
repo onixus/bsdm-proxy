@@ -21,7 +21,7 @@ quick_cache = "0.7"
 redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
 rand = "0.9"
 rcgen = { version = "0.14", features = ["x509-parser"] }
-rdkafka = "0.39"
+rdkafka = { version = "0.39", optional = true }
 prometheus = { version = "0.14", features = ["process"] }
 tokio-rustls = { version = "0.26", features = ["ring"] }
 rustls = { version = "0.23", features = ["ring"] }
@@ -53,7 +53,8 @@ sspi = { version = "0.21.1", optional = true, features = ["network_client"] }
 kerberos_keytab = { version = "0.0.3", optional = true }
 
 [features]
-default = ["auth-basic"]
+default = ["auth-basic", "kafka"]
+kafka = ["dep:rdkafka"]
 auth-basic = []
 auth-ldap = ["ldap3"]
 auth-ntlm = ["sspi"]
