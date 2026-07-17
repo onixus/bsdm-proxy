@@ -1,0 +1,40 @@
+name: Admin Console CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'admin-console/**'
+      - '.github/workflows/admin-console.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'admin-console/**'
+      - '.github/workflows/admin-console.yml'
+
+concurrency:
+  group: admin-console-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build & Lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: admin-console
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: admin-console/package-lock.json
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build

@@ -1,6 +1,8 @@
 # BSDM-Proxy Web Configurator
 
-🌐 Modern web-based configuration interface for BSDM-Proxy.
+> **New:** The unified admin console lives in [`admin-console/`](../admin-console/) — React SPA with dashboard, logs, policies, and settings. This directory remains as a zero-dependency static fallback.
+
+🌐 Web-based configuration interface for BSDM-Proxy.
 
 > Project wiki: [docs/README.md](../docs/README.md) · Deployment: [docs/deployment.md](../docs/deployment.md)
 

@@ -459,7 +459,8 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test, cargo-audi
 | [docs/releases/v0.5.0.md](docs/releases/v0.5.0.md) | Release notes 0.5.0 (M4) |
 | [docs/releases/v0.3.2.md](docs/releases/v0.3.2.md) | Release notes 0.3.2 |
 | [docs/releases/v0.3.1.md](docs/releases/v0.3.1.md) | Release notes 0.3.1 |
-| [packaging/README.md](packaging/README.md) | Release-пакет и systemd |
+| [admin-console/README.md](admin-console/README.md) | Unified admin UI (dashboard, logs, policies, settings) |
+| [web-config/README.md](web-config/README.md) | Legacy static config generator |
 | [docker-compose.yml](docker-compose.yml) | Полный стек |
 
 ## Roadmap
