@@ -9,9 +9,10 @@ use bsdm_proxy::{
     htcp_peer_port, htcp_server_bind_addr, http_cache_key, icp_server_bind_addr,
     load_hierarchy_config, metrics_server, run_peer_discovery, should_start_htcp_server,
     should_start_icp_server, wait_shutdown_signal, AclAction, AuthManager, CacheConfig, CertCache,
-    HtcpServer, HttpEventPipeline, IcpServer, L2CacheConfig, Metrics, PeerDiscoveryConfig,
-    PerfConfig, PolicyCacheConfig, PolicyDecisionCache, ProxyPolicy, ProxyService, RateLimitConfig,
-    RedisL2Cache, ThreatScoreCache, ThreatScoreConfig, UpstreamTlsConfig,
+    ControlApiState, HtcpServer, HttpEventPipeline, IcpServer, L2CacheConfig, Metrics,
+    PeerDiscoveryConfig, PerfConfig, PolicyCacheConfig, PolicyDecisionCache, ProxyPolicy,
+    ProxyService, RateLimitConfig, RedisL2Cache, ThreatScoreCache, ThreatScoreConfig,
+    UpstreamTlsConfig,
 };
 use policy_config::{load_policy_config, reload_acl_engine};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -134,14 +135,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    tokio::spawn(metrics_server(
-        metrics.clone(),
-        draining.clone(),
-        shutdown_rx.clone(),
-        metrics_port,
-        acl_api,
-    ));
-
     let mitm_enabled = std::env::var("MITM_ENABLED")
         .map(|v| !matches!(v.to_ascii_lowercase().as_str(), "0" | "false" | "no"))
         .unwrap_or(true);
@@ -243,7 +236,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let service = Arc::new(ProxyService::new(
         cert_cache,
         cache_config.clone(),
-        l2_cache,
+        l2_cache.clone(),
         #[cfg(feature = "kafka")]
         kafka_pipeline,
         http_pipeline,
@@ -258,6 +251,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         perf.clone(),
         policy_cache.clone(),
         threat_score_cache,
+    ));
+
+    let control_api = Arc::new(ControlApiState::from_env(
+        metrics.clone(),
+        service.http_cache(),
+        l2_cache.clone(),
+    ));
+    info!(
+        "Control plane API on :{}/api/stats · :{}/api/cache/purge",
+        metrics_port, metrics_port
+    );
+    tokio::spawn(metrics_server(
+        metrics.clone(),
+        draining.clone(),
+        shutdown_rx.clone(),
+        metrics_port,
+        acl_api,
+        Some(control_api),
     ));
 
     if should_start_icp_server(&hierarchy_config) {

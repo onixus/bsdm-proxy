@@ -1,5 +1,6 @@
 import { loadApiSettings } from './settings'
 import { apiFetch } from './client'
+import { fetchThreatScores } from './threatScores'
 
 export interface DashboardMetric {
   id: string
@@ -20,37 +21,76 @@ export interface MlScoreRow {
   features_json?: string
 }
 
-/** Parse Prometheus text exposition for a single metric sample (best-effort). */
-function parsePrometheusValue(text: string, name: string): number | null {
-  const re = new RegExp(`^${name}(?:\\{[^}]*\\})?\\s+([\\d.eE+-]+)`, 'm')
-  const m = text.match(re)
-  return m ? parseFloat(m[1]) : null
-}
-
-export async function fetchDashboardMetrics(): Promise<DashboardMetric[]> {
-  const settings = loadApiSettings()
-  const base = settings.metricsBaseUrl
-
-  try {
-    const text = await apiFetch<string>('/metrics', { baseUrl: base })
-    if (typeof text !== 'string') throw new Error('not text')
-    const requests = parsePrometheusValue(text, 'bsdm_proxy_requests_total') ?? 0
-    const hits = parsePrometheusValue(text, 'bsdm_proxy_cache_hits_total') ?? 0
-    const misses = parsePrometheusValue(text, 'bsdm_proxy_cache_misses_total') ?? 0
-    const hitRate = requests > 0 ? ((hits / (hits + misses || 1)) * 100).toFixed(1) : '—'
-    return [
-      { id: 'requests', label: 'Total requests', value: requests, status: 'ok' },
-      { id: 'hit-rate', label: 'Cache hit rate', value: hitRate, unit: '%', status: 'ok' },
-      { id: 'hits', label: 'Cache hits', value: hits, status: 'ok' },
-      { id: 'misses', label: 'Cache misses', value: misses, status: 'ok' },
-    ]
-  } catch {
-    return mockMetrics()
+export interface ProxyStats {
+  service: string
+  uptime_secs: number
+  requests_in_flight: number
+  cache: {
+    hits: number
+    misses: number
+    bypasses: number
+    hit_ratio: number
+    entries: number
+    capacity: number
+    shards: number
   }
 }
 
+export async function fetchProxyStats(): Promise<ProxyStats | null> {
+  const settings = loadApiSettings()
+  try {
+    return await apiFetch<ProxyStats>('/api/stats', { baseUrl: settings.metricsBaseUrl })
+  } catch {
+    return null
+  }
+}
+
+export async function purgeCache(body: { all?: boolean; url?: string; method?: string }): Promise<void> {
+  const settings = loadApiSettings()
+  await apiFetch('/api/cache/purge', {
+    baseUrl: settings.metricsBaseUrl,
+    method: 'POST',
+    body,
+  })
+}
+
+export async function fetchDashboardMetrics(): Promise<DashboardMetric[]> {
+  const stats = await fetchProxyStats()
+  if (stats) {
+    return [
+      {
+        id: 'hit-rate',
+        label: 'Cache hit rate',
+        value: (stats.cache.hit_ratio * 100).toFixed(1),
+        unit: '%',
+        status: 'ok',
+      },
+      { id: 'hits', label: 'Cache hits', value: stats.cache.hits, status: 'ok' },
+      { id: 'misses', label: 'Cache misses', value: stats.cache.misses, status: 'ok' },
+      {
+        id: 'entries',
+        label: 'L1 entries',
+        value: `${stats.cache.entries}/${stats.cache.capacity}`,
+        status: 'ok',
+      },
+      {
+        id: 'inflight',
+        label: 'In flight',
+        value: stats.requests_in_flight,
+        status: 'ok',
+      },
+      {
+        id: 'uptime',
+        label: 'Uptime',
+        value: formatUptime(stats.uptime_secs),
+        status: 'ok',
+      },
+    ]
+  }
+  return mockMetrics()
+}
+
 export async function fetchTopMlScores(): Promise<MlScoreRow[]> {
-  const { fetchThreatScores } = await import('./threatScores')
   const snap = await fetchThreatScores()
   return snap.scores
     .slice()
@@ -66,11 +106,17 @@ export async function fetchTopMlScores(): Promise<MlScoreRow[]> {
     }))
 }
 
+function formatUptime(secs: number): string {
+  if (secs < 60) return `${secs}s`
+  if (secs < 3600) return `${Math.floor(secs / 60)}m`
+  return `${(secs / 3600).toFixed(1)}h`
+}
+
 function mockMetrics(): DashboardMetric[] {
   return [
-    { id: 'requests', label: 'Total requests', value: '128.4k', trend: 'up', status: 'ok' },
     { id: 'hit-rate', label: 'Cache hit rate', value: '87.2', unit: '%', trend: 'up', status: 'ok' },
-    { id: 'denied', label: 'Denied (24h)', value: 342, trend: 'flat', status: 'warn' },
-    { id: 'ml-alerts', label: 'ML anomalies', value: 7, trend: 'down', status: 'warn' },
+    { id: 'hits', label: 'Cache hits', value: 11240, trend: 'up', status: 'ok' },
+    { id: 'misses', label: 'Cache misses', value: 1640, trend: 'flat', status: 'ok' },
+    { id: 'entries', label: 'L1 entries', value: '3200/10000', status: 'ok' },
   ]
 }

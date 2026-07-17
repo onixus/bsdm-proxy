@@ -11,6 +11,8 @@ export default defineConfig({
       '/api/search': { target: 'http://127.0.0.1:8080', changeOrigin: true },
       '/api/events': { target: 'http://127.0.0.1:8080', changeOrigin: true },
       '/api/acl': { target: 'http://127.0.0.1:9090', changeOrigin: true },
+      '/api/stats': { target: 'http://127.0.0.1:9090', changeOrigin: true },
+      '/api/cache': { target: 'http://127.0.0.1:9090', changeOrigin: true },
       '/api/threat-scores': { target: 'http://127.0.0.1:8091', changeOrigin: true },
       '/metrics': { target: 'http://127.0.0.1:9090', changeOrigin: true },
     },

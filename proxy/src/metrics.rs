@@ -529,7 +529,6 @@ impl Metrics {
     }
 
     /// Get cache hit rate (0.0 to 1.0)
-    #[allow(dead_code)]
     pub fn cache_hit_rate(&self) -> f64 {
         let hits = self.cache_hits_total.get();
         let misses = self.cache_misses_total.get();

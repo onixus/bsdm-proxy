@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 use crate::acl::{AclAction, AclEngineHandle, AclRule};
-use crate::acl_config::{load_acl_engine_from_file, parse_acl_action};
+use crate::acl_config::{load_acl_engine_from_file, parse_acl_action, save_acl_engine_to_file};
 use crate::http_types::{full, Body};
 use crate::policy_cache::PolicyDecisionCache;
 
@@ -81,10 +81,23 @@ impl AclApiState {
             return json_response(StatusCode::UNAUTHORIZED, r#"{"error":"unauthorized"}"#);
         }
 
+        if let Some(id) = path.strip_prefix("/api/acl/rules/") {
+            let id = percent_decode(id);
+            return match *method {
+                Method::PUT => self.update_rule_body(&id, body).await,
+                Method::DELETE => self.delete_rule(&id).await,
+                _ => json_response(
+                    StatusCode::METHOD_NOT_ALLOWED,
+                    r#"{"error":"method not allowed"}"#,
+                ),
+            };
+        }
+
         match (method, path) {
             (&Method::GET, "/api/acl/rules") => self.list_rules().await,
             (&Method::POST, "/api/acl/rules") => self.add_rule_body(body).await,
             (&Method::POST, "/api/acl/reload") => self.reload_rules().await,
+            (&Method::POST, "/api/acl/persist") => self.persist_rules().await,
             _ => json_response(StatusCode::NOT_FOUND, r#"{"error":"not found"}"#),
         }
     }
@@ -98,6 +111,12 @@ impl AclApiState {
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.strip_prefix("Bearer "))
             .is_some_and(|token| token == expected)
+    }
+
+    fn invalidate_policy_cache(&self) {
+        if let Some(cache) = &self.policy_cache {
+            cache.invalidate();
+        }
     }
 
     async fn list_rules(&self) -> Response<Body> {
@@ -153,10 +172,64 @@ impl AclApiState {
 
         info!("ACL API: adding rule {} ({})", rule.id, rule.name);
         self.engine.mutate(|engine| engine.add_rule(rule.clone()));
+        self.invalidate_policy_cache();
         match serde_json::to_string(&rule) {
             Ok(body) => json_response(StatusCode::CREATED, &body),
             Err(_) => json_response(StatusCode::CREATED, r#"{"status":"created"}"#),
         }
+    }
+
+    async fn update_rule_body(&self, id: &str, body: Bytes) -> Response<Body> {
+        let mut rule: AclRule = match serde_json::from_slice(&body) {
+            Ok(rule) => rule,
+            Err(e) => {
+                return json_response(
+                    StatusCode::BAD_REQUEST,
+                    &format!(
+                        r#"{{"error":"invalid json: {}"}}"#,
+                        escape_json(&e.to_string())
+                    ),
+                );
+            }
+        };
+        if rule.id.trim().is_empty() {
+            rule.id = id.to_string();
+        } else if rule.id != id {
+            return json_response(
+                StatusCode::BAD_REQUEST,
+                r#"{"error":"path id must match rule.id"}"#,
+            );
+        }
+
+        let mut updated = false;
+        self.engine.mutate(|engine| {
+            updated = engine.update_rule(rule.clone());
+        });
+        if !updated {
+            return json_response(StatusCode::NOT_FOUND, r#"{"error":"rule not found"}"#);
+        }
+        self.invalidate_policy_cache();
+        info!("ACL API: updated rule {id}");
+        match serde_json::to_string(&rule) {
+            Ok(body) => json_response(StatusCode::OK, &body),
+            Err(_) => json_response(StatusCode::OK, r#"{"status":"updated"}"#),
+        }
+    }
+
+    async fn delete_rule(&self, id: &str) -> Response<Body> {
+        let mut removed = false;
+        self.engine.mutate(|engine| {
+            removed = engine.remove_rule(id);
+        });
+        if !removed {
+            return json_response(StatusCode::NOT_FOUND, r#"{"error":"rule not found"}"#);
+        }
+        self.invalidate_policy_cache();
+        info!("ACL API: deleted rule {id}");
+        json_response(
+            StatusCode::OK,
+            &format!(r#"{{"status":"deleted","id":"{}"}}"#, escape_json(id)),
+        )
     }
 
     async fn reload_rules(&self) -> Response<Body> {
@@ -171,9 +244,7 @@ impl AclApiState {
             Ok(loaded) => {
                 let count = loaded.rule_count();
                 self.engine.replace(loaded);
-                if let Some(cache) = &self.policy_cache {
-                    cache.invalidate();
-                }
+                self.invalidate_policy_cache();
                 info!("ACL API: reloaded {} rules from {}", count, path);
                 json_response(
                     StatusCode::OK,
@@ -187,6 +258,30 @@ impl AclApiState {
                     &format!(r#"{{"error":"{}"}}"#, escape_json(&e)),
                 )
             }
+        }
+    }
+
+    async fn persist_rules(&self) -> Response<Body> {
+        let Some(path) = &self.config.rules_path else {
+            return json_response(
+                StatusCode::BAD_REQUEST,
+                r#"{"error":"ACL_RULES_PATH is not configured"}"#,
+            );
+        };
+        let engine = self.engine.load();
+        match save_acl_engine_to_file(path, &engine) {
+            Ok(()) => json_response(
+                StatusCode::OK,
+                &format!(
+                    r#"{{"status":"persisted","count":{},"path":"{}"}}"#,
+                    engine.rule_count(),
+                    escape_json(path)
+                ),
+            ),
+            Err(e) => json_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!(r#"{{"error":"{}"}}"#, escape_json(&e)),
+            ),
         }
     }
 }
@@ -212,6 +307,33 @@ fn escape_json(value: &str) -> String {
         .replace('"', "\\\"")
         .replace('\n', "\\n")
         .replace('\r', "\\r")
+}
+
+fn percent_decode(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let bytes = raw.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let (Some(h), Some(l)) = (from_hex(bytes[i + 1]), from_hex(bytes[i + 2])) {
+                out.push((h << 4 | l) as char);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+    out
+}
+
+fn from_hex(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -248,6 +370,17 @@ mod tests {
         )
     }
 
+    const SAMPLE_RULE: &[u8] = br#"{
+            "id": "api-rule",
+            "name": "API rule",
+            "enabled": true,
+            "priority": 50,
+            "action": "deny",
+            "rule_type": { "Domain": "blocked.test" },
+            "redirect_url": null,
+            "comment": null
+        }"#;
+
     #[tokio::test]
     async fn list_rules_empty() {
         let state = test_state();
@@ -268,21 +401,11 @@ mod tests {
     #[tokio::test]
     async fn add_rule_via_api() {
         let state = test_state();
-        let rule_json = br#"{
-            "id": "api-rule",
-            "name": "API rule",
-            "enabled": true,
-            "priority": 50,
-            "action": "deny",
-            "rule_type": { "Domain": "blocked.test" },
-            "redirect_url": null,
-            "comment": null
-        }"#;
         let resp = state
             .dispatch(
                 &Method::POST,
                 "/api/acl/rules",
-                Bytes::from_static(rule_json),
+                Bytes::from_static(SAMPLE_RULE),
                 &HeaderMap::new(),
             )
             .await;
@@ -302,6 +425,64 @@ mod tests {
             .to_bytes();
         let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(parsed["count"], 1);
+    }
+
+    #[tokio::test]
+    async fn update_and_delete_rule() {
+        let state = test_state();
+        state
+            .dispatch(
+                &Method::POST,
+                "/api/acl/rules",
+                Bytes::from_static(SAMPLE_RULE),
+                &HeaderMap::new(),
+            )
+            .await;
+
+        let updated = br#"{
+            "id": "api-rule",
+            "name": "Updated",
+            "enabled": false,
+            "priority": 10,
+            "action": "allow",
+            "rule_type": { "Domain": "blocked.test" },
+            "redirect_url": null,
+            "comment": null
+        }"#;
+        let resp = state
+            .dispatch(
+                &Method::PUT,
+                "/api/acl/rules/api-rule",
+                Bytes::from_static(updated),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let resp = state
+            .dispatch(
+                &Method::DELETE,
+                "/api/acl/rules/api-rule",
+                Bytes::new(),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let list_resp = state
+            .dispatch(
+                &Method::GET,
+                "/api/acl/rules",
+                Bytes::new(),
+                &HeaderMap::new(),
+            )
+            .await;
+        let body = BodyExt::collect(list_resp.into_body())
+            .await
+            .unwrap()
+            .to_bytes();
+        let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(parsed["count"], 0);
     }
 
     #[tokio::test]
@@ -345,6 +526,20 @@ mod tests {
             .dispatch(
                 &Method::POST,
                 "/api/acl/reload",
+                Bytes::new(),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn persist_without_path_returns_bad_request() {
+        let state = test_state();
+        let resp = state
+            .dispatch(
+                &Method::POST,
+                "/api/acl/persist",
                 Bytes::new(),
                 &HeaderMap::new(),
             )

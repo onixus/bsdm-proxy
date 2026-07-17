@@ -32,6 +32,7 @@
 | [logging.md](logging.md) | `RUST_LOG`, уровни |
 | [performance.md](performance.md) | Тюнинг RPS, bench |
 | [acl.md](acl.md) | ACL + REST API |
+| [control-plane.md](control-plane.md) | DX Phase 2: stats, cache purge, ACL CRUD |
 | [categorization.md](categorization.md) | UT1 Blacklists, metrics, OTX |
 | [hierarchical-caching.md](hierarchical-caching.md) | ICP/HTCP hierarchy |
 | [clickhouse-analytics.md](clickhouse-analytics.md) | ClickHouse analytics |

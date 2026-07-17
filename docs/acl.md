@@ -2,7 +2,7 @@
 
 > См. также: [оглавление документации](README.md) · [пример правил](../config/acl-rules.example.json)
 
-> ⚠️ **Ограничения реализации:** TimeWindow rules — TODO ([B14](BLOCKERS.md)); group-based rules частично игнорируются; REST API для управления ACL **не реализован** ([B25](BLOCKERS.md)) — только JSON-файл.
+> ⚠️ **Ограничения реализации:** REST ACL CRUD + persist — ✅ (см. [control-plane.md](control-plane.md)); upstream hot reload и Cache-Tags purge — ещё в roadmap Phase 2.
 
 Flexible access control system for BSDM-Proxy with multiple rule types and priority-based matching.
 
@@ -431,24 +431,30 @@ curl -X POST http://localhost:9090/api/acl/rules \
 curl http://localhost:9090/api/acl/rules
 ```
 
-### Reload Rules
+### Reload / Persist
 
 ```bash
 curl -X POST http://localhost:9090/api/acl/reload
+curl -X POST http://localhost:9090/api/acl/persist
 ```
 
 Responses:
 - `GET /api/acl/rules` → `{ "count", "default_action", "rules": [...] }`
 - `POST /api/acl/rules` → `201 Created` with rule JSON (or `409` if `id` exists)
+- `PUT /api/acl/rules/{id}` → replace rule (`404` if missing)
+- `DELETE /api/acl/rules/{id}` → delete rule
 - `POST /api/acl/reload` → `{ "status": "reloaded", "count": N }` (requires `ACL_RULES_PATH`)
+- `POST /api/acl/persist` → write memory → `ACL_RULES_PATH`
 
 When `ACL_API_TOKEN` is set, pass `Authorization: Bearer <token>` on all `/api/acl/*` requests.
 
 The API is available when `ACL_ENABLED=true` on the metrics port (`METRICS_PORT`, default `9090`).
 
-**Security:** in production set `ACL_API_TOKEN` or restrict network access to `METRICS_PORT` (the API listens on `0.0.0.0`).
+**Security:** in production set `ACL_API_TOKEN` / `CONTROL_API_TOKEN` or restrict network access to `METRICS_PORT` (the API listens on `0.0.0.0`).
 
-**Persistence:** `POST /api/acl/rules` updates the in-memory engine only; rules are not written to `ACL_RULES_PATH`. A subsequent `POST /api/acl/reload` (or `ACL_AUTO_RELOAD`) replaces in-memory rules from the file and drops API-added rules. To make changes permanent, edit the JSON file and call reload.
+**Persistence:** mutations update the in-memory engine; call `POST /api/acl/persist` to write `ACL_RULES_PATH`. A subsequent `POST /api/acl/reload` (or `ACL_AUTO_RELOAD`) replaces in-memory rules from the file.
+
+Full control plane (stats + purge): [control-plane.md](control-plane.md).
 
 ### Policy decision cache
 
@@ -459,10 +465,11 @@ POLICY_DECISION_CACHE_TTL_SECONDS=120   # 0 = disabled
 POLICY_DECISION_CACHE_MAX_KEYS=10000
 ```
 
-ACL reload (`POST /api/acl/reload`, `ACL_AUTO_RELOAD`) flushes the cache. Metric: `bsdm_proxy_policy_cache_hit_total`.
+ACL mutations and reload flush the cache. Metric: `bsdm_proxy_policy_cache_hit_total`.
 
 ---
 
 **See also:**
+- [Control plane](control-plane.md)
 - [Categorization](categorization.md)
 - [Authentication](authentication.md)

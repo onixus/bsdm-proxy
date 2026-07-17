@@ -25,6 +25,7 @@ use tracing::{debug, error, info, warn};
 use crate::acl_api::AclApiState;
 use crate::auth::ConnAuthCache;
 use crate::auth::UserInfo;
+use crate::control_api::ControlApiState;
 use crate::http_types::{empty, full};
 use crate::metrics::Metrics;
 use crate::pipeline::{new_event_id, CacheEvent};
@@ -64,6 +65,7 @@ pub async fn metrics_server(
     mut shutdown_rx: watch::Receiver<bool>,
     metrics_port: u16,
     acl_api: Option<Arc<AclApiState>>,
+    control_api: Option<Arc<ControlApiState>>,
 ) {
     let bind_addr = format!("0.0.0.0:{}", metrics_port);
     let listener = match TcpListener::bind(&bind_addr).await {
@@ -90,18 +92,26 @@ pub async fn metrics_server(
                 let metrics = metrics.clone();
                 let draining = draining.clone();
                 let acl_api = acl_api.clone();
+                let control_api = control_api.clone();
                 tokio::spawn(async move {
                     let io = TokioIo::new(stream);
                     let service = service_fn(move |req: Request<Incoming>| {
                         let metrics = metrics.clone();
                         let draining = draining.clone();
                         let acl_api = acl_api.clone();
+                        let control_api = control_api.clone();
                         async move {
                             let path = req.uri().path();
                             debug!("Metrics request from {}: {}", addr, path);
 
                             if let Some(api) = &acl_api {
                                 if path.starts_with("/api/acl/") {
+                                    return Ok::<_, Infallible>(api.handle_request(req).await);
+                                }
+                            }
+
+                            if let Some(api) = &control_api {
+                                if path == "/api/stats" || path.starts_with("/api/cache/") {
                                     return Ok::<_, Infallible>(api.handle_request(req).await);
                                 }
                             }

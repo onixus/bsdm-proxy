@@ -1,7 +1,7 @@
-//! Load ACL rules from JSON configuration files.
+//! Load / persist ACL rules from JSON configuration files.
 
 use crate::acl::{AclAction, AclEngine, AclRule};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tracing::info;
 
 pub fn parse_acl_action(value: &str) -> AclAction {
@@ -12,7 +12,15 @@ pub fn parse_acl_action(value: &str) -> AclAction {
     }
 }
 
-#[derive(Debug, Deserialize)]
+fn action_to_str(action: AclAction) -> &'static str {
+    match action {
+        AclAction::Allow => "allow",
+        AclAction::Deny => "deny",
+        AclAction::Redirect => "redirect",
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 struct AclRulesFile {
     #[serde(default)]
     default_action: Option<String>,
@@ -40,6 +48,22 @@ pub fn load_acl_engine_from_file(
     engine.load_rules(file.rules);
     info!("Loaded {} ACL rules from {}", engine.rule_count(), path);
     Ok(engine)
+}
+
+/// Persist current engine state to `ACL_RULES_PATH` JSON.
+pub fn save_acl_engine_to_file(path: &str, engine: &AclEngine) -> Result<(), String> {
+    let file = AclRulesFile {
+        default_action: Some(action_to_str(engine.default_action()).to_string()),
+        rules: engine.rules().to_vec(),
+    };
+    let content = serde_json::to_string_pretty(&file)
+        .map_err(|e| format!("failed to serialize ACL rules: {e}"))?;
+    let tmp = format!("{path}.tmp");
+    std::fs::write(&tmp, format!("{content}\n"))
+        .map_err(|e| format!("failed to write ACL temp file: {e}"))?;
+    std::fs::rename(&tmp, path).map_err(|e| format!("failed to replace ACL rules file: {e}"))?;
+    info!("Persisted {} ACL rules to {path}", engine.rule_count());
+    Ok(())
 }
 
 #[cfg(test)]
@@ -85,5 +109,27 @@ mod tests {
         assert_eq!(parse_acl_action("deny"), AclAction::Deny);
         assert_eq!(parse_acl_action("ALLOW"), AclAction::Allow);
         assert_eq!(parse_acl_action("redirect"), AclAction::Redirect);
+    }
+
+    #[test]
+    fn persist_roundtrip() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, r#"{{"default_action":"allow","rules":[]}}"#).unwrap();
+        let path = file.path().to_str().unwrap();
+        let mut engine = AclEngine::new(AclAction::Allow);
+        engine.add_rule(AclRule {
+            id: "r1".into(),
+            name: "n".into(),
+            enabled: true,
+            priority: 1,
+            action: AclAction::Deny,
+            rule_type: crate::acl::AclRuleType::Domain("evil.test".into()),
+            redirect_url: None,
+            comment: None,
+        });
+        save_acl_engine_to_file(path, &engine).unwrap();
+        let loaded = load_acl_engine_from_file(path, AclAction::Allow).unwrap();
+        assert_eq!(loaded.rule_count(), 1);
+        assert!(loaded.has_rule("r1"));
     }
 }

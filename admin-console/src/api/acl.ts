@@ -30,9 +30,33 @@ export async function addAclRule(rule: AclRule): Promise<void> {
   await apiFetch('/api/acl/rules', { baseUrl, token, method: 'POST', body: rule })
 }
 
+export async function updateAclRule(rule: AclRule): Promise<void> {
+  const { baseUrl, token } = aclClient()
+  await apiFetch(`/api/acl/rules/${encodeURIComponent(rule.id)}`, {
+    baseUrl,
+    token,
+    method: 'PUT',
+    body: rule,
+  })
+}
+
+export async function deleteAclRule(id: string): Promise<void> {
+  const { baseUrl, token } = aclClient()
+  await apiFetch(`/api/acl/rules/${encodeURIComponent(id)}`, {
+    baseUrl,
+    token,
+    method: 'DELETE',
+  })
+}
+
 export async function reloadAclRules(): Promise<void> {
   const { baseUrl, token } = aclClient()
   await apiFetch('/api/acl/reload', { baseUrl, token, method: 'POST' })
+}
+
+export async function persistAclRules(): Promise<void> {
+  const { baseUrl, token } = aclClient()
+  await apiFetch('/api/acl/persist', { baseUrl, token, method: 'POST' })
 }
 
 function mockRules(): AclRulesResponse {
