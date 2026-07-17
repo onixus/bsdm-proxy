@@ -229,8 +229,8 @@ pub fn phishing_lexical_v0(features: &DomainPhishingFeatures, lexical: &LexicalS
 pub fn score_domain(features: &DomainPhishingFeatures, threshold: f64) -> ScoreResult {
     let lexical = lexical_signals(&features.domain);
     let score = phishing_lexical_v0(features, &lexical);
-    let features_json = serde_json::to_string(&features.score_payload(&lexical))
-        .unwrap_or_else(|_| "{}".into());
+    let features_json =
+        serde_json::to_string(&features.score_payload(&lexical)).unwrap_or_else(|_| "{}".into());
 
     ScoreResult {
         scored_at: Utc::now(),
