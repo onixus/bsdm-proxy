@@ -60,7 +60,7 @@
 | Lite | `docker-compose.lite.yml`, SQLite indexer, optional `kafka` Cargo feature (B21) |
 | DX | REST control plane ✅ ([control-plane.md](control-plane.md)); next: [gRPC #187](https://github.com/onixus/bsdm-proxy/issues/187) |
 | Wasm | [Wasmtime plugin host #188](https://github.com/onixus/bsdm-proxy/issues/188) |
-| AI-трафик | coalescing ✅, API-key RL ✅, LLM/semantic cache prep ✅; next: [vector DB #189](https://github.com/onixus/bsdm-proxy/issues/189) |
+| AI-трафик | coalescing ✅, API-key RL ✅, LLM/semantic cache ✅, Qdrant vector backend ✅ ([#189](https://github.com/onixus/bsdm-proxy/issues/189)) |
 
 Текущий product plan (Squid / ретропоиск / ML): [roadmap.md](roadmap.md).  
 Статус GitHub issues: [issue-tracker.md](issue-tracker.md).
