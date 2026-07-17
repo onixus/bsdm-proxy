@@ -123,21 +123,31 @@ impl ControlApiState {
     }
 
     fn is_authorized(&self, headers: &HeaderMap) -> bool {
+        let bearer = headers
+            .get(AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "));
+        self.is_authorized_bearer(bearer)
+    }
+
+    /// Shared auth check for REST and gRPC (`authorization: Bearer …`).
+    pub fn is_authorized_bearer(&self, bearer: Option<&str>) -> bool {
         let Some(expected) = &self.api_token else {
             return true;
         };
-        headers
-            .get(AUTHORIZATION)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.strip_prefix("Bearer "))
-            .is_some_and(|token| token == expected)
+        bearer.is_some_and(|token| token == expected)
     }
 
-    fn stats(&self) -> Response<Body> {
+    /// Whether mutating control RPCs require a Bearer token.
+    pub fn auth_required(&self) -> bool {
+        self.api_token.is_some()
+    }
+
+    pub fn stats_payload(&self) -> StatsResponse {
         let hits = self.metrics.cache_hits_total.get();
         let misses = self.metrics.cache_misses_total.get();
         let bypasses = self.metrics.cache_bypasses_total.get();
-        let payload = StatsResponse {
+        StatsResponse {
             service: "bsdm-proxy",
             uptime_secs: self.started_at.elapsed().as_secs(),
             requests_in_flight: self.metrics.requests_in_flight.get() as u64,
@@ -151,8 +161,11 @@ impl ControlApiState {
                 shards: self.http_cache.shard_count(),
                 tags: self.http_cache.tag_count(),
             },
-        };
-        match serde_json::to_string(&payload) {
+        }
+    }
+
+    fn stats(&self) -> Response<Body> {
+        match serde_json::to_string(&self.stats_payload()) {
             Ok(body) => json_response(StatusCode::OK, &body),
             Err(_) => json_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -161,12 +174,12 @@ impl ControlApiState {
         }
     }
 
-    async fn hierarchy_peers(&self) -> Response<Body> {
+    pub async fn hierarchy_peers_payload(&self) -> PeersListResponse {
         let Some(registry) = &self.peer_registry else {
-            return json_response(
-                StatusCode::OK,
-                r#"{"enabled":false,"peers":[],"source_hint":"set HIERARCHY_ENABLED=true"}"#,
-            );
+            return PeersListResponse {
+                enabled: false,
+                peers: Vec::new(),
+            };
         };
         let peers = registry.all_peers().await;
         let mut items = Vec::with_capacity(peers.len());
@@ -184,10 +197,20 @@ impl ControlApiState {
             });
         }
         items.sort_by(|a, b| a.id.cmp(&b.id));
-        let payload = PeersListResponse {
+        PeersListResponse {
             enabled: true,
             peers: items,
-        };
+        }
+    }
+
+    async fn hierarchy_peers(&self) -> Response<Body> {
+        let payload = self.hierarchy_peers_payload().await;
+        if !payload.enabled {
+            return json_response(
+                StatusCode::OK,
+                r#"{"enabled":false,"peers":[],"source_hint":"set HIERARCHY_ENABLED=true"}"#,
+            );
+        }
         match serde_json::to_string(&payload) {
             Ok(body) => json_response(StatusCode::OK, &body),
             Err(_) => json_response(
@@ -197,24 +220,37 @@ impl ControlApiState {
         }
     }
 
-    async fn hierarchy_reload(&self) -> Response<Body> {
+    pub async fn hierarchy_reload_payload(&self) -> Result<HierarchyReloadPayload, String> {
         let Some(registry) = &self.peer_registry else {
-            return json_response(
-                StatusCode::SERVICE_UNAVAILABLE,
-                r#"{"error":"hierarchy disabled (HIERARCHY_ENABLED=false)"}"#,
-            );
+            return Err("hierarchy disabled (HIERARCHY_ENABLED=false)".into());
         };
-        match reload_static_peers(registry, self.hierarchy_use_htcp).await {
+        let report = reload_static_peers(registry, self.hierarchy_use_htcp).await?;
+        Ok(HierarchyReloadPayload {
+            status: "reloaded",
+            source: report.source.as_str().to_string(),
+            added: report.stats.added as u64,
+            removed: report.stats.removed as u64,
+            preserved_discovery: report.stats.preserved_discovery as u64,
+        })
+    }
+
+    async fn hierarchy_reload(&self) -> Response<Body> {
+        match self.hierarchy_reload_payload().await {
             Ok(report) => {
                 let body = format!(
-                    r#"{{"status":"reloaded","source":"{}","added":{},"removed":{},"preserved_discovery":{}}}"#,
-                    report.source.as_str(),
-                    report.stats.added,
-                    report.stats.removed,
-                    report.stats.preserved_discovery
+                    r#"{{"status":"{}","source":"{}","added":{},"removed":{},"preserved_discovery":{}}}"#,
+                    report.status,
+                    report.source,
+                    report.added,
+                    report.removed,
+                    report.preserved_discovery
                 );
                 json_response(StatusCode::OK, &body)
             }
+            Err(e) if e.contains("hierarchy disabled") => json_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                r#"{"error":"hierarchy disabled (HIERARCHY_ENABLED=false)"}"#,
+            ),
             Err(e) => json_response(
                 StatusCode::BAD_REQUEST,
                 &format!(r#"{{"error":"{}"}}"#, escape_json(&e)),
@@ -222,8 +258,12 @@ impl ControlApiState {
         }
     }
 
+    pub fn upstream_tls_snapshot(&self) -> crate::upstream::UpstreamTlsSnapshot {
+        (*self.upstream_client.snapshot()).clone()
+    }
+
     fn upstream_tls_status(&self) -> Response<Body> {
-        match serde_json::to_string(self.upstream_client.snapshot().as_ref()) {
+        match serde_json::to_string(&self.upstream_tls_snapshot()) {
             Ok(body) => json_response(StatusCode::OK, &body),
             Err(_) => json_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -232,8 +272,14 @@ impl ControlApiState {
         }
     }
 
+    pub fn upstream_tls_reload_payload(
+        &self,
+    ) -> Result<crate::upstream::UpstreamTlsSnapshot, String> {
+        self.upstream_client.reload_from_env()
+    }
+
     fn upstream_tls_reload(&self) -> Response<Body> {
-        match self.upstream_client.reload_from_env() {
+        match self.upstream_tls_reload_payload() {
             Ok(snap) => match serde_json::to_string(&UpstreamTlsReloadResponse {
                 status: "reloaded",
                 tls: snap,
@@ -249,6 +295,69 @@ impl ControlApiState {
                 &format!(r#"{{"error":"{}"}}"#, escape_json(&e)),
             ),
         }
+    }
+
+    pub async fn purge_payload(&self, req: PurgeRequest) -> Result<PurgeResult, String> {
+        if req.all {
+            let removed = self.http_cache.clear();
+            if let Some(l2) = &self.l2_cache {
+                l2.flush_prefix().await;
+            }
+            info!("Control API: purged entire L1 cache ({removed} entries)");
+            return Ok(PurgeResult {
+                status: "purged".into(),
+                scope: "all".into(),
+                removed,
+                url: None,
+                tags: Vec::new(),
+            });
+        }
+
+        let tags = collect_purge_tags(&req);
+        if !tags.is_empty() {
+            let mut removed = 0usize;
+            for tag in &tags {
+                let keys = self.http_cache.keys_for_tag(tag);
+                for key in &keys {
+                    if self.http_cache.remove(key).is_some() {
+                        removed += 1;
+                    }
+                    if let Some(l2) = &self.l2_cache {
+                        l2.delete(key.as_ref()).await;
+                    }
+                }
+            }
+            info!("Control API: purged tags={tags:?} removed={removed}");
+            return Ok(PurgeResult {
+                status: "purged".into(),
+                scope: "tag".into(),
+                removed,
+                url: None,
+                tags,
+            });
+        }
+
+        let Some(url) = req.url.as_deref().filter(|u| !u.is_empty()) else {
+            return Err(
+                "provide {\"url\":\"...\"}, {\"tag\":\"...\"}, {\"tags\":[...]}, or {\"all\":true}"
+                    .into(),
+            );
+        };
+
+        let method = req.method.as_deref().unwrap_or("GET");
+        let key = http_cache_key(method, url);
+        let removed_l1 = self.http_cache.remove(&key).is_some();
+        if let Some(l2) = &self.l2_cache {
+            l2.delete(key.as_ref()).await;
+        }
+        info!("Control API: purge url={url} method={method} l1={removed_l1}");
+        Ok(PurgeResult {
+            status: "purged".into(),
+            scope: "url".into(),
+            removed: if removed_l1 { 1 } else { 0 },
+            url: Some(url.to_string()),
+            tags: Vec::new(),
+        })
     }
 
     async fn purge(&self, body: Bytes) -> Response<Body> {
@@ -269,89 +378,60 @@ impl ControlApiState {
             }
         };
 
-        if req.all {
-            let removed = self.http_cache.clear();
-            if let Some(l2) = &self.l2_cache {
-                l2.flush_prefix().await;
-            }
-            info!("Control API: purged entire L1 cache ({removed} entries)");
-            return json_response(
+        match self.purge_payload(req).await {
+            Ok(r) if r.scope == "all" => json_response(
                 StatusCode::OK,
-                &format!(r#"{{"status":"purged","scope":"all","removed":{removed}}}"#),
-            );
-        }
-
-        let tags = collect_purge_tags(&req);
-        if !tags.is_empty() {
-            let mut removed = 0usize;
-            for tag in &tags {
-                let keys = self.http_cache.keys_for_tag(tag);
-                for key in &keys {
-                    if self.http_cache.remove(key).is_some() {
-                        removed += 1;
-                    }
-                    if let Some(l2) = &self.l2_cache {
-                        l2.delete(key.as_ref()).await;
-                    }
-                }
-            }
-            info!("Control API: purged tags={tags:?} removed={removed}");
-            return json_response(
+                &format!(
+                    r#"{{"status":"purged","scope":"all","removed":{}}}"#,
+                    r.removed
+                ),
+            ),
+            Ok(r) if r.scope == "tag" => json_response(
                 StatusCode::OK,
                 &format!(
                     r#"{{"status":"purged","scope":"tag","tags":[{}],"removed":{}}}"#,
-                    tags.iter()
+                    r.tags
+                        .iter()
                         .map(|t| format!("\"{}\"", escape_json(t)))
                         .collect::<Vec<_>>()
                         .join(","),
-                    removed
+                    r.removed
                 ),
-            );
-        }
-
-        let Some(url) = req.url.as_deref().filter(|u| !u.is_empty()) else {
-            return json_response(
-                StatusCode::BAD_REQUEST,
-                r#"{"error":"provide {\"url\":\"...\"}, {\"tag\":\"...\"}, {\"tags\":[...]}, or {\"all\":true}"}"#,
-            );
-        };
-
-        let method = req.method.as_deref().unwrap_or("GET");
-        let key = http_cache_key(method, url);
-        let removed_l1 = self.http_cache.remove(&key).is_some();
-        if let Some(l2) = &self.l2_cache {
-            l2.delete(key.as_ref()).await;
-        }
-        info!("Control API: purge url={url} method={method} l1={removed_l1}");
-        json_response(
-            StatusCode::OK,
-            &format!(
-                r#"{{"status":"purged","scope":"url","url":"{}","removed":{}}}"#,
-                escape_json(url),
-                if removed_l1 { 1 } else { 0 }
             ),
-        )
+            Ok(r) => json_response(
+                StatusCode::OK,
+                &format!(
+                    r#"{{"status":"purged","scope":"url","url":"{}","removed":{}}}"#,
+                    escape_json(r.url.as_deref().unwrap_or("")),
+                    r.removed
+                ),
+            ),
+            Err(e) => json_response(
+                StatusCode::BAD_REQUEST,
+                &format!(r#"{{"error":"{}"}}"#, escape_json(&e)),
+            ),
+        }
     }
 }
 
-#[derive(Debug, Serialize)]
-struct StatsResponse {
-    service: &'static str,
-    uptime_secs: u64,
-    requests_in_flight: u64,
-    cache: CacheStats,
+#[derive(Debug, Clone, Serialize)]
+pub struct StatsResponse {
+    pub service: &'static str,
+    pub uptime_secs: u64,
+    pub requests_in_flight: u64,
+    pub cache: CacheStats,
 }
 
-#[derive(Debug, Serialize)]
-struct CacheStats {
-    hits: u64,
-    misses: u64,
-    bypasses: u64,
-    hit_ratio: f64,
-    entries: usize,
-    capacity: usize,
-    shards: usize,
-    tags: usize,
+#[derive(Debug, Clone, Serialize)]
+pub struct CacheStats {
+    pub hits: u64,
+    pub misses: u64,
+    pub bypasses: u64,
+    pub hit_ratio: f64,
+    pub entries: usize,
+    pub capacity: usize,
+    pub shards: usize,
+    pub tags: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -360,33 +440,51 @@ struct UpstreamTlsReloadResponse {
     tls: crate::upstream::UpstreamTlsSnapshot,
 }
 
-#[derive(Debug, Serialize)]
-struct PeersListResponse {
-    enabled: bool,
-    peers: Vec<PeerListItem>,
+#[derive(Debug, Clone, Serialize)]
+pub struct PeersListResponse {
+    pub enabled: bool,
+    pub peers: Vec<PeerListItem>,
 }
 
-#[derive(Debug, Serialize)]
-struct PeerListItem {
-    id: String,
-    host: String,
-    port: u16,
-    peer_type: String,
-    weight: f64,
-    icp_port: Option<u16>,
-    healthy: bool,
-    is_static: bool,
+#[derive(Debug, Clone, Serialize)]
+pub struct PeerListItem {
+    pub id: String,
+    pub host: String,
+    pub port: u16,
+    pub peer_type: String,
+    pub weight: f64,
+    pub icp_port: Option<u16>,
+    pub healthy: bool,
+    pub is_static: bool,
 }
 
-#[derive(Debug, Default, Deserialize)]
-struct PurgeRequest {
+#[derive(Debug, Clone)]
+pub struct HierarchyReloadPayload {
+    pub status: &'static str,
+    pub source: String,
+    pub added: u64,
+    pub removed: u64,
+    pub preserved_discovery: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct PurgeResult {
+    pub status: String,
+    pub scope: String,
+    pub removed: usize,
+    pub url: Option<String>,
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Default, Clone, Deserialize)]
+pub struct PurgeRequest {
     #[serde(default)]
-    all: bool,
-    url: Option<String>,
-    method: Option<String>,
-    tag: Option<String>,
+    pub all: bool,
+    pub url: Option<String>,
+    pub method: Option<String>,
+    pub tag: Option<String>,
     #[serde(default)]
-    tags: Vec<String>,
+    pub tags: Vec<String>,
 }
 
 fn collect_purge_tags(req: &PurgeRequest) -> Vec<String> {

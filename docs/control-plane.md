@@ -141,9 +141,43 @@ curl -X POST http://127.0.0.1:9090/api/upstream/tls/reload \
 
 On failure (missing/invalid CA file) the previous client is kept and the API returns `400`.
 
+## gRPC control plane (optional)
+
+Feature-flagged (`--features grpc`), **off by default**. REST stays the Lite / admin-console path.
+
+```bash
+# Build
+cargo build -p bsdm-proxy --features grpc --bin proxy
+
+# Run
+CONTROL_GRPC_ENABLED=true \
+CONTROL_GRPC_BIND=127.0.0.1:50051 \
+CONTROL_API_TOKEN=secret \
+cargo run -p bsdm-proxy --features grpc --bin proxy
+```
+
+| Variable | Default | Role |
+|----------|---------|------|
+| `CONTROL_GRPC_ENABLED` | `false` | Start gRPC server (requires build with `grpc` feature) |
+| `CONTROL_GRPC_BIND` | `127.0.0.1:50051` | Listen address |
+
+Auth matches REST: mutating RPCs need `authorization: Bearer <CONTROL_API_TOKEN>` when the token is set. Public: `GetStats`, `ListHierarchyPeers`, `GetUpstreamTls`.
+
+Proto: [`proxy/proto/control_plane.proto`](../proxy/proto/control_plane.proto).
+
+```bash
+# Example (grpcurl)
+grpcurl -plaintext localhost:50051 list
+grpcurl -plaintext localhost:50051 bsdm.control.v1.ControlPlane/GetStats
+grpcurl -plaintext -H 'authorization: Bearer secret' \
+  -d '{"all":true}' localhost:50051 bsdm.control.v1.ControlPlane/PurgeCache
+```
+
+ACL CRUD remains REST-only (`/api/acl/*`).
+
 ## Roadmap leftovers
 
 - [x] Cache-Tags / Surrogate-Key purge (`{"tag":"..."}`)
 - [x] Hierarchy peer hot reload (`/api/hierarchy/*`)
 - [x] Upstream TLS hot reload (`/api/upstream/tls*`)
-- [ ] gRPC control plane
+- [x] gRPC control plane (`--features grpc`, [#187](https://github.com/onixus/bsdm-proxy/issues/187))
