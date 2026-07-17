@@ -294,6 +294,35 @@ services:
       timeout: 5s
       retries: 10
 
+  # Optional DNS sinkhole sidecar (P3 / #108). RPZ-lite UDP proxy — not in proxy core.
+  #   docker compose --profile dns-sinkhole up -d --build dns-sinkhole
+  # Docs: docs/dns-sinkhole.md · ADR 0004
+  dns-sinkhole:
+    profiles: ["dns-sinkhole"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: dns-sinkhole
+    ports:
+      - "5353:53/udp"
+      - "8092:8092"
+    environment:
+      - DNS_SINKHOLE_BIND=0.0.0.0:53
+      - DNS_SINKHOLE_UPSTREAM=${DNS_SINKHOLE_UPSTREAM:-1.1.1.1:53}
+      - DNS_SINKHOLE_ZONE_PATH=/etc/bsdm-proxy/blocklist.rpz
+      - DNS_SINKHOLE_ACTION=${DNS_SINKHOLE_ACTION:-sinkhole}
+      - DNS_SINKHOLE_A=${DNS_SINKHOLE_A:-127.0.0.1}
+      - METRICS_PORT=8092
+      - RUST_LOG=info,dns_sinkhole=info
+    networks:
+      - bsdm-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8092/health | grep -q ok"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
 networks:
   bsdm-net:
     driver: bridge

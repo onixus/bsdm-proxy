@@ -10,6 +10,7 @@
 | `cache-indexer` | `cache-indexer/` | Kafka|HTTP → ClickHouse|SQLite, Search API, `/metrics` |
 | `alert-worker` | `alert-worker/` | ClickHouse threat rules → SIEM/webhook (M4 / B19) |
 | `ml-worker` | `ml-worker/` | M5 features/scores + threat-score API |
+| `dns-sinkhole` | `dns-sinkhole/` | Optional DNS RPZ-lite sinkhole sidecar (P3 / #108) |
 | `bsdm-events` | `bsdm-events/` | Общие типы событий (`CacheEvent`) для proxy и indexer |
 | `e2e` | `e2e/` | Smoke и E2E тесты (subprocess proxy + mock upstream) |
 
@@ -27,6 +28,7 @@ bsdm-proxy/
 │       └── lib.rs
 ├── cache-indexer/          # Kafka|HTTP → ClickHouse|SQLite + Search API
 ├── ml-worker/              # M5 features/scores + threat-score API
+├── dns-sinkhole/           # Optional DNS RPZ-lite sidecar
 ├── alert-worker/           # CH rule polling → webhook / SIEM
 ├── bsdm-events/            # Shared event schema
 ├── e2e/                    # Integration tests
@@ -41,7 +43,7 @@ bsdm-proxy/
 ├── alertmanager/           # Alertmanager template + entrypoint
 ├── web-config/             # Legacy static config generator
 ├── certs/                  # MITM CA (gitignored, генерируется локально)
-├── Dockerfile              # Multi-stage: proxy + cache-indexer + alert-worker + ml-worker
+├── Dockerfile              # Multi-stage: proxy + cache-indexer + alert-worker + ml-worker + dns-sinkhole
 ├── docker-compose.yml      # Полный стек (+ profiles `alerts`, `ml`)
 ├── docker-compose.lite.yml # Lite: proxy + SQLite indexer (Phase 1)
 ├── docker-compose.*.yml    # Профили: test, redis-l2, hierarchy, ha
@@ -53,7 +55,7 @@ bsdm-proxy/
 | Файл | Сервисы |
 |------|---------|
 | `docker-compose.lite.yml` | proxy + SQLite cache-indexer (MITM + L1 spill, no Kafka/CH) |
-| `docker-compose.yml` | proxy, cache-indexer, kafka, zookeeper, clickhouse, prometheus, alertmanager, grafana; optional `alert-worker` (`--profile alerts`), `ml-worker` (`--profile ml`) |
+| `docker-compose.yml` | proxy, cache-indexer, kafka, zookeeper, clickhouse, prometheus, alertmanager, grafana; optional `alert-worker` (`--profile alerts`), `ml-worker` (`--profile ml`), `dns-sinkhole` (`--profile dns-sinkhole`) |
 | `docker-compose.test.yml` | Минимальный стек для smoke/E2E |
 | `docker-compose.redis-l2.yml` | 2× proxy + Redis L2 |
 | `docker-compose.hierarchy.yml` | Multi-instance + ICP |

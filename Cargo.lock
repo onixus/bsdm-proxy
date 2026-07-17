@@ -1035,6 +1035,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "dns-sinkhole"
+version = "0.5.0"
+dependencies = [
+ "prometheus",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "dunce"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"

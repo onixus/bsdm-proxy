@@ -1,0 +1,14 @@
+; BSDM DNS sinkhole example (RPZ-lite + plain list)
+; See docs/dns-sinkhole.md
+$TTL 300
+
+; Policy blocks → sinkhole A/AAAA or NXDOMAIN (DNS_SINKHOLE_ACTION)
+blocked.test.           CNAME .
+*.evil.example.         CNAME .
+
+; Explicit sinkhole address for one name
+fixed-sinkhole.test.    A     127.0.0.1
+
+; Plain domain list
+malware.example
+.blocked.suffix

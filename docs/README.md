@@ -35,6 +35,8 @@
 | [acl.md](acl.md) | ACL + REST API |
 | [control-plane.md](control-plane.md) | DX: stats, purge, hierarchy/TLS reload, ACL CRUD |
 | [wasm-plugins.md](wasm-plugins.md) | Wasmtime request hooks (feature `wasm`) |
+| [dns-sinkhole.md](dns-sinkhole.md) | Optional DNS RPZ-lite sidecar |
+| [adr/0004-dns-sinkhole-sidecar.md](adr/0004-dns-sinkhole-sidecar.md) | ADR: DNS as sidecar, not in proxy |
 | [categorization.md](categorization.md) | UT1 Blacklists, metrics, OTX |
 | [hierarchical-caching.md](hierarchical-caching.md) | ICP/HTCP hierarchy |
 | [clickhouse-analytics.md](clickhouse-analytics.md) | ClickHouse analytics |

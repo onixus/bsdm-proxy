@@ -1,0 +1,24 @@
+[package]
+name = "dns-sinkhole"
+version = "0.5.0"
+edition = "2021"
+license = "MIT"
+authors = ["BSDM-Proxy Contributors"]
+description = "Optional UDP DNS sinkhole / RPZ-lite proxy (sidecar, not in bsdm-proxy)"
+repository = "https://github.com/onixus/bsdm-proxy"
+keywords = ["dns", "rpz", "sinkhole", "security"]
+categories = ["network-programming"]
+
+[[bin]]
+name = "dns-sinkhole"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+prometheus = "0.14"
+
+[dev-dependencies]
+tokio = { workspace = true }
+tempfile = "3.14"
