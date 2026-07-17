@@ -58,7 +58,7 @@ prost = { version = "0.13", optional = true }
 tower = { version = "0.5", optional = true }
 
 # Optional Wasm plugin host (feature `wasm`)
-wasmtime = { version = "26", default-features = false, features = ["cranelift", "runtime", "wat"], optional = true }
+wasmtime = { version = "46", default-features = false, features = ["cranelift", "runtime", "wat"], optional = true }
 
 [build-dependencies]
 tonic-build = { version = "0.12", optional = true }
