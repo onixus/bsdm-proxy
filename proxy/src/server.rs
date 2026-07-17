@@ -463,7 +463,9 @@ pub async fn handle_connection(
                     .as_deref()
                     .map(|u| u.groups.iter().map(String::as_str).collect())
                     .unwrap_or_default();
-                if let Some(resp) = service.check_rate_limit(&client_ip, policy_username) {
+                if let Some(resp) =
+                    service.check_rate_limit(&client_ip, policy_username, req.headers())
+                {
                     return Ok::<_, Infallible>(resp);
                 }
 

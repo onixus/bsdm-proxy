@@ -76,7 +76,7 @@ pub use pipeline::{dispatch_cache_event, new_event_id, HttpEventPipeline};
 pub use pipeline::{flush_kafka, KafkaEventPipeline};
 pub use policy_cache::{PolicyCacheConfig, PolicyDecisionCache};
 pub use proxy_service::{ProxyPolicy, ProxyService};
-pub use rate_limit::{RateLimitConfig, RateLimitViolation, RateLimiter};
+pub use rate_limit::{extract_api_key, RateLimitConfig, RateLimitViolation, RateLimiter};
 pub use selection::{parse_strategy, SelectionStrategy};
 pub use server::{handle_connection, metrics_server, wait_shutdown_signal};
 pub use session::{SessionCorrelation, SessionCorrelator};

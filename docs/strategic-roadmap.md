@@ -47,7 +47,7 @@
 
 *Фокус: современные паттерны трафика и LLM.*
 
-- **Умный Rate Limiting:** квоты и токены (Token Bucket / Leaky Bucket) под API-ключи.
+- **Умный Rate Limiting:** ✅ token bucket per IP / user / API key (`RATE_LIMIT_API_KEY_*`, header или Bearer; optional required → 401).
 - **Семантическое кэширование:** подготовка к векторным БД для LLM (hit при семантическом сходстве запроса).
 - **Request Coalescing:** ✅ singleflight для GET/HEAD MISS (`MISS_COALESCE_ENABLED`, metric `bsdm_proxy_cache_coalesced_total`, `X-Cache-Status: COALESCED-HIT`).
 
