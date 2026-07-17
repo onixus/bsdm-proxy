@@ -30,7 +30,7 @@ use crate::http_types::{empty, full, Body};
 use crate::l2_cache::RedisL2Cache;
 use crate::metrics::{FastRequestScope, Metrics, RequestMetricsGuard};
 use crate::miss_coalesce::{CoalesceJoin, MissFlightMap, MissFlightPermit};
-use crate::peer_fetch::fetch_via_peer;
+use crate::peer_fetch::{fetch_via_peer, PeerTlsConfig};
 use crate::peers::CachePeer;
 use crate::perf::PerfConfig;
 use crate::pipeline::{dispatch_cache_event, new_event_id, CacheEvent, HttpEventPipeline};
@@ -39,7 +39,7 @@ use crate::pipeline::{flush_kafka, KafkaEventPipeline};
 use crate::policy_cache::PolicyDecisionCache;
 use crate::rate_limit::{extract_api_key, RateLimitViolation, RateLimiter};
 use crate::semantic_cache::{
-    content_cache_key, evaluate_llm_store, extract_embed_text, hash_embed, normalize_llm_body,
+    content_cache_key, evaluate_llm_store, extract_embed_text, normalize_llm_body,
     SemanticCacheConfig, SemanticIndex,
 };
 use crate::session::{header_ci, resolve_location, SessionCorrelator};
@@ -163,9 +163,25 @@ impl MissCompletionHandle {
             self.store_in_l1_and_l2(cache_key.clone(), cached_response.clone());
             if self.llm_mode {
                 if let Some(norm) = &self.llm_normalized_body {
-                    let emb =
-                        hash_embed(&extract_embed_text(norm), self.semantic_config.embed_dims);
-                    self.semantic_index.insert(emb, cache_key.clone());
+                    let index = self.semantic_index.clone();
+                    let cfg = self.semantic_config.clone();
+                    let metrics = self.metrics.clone();
+                    let key = cache_key.clone();
+                    let text = extract_embed_text(norm);
+                    tokio::spawn(async move {
+                        match cfg.embed(&text).await {
+                            Ok(emb) => {
+                                if let Err(e) = index.insert(emb, key).await {
+                                    metrics.semantic_cache_vector_errors_total.inc();
+                                    warn!("semantic index insert failed: {e}");
+                                }
+                            }
+                            Err(e) => {
+                                metrics.semantic_cache_vector_errors_total.inc();
+                                warn!("semantic embed failed: {e}");
+                            }
+                        }
+                    });
                 }
             }
             self.miss_flights
@@ -282,6 +298,7 @@ pub struct ProxyService {
     miss_flights: MissFlightMap,
     semantic_config: SemanticCacheConfig,
     semantic_index: SemanticIndex,
+    peer_tls: PeerTlsConfig,
 }
 
 impl ProxyService {
@@ -369,7 +386,11 @@ impl ProxyService {
         let http_client =
             UpstreamClientHandle::new(upstream_tls).expect("failed to build upstream HTTPS client");
         let semantic_config = SemanticCacheConfig::from_env();
-        let semantic_index = SemanticIndex::new(semantic_config.max_index_entries);
+        let semantic_index = SemanticIndex::from_config(&semantic_config);
+        let peer_tls = PeerTlsConfig::from_env();
+        if let Err(e) = peer_tls.validate() {
+            tracing::warn!("Hierarchy peer mTLS config invalid: {e}");
+        }
 
         Self {
             cert_cache,
@@ -395,6 +416,7 @@ impl ProxyService {
             miss_flights: MissFlightMap::new(),
             semantic_config,
             semantic_index,
+            peer_tls,
         }
     }
 
@@ -993,7 +1015,12 @@ impl ProxyService {
         };
 
         let timeout = hierarchy.parent_timeout();
-        match fetch_via_peer(&peer, req, timeout).await {
+        let tls = if self.peer_tls.enabled {
+            Some(&self.peer_tls)
+        } else {
+            None
+        };
+        match fetch_via_peer(&peer, req, timeout, tls).await {
             Ok(response) => {
                 info!("Peer response via {} for {}", peer.id, url);
                 Some((peer, response))
@@ -1435,37 +1462,50 @@ impl ProxyService {
             }
 
             if self.semantic_config.near_hit_enabled() {
-                let emb = hash_embed(
-                    &extract_embed_text(&normalized),
-                    self.semantic_config.embed_dims,
-                );
-                if let Some(near_key) = self
-                    .semantic_index
-                    .find_similar(&emb, self.semantic_config.similarity_threshold)
-                {
-                    if let Some(cached) = self.http_cache.get(&near_key) {
-                        if cached.can_serve_fresh() {
-                            debug!("LLM cache semantic HIT: {} {}", method, url);
-                            self.metrics.semantic_cache_similar_hits_total.inc();
-                            return self.serve_l1_hit(
-                                &cached,
-                                &near_key,
-                                &url,
-                                method,
-                                &user_id,
-                                &username,
-                                user_agent.as_deref(),
-                                &client_ip,
-                                &categories,
-                                &threat_sources,
-                                request_start,
-                                detailed_metrics,
-                                &mut guard,
-                                &mut fast_scope,
-                                "SEMANTIC_HIT",
-                                "SEMANTIC-HIT",
-                            );
+                let text = extract_embed_text(&normalized);
+                match self.semantic_config.embed(&text).await {
+                    Ok(emb) => {
+                        match self
+                            .semantic_index
+                            .find_similar(&emb, self.semantic_config.similarity_threshold)
+                            .await
+                        {
+                            Ok(Some(near_key)) => {
+                                if let Some(cached) = self.http_cache.get(&near_key) {
+                                    if cached.can_serve_fresh() {
+                                        debug!("LLM cache semantic HIT: {} {}", method, url);
+                                        self.metrics.semantic_cache_similar_hits_total.inc();
+                                        return self.serve_l1_hit(
+                                            &cached,
+                                            &near_key,
+                                            &url,
+                                            method,
+                                            &user_id,
+                                            &username,
+                                            user_agent.as_deref(),
+                                            &client_ip,
+                                            &categories,
+                                            &threat_sources,
+                                            request_start,
+                                            detailed_metrics,
+                                            &mut guard,
+                                            &mut fast_scope,
+                                            "SEMANTIC_HIT",
+                                            "SEMANTIC-HIT",
+                                        );
+                                    }
+                                }
+                            }
+                            Ok(None) => {}
+                            Err(e) => {
+                                self.metrics.semantic_cache_vector_errors_total.inc();
+                                warn!("semantic index search failed: {e}");
+                            }
                         }
+                    }
+                    Err(e) => {
+                        self.metrics.semantic_cache_vector_errors_total.inc();
+                        warn!("semantic embed failed: {e}");
                     }
                 }
             }

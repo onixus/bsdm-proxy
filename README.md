@@ -208,7 +208,11 @@ cargo build --release -p bsdm-proxy --bin proxy -p cache-indexer --bin cache-ind
 | `SEMANTIC_CACHE_TTL_SECONDS` | `3600` | TTL for LLM cached responses |
 | `SEMANTIC_CACHE_SIMILARITY` | `1.0` | Cosine threshold; `<1` enables near-hit |
 | `SEMANTIC_CACHE_EMBED_DIMS` | `64` | Размерность local hash embedding |
-| `SEMANTIC_CACHE_MAX_INDEX` | `10000` | Макс. записей similarity index |
+| `SEMANTIC_CACHE_MAX_INDEX` | `10000` | Макс. записей local similarity index |
+| `SEMANTIC_VECTOR_BACKEND` | `local` | `local` или `qdrant` (near-hit index) |
+| `SEMANTIC_VECTOR_URL` | — | Qdrant base URL (`http://host:6333`) |
+| `SEMANTIC_EMBED_PROVIDER` | `local` | `local` hash embed или `http` |
+| `SEMANTIC_EMBED_URL` | — | Remote embed API (`{"text","dims"}` → `embedding[]`) |
 | `CACHE_TTL_SECONDS` | `3600` | Fallback TTL кеша (сек), если нет `max-age` |
 | `MAX_CACHE_BODY_SIZE` | `10485760` | Макс. размер body (байт) |
 | `NEGATIVE_CACHE_ENABLED` | `true` | Кешировать upstream 403/404 |
@@ -331,6 +335,9 @@ Token-bucket лимиты на IP, пользователя и **API key**. Ме
 | `CACHE_SIBLINGS` | — | Sibling peers: `host:port[:weight][:icp_port]` |
 | `CACHE_PEERS_PATH` | — | JSON peers file (overrides env); hot reload: `POST /api/hierarchy/reload` |
 | `HIERARCHY_PEERS_PATH` | — | Alias for `CACHE_PEERS_PATH` |
+| `HIERARCHY_PEER_MTLS_ENABLED` | `false` | TLS + client cert for peer HTTP fetch |
+| `HIERARCHY_PEER_CA_FILE` | — | CA that signed peer server certs |
+| `HIERARCHY_PEER_CERT_FILE` / `HIERARCHY_PEER_KEY_FILE` | — | Client cert for peer mTLS |
 | `CACHE_SELECTION_STRATEGY` | `round-robin` | `round-robin`, `weighted`, `closest`, `hash` |
 | `ICP_BIND` | `0.0.0.0:3130` | Адрес ICP-сервера (UDP) |
 | `ICP_CLIENT_BIND` | `0.0.0.0:0` | Bind для ICP-клиента |

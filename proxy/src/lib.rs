@@ -69,7 +69,7 @@ pub use icp::{IcpClient, IcpMessage, IcpOpcode, IcpServer};
 pub use l2_cache::{L2CacheConfig, RedisL2Cache};
 pub use metrics::{FastRequestScope, Metrics, RequestMetricsGuard};
 pub use peer_discovery::{run_peer_discovery, PeerDiscoveryConfig};
-pub use peer_fetch::{fetch_via_peer, PeerFetchError};
+pub use peer_fetch::{fetch_via_peer, PeerFetchError, PeerTlsConfig};
 pub use peers::{CachePeer, PeerConfig, PeerRegistry, PeerType, ReplaceStaticStats};
 pub use perf::{bind_http_listeners, PerfConfig};
 pub use pipeline::{dispatch_cache_event, new_event_id, HttpEventPipeline};

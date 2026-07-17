@@ -7,13 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Documentation
-
-- **Issue tracker hygiene** — [docs/issue-tracker.md](docs/issue-tracker.md); close completed epics #165/#125/#102/#112; backlog #187 gRPC, #188 Wasm, #189 vector DB; BLOCKERS wave 3 strikethrough
-- **Project docs refresh** — README / architecture / development / structure / docker / deployment / wiki index / env.example aligned with M1–M5 done and DX/AI Unreleased (Lite = proxy+SQLite, control plane, event sink, hierarchy peers paths, threat-score vars)
-
 ### Added
 
+- **Hierarchy peer mTLS** — `HIERARCHY_PEER_MTLS_*` wraps peer HTTP fetch in TLS + client cert ([#103](https://github.com/onixus/bsdm-proxy/issues/103))
+- **Semantic vector backend** — pluggable similarity index (`SEMANTIC_VECTOR_BACKEND=local|qdrant`) + optional HTTP embed provider; metric `bsdm_proxy_semantic_cache_vector_errors_total` ([#189](https://github.com/onixus/bsdm-proxy/issues/189))
 - **AI semantic / LLM cache prep** — `SEMANTIC_CACHE_ENABLED` POST body-hash cache for chat/completions paths; optional local cosine near-hit; docs [semantic-cache.md](docs/semantic-cache.md)
 - **AI API-key rate limiting** — token bucket per API key (`RATE_LIMIT_API_KEY_*`); key from `X-API-Key` or `Authorization: Bearer`; optional `RATE_LIMIT_API_KEY_REQUIRED` → 401; metric label `api_key` / `api_key_missing`
 - **AI request coalescing** — singleflight for concurrent GET/HEAD cache MISSes (`MISS_COALESCE_ENABLED`); waiters serve `COALESCED-HIT`; metric `bsdm_proxy_cache_coalesced_total`
@@ -29,6 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Admin console (UI/UX)** — React + Tailwind SPA in `admin-console/`: unified dashboard, logs with explainable ML (XAI), policies, settings; migrates `web-config` export logic
 - **M5.2 UEBA z-score** — `ueba_zscore_v0` (default): population baseline from `entity_features` or `ML_BASELINE_PATH`; Grafana anomalous-entities panel; `scripts/ml/export_baseline.py` + `compare_stub_vs_ueba.py` ([#166](https://github.com/onixus/bsdm-proxy/issues/166))
 - **M5.1 ML worker scaffold** — crate `ml-worker` extracts entity windows into ClickHouse `entity_features`, scores with `anomaly_stub_v0` into `ml_scores`, optional webhook; compose profile `ml`, packaging/systemd; ADR 0003 / [docs/ml-security.md](docs/ml-security.md) (B15 / #46)
+
+### Documentation
+
+- **Squid rock ↔ BSDM spill sizing** — [docs/capacity-planning.md](docs/capacity-planning.md) mapping + HA example ([#101](https://github.com/onixus/bsdm-proxy/issues/101))
+- **Issue tracker hygiene** — [docs/issue-tracker.md](docs/issue-tracker.md); close completed epics #165/#125/#102/#112; backlog #187 gRPC, #188 Wasm, #189 vector DB; BLOCKERS wave 3 strikethrough
+- **Project docs refresh** — README / architecture / development / structure / docker / deployment / wiki index / env.example aligned with M1–M5 done and DX/AI Unreleased (Lite = proxy+SQLite, control plane, event sink, hierarchy peers paths, threat-score vars)
 
 ## [0.5.0] - 2026-07-16
 

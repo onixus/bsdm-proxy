@@ -31,6 +31,7 @@ pub struct Metrics {
     pub cache_coalesced_total: Counter,
     pub semantic_cache_exact_hits_total: Counter,
     pub semantic_cache_similar_hits_total: Counter,
+    pub semantic_cache_vector_errors_total: Counter,
     pub cache_bypasses_total: Counter,
     pub cache_entries: Gauge,
     pub cache_size_bytes: Gauge,
@@ -166,9 +167,15 @@ impl Metrics {
 
         let semantic_cache_similar_hits_total = Counter::new(
             "bsdm_proxy_semantic_cache_similar_hits_total",
-            "LLM POST near-neighbor semantic cache hits (local embedding cosine)",
+            "LLM POST near-neighbor semantic cache hits (local or vector backend)",
         )?;
         registry.register(Box::new(semantic_cache_similar_hits_total.clone()))?;
+
+        let semantic_cache_vector_errors_total = Counter::new(
+            "bsdm_proxy_semantic_cache_vector_errors_total",
+            "Semantic embed / vector backend errors (insert or search)",
+        )?;
+        registry.register(Box::new(semantic_cache_vector_errors_total.clone()))?;
 
         let cache_bypasses_total = Counter::new(
             "bsdm_proxy_cache_bypasses_total",
@@ -436,6 +443,7 @@ impl Metrics {
             cache_coalesced_total,
             semantic_cache_exact_hits_total,
             semantic_cache_similar_hits_total,
+            semantic_cache_vector_errors_total,
             cache_bypasses_total,
             cache_entries,
             cache_size_bytes,

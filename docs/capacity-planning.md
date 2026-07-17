@@ -48,6 +48,38 @@ REDIS_L2_ENABLED=true
 
 Полные формулы, модели нагрузки и риски — на [wiki](https://github.com/onixus/bsdm-proxy/wiki/Capacity-Planning).
 
+## Squid rock ↔ BSDM spill (HTTP Archive / large objects)
+
+Squid stores small objects in `cache_mem` and larger ones in `cache_dir rock`. BSDM mirrors that split with **inline L1** vs **mmap spill**, plus accept workers.
+
+| Squid | BSDM | Role |
+|-------|------|------|
+| `cache_mem` | `CACHE_CAPACITY` × shards (inline entries) | Hot small objects in RAM |
+| `cache_dir rock <path> <MB>` | `CACHE_SPILL_DIR` + disk under spill threshold | Large bodies on disk (mmap) |
+| `maximum_object_size` | `MAX_CACHE_BODY_SIZE` | Hard cap per object |
+| `maximum_object_size_in_memory` | `CACHE_SPILL_THRESHOLD_BYTES` | Above threshold → spill file, not inline |
+| `workers N` | `WORKER_COUNT` | Accept loops (`SO_REUSEPORT`) |
+
+Reference Squid bench config: [`scripts/squid-benchmark-tuned.conf`](../scripts/squid-benchmark-tuned.conf) — `workers 4`, `cache_dir rock … 1024`, `cache_mem 256 MB`, `maximum_object_size 10 MB`.
+
+### Example: ~2.6 MB objects (HTTP Archive CDN)
+
+Typical HA warm objects are a few MB. Keep spill threshold **well below** median body size so large responses do not bloat process RSS:
+
+```bash
+# Squid-tuned parity sketch (see scripts/squid-benchmark-tuned.conf)
+WORKER_COUNT=4
+CACHE_SHARDS=16
+CACHE_CAPACITY=10000          # entries per shard (not bytes)
+CACHE_SPILL_THRESHOLD_BYTES=262144   # 256 KiB — bodies ≥ this → mmap spill
+MAX_CACHE_BODY_SIZE=10485760         # 10 MiB (matches Squid maximum_object_size)
+CACHE_SPILL_DIR=/var/cache/bsdm-proxy/spill
+```
+
+**Rule of thumb:** set `CACHE_SPILL_THRESHOLD_BYTES` ≈ 64–256 KiB for CDN/static workloads; raise only if most responses are tiny and you want fewer spill files. Scale `CACHE_SHARDS` with CPU (16 default; 32 on busy multi-core). Pair with `WORKER_COUNT=4` when comparing to the tuned Squid workers profile.
+
+Bench scripts: `scripts/run-httparchive-benchmark.sh`, `scripts/compare-squid-bsdm-httparchive.sh` (`BENCH_PROFILE=warm|cold`).
+
 ## Kubernetes
 
 См. [k8s-architecture.md](k8s-architecture.md) и Helm chart [`charts/bsdm/`](../charts/bsdm/README.md).

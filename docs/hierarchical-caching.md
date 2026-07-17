@@ -137,6 +137,12 @@ ICP_SERVER_ENABLED=true          # set false to disable local ICP listener
 PARENT_TIMEOUT_SECONDS=5
 ICP_MAX_SIBLING_QUERIES=10
 
+# Optional mTLS for HTTP peer fetch (encrypt + authenticate peer links)
+# HIERARCHY_PEER_MTLS_ENABLED=true
+# HIERARCHY_PEER_CA_FILE=/etc/bsdm-proxy/peer-ca.crt
+# HIERARCHY_PEER_CERT_FILE=/etc/bsdm-proxy/peer-client.crt
+# HIERARCHY_PEER_KEY_FILE=/etc/bsdm-proxy/peer-client.key
+
 # Selection strategy: round-robin, weighted, closest, hash
 CACHE_SELECTION_STRATEGY=weighted
 
@@ -188,7 +194,7 @@ Full TOML config is still planned. Env vars + optional peers JSON cover runtime 
 ### Phase 2: Request Routing ✅
 
 4. **Hierarchy Manager** (`proxy/src/hierarchy.rs`) — done
-5. **Cache Fetcher** (`proxy/src/peer_fetch.rs`) — done (HTTP/1 forward proxy)
+5. **Cache Fetcher** (`proxy/src/peer_fetch.rs`) — done (HTTP/1 forward proxy; optional peer mTLS)
 
 ### Phase 3: Integration ✅ (v0.2.3-test dev)
 
@@ -359,15 +365,16 @@ Origin Servers
 
 ## Security Considerations
 
-- **Peer Authentication**: Shared secret or mTLS
-- **ICP filtering**: Accept queries only from known peers
+- **Peer Authentication**: optional **mTLS** on peer HTTP fetch (`HIERARCHY_PEER_MTLS_*`) — TLS to peer host with client certificate; peer must present a cert trusted by `HIERARCHY_PEER_CA_FILE`
+- **ICP filtering**: Accept queries only from known peers (still plaintext UDP)
 - **Cache poisoning prevention**: Verify parent responses
 - **Access control**: Restrict which URLs can be fetched from peers
 
+When mTLS is enabled, every peer listed in `CACHE_PARENTS` / `CACHE_SIBLINGS` / peers JSON must speak **TLS on the HTTP proxy port** (same port as plain HTTP peer fetch). ICP/HTCP remain separate UDP channels.
+
 ## Future Enhancements
 
-- HTTPS between peers (TLS)
-- HTCP protocol support
+- ICP/HTCP over DTLS or authenticated digests
 - Dynamic peer weights based on performance
 - Geographic peer selection (GeoIP)
 - Cache warming from digest

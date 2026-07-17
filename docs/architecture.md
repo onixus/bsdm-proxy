@@ -188,7 +188,7 @@ Local L1 miss → ICP query siblings → select parent → fetch_via_peer → or
 
 Локальный ICP-сервер отвечает HIT/MISS по наличию URL в `http_cache` (ключ `GET:<url>`).
 
-**Ограничения после Phase 4:** нет mTLS между peers, `HIERARCHY_DIRECT_DOMAINS`.
+**Ограничения после Phase 4:** ICP/HTCP still plaintext UDP; peer HTTP mTLS optional (`HIERARCHY_PEER_MTLS_*`); `HIERARCHY_DIRECT_DOMAINS` TBD.
 
 ---
 
