@@ -50,7 +50,9 @@ flowchart TB
   P -->|/metrics| PM
 ```
 
-### Референс sizing (5k users, ~350 peak RPS)
+### Референс sizing (corporate medium ≈5k users, ~350 peak RPS)
+
+Estimate — см. оговорки в [capacity-planning.md](capacity-planning.md). Итоги кластера считайте по CH×1 vs CH×3.
 
 | Компонент | K8s | Replicas | CPU/pod | RAM/pod |
 |-----------|-----|----------|---------|---------|
@@ -60,7 +62,7 @@ flowchart TB
 | Kafka | Strimzi / external | 3 | 2 / 4 | 8 Gi |
 | ClickHouse | StatefulSet / managed / ClickHouse Cloud | 1–3 | 8 / 8 | 32 Gi |
 
-Полные цифры: [capacity-planning.md](capacity-planning.md).
+Для ~1k users (малый prod): обычно **2** replica proxy, Redis optional, CH×1. Полные цифры: [capacity-planning.md](capacity-planning.md).
 
 ---
 
