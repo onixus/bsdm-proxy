@@ -491,6 +491,36 @@
       ],
       "title": "Top C&C beacon pairs (cc_beacon_v0 / ml-worker M5.4)",
       "type": "table"
+    },
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "inspect": false },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 90 },
+      "id": 16,
+      "options": {
+        "cellHeight": "sm",
+        "footer": { "countRows": false, "fields": "", "reducer": ["sum"], "show": false },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+          "editorType": "sql",
+          "format": 0,
+          "queryType": "sql",
+          "rawSql": "SELECT\n  entity_type,\n  entity_id,\n  max(score) AS max_score,\n  argMax(severity, score) AS severity,\n  argMax(model, score) AS model,\n  max(scored_at) AS last_scored,\n  max(expires_at) AS expires_at\nFROM bsdm.threat_score_cache\nWHERE expires_at > now()\nGROUP BY entity_type, entity_id\nORDER BY max_score DESC\nLIMIT 50",
+          "refId": "A"
+        }
+      ],
+      "title": "Active threat score cache (M5.5 write-back / proxy poll)",
+      "type": "table"
     }
   ],
   "refresh": "30s",

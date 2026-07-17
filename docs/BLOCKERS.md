@@ -39,7 +39,7 @@
 
 | ID | Issue | Блокер | Статус |
 |----|-------|--------|--------|
-| B15 | [#46](https://github.com/onixus/bsdm-proxy/issues/46) | Design analytics/ML worker service | ❌ |
+| B15 | [#46](https://github.com/onixus/bsdm-proxy/issues/46) | Design analytics/ML worker service | ✅ ml-worker M5 |
 | B16 | [#47](https://github.com/onixus/bsdm-proxy/issues/47) | Extend event schema for threat analytics | ✅ |
 | B17 | [#48](https://github.com/onixus/bsdm-proxy/issues/48) | Analytics UI (Grafana + ClickHouse; was OS Dashboards) | ✅ |
 | B18 | [#49](https://github.com/onixus/bsdm-proxy/issues/49) | Behavioral threat signals (beyond blocklists) | ✅ beacon_periodic |

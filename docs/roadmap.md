@@ -25,7 +25,7 @@
 | [M2.5 — Data plane](#m25--data-plane-throughput-v03x) | v0.3.x–0.3.2 | Tiered L1, streaming, P1 hot path | ✅ Done |
 | [M3 — Retro-search](#m3--retro-search) | v0.3.1+ | ClickHouse, Search API, Grafana, k8s CHI | ✅ Done (~95%) |
 | [M4 — Threat analytics](#m4--threat-analytics-v05x) | v0.5.x | Rule-based угрозы, алерты, C&C / Shannon | ✅ Done |
-| [M5 — ML security](#m5--ml-security-v10x) | v1.0.x | Feature store, anomaly / phishing / C&C ML | ~55% (M5.4 C&C beacon) |
+| [M5 — ML security](#m5--ml-security-v10x) | v1.0.x | Feature store, anomaly / phishing / C&C ML | ✅ Done |
 
 ```mermaid
 gantt
@@ -39,7 +39,7 @@ gantt
   M3 Retro-search         :done, m3, 2026-05, 2026-07
   M4 Threat analytics     :done, m4, 2026-07, 2026-07
   section ML
-  M5 ML security          :active, m5, 2026-10, 2027-03
+  M5 ML security          :done, m5, 2026-10, 2027-03
 ```
 
 ---
@@ -167,12 +167,12 @@ Async scoring off the proxy hot path. Design: [ADR 0003](adr/0003-ml-worker-feat
 
 ## Матрица зрелости
 
-| Столп | Сейчас (0.5.0 + M5.1) | После M5 |
-|-------|----------------------|----------|
+| Столп | Сейчас (0.5.0 + M5) | Целевое |
+|-------|---------------------|---------|
 | Squid parity | **~92%** | ~93% |
 | Ретропоиск | **~90%** | ~95% |
-| ML / C&C / phishing | **~70%** | ~85% |
-| **Итого** | **~78%** | ~88% |
+| ML / C&C / phishing | **~85%** | ~90% |
+| **Итого** | **~88%** | ~92% |
 
 ---
 
