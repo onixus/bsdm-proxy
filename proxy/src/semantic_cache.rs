@@ -196,10 +196,9 @@ impl SemanticCacheConfig {
         match self.embed_provider {
             EmbedProviderKind::Local => Ok(hash_embed(text, self.embed_dims)),
             EmbedProviderKind::Http => {
-                let url = self
-                    .embed_url
-                    .as_deref()
-                    .ok_or_else(|| "SEMANTIC_EMBED_URL required for http embed provider".to_string())?;
+                let url = self.embed_url.as_deref().ok_or_else(|| {
+                    "SEMANTIC_EMBED_URL required for http embed provider".to_string()
+                })?;
                 let client = reqwest::Client::new();
                 let resp = client
                     .post(url)
@@ -213,10 +212,8 @@ impl SemanticCacheConfig {
                 if !resp.status().is_success() {
                     return Err(format!("embed HTTP status {}", resp.status()));
                 }
-                let body: serde_json::Value = resp
-                    .json()
-                    .await
-                    .map_err(|e| format!("embed JSON: {e}"))?;
+                let body: serde_json::Value =
+                    resp.json().await.map_err(|e| format!("embed JSON: {e}"))?;
                 let arr = body
                     .get("embedding")
                     .and_then(|v| v.as_array())
@@ -456,12 +453,14 @@ impl QdrantIndex {
             }
         }
         let url = format!("{}/collections/{}", self.base_url, self.collection);
-        let req = self.apply_auth(self.client.put(&url)).json(&serde_json::json!({
-            "vectors": {
-                "size": self.dims,
-                "distance": "Cosine"
-            }
-        }));
+        let req = self
+            .apply_auth(self.client.put(&url))
+            .json(&serde_json::json!({
+                "vectors": {
+                    "size": self.dims,
+                    "distance": "Cosine"
+                }
+            }));
         let resp = req
             .send()
             .await
@@ -494,13 +493,15 @@ impl QdrantIndex {
             self.base_url, self.collection
         );
         let id = point_id_u64(&cache_key);
-        let req = self.apply_auth(self.client.put(&url)).json(&serde_json::json!({
-            "points": [{
-                "id": id,
-                "vector": embedding,
-                "payload": { "cache_key": cache_key.as_ref() }
-            }]
-        }));
+        let req = self
+            .apply_auth(self.client.put(&url))
+            .json(&serde_json::json!({
+                "points": [{
+                    "id": id,
+                    "vector": embedding,
+                    "payload": { "cache_key": cache_key.as_ref() }
+                }]
+            }));
         let resp = req
             .send()
             .await
@@ -521,12 +522,14 @@ impl QdrantIndex {
             "{}/collections/{}/points/search",
             self.base_url, self.collection
         );
-        let req = self.apply_auth(self.client.post(&url)).json(&serde_json::json!({
-            "vector": embedding,
-            "limit": 1,
-            "score_threshold": threshold,
-            "with_payload": true
-        }));
+        let req = self
+            .apply_auth(self.client.post(&url))
+            .json(&serde_json::json!({
+                "vector": embedding,
+                "limit": 1,
+                "score_threshold": threshold,
+                "with_payload": true
+            }));
         let resp = req
             .send()
             .await
@@ -741,80 +744,92 @@ mod tests {
                 let state = state_accept.clone();
                 tokio::spawn(async move {
                     let io = hyper_util::rt::TokioIo::new(stream);
-                    let service = hyper::service::service_fn(move |req: hyper::Request<hyper::body::Incoming>| {
-                        let state = state.clone();
-                        async move {
-                            let path = req.uri().path().to_string();
-                            let method = req.method().clone();
-                            let body = http_body_util::BodyExt::collect(req.into_body())
-                                .await
-                                .unwrap()
-                                .to_bytes();
-                            let mut status = hyper::StatusCode::OK;
-                            let mut resp_body = br#"{"result":true}"#.to_vec();
+                    let service = hyper::service::service_fn(
+                        move |req: hyper::Request<hyper::body::Incoming>| {
+                            let state = state.clone();
+                            async move {
+                                let path = req.uri().path().to_string();
+                                let method = req.method().clone();
+                                let body = http_body_util::BodyExt::collect(req.into_body())
+                                    .await
+                                    .unwrap()
+                                    .to_bytes();
+                                let mut status = hyper::StatusCode::OK;
+                                let mut resp_body = br#"{"result":true}"#.to_vec();
 
-                            if method == hyper::Method::PUT && path.contains("/collections/") && !path.contains("/points")
-                            {
-                                resp_body = br#"{"result":true}"#.to_vec();
-                            } else if method == hyper::Method::GET && path.contains("/collections/")
-                            {
-                                resp_body = br#"{"result":{"status":"green"}}"#.to_vec();
-                            } else if method == hyper::Method::PUT && path.contains("/points") {
-                                let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-                                let p = &v["points"][0];
-                                let id = p["id"].as_u64().unwrap();
-                                let vec: Vec<f32> = p["vector"]
-                                    .as_array()
-                                    .unwrap()
-                                    .iter()
-                                    .map(|x| x.as_f64().unwrap() as f32)
-                                    .collect();
-                                let key = p["payload"]["cache_key"].as_str().unwrap().to_string();
-                                state.lock().unwrap().push((id, vec, key));
-                            } else if method == hyper::Method::POST && path.contains("/search") {
-                                let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-                                let q: Vec<f32> = v["vector"]
-                                    .as_array()
-                                    .unwrap()
-                                    .iter()
-                                    .map(|x| x.as_f64().unwrap() as f32)
-                                    .collect();
-                                let thr = v["score_threshold"].as_f64().unwrap_or(0.0) as f32;
-                                let guard = state.lock().unwrap();
-                                let mut best: Option<(f32, String)> = None;
-                                for (_id, emb, key) in guard.iter() {
-                                    let score = cosine_similarity(&q, emb);
-                                    if score >= thr
-                                        && best.as_ref().map(|(s, _)| score > *s).unwrap_or(true)
-                                    {
-                                        best = Some((score, key.clone()));
+                                if method == hyper::Method::PUT
+                                    && path.contains("/collections/")
+                                    && !path.contains("/points")
+                                {
+                                    resp_body = br#"{"result":true}"#.to_vec();
+                                } else if method == hyper::Method::GET
+                                    && path.contains("/collections/")
+                                {
+                                    resp_body = br#"{"result":{"status":"green"}}"#.to_vec();
+                                } else if method == hyper::Method::PUT && path.contains("/points") {
+                                    let v: serde_json::Value =
+                                        serde_json::from_slice(&body).unwrap();
+                                    let p = &v["points"][0];
+                                    let id = p["id"].as_u64().unwrap();
+                                    let vec: Vec<f32> = p["vector"]
+                                        .as_array()
+                                        .unwrap()
+                                        .iter()
+                                        .map(|x| x.as_f64().unwrap() as f32)
+                                        .collect();
+                                    let key =
+                                        p["payload"]["cache_key"].as_str().unwrap().to_string();
+                                    state.lock().unwrap().push((id, vec, key));
+                                } else if method == hyper::Method::POST && path.contains("/search")
+                                {
+                                    let v: serde_json::Value =
+                                        serde_json::from_slice(&body).unwrap();
+                                    let q: Vec<f32> = v["vector"]
+                                        .as_array()
+                                        .unwrap()
+                                        .iter()
+                                        .map(|x| x.as_f64().unwrap() as f32)
+                                        .collect();
+                                    let thr = v["score_threshold"].as_f64().unwrap_or(0.0) as f32;
+                                    let guard = state.lock().unwrap();
+                                    let mut best: Option<(f32, String)> = None;
+                                    for (_id, emb, key) in guard.iter() {
+                                        let score = cosine_similarity(&q, emb);
+                                        if score >= thr
+                                            && best
+                                                .as_ref()
+                                                .map(|(s, _)| score > *s)
+                                                .unwrap_or(true)
+                                        {
+                                            best = Some((score, key.clone()));
+                                        }
                                     }
-                                }
-                                resp_body = if let Some((score, key)) = best {
-                                    serde_json::json!({
-                                        "result": [{
-                                            "score": score,
-                                            "payload": { "cache_key": key }
-                                        }]
-                                    })
-                                    .to_string()
-                                    .into_bytes()
+                                    resp_body = if let Some((score, key)) = best {
+                                        serde_json::json!({
+                                            "result": [{
+                                                "score": score,
+                                                "payload": { "cache_key": key }
+                                            }]
+                                        })
+                                        .to_string()
+                                        .into_bytes()
+                                    } else {
+                                        br#"{"result":[]}"#.to_vec()
+                                    };
                                 } else {
-                                    br#"{"result":[]}"#.to_vec()
-                                };
-                            } else {
-                                status = hyper::StatusCode::NOT_FOUND;
-                                resp_body = br#"{"status":{"error":"not found"}}"#.to_vec();
-                            }
+                                    status = hyper::StatusCode::NOT_FOUND;
+                                    resp_body = br#"{"status":{"error":"not found"}}"#.to_vec();
+                                }
 
-                            let resp = hyper::Response::builder()
-                                .status(status)
-                                .header("content-type", "application/json")
-                                .body(http_body_util::Full::new(bytes::Bytes::from(resp_body)))
-                                .unwrap();
-                            Ok::<_, Infallible>(resp)
-                        }
-                    });
+                                let resp = hyper::Response::builder()
+                                    .status(status)
+                                    .header("content-type", "application/json")
+                                    .body(http_body_util::Full::new(bytes::Bytes::from(resp_body)))
+                                    .unwrap();
+                                Ok::<_, Infallible>(resp)
+                            }
+                        },
+                    );
                     let _ = hyper::server::conn::http1::Builder::new()
                         .serve_connection(io, service)
                         .await;
