@@ -12,6 +12,9 @@ on:
       - 'proxy/**'
   workflow_dispatch: # Позволяет запускать тесты вручную из интерфейса GitHub
 
+permissions:
+  contents: read
+
 jobs:
   benchmark:
     name: Run wrk Load Test
