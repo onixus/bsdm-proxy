@@ -7,10 +7,10 @@
 
 [![E2E Tests](https://github.com/onixus/bsdm-proxy/actions/workflows/e2e.yml/badge.svg)](https://github.com/onixus/bsdm-proxy/actions/workflows/e2e.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.5.0-blue.svg)](https://github.com/onixus/bsdm-proxy/releases)
+[![Version](https://img.shields.io/badge/version-0.5.07.033-blue.svg)](https://github.com/onixus/bsdm-proxy/releases)
 [![Rust](https://img.shields.io/badge/rust-1.88+-orange.svg)](https://www.rust-lang.org)
 
-> **Текущая версия:** `0.5.0` · M1–M5 done · DX/AI prep in Unreleased — см. [Releases](https://github.com/onixus/bsdm-proxy/releases) · [CHANGELOG](CHANGELOG.md) · [roadmap](docs/roadmap.md)
+> **Текущая версия:** `0.5.07.033` (Cargo `0.5.7+033`) · M1–M5 + DX/Wasm/AI/P3 — см. [Releases](https://github.com/onixus/bsdm-proxy/releases) · [CHANGELOG](CHANGELOG.md) · [roadmap](docs/roadmap.md)
 
 ⚠️ **MITM-прокси для HTTPS.** Используйте только в корпоративной среде с согласия пользователей и в рамках законодательства.
 
@@ -160,13 +160,13 @@ Grafana: http://localhost:3000 → **BSDM HTTP Traffic (ClickHouse)** и **BSDM 
 ./scripts/build-package.sh
 ```
 
-Архив: `dist/bsdm-proxy-0.5.0-linux-<arch>.tar.gz`
+Архив: `dist/bsdm-proxy-0.5.7.033-linux-<arch>.tar.gz`
 
 Установка:
 
 ```bash
-tar xzf dist/bsdm-proxy-0.5.0-linux-x86_64.tar.gz
-cd bsdm-proxy-0.5.0-linux-x86_64
+tar xzf dist/bsdm-proxy-0.5.7.033-linux-x86_64.tar.gz
+cd bsdm-proxy-0.5.7.033-linux-x86_64
 sudo ./install.sh --create-user --systemd
 sudo cp certs/ca.key certs/ca.crt /certs/
 sudo systemctl start bsdm-proxy
@@ -515,6 +515,7 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test, cargo-audi
 | [docs/strategic-roadmap.md](docs/strategic-roadmap.md) | Стратегия: Lite, DX, Wasm, AI |
 | [docs/capacity-planning.md](docs/capacity-planning.md) | Планирование ёмкости (корп. сценарии) |
 | [CHANGELOG.md](CHANGELOG.md) | История изменений |
+| [docs/releases/v0.5.7+033.md](docs/releases/v0.5.7+033.md) | Release notes 0.5.07.033 |
 | [docs/releases/v0.5.0.md](docs/releases/v0.5.0.md) | Release notes 0.5.0 (M4) |
 | [docs/releases/v0.3.2.md](docs/releases/v0.3.2.md) | Release notes 0.3.2 |
 | [docs/releases/v0.3.1.md](docs/releases/v0.3.1.md) | Release notes 0.3.1 |

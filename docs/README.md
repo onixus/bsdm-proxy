@@ -2,7 +2,7 @@
 
 Центральное оглавление. Страницы wiki — в каталоге `docs/`.
 
-**Текущая версия:** 0.5.0 · M1–M5 done · Unreleased: DX/AI · Analytics: Kafka → ClickHouse (или Lite: HTTP → SQLite) · [roadmap](roadmap.md)
+**Текущая версия:** 0.5.07.033 (Cargo `0.5.7+033`) · M1–M5 + DX/Wasm/AI/P3 · Analytics: Kafka → ClickHouse (или Lite: HTTP → SQLite) · [roadmap](roadmap.md)
 
 ## Начало работы
 
@@ -18,7 +18,8 @@
 | [structure.md](structure.md) | Структура репозитория |
 | [licensing.md](licensing.md) | Лицензии и third-party |
 | [CHANGELOG.md](../CHANGELOG.md) | История изменений |
-| [releases/v0.5.0.md](releases/v0.5.0.md) | **Release notes 0.5.0** (M4) |
+| [releases/v0.5.7+033.md](releases/v0.5.7+033.md) | **Release notes 0.5.07.033** |
+| [releases/v0.5.0.md](releases/v0.5.0.md) | Release notes 0.5.0 (M4) |
 | [releases/v0.3.2.md](releases/v0.3.2.md) | Release notes 0.3.2 |
 | [releases/v0.3.1.md](releases/v0.3.1.md) | Release notes 0.3.1 (ClickHouse migration) |
 | [releases/v0.3.0.md](releases/v0.3.0.md) | Release notes 0.3.0 (M2) |
