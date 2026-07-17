@@ -1,4 +1,5 @@
 mod baseline;
+mod beacon;
 mod clickhouse;
 mod config;
 mod features;
@@ -8,6 +9,10 @@ mod scoring;
 mod webhook;
 
 use baseline::{baseline_sql, baselines_from_rows, BaselineSet};
+use beacon::{
+    extract_sql as beacon_extract_sql, features_from_row as beacon_from_row, score_beacon_pair,
+    MODEL_CC_BEACON,
+};
 use clickhouse::ClickHouseClient;
 use config::Config;
 use features::{extract_sql, features_from_row};
@@ -57,6 +62,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         source = %config.fq_source(),
         features = %if config.is_phishing_model() {
             config.fq_phishing_features()
+        } else if config.is_beacon_model() {
+            config.fq_beacon_features()
         } else {
             config.fq_features()
         },
@@ -68,7 +75,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         baseline_lookback_secs = config.baseline_lookback.as_secs(),
         baseline_path = ?config.baseline_path,
         webhook = webhook.is_some(),
-        "ml-worker started (M5.3 phishing lexical / UEBA / stub)"
+        "ml-worker started (M5.4 C&C beacon / M5.3 phishing / UEBA / stub)"
     );
 
     loop {
@@ -116,7 +123,64 @@ async fn cycle_once(
     if config.is_phishing_model() {
         return cycle_phishing(config, ch, webhook, metrics).await;
     }
+    if config.is_beacon_model() {
+        return cycle_beacon(config, ch, webhook, metrics).await;
+    }
     cycle_ueba(config, ch, webhook, metrics).await
+}
+
+async fn cycle_beacon(
+    config: &Config,
+    ch: &ClickHouseClient,
+    webhook: Option<&WebhookClient>,
+    metrics: &WorkerMetrics,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sql = beacon_extract_sql(config);
+    let rows = ch.query_json_each_row(&sql).await?;
+    let mut pairs = Vec::new();
+    for row in rows {
+        match beacon_from_row(&row) {
+            Ok(f) => pairs.push(f),
+            Err(e) => {
+                warn!("skip beacon feature row: {e}");
+                metrics.errors.inc();
+            }
+        }
+    }
+
+    let feature_jsons: Vec<_> = pairs.iter().map(|f| f.to_insert_json()).collect();
+    ch.insert_json_each_row(&config.fq_beacon_features(), &feature_jsons)
+        .await?;
+    metrics.features_written.inc_by(feature_jsons.len() as u64);
+    metrics.last_cycle_features.set(feature_jsons.len() as i64);
+
+    let mut score_jsons = Vec::new();
+    for f in &pairs {
+        let scored = score_beacon_pair(f, config);
+        if let Some(wh) = webhook {
+            if scored.score >= config.score_threshold {
+                if let Err(e) = wh.post_score(&scored).await {
+                    warn!("webhook failed for {}: {e}", scored.entity_id);
+                    metrics.errors.inc();
+                } else {
+                    metrics.webhooks_sent.inc();
+                }
+            }
+        }
+        score_jsons.push(scored.to_insert_json());
+    }
+    ch.insert_json_each_row(&config.fq_scores(), &score_jsons)
+        .await?;
+    metrics.scores_written.inc_by(score_jsons.len() as u64);
+    metrics.cycles.inc();
+
+    info!(
+        pairs = feature_jsons.len(),
+        scores = score_jsons.len(),
+        model = MODEL_CC_BEACON,
+        "beacon cycle complete"
+    );
+    Ok(())
 }
 
 async fn cycle_phishing(

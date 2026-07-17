@@ -75,6 +75,31 @@ ORDER BY (domain, window_start)
 TTL window_start + INTERVAL 90 DAY
 SETTINGS index_granularity = 8192;
 
+-- M5.4 client→domain C&C beacon features (ml-worker cc_beacon_v0).
+CREATE TABLE IF NOT EXISTS bsdm.beacon_pair_features
+(
+    window_start DateTime64(3, 'UTC'),
+    window_secs UInt32,
+    client_ip String,
+    domain String,
+    request_count UInt64,
+    gap_count UInt64,
+    avg_gap_secs Float64,
+    gap_cv Float64,
+    stddev_gap_secs Float64,
+    post_count UInt64,
+    avg_response_size Float64,
+    off_hours_count UInt64,
+    threat_hit_count UInt64,
+    unique_urls UInt64,
+    extracted_at DateTime64(3, 'UTC')
+)
+ENGINE = MergeTree
+PARTITION BY toYYYYMMDD(window_start)
+ORDER BY (client_ip, domain, window_start)
+TTL window_start + INTERVAL 90 DAY
+SETTINGS index_granularity = 8192;
+
 -- Example: top phishing-scored domains (last 24h)
 -- SELECT entity_id, max(score) AS max_score, argMax(severity, score) AS severity
 -- FROM bsdm.ml_scores
