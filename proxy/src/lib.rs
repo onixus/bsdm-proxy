@@ -83,7 +83,9 @@ pub use sharded_cache::HttpL1Cache;
 pub use tag_index::{parse_cache_tags, TagIndex};
 pub use threat_score_cache::{ThreatScoreCache, ThreatScoreConfig, ThreatScoreHit};
 pub use tls::CertCache;
-pub use upstream::{build_upstream_https_connector, UpstreamTlsConfig};
+pub use upstream::{
+    build_upstream_https_connector, UpstreamClientHandle, UpstreamTlsConfig, UpstreamTlsSnapshot,
+};
 
 // Conditional re-exports based on features
 #[cfg(feature = "auth-ldap")]

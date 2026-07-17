@@ -17,6 +17,7 @@ use crate::l2_cache::RedisL2Cache;
 use crate::metrics::Metrics;
 use crate::peers::PeerRegistry;
 use crate::sharded_cache::HttpL1Cache;
+use crate::upstream::UpstreamClientHandle;
 
 #[derive(Clone)]
 pub struct ControlApiState {
@@ -27,6 +28,7 @@ pub struct ControlApiState {
     started_at: Instant,
     peer_registry: Option<PeerRegistry>,
     hierarchy_use_htcp: bool,
+    upstream_client: UpstreamClientHandle,
 }
 
 impl ControlApiState {
@@ -37,6 +39,7 @@ impl ControlApiState {
         api_token: Option<String>,
         peer_registry: Option<PeerRegistry>,
         hierarchy_use_htcp: bool,
+        upstream_client: UpstreamClientHandle,
     ) -> Self {
         Self {
             metrics,
@@ -46,6 +49,7 @@ impl ControlApiState {
             started_at: Instant::now(),
             peer_registry,
             hierarchy_use_htcp,
+            upstream_client,
         }
     }
 
@@ -55,6 +59,7 @@ impl ControlApiState {
         l2_cache: Option<RedisL2Cache>,
         peer_registry: Option<PeerRegistry>,
         hierarchy_use_htcp: bool,
+        upstream_client: UpstreamClientHandle,
     ) -> Self {
         let api_token = std::env::var("CONTROL_API_TOKEN")
             .ok()
@@ -71,6 +76,7 @@ impl ControlApiState {
             api_token,
             peer_registry,
             hierarchy_use_htcp,
+            upstream_client,
         )
     }
 
@@ -97,7 +103,9 @@ impl ControlApiState {
         // Public monitoring GETs; mutations require token when configured.
         let needs_auth = !matches!(
             (method, path),
-            (&Method::GET, "/api/stats") | (&Method::GET, "/api/hierarchy/peers")
+            (&Method::GET, "/api/stats")
+                | (&Method::GET, "/api/hierarchy/peers")
+                | (&Method::GET, "/api/upstream/tls")
         );
         if needs_auth && !self.is_authorized(headers) {
             return json_response(StatusCode::UNAUTHORIZED, r#"{"error":"unauthorized"}"#);
@@ -108,6 +116,8 @@ impl ControlApiState {
             (&Method::POST, "/api/cache/purge") => self.purge(body).await,
             (&Method::GET, "/api/hierarchy/peers") => self.hierarchy_peers().await,
             (&Method::POST, "/api/hierarchy/reload") => self.hierarchy_reload().await,
+            (&Method::GET, "/api/upstream/tls") => self.upstream_tls_status(),
+            (&Method::POST, "/api/upstream/tls/reload") => self.upstream_tls_reload(),
             _ => json_response(StatusCode::NOT_FOUND, r#"{"error":"not found"}"#),
         }
     }
@@ -205,6 +215,35 @@ impl ControlApiState {
                 );
                 json_response(StatusCode::OK, &body)
             }
+            Err(e) => json_response(
+                StatusCode::BAD_REQUEST,
+                &format!(r#"{{"error":"{}"}}"#, escape_json(&e)),
+            ),
+        }
+    }
+
+    fn upstream_tls_status(&self) -> Response<Body> {
+        match serde_json::to_string(self.upstream_client.snapshot().as_ref()) {
+            Ok(body) => json_response(StatusCode::OK, &body),
+            Err(_) => json_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                r#"{"error":"serialization failed"}"#,
+            ),
+        }
+    }
+
+    fn upstream_tls_reload(&self) -> Response<Body> {
+        match self.upstream_client.reload_from_env() {
+            Ok(snap) => match serde_json::to_string(&UpstreamTlsReloadResponse {
+                status: "reloaded",
+                tls: snap,
+            }) {
+                Ok(body) => json_response(StatusCode::OK, &body),
+                Err(_) => json_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    r#"{"error":"serialization failed"}"#,
+                ),
+            },
             Err(e) => json_response(
                 StatusCode::BAD_REQUEST,
                 &format!(r#"{{"error":"{}"}}"#, escape_json(&e)),
@@ -316,6 +355,12 @@ struct CacheStats {
 }
 
 #[derive(Debug, Serialize)]
+struct UpstreamTlsReloadResponse {
+    status: &'static str,
+    tls: crate::upstream::UpstreamTlsSnapshot,
+}
+
+#[derive(Debug, Serialize)]
 struct PeersListResponse {
     enabled: bool,
     peers: Vec<PeerListItem>,
@@ -379,9 +424,15 @@ mod tests {
     use super::*;
     use crate::metrics::Metrics;
     use crate::peers::{PeerConfig, PeerType};
+    use crate::upstream::UpstreamTlsConfig;
+
+    fn test_upstream() -> UpstreamClientHandle {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        UpstreamClientHandle::new(UpstreamTlsConfig::default()).unwrap()
+    }
 
     fn state_plain(metrics: Arc<Metrics>, cache: Arc<HttpL1Cache>) -> ControlApiState {
-        ControlApiState::new(metrics, cache, None, None, None, false)
+        ControlApiState::new(metrics, cache, None, None, None, false, test_upstream())
     }
 
     #[tokio::test]
@@ -508,7 +559,15 @@ mod tests {
                 max_connections: 100,
             })
             .await;
-        let state = ControlApiState::new(metrics, cache, None, None, Some(registry), false);
+        let state = ControlApiState::new(
+            metrics,
+            cache,
+            None,
+            None,
+            Some(registry),
+            false,
+            test_upstream(),
+        );
         let resp = state
             .dispatch(
                 &Method::GET,
@@ -523,6 +582,39 @@ mod tests {
         assert_eq!(v["enabled"], true);
         assert_eq!(v["peers"].as_array().unwrap().len(), 1);
         assert_eq!(v["peers"][0]["is_static"], true);
+    }
+
+    #[tokio::test]
+    async fn upstream_tls_status_and_reload() {
+        let metrics = Arc::new(Metrics::new().unwrap());
+        let cache = Arc::new(HttpL1Cache::new(100, 4));
+        let state = state_plain(metrics, cache);
+        let resp = state
+            .dispatch(
+                &Method::GET,
+                "/api/upstream/tls",
+                Bytes::new(),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = BodyExt::collect(resp.into_body()).await.unwrap().to_bytes();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["custom_ca"], false);
+
+        let resp = state
+            .dispatch(
+                &Method::POST,
+                "/api/upstream/tls/reload",
+                Bytes::new(),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = BodyExt::collect(resp.into_body()).await.unwrap().to_bytes();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["status"], "reloaded");
+        assert!(v["tls"]["reloaded_at_unix"].as_u64().unwrap() > 0);
     }
 
     #[tokio::test]
