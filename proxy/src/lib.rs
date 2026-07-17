@@ -59,7 +59,8 @@ pub use control_api::ControlApiState;
 pub use hierarchy::{HierarchyConfig, HierarchyManager, HierarchyResult};
 pub use hierarchy_config::{
     build_hierarchy_manager, htcp_peer_port, htcp_server_bind_addr, icp_server_bind_addr,
-    load_hierarchy_config, should_start_htcp_server, should_start_icp_server, HierarchySetup,
+    load_hierarchy_config, reload_static_peers, should_start_htcp_server, should_start_icp_server,
+    HierarchyReloadReport, HierarchySetup, PeerConfigSource,
 };
 pub use htcp::{HtcpClient, HtcpOpcode, HtcpServer};
 pub use icp::{IcpClient, IcpMessage, IcpOpcode, IcpServer};
@@ -67,7 +68,7 @@ pub use l2_cache::{L2CacheConfig, RedisL2Cache};
 pub use metrics::{FastRequestScope, Metrics, RequestMetricsGuard};
 pub use peer_discovery::{run_peer_discovery, PeerDiscoveryConfig};
 pub use peer_fetch::{fetch_via_peer, PeerFetchError};
-pub use peers::{CachePeer, PeerConfig, PeerRegistry, PeerType};
+pub use peers::{CachePeer, PeerConfig, PeerRegistry, PeerType, ReplaceStaticStats};
 pub use perf::{bind_http_listeners, PerfConfig};
 pub use pipeline::{dispatch_cache_event, new_event_id, HttpEventPipeline};
 #[cfg(feature = "kafka")]

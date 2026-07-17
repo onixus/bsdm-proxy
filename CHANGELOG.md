@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **DX hierarchy peer hot reload** — `GET /api/hierarchy/peers`, `POST /api/hierarchy/reload`; optional `CACHE_PEERS_PATH` / `HIERARCHY_PEERS_PATH` JSON; discovery siblings preserved
 - **DX Cache-Tag purge** — L1 secondary index for `Cache-Tag` / `Surrogate-Key`; `POST /api/cache/purge` accepts `tag` / `tags` (+ L2 key delete)
 - **DX Phase 2 control plane** — ACL CRUD (`PUT`/`DELETE`/`persist`), `GET /api/stats` Lite JSON, `POST /api/cache/purge`; admin-console Policies delete/persist; [docs/control-plane.md](docs/control-plane.md)
 - **Lite B21 — optional Kafka feature** — `kafka` Cargo feature (default on) for `bsdm-proxy` and `cache-indexer`; Lite Docker build uses `--no-default-features` (no `rdkafka` link) ([#52](https://github.com/onixus/bsdm-proxy/issues/52))

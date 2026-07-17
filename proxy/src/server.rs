@@ -111,7 +111,10 @@ pub async fn metrics_server(
                             }
 
                             if let Some(api) = &control_api {
-                                if path == "/api/stats" || path.starts_with("/api/cache/") {
+                                if path == "/api/stats"
+                                    || path.starts_with("/api/cache/")
+                                    || path.starts_with("/api/hierarchy/")
+                                {
                                     return Ok::<_, Infallible>(api.handle_request(req).await);
                                 }
                             }

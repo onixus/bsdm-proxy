@@ -11,8 +11,8 @@ See also: [strategic-roadmap.md](strategic-roadmap.md) Phase 2 · [acl.md](acl.m
 | `CONTROL_API_TOKEN` | Preferred Bearer token for mutating control APIs |
 | `ACL_API_TOKEN` | Fallback token (also used for `/api/acl/*`) |
 
-`GET /api/stats` is intentionally unauthenticated (local Lite monitoring).  
-`POST /api/cache/purge` and all `/api/acl/*` require Bearer when a token is configured.
+`GET /api/stats` and `GET /api/hierarchy/peers` are intentionally unauthenticated (local Lite monitoring).  
+`POST /api/cache/purge`, `POST /api/hierarchy/reload`, and all `/api/acl/*` require Bearer when a token is configured.
 
 ```bash
 curl -H "Authorization: Bearer $CONTROL_API_TOKEN" ...
@@ -80,8 +80,38 @@ Tags are parsed from upstream response headers `Cache-Tag` (comma-separated) and
 
 Requires `ACL_ENABLED=true`.
 
+## Hierarchy peers (hot reload)
+
+Requires `HIERARCHY_ENABLED=true`. Reloads **static** parents/siblings only; multicast discovery peers are preserved. Does **not** rebind ICP/HTCP listeners or reload TLS.
+
+| Method | Path | Notes |
+|--------|------|-------|
+| `GET` | `/api/hierarchy/peers` | List peers (`is_static` distinguishes config vs discovery) |
+| `POST` | `/api/hierarchy/reload` | Re-read peers file or env |
+
+**Source (in order):**
+
+1. JSON file at `CACHE_PEERS_PATH` or `HIERARCHY_PEERS_PATH`
+2. Else `CACHE_PARENTS` / `CACHE_SIBLINGS` env (same format as startup)
+
+```json
+{"parents":["parent.example.com:1488:1.0"],"siblings":["sib.example.com:1488:1.0:3130"]}
+```
+
+```bash
+curl http://127.0.0.1:9090/api/hierarchy/peers
+
+curl -X POST http://127.0.0.1:9090/api/hierarchy/reload \
+  -H "Authorization: Bearer $CONTROL_API_TOKEN"
+```
+
+```json
+{"status":"reloaded","source":"file","added":2,"removed":1,"preserved_discovery":3}
+```
+
 ## Roadmap leftovers
 
 - [x] Cache-Tags / Surrogate-Key purge (`{"tag":"..."}`)
-- [ ] Upstream / hierarchy hot reload
+- [x] Hierarchy peer hot reload (`/api/hierarchy/*`)
+- [ ] Upstream TLS hot reload
 - [ ] gRPC control plane
