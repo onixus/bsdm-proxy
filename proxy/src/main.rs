@@ -9,7 +9,8 @@ use bsdm_proxy::{
     should_start_icp_server, wait_shutdown_signal, AclAction, AuthManager, CacheConfig, CertCache,
     HtcpServer, HttpEventPipeline, IcpServer, KafkaEventPipeline, L2CacheConfig, Metrics,
     PeerDiscoveryConfig, PerfConfig, PolicyCacheConfig, PolicyDecisionCache, ProxyPolicy,
-    ProxyService, RateLimitConfig, RedisL2Cache, UpstreamTlsConfig,
+    ProxyService, RateLimitConfig, RedisL2Cache, ThreatScoreCache, ThreatScoreConfig,
+    UpstreamTlsConfig,
 };
 use policy_config::{load_policy_config, reload_acl_engine};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -203,6 +204,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let upstream_tls = UpstreamTlsConfig::from_env();
     let perf = PerfConfig::from_env();
 
+    let threat_score_config = ThreatScoreConfig::from_env();
+    let threat_score_cache = Arc::new(ThreatScoreCache::new(threat_score_config));
+    if threat_score_cache.enabled() {
+        info!(
+            poll_url = %threat_score_cache.config().poll_url,
+            poll_secs = threat_score_cache.config().poll_interval.as_secs(),
+            warn_threshold = threat_score_cache.config().warn_threshold,
+            block_threshold = threat_score_cache.config().block_threshold,
+            "M5.5 threat score cache enabled"
+        );
+        threat_score_cache.clone().spawn_poll_task();
+    }
+
     let service = Arc::new(ProxyService::new(
         cert_cache,
         cache_config.clone(),
@@ -219,6 +233,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         upstream_tls,
         perf.clone(),
         policy_cache.clone(),
+        threat_score_cache,
     ));
 
     if should_start_icp_server(&hierarchy_config) {

@@ -14,6 +14,8 @@ pub struct Config {
     pub phishing_features_table: String,
     /// M5.4 client→domain beacon feature store.
     pub beacon_features_table: String,
+    /// M5.5 write-back cache table for proxy poll.
+    pub score_cache_table: String,
     pub clickhouse_user: Option<String>,
     pub clickhouse_password: Option<String>,
     pub poll_interval: Duration,
@@ -35,6 +37,10 @@ pub struct Config {
     pub beacon_min_interval_secs: u64,
     pub beacon_max_interval_secs: u64,
     pub beacon_max_gap_cv: f64,
+    /// M5.5 publish scores to threat_score_cache + /api/threat-scores.
+    pub writeback_enabled: bool,
+    pub writeback_min_score: f64,
+    pub writeback_ttl: Duration,
     pub webhook_url: Option<String>,
     pub webhook_timeout: Duration,
     pub metrics_port: u16,
@@ -75,6 +81,8 @@ impl Config {
                 .unwrap_or_else(|_| "domain_phishing_features".into()),
             beacon_features_table: std::env::var("ML_BEACON_FEATURES_TABLE")
                 .unwrap_or_else(|_| "beacon_pair_features".into()),
+            score_cache_table: std::env::var("ML_SCORE_CACHE_TABLE")
+                .unwrap_or_else(|_| "threat_score_cache".into()),
             clickhouse_user: std::env::var("CLICKHOUSE_USER")
                 .ok()
                 .filter(|s| !s.is_empty()),
@@ -100,6 +108,16 @@ impl Config {
             beacon_min_interval_secs: env_u64("ML_BEACON_MIN_INTERVAL_SECS", 45),
             beacon_max_interval_secs: env_u64("ML_BEACON_MAX_INTERVAL_SECS", 900),
             beacon_max_gap_cv: env_f64("ML_BEACON_MAX_GAP_CV", 0.25)?,
+            writeback_enabled: std::env::var("ML_WRITEBACK_ENABLED")
+                .map(|v| {
+                    !matches!(
+                        v.to_ascii_lowercase().as_str(),
+                        "0" | "false" | "no" | "off"
+                    )
+                })
+                .unwrap_or(true),
+            writeback_min_score: env_f64("ML_WRITEBACK_MIN_SCORE", 0.5)?,
+            writeback_ttl: Duration::from_secs(env_u64("ML_WRITEBACK_TTL_SECS", 3600)),
             webhook_url,
             webhook_timeout: Duration::from_secs(env_u64("ML_WEBHOOK_TIMEOUT_SECS", 10)),
             metrics_port: env_u64("METRICS_PORT", 8091) as u16,
@@ -139,6 +157,10 @@ impl Config {
             "{}.{}",
             self.clickhouse_database, self.beacon_features_table
         )
+    }
+
+    pub fn fq_score_cache(&self) -> String {
+        format!("{}.{}", self.clickhouse_database, self.score_cache_table)
     }
 }
 

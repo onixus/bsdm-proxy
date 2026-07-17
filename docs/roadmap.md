@@ -151,16 +151,17 @@ Async scoring off the proxy hot path. Design: [ADR 0003](adr/0003-ml-worker-feat
 - [x] `domain_phishing_features` table + lexical signals (entropy, keywords, IP host)
 - [x] Grafana panel + `m5_phishing_queries.sql` + `eval_phishing_lexical.py` ([#167](https://github.com/onixus/bsdm-proxy/issues/167))
 
-### M5.4 — C&C beacon ML ✅ / in this PR
+### M5.4 — C&C beacon ML ✅
 
 - [x] Model `cc_beacon_v0` on `(client_ip, domain)` pairs
 - [x] Augments M4 `beacon_periodic` (gap_cv, interval) + behavioral signals
 - [x] `beacon_pair_features` table; weak label = passes periodic thresholds
 - [x] Grafana panel + `m5_beacon_queries.sql` + `eval_cc_beacon.py` ([#168](https://github.com/onixus/bsdm-proxy/issues/168))
 
-### Planned
+### M5.5 — Threat score write-back ✅
 
-- [ ] **M5.5** Optional `threat_score` write-back / cached inline score (not on hot path until proven)
+- [x] `threat_score_cache` table + `GET /api/threat-scores` snapshot
+- [x] Proxy opt-in async poll + O(1) lookup; enriches `threat_sources` / optional block ([#169](https://github.com/onixus/bsdm-proxy/issues/169))
 
 ---
 
@@ -170,8 +171,8 @@ Async scoring off the proxy hot path. Design: [ADR 0003](adr/0003-ml-worker-feat
 |-------|----------------------|----------|
 | Squid parity | **~92%** | ~93% |
 | Ретропоиск | **~90%** | ~95% |
-| ML / C&C / phishing | **~40%** | ~75% |
-| **Итого** | **~74%** | ~85% |
+| ML / C&C / phishing | **~70%** | ~85% |
+| **Итого** | **~78%** | ~88% |
 
 ---
 
@@ -221,4 +222,4 @@ Backlog mapping: [swg-backlog-mapping.md](swg-backlog-mapping.md)
 
 ---
 
-*Обновлено: 2026-07-17 — M5.4 C&C beacon ML; next M5.5 score write-back*
+*Обновлено: 2026-07-17 — M5.5 threat score write-back; M5 epic complete*
