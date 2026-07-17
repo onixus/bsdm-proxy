@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Lite B21 — optional Kafka feature** — `kafka` Cargo feature (default on) for `bsdm-proxy` and `cache-indexer`; Lite Docker build uses `--no-default-features` (no `rdkafka` link) ([#52](https://github.com/onixus/bsdm-proxy/issues/52))
 - **M5.5 threat score write-back** — `ml-worker` publishes to `threat_score_cache` + `GET /api/threat-scores`; proxy optional async poll enriches `threat_sources` / block ([#169](https://github.com/onixus/bsdm-proxy/issues/169))
 - **Admin console** — Threat scores page (M5.5 snapshot + XAI); dashboard uses live write-back API
 - **M5.4 C&C beacon ML** — `cc_beacon_v0`: augments M4 `beacon_periodic` with behavioral signals (POST ratio, small payloads, off-hours); `beacon_pair_features` table; Grafana panel; `scripts/ml/eval_cc_beacon.py` ([#168](https://github.com/onixus/bsdm-proxy/issues/168))

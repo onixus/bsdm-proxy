@@ -8,7 +8,7 @@
 |-----------|--------|
 | Rust | **1.88+** (рекомендуется latest stable) |
 | Cargo | stable |
-| librdkafka | dev-пакет (`librdkafka-dev`) |
+| librdkafka | dev-пакет (`librdkafka-dev`) — только при сборке с feature `kafka` (default) |
 | OpenSSL | dev-пакет (`libssl-dev`) |
 
 **Debian/Ubuntu:**
@@ -45,8 +45,12 @@ bsdm-proxy/
 ## Сборка
 
 ```bash
-# Debug
+# Debug (default: auth-basic + kafka)
 cargo build -p bsdm-proxy --bin proxy
+
+# Lite — без rdkafka (HTTP EVENT_SINK only)
+cargo build -p bsdm-proxy --no-default-features --features auth-basic --bin proxy
+cargo build -p cache-indexer --no-default-features --bin cache-indexer
 
 # Release (оба бинарника)
 cargo build --release -p bsdm-proxy --bin proxy -p cache-indexer --bin cache-indexer

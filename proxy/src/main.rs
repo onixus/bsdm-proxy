@@ -2,15 +2,16 @@ mod auth_config;
 mod policy_config;
 
 use auth_config::load_auth_config;
+#[cfg(feature = "kafka")]
+use bsdm_proxy::KafkaEventPipeline;
 use bsdm_proxy::{
     bind_http_listeners, build_hierarchy_manager, ensure_private_spill_dir, handle_connection,
     htcp_peer_port, htcp_server_bind_addr, http_cache_key, icp_server_bind_addr,
     load_hierarchy_config, metrics_server, run_peer_discovery, should_start_htcp_server,
     should_start_icp_server, wait_shutdown_signal, AclAction, AuthManager, CacheConfig, CertCache,
-    HtcpServer, HttpEventPipeline, IcpServer, KafkaEventPipeline, L2CacheConfig, Metrics,
-    PeerDiscoveryConfig, PerfConfig, PolicyCacheConfig, PolicyDecisionCache, ProxyPolicy,
-    ProxyService, RateLimitConfig, RedisL2Cache, ThreatScoreCache, ThreatScoreConfig,
-    UpstreamTlsConfig,
+    HtcpServer, HttpEventPipeline, IcpServer, L2CacheConfig, Metrics, PeerDiscoveryConfig,
+    PerfConfig, PolicyCacheConfig, PolicyDecisionCache, ProxyPolicy, ProxyService, RateLimitConfig,
+    RedisL2Cache, ThreatScoreCache, ThreatScoreConfig, UpstreamTlsConfig,
 };
 use policy_config::{load_policy_config, reload_acl_engine};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -20,6 +21,18 @@ use tokio::net::TcpListener;
 use tokio::sync::watch;
 use tokio_util::task::TaskTracker;
 use tracing::{debug, error, info, warn};
+
+fn spawn_http_event_pipeline(metrics: &Arc<Metrics>) -> Option<Arc<HttpEventPipeline>> {
+    std::env::var("EVENT_SINK_URL")
+        .ok()
+        .filter(|u| !u.is_empty())
+        .and_then(|url| {
+            let token = std::env::var("EVENT_SINK_TOKEN")
+                .ok()
+                .filter(|t| !t.is_empty());
+            HttpEventPipeline::spawn(url, token, metrics.clone())
+        })
+}
 
 async fn run_accept_loop(
     listener: Arc<TcpListener>,
@@ -134,24 +147,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or(true);
 
     let cert_cache = CertCache::load_for_startup(mitm_enabled).await?;
+    #[cfg(feature = "kafka")]
     let kafka_brokers = std::env::var("KAFKA_BROKERS").ok();
+    #[cfg(not(feature = "kafka"))]
+    {
+        if std::env::var("KAFKA_BROKERS")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .is_some()
+        {
+            warn!(
+                "KAFKA_BROKERS is set but proxy was built without the `kafka` feature — use EVENT_SINK_URL or rebuild with default features"
+            );
+        }
+    }
+    #[cfg(feature = "kafka")]
     let kafka_topic = std::env::var("KAFKA_TOPIC").unwrap_or_else(|_| "cache-events".to_string());
+    #[cfg(feature = "kafka")]
     let kafka_pipeline = kafka_brokers
         .as_deref()
         .and_then(|brokers| KafkaEventPipeline::spawn(brokers, kafka_topic, metrics.clone()));
-    let http_pipeline = if kafka_pipeline.is_none() {
-        std::env::var("EVENT_SINK_URL")
-            .ok()
-            .filter(|u| !u.is_empty())
-            .and_then(|url| {
-                let token = std::env::var("EVENT_SINK_TOKEN")
-                    .ok()
-                    .filter(|t| !t.is_empty());
-                HttpEventPipeline::spawn(url, token, metrics.clone())
-            })
-    } else {
+    #[cfg(feature = "kafka")]
+    let http_pipeline = if kafka_pipeline.is_some() {
         None
+    } else {
+        spawn_http_event_pipeline(&metrics)
     };
+    #[cfg(not(feature = "kafka"))]
+    let http_pipeline = spawn_http_event_pipeline(&metrics);
     let cache_config = CacheConfig::from_env();
     if cache_config.spill_threshold_bytes > 0 {
         if let Err(e) = ensure_private_spill_dir(&cache_config.spill_dir) {
@@ -221,6 +244,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         cert_cache,
         cache_config.clone(),
         l2_cache,
+        #[cfg(feature = "kafka")]
         kafka_pipeline,
         http_pipeline,
         metrics.clone(),

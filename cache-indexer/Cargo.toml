@@ -13,10 +13,14 @@ categories = ["database", "network-programming"]
 name = "cache-indexer"
 path = "src/main.rs"
 
+[features]
+default = ["kafka"]
+kafka = ["dep:rdkafka"]
+
 [dependencies]
 bsdm-events = { workspace = true }
 tokio = { workspace = true }
-rdkafka = { workspace = true }
+rdkafka = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 reqwest = { workspace = true }

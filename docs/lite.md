@@ -52,4 +52,4 @@ Root [`docker-compose.yml`](../docker-compose.yml): Kafka → ClickHouse → Gra
 
 - [x] `cache-indexer` without mandatory Kafka/ClickHouse (`INDEX_STORE` + HTTP ingest)
 - [x] SQLite / in-memory metadata store
-- [ ] Cargo features to drop `rdkafka` from Lite binary (B21 / #52)
+- [x] Cargo features to drop `rdkafka` from Lite binary (B21 / #52) — `cargo build --no-default-features --features auth-basic -p bsdm-proxy`

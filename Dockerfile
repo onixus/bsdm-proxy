@@ -45,8 +45,15 @@ ENV OPENSSL_STATIC=1 \
     RUSTFLAGS="-C target-feature=+crt-static"
 
 # Собираем бинарники workspace в release режиме
-RUN cargo build --release --target x86_64-unknown-linux-musl \
-    -p bsdm-proxy -p cache-indexer -p alert-worker -p ml-worker
+RUN if [ "$LITE_BUILD" = "1" ]; then \
+      cargo build --release --target x86_64-unknown-linux-musl \
+        --no-default-features --features auth-basic -p bsdm-proxy && \
+      cargo build --release --target x86_64-unknown-linux-musl \
+        --no-default-features -p cache-indexer; \
+    else \
+      cargo build --release --target x86_64-unknown-linux-musl \
+        -p bsdm-proxy -p cache-indexer -p alert-worker -p ml-worker; \
+    fi
 
 # ============================================================
 # Proxy runtime

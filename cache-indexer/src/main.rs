@@ -1,6 +1,8 @@
 mod admin_server;
 mod clickhouse;
+#[cfg(feature = "kafka")]
 mod kafka;
+#[cfg(feature = "kafka")]
 mod kafka_ingest;
 mod metrics;
 mod search_api;
@@ -8,6 +10,7 @@ mod store;
 
 use admin_server::run_admin_server;
 use clickhouse::{load_config_from_env, ClickHouseWriter};
+#[cfg(feature = "kafka")]
 use kafka_ingest::KafkaStoreIndexer;
 use metrics::IndexerMetrics;
 use search_api::{SearchApi, SearchApiConfig};
@@ -46,6 +49,12 @@ async fn bootstrap_store() -> Result<Arc<EventStore>, Box<dyn std::error::Error>
     }
 }
 
+async fn run_http_ingest_only() -> Result<(), Box<dyn std::error::Error>> {
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
@@ -58,7 +67,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let kafka_brokers = std::env::var("KAFKA_BROKERS")
         .ok()
         .filter(|s| !s.is_empty());
+    #[cfg(feature = "kafka")]
     let kafka_topic = std::env::var("KAFKA_TOPIC").unwrap_or_else(|_| "cache-events".to_string());
+    #[cfg(feature = "kafka")]
     let kafka_group =
         std::env::var("KAFKA_GROUP_ID").unwrap_or_else(|_| "cache-indexer-group".to_string());
     let metrics = Arc::new(IndexerMetrics::new()?);
@@ -91,17 +102,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("Search API on :{port}/api/search · ingest POST :{port}/api/events");
     }
 
-    let result = if let Some(brokers) = kafka_brokers {
-        info!("Kafka brokers: {brokers}");
-        info!("Kafka topic: {kafka_topic}");
-        info!("Kafka group: {kafka_group}");
-        let indexer =
-            KafkaStoreIndexer::new(&brokers, &kafka_topic, &kafka_group, store, metrics).await?;
-        indexer.run().await
-    } else {
-        info!("KAFKA_BROKERS unset — HTTP ingest only (POST /api/events)");
-        loop {
-            tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+    let result = {
+        #[cfg(feature = "kafka")]
+        {
+            if let Some(brokers) = kafka_brokers {
+                info!("Kafka brokers: {brokers}");
+                info!("Kafka topic: {kafka_topic}");
+                info!("Kafka group: {kafka_group}");
+                let indexer =
+                    KafkaStoreIndexer::new(&brokers, &kafka_topic, &kafka_group, store, metrics)
+                        .await?;
+                indexer.run().await
+            } else {
+                info!("KAFKA_BROKERS unset — HTTP ingest only (POST /api/events)");
+                run_http_ingest_only().await
+            }
+        }
+        #[cfg(not(feature = "kafka"))]
+        {
+            if kafka_brokers.is_some() {
+                tracing::warn!(
+                    "KAFKA_BROKERS is set but cache-indexer was built without the `kafka` feature — HTTP ingest only"
+                );
+            } else {
+                info!("Kafka disabled at compile time — HTTP ingest only (POST /api/events)");
+            }
+            run_http_ingest_only().await
         }
     };
 

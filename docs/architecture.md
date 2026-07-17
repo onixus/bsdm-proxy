@@ -229,7 +229,7 @@ Local L1 miss → ICP query siblings → select parent → fetch_via_peer → or
 
 | ID | Блокер | Файлы |
 |----|--------|-------|
-| **B21** | Feature flags не в main | `Cargo.toml` features |
+| **B21** | Feature flags | ✅ `kafka` feature (Lite: `--no-default-features`) | `Cargo.toml` |
 | **B22** | Negative caching + `Cache-Control` revalidate | `cache_freshness.rs`, `proxy_service.rs` | ✅ |
 | **B23** | HTTP/2 upstream — `UPSTREAM_HTTP2_ENABLED` | `upstream.rs` | ✅ |
 | **B24** | Healthcheck curl vs wget — исправлено (`wget` в compose) | `docker-compose.yml`, `Dockerfile` |

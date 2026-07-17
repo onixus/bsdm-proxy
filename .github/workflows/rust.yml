@@ -49,6 +49,11 @@ jobs:
       - name: Build workspace
         run: cargo build --workspace --all-targets
 
+      - name: Build lite profile (no rdkafka)
+        run: |
+          cargo build -p bsdm-proxy --no-default-features --features auth-basic --all-targets
+          cargo build -p cache-indexer --no-default-features --all-targets
+
       - name: Run tests
         run: cargo test --workspace --all-targets
 
