@@ -42,6 +42,8 @@ pub mod tag_index;
 pub mod threat_score_cache;
 pub mod tls;
 pub mod upstream;
+#[cfg(feature = "wasm")]
+pub mod wasm_host;
 
 // Re-export commonly used types
 pub use acl::{AclAction, AclDecision, AclEngine, AclEngineHandle, AclRule};

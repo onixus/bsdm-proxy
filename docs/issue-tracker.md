@@ -28,9 +28,10 @@ Blockers B1–B26: all ✅ in [BLOCKERS.md](BLOCKERS.md) (GitHub #32–#56).
 
 | Issue | Phase |
 |-------|-------|
-| [#188](https://github.com/onixus/bsdm-proxy/issues/188) | Wasm — Wasmtime plugin host |
+| [#99](https://github.com/onixus/bsdm-proxy/issues/99) | P3 ICAP adapter |
+| [#108](https://github.com/onixus/bsdm-proxy/issues/108) | P3 DNS sinkhole |
 
-*(#101 / #103 / #189 / #187 closed via implementation PRs.)*
+*(#101 / #103 / #189 / #187 / #188 closed via implementation PRs.)*
 
 
 ---

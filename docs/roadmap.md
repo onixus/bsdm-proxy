@@ -199,7 +199,7 @@ Backlog mapping: [swg-backlog-mapping.md](swg-backlog-mapping.md)
 |------|--------|-------------------|
 | **1. Lite** | VPS / edge, низкий порог | ✅ `docker-compose.lite.yml` + SQLite indexer; ✅ Cargo `kafka` feature (B21) |
 | **2. DX** | Control plane | ✅ REST + optional gRPC (`--features grpc`, [#187](https://github.com/onixus/bsdm-proxy/issues/187)) |
-| **3. Wasm** | Плагины | [Wasmtime plugin host #188](https://github.com/onixus/bsdm-proxy/issues/188) |
+| **3. Wasm** | Плагины | ✅ PoC Wasmtime hook (`--features wasm`, [#188](https://github.com/onixus/bsdm-proxy/issues/188)) |
 | **4. AI-трафик** | LLM / API proxy | ✅ coalescing + API-key RL + LLM/semantic cache + Qdrant vector backend ([#189](https://github.com/onixus/bsdm-proxy/issues/189)) |
 
 Порядок реализации по умолчанию: **Lite → DX → Wasm / AI** (AI coalescing может частично пересекаться с perf-треком раньше Wasm).

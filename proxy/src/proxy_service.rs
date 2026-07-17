@@ -48,6 +48,8 @@ use crate::streaming_miss::TeeMissBody;
 use crate::threat_score_cache::ThreatScoreCache;
 use crate::tls::CertCache;
 use crate::upstream::{UpstreamClientHandle, UpstreamTlsConfig};
+#[cfg(feature = "wasm")]
+use crate::wasm_host::{try_load_from_env, WasmHookDecision, WasmHookEngine, WasmHookRequest};
 
 pub struct ProxyPolicy {
     pub acl_engine: Option<Arc<AclEngineHandle>>,
@@ -299,6 +301,8 @@ pub struct ProxyService {
     semantic_config: SemanticCacheConfig,
     semantic_index: SemanticIndex,
     peer_tls: PeerTlsConfig,
+    #[cfg(feature = "wasm")]
+    wasm_hook: Option<Arc<WasmHookEngine>>,
 }
 
 impl ProxyService {
@@ -391,6 +395,8 @@ impl ProxyService {
         if let Err(e) = peer_tls.validate() {
             tracing::warn!("Hierarchy peer mTLS config invalid: {e}");
         }
+        #[cfg(feature = "wasm")]
+        let wasm_hook = try_load_from_env();
 
         Self {
             cert_cache,
@@ -417,6 +423,8 @@ impl ProxyService {
             semantic_config,
             semantic_index,
             peer_tls,
+            #[cfg(feature = "wasm")]
+            wasm_hook,
         }
     }
 
@@ -891,6 +899,87 @@ impl ProxyService {
             }
             AclAction::Allow => Response::new(empty()),
         }
+    }
+
+    /// Optional Wasm request hook (feature `wasm`): after auth/RL, before ACL policy.
+    /// Returns `Some(response)` when the guest denies (or hard-fails with fail_open=false).
+    #[cfg(feature = "wasm")]
+    pub(crate) fn run_wasm_hook(
+        &self,
+        method: &str,
+        url: &str,
+        client_ip: &str,
+        username: Option<&str>,
+        headers: &mut hyper::HeaderMap,
+    ) -> Option<Response<Body>> {
+        let Some(hook) = &self.wasm_hook else {
+            return None;
+        };
+        let decision = match hook.evaluate(WasmHookRequest {
+            method: method.to_string(),
+            url: url.to_string(),
+            client_ip: client_ip.to_string(),
+            username: username.map(str::to_string),
+        }) {
+            Ok(d) => d,
+            Err(e) => {
+                if hook.fail_open() {
+                    warn!("Wasm hook error (fail-open): {e}");
+                    return None;
+                }
+                warn!("Wasm hook error (fail-closed): {e}");
+                return Some(
+                    Response::builder()
+                        .status(StatusCode::BAD_GATEWAY)
+                        .header("Content-Type", "text/plain; charset=utf-8")
+                        .body(full(Bytes::from(format!(
+                            "502 Bad Gateway: wasm hook: {e}"
+                        ))))
+                        .unwrap_or_else(|_| {
+                            Response::new(full(Bytes::from_static(b"502 Bad Gateway")))
+                        }),
+                );
+            }
+        };
+        match decision {
+            WasmHookDecision::Allow { set_headers } => {
+                for (name, value) in set_headers {
+                    if let (Ok(hn), Ok(hv)) = (
+                        HeaderName::from_bytes(name.as_bytes()),
+                        HeaderValue::from_str(&value),
+                    ) {
+                        headers.insert(hn, hv);
+                    }
+                }
+                None
+            }
+            WasmHookDecision::Deny { reason } => {
+                debug!("Wasm hook deny: {reason}");
+                Some(
+                    Response::builder()
+                        .status(StatusCode::FORBIDDEN)
+                        .header("Content-Type", "text/plain; charset=utf-8")
+                        .header("X-Wasm-Hook", "deny")
+                        .body(full(Bytes::from(format!("403 Forbidden: {reason}"))))
+                        .unwrap_or_else(|_| {
+                            Response::new(full(Bytes::from_static(b"403 Forbidden")))
+                        }),
+                )
+            }
+        }
+    }
+
+    /// CONNECT path: evaluate Wasm hook (no request header rewrite needed).
+    #[cfg(feature = "wasm")]
+    pub(crate) fn run_wasm_hook_connect(
+        &self,
+        method: &str,
+        url: &str,
+        client_ip: &str,
+        username: Option<&str>,
+    ) -> Option<Response<Body>> {
+        let mut headers = hyper::HeaderMap::new();
+        self.run_wasm_hook(method, url, client_ip, username, &mut headers)
     }
 
     pub(crate) async fn authenticate_proxy(
@@ -1388,6 +1477,26 @@ impl ProxyService {
             .as_deref()
             .map(|u| u.groups.iter().map(String::as_str).collect())
             .unwrap_or_default();
+
+        #[cfg(feature = "wasm")]
+        {
+            let req_mut = req.as_mut().expect("request present");
+            if let Some(resp) = self.run_wasm_hook(
+                method,
+                &url,
+                &client_ip,
+                username.as_deref(),
+                req_mut.headers_mut(),
+            ) {
+                let code = resp.status().as_u16();
+                if let Some(g) = guard.take() {
+                    g.finish(code, 0, 0);
+                } else if let Some(scope) = fast_scope.take() {
+                    scope.finish(code);
+                }
+                return resp;
+            }
+        }
 
         let domain = Self::extract_domain(&url);
         let (policy_decision, categories, threat_sources) = self

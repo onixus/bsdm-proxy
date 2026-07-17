@@ -471,6 +471,17 @@ pub async fn handle_connection(
 
                 let connect_url = format!("https://{}", authority);
                 let connect_domain = parse_authority(&authority).0;
+
+                #[cfg(feature = "wasm")]
+                if let Some(resp) = service.run_wasm_hook_connect(
+                    "CONNECT",
+                    &connect_url,
+                    &client_ip,
+                    policy_username,
+                ) {
+                    return Ok::<_, Infallible>(resp);
+                }
+
                 let (policy_decision, _, _) = service
                     .check_policy(
                         &connect_url,
