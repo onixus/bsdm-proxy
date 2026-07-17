@@ -294,6 +294,19 @@ services:
       timeout: 5s
       retries: 10
 
+  # Optional ICAP AV sidecar (P3 / #99). Open-source c-icap + ClamAV.
+  #   docker compose --profile icap up -d icap
+  # Proxy: ICAP_ENABLED=true ICAP_URL=icap://icap:1344/srv_clamav
+  # Docs: docs/icap.md
+  icap:
+    profiles: ["icap"]
+    image: toolarium/toolarium-icap-clamav-docker:latest
+    ports:
+      - "1344:1344"
+    networks:
+      - bsdm-net
+    restart: unless-stopped
+
 networks:
   bsdm-net:
     driver: bridge
