@@ -7,6 +7,7 @@ mod metrics;
 mod phishing;
 mod scoring;
 mod webhook;
+mod writeback;
 
 use baseline::{baseline_sql, baselines_from_rows, BaselineSet};
 use beacon::{
@@ -21,12 +22,13 @@ use phishing::{
     extract_sql as phishing_extract_sql, features_from_row as phishing_from_row, lexical_signals,
     score_domain, MODEL_PHISHING,
 };
-use scoring::{score_features, ScoreContext, MODEL_UEBA};
+use scoring::{score_features, ScoreContext, ScoreResult, MODEL_UEBA};
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tracing::{error, info, warn};
 use webhook::WebhookClient;
+use writeback::{new_snapshot_store, publish_writeback, snapshot_json, SnapshotStore};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -50,11 +52,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None => None,
     };
 
+    let snapshot = new_snapshot_store();
+
     {
         let metrics = metrics.clone();
         let port = config.metrics_port;
+        let snap = snapshot.clone();
         tokio::spawn(async move {
-            run_admin_server(port, metrics).await;
+            run_admin_server(port, metrics, snap).await;
         });
     }
 
@@ -75,11 +80,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         baseline_lookback_secs = config.baseline_lookback.as_secs(),
         baseline_path = ?config.baseline_path,
         webhook = webhook.is_some(),
-        "ml-worker started (M5.4 C&C beacon / M5.3 phishing / UEBA / stub)"
+        writeback = config.writeback_enabled,
+        "ml-worker started (M5.5 write-back / M5.4 beacon / M5.3 phishing / UEBA)"
     );
 
     loop {
-        if let Err(e) = cycle_once(&config, &ch, webhook.as_ref(), &metrics).await {
+        if let Err(e) = cycle_once(&config, &ch, webhook.as_ref(), &metrics, &snapshot).await {
             metrics.errors.inc();
             warn!("ml-worker cycle failed: {e}");
         }
@@ -119,14 +125,52 @@ async fn cycle_once(
     ch: &ClickHouseClient,
     webhook: Option<&WebhookClient>,
     metrics: &WorkerMetrics,
+    snapshot: &SnapshotStore,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if config.is_phishing_model() {
-        return cycle_phishing(config, ch, webhook, metrics).await;
+        return cycle_phishing(config, ch, webhook, metrics, snapshot).await;
     }
     if config.is_beacon_model() {
-        return cycle_beacon(config, ch, webhook, metrics).await;
+        return cycle_beacon(config, ch, webhook, metrics, snapshot).await;
     }
-    cycle_ueba(config, ch, webhook, metrics).await
+    cycle_ueba(config, ch, webhook, metrics, snapshot).await
+}
+
+async fn persist_scores(
+    config: &Config,
+    ch: &ClickHouseClient,
+    webhook: Option<&WebhookClient>,
+    metrics: &WorkerMetrics,
+    snapshot: &SnapshotStore,
+    scored: Vec<ScoreResult>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for s in &scored {
+        if let Some(wh) = webhook {
+            if s.score >= config.score_threshold {
+                if let Err(e) = wh.post_score(s).await {
+                    warn!("webhook failed for {}: {e}", s.entity_id);
+                    metrics.errors.inc();
+                } else {
+                    metrics.webhooks_sent.inc();
+                }
+            }
+        }
+    }
+    let score_jsons: Vec<_> = scored.iter().map(|s| s.to_insert_json()).collect();
+    ch.insert_json_each_row(&config.fq_scores(), &score_jsons)
+        .await?;
+    metrics.scores_written.inc_by(score_jsons.len() as u64);
+
+    match publish_writeback(config, ch, snapshot, &scored).await {
+        Ok(n) if n > 0 => info!("write-back published {n} threat scores"),
+        Ok(_) => {}
+        Err(e) => {
+            warn!("write-back failed: {e}");
+            metrics.errors.inc();
+        }
+    }
+    metrics.cycles.inc();
+    Ok(())
 }
 
 async fn cycle_beacon(
@@ -134,6 +178,7 @@ async fn cycle_beacon(
     ch: &ClickHouseClient,
     webhook: Option<&WebhookClient>,
     metrics: &WorkerMetrics,
+    snapshot: &SnapshotStore,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let sql = beacon_extract_sql(config);
     let rows = ch.query_json_each_row(&sql).await?;
@@ -154,29 +199,11 @@ async fn cycle_beacon(
     metrics.features_written.inc_by(feature_jsons.len() as u64);
     metrics.last_cycle_features.set(feature_jsons.len() as i64);
 
-    let mut score_jsons = Vec::new();
-    for f in &pairs {
-        let scored = score_beacon_pair(f, config);
-        if let Some(wh) = webhook {
-            if scored.score >= config.score_threshold {
-                if let Err(e) = wh.post_score(&scored).await {
-                    warn!("webhook failed for {}: {e}", scored.entity_id);
-                    metrics.errors.inc();
-                } else {
-                    metrics.webhooks_sent.inc();
-                }
-            }
-        }
-        score_jsons.push(scored.to_insert_json());
-    }
-    ch.insert_json_each_row(&config.fq_scores(), &score_jsons)
-        .await?;
-    metrics.scores_written.inc_by(score_jsons.len() as u64);
-    metrics.cycles.inc();
+    let scored: Vec<_> = pairs.iter().map(|f| score_beacon_pair(f, config)).collect();
+    persist_scores(config, ch, webhook, metrics, snapshot, scored).await?;
 
     info!(
         pairs = feature_jsons.len(),
-        scores = score_jsons.len(),
         model = MODEL_CC_BEACON,
         "beacon cycle complete"
     );
@@ -188,6 +215,7 @@ async fn cycle_phishing(
     ch: &ClickHouseClient,
     webhook: Option<&WebhookClient>,
     metrics: &WorkerMetrics,
+    snapshot: &SnapshotStore,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let sql = phishing_extract_sql(config);
     let rows = ch.query_json_each_row(&sql).await?;
@@ -214,29 +242,14 @@ async fn cycle_phishing(
     metrics.features_written.inc_by(feature_jsons.len() as u64);
     metrics.last_cycle_features.set(feature_jsons.len() as i64);
 
-    let mut score_jsons = Vec::new();
-    for f in &domains {
-        let scored = score_domain(f, config.score_threshold);
-        if let Some(wh) = webhook {
-            if scored.score >= config.score_threshold {
-                if let Err(e) = wh.post_score(&scored).await {
-                    warn!("webhook failed for {}: {e}", scored.entity_id);
-                    metrics.errors.inc();
-                } else {
-                    metrics.webhooks_sent.inc();
-                }
-            }
-        }
-        score_jsons.push(scored.to_insert_json());
-    }
-    ch.insert_json_each_row(&config.fq_scores(), &score_jsons)
-        .await?;
-    metrics.scores_written.inc_by(score_jsons.len() as u64);
-    metrics.cycles.inc();
+    let scored: Vec<_> = domains
+        .iter()
+        .map(|f| score_domain(f, config.score_threshold))
+        .collect();
+    persist_scores(config, ch, webhook, metrics, snapshot, scored).await?;
 
     info!(
         domains = feature_jsons.len(),
-        scores = score_jsons.len(),
         model = MODEL_PHISHING,
         "phishing cycle complete"
     );
@@ -248,6 +261,7 @@ async fn cycle_ueba(
     ch: &ClickHouseClient,
     webhook: Option<&WebhookClient>,
     metrics: &WorkerMetrics,
+    snapshot: &SnapshotStore,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut all_features = Vec::new();
     for entity_type in &config.entity_types {
@@ -287,36 +301,21 @@ async fn cycle_ueba(
         },
     };
 
-    let mut score_jsons = Vec::new();
-    for f in &all_features {
-        let scored = score_features(f, &ctx);
-        if let Some(wh) = webhook {
-            if scored.score >= config.score_threshold {
-                if let Err(e) = wh.post_score(&scored).await {
-                    warn!("webhook failed for {}: {e}", scored.entity_id);
-                    metrics.errors.inc();
-                } else {
-                    metrics.webhooks_sent.inc();
-                }
-            }
-        }
-        score_jsons.push(scored.to_insert_json());
-    }
-    ch.insert_json_each_row(&config.fq_scores(), &score_jsons)
-        .await?;
-    metrics.scores_written.inc_by(score_jsons.len() as u64);
-    metrics.cycles.inc();
+    let scored: Vec<_> = all_features
+        .iter()
+        .map(|f| score_features(f, &ctx))
+        .collect();
+    persist_scores(config, ch, webhook, metrics, snapshot, scored).await?;
 
     info!(
         features = feature_jsons.len(),
-        scores = score_jsons.len(),
         baseline_types = baselines.baselines.len(),
         "cycle complete"
     );
     Ok(())
 }
 
-async fn run_admin_server(port: u16, metrics: WorkerMetrics) {
+async fn run_admin_server(port: u16, metrics: WorkerMetrics, snapshot: SnapshotStore) {
     let addr = format!("0.0.0.0:{port}");
     let listener = match TcpListener::bind(&addr).await {
         Ok(l) => l,
@@ -325,13 +324,14 @@ async fn run_admin_server(port: u16, metrics: WorkerMetrics) {
             return;
         }
     };
-    info!("ml-worker metrics on http://{addr}/metrics");
+    info!("ml-worker admin on http://{addr}/metrics · /api/threat-scores");
     let metrics = Arc::new(metrics);
     loop {
         let Ok((mut socket, _)) = listener.accept().await else {
             continue;
         };
         let metrics = metrics.clone();
+        let snapshot = snapshot.clone();
         tokio::spawn(async move {
             let mut buf = [0u8; 1024];
             let _ = socket.read(&mut buf).await;
@@ -347,6 +347,8 @@ async fn run_admin_server(port: u16, metrics: WorkerMetrics) {
                     Ok(b) => ("200 OK", b, "text/plain; version=0.0.4"),
                     Err(_) => ("500 Internal Server Error", String::new(), "text/plain"),
                 }
+            } else if req.starts_with("GET /api/threat-scores") {
+                ("200 OK", snapshot_json(&snapshot), "application/json")
             } else {
                 ("404 Not Found", "not found".into(), "text/plain")
             };

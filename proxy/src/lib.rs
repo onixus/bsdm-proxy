@@ -33,6 +33,7 @@ pub mod server;
 pub mod session;
 pub mod sharded_cache;
 pub mod streaming_miss;
+pub mod threat_score_cache;
 pub mod tls;
 pub mod upstream;
 
@@ -73,6 +74,7 @@ pub use selection::{parse_strategy, SelectionStrategy};
 pub use server::{handle_connection, metrics_server, wait_shutdown_signal};
 pub use session::{SessionCorrelation, SessionCorrelator};
 pub use sharded_cache::HttpL1Cache;
+pub use threat_score_cache::{ThreatScoreCache, ThreatScoreConfig, ThreatScoreHit};
 pub use tls::CertCache;
 pub use upstream::{build_upstream_https_connector, UpstreamTlsConfig};
 

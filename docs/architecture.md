@@ -68,7 +68,7 @@ flowchart TB
 | MITM | `proxy/src/tls.rs` | ✅ |
 | Hierarchy / ICP | `hierarchy.rs`, `peer_fetch.rs`, `icp.rs`, `hierarchy_config.rs` | ✅ opt-in (`HIERARCHY_ENABLED`) |
 | Event indexer | `cache-indexer/src/main.rs` | ✅ |
-| ML / analytics worker | `ml-worker` (:8091) | ✅ M5.4 C&C beacon + phishing + UEBA; write-back TBD |
+| ML / analytics worker | `ml-worker` (:8091) | ✅ M5.5 write-back + M5.4 beacon + phishing + UEBA |
 
 ---
 
@@ -82,6 +82,7 @@ TCP accept
   → check_policy()
        → categorization.categorize()   # UT1 Blacklists / OTX / custom
        → acl_engine.check_access()     # ArcSwap snapshot (lock-free read)
+       → threat_score_cache.lookup()   # M5.5 opt-in O(1) ML score (async poll)
   → L1 cache lookup (GET/HEAD)
   → [if HIERARCHY_ENABLED] resolve_source()
        → ICP query siblings (parallel UDP)

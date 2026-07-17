@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **M5.5 threat score write-back** — `ml-worker` publishes to `threat_score_cache` + `GET /api/threat-scores`; proxy optional async poll enriches `threat_sources` / block ([#169](https://github.com/onixus/bsdm-proxy/issues/169))
 - **M5.4 C&C beacon ML** — `cc_beacon_v0`: augments M4 `beacon_periodic` with behavioral signals (POST ratio, small payloads, off-hours); `beacon_pair_features` table; Grafana panel; `scripts/ml/eval_cc_beacon.py` ([#168](https://github.com/onixus/bsdm-proxy/issues/168))
 - **M5.3 lexical phishing** — `phishing_lexical_v0`: domain lexical heuristics + weak labels from PhishTank / UT1 / `phishing` category; `domain_phishing_features` table; Grafana panel; `scripts/ml/eval_phishing_lexical.py` ([#167](https://github.com/onixus/bsdm-proxy/issues/167))
 - **Admin console (UI/UX)** — React + Tailwind SPA in `admin-console/`: unified dashboard, logs with explainable ML (XAI), policies, settings; migrates `web-config` export logic

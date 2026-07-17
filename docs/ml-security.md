@@ -11,8 +11,11 @@ bsdm.http_cache ──► ml-worker ──► bsdm.entity_features
                       │                 │
                       │                 └── population baseline (mean/std)
                       ├──► bsdm.ml_scores (ueba_zscore_v0 / stub)
+                      ├──► bsdm.threat_score_cache + GET /api/threat-scores (M5.5)
                       └──► optional webhook
 ```
+
+Proxy (opt-in `THREAT_SCORE_ENABLED=true`) polls `/api/threat-scores` in background; request path does O(1) memory lookup only.
 
 | Component | Role |
 |-----------|------|
@@ -20,6 +23,7 @@ bsdm.http_cache ──► ml-worker ──► bsdm.entity_features
 | `entity_features` | Per-entity window aggregates |
 | Population baseline | Live CH stats or `ML_BASELINE_PATH` JSON artifact |
 | `ml_scores` | Model scores + severity |
+| `threat_score_cache` | M5.5 write-back rows for proxy poll |
 | `alert-worker` | Unchanged rule engine (M4) |
 
 ## Quick start
@@ -80,7 +84,11 @@ python3 scripts/ml/compare_stub_vs_ueba.py
 | `ML_ZSCORE_CLIP` | `4.0` | Clip \|z\| before \[0,1\] map |
 | `ML_BASELINE_PATH` | — | JSON artifact (`export_baseline.py`) |
 | `ML_WEBHOOK_URL` | — | Optional SIEM URL |
-| `METRICS_PORT` | `8091` | `/health`, `/metrics` |
+| `ML_SCORE_CACHE_TABLE` | `threat_score_cache` | M5.5 write-back table |
+| `ML_WRITEBACK_ENABLED` | `true` | Publish to cache + `/api/threat-scores` |
+| `ML_WRITEBACK_MIN_SCORE` | `0.5` | Min score to write back |
+| `ML_WRITEBACK_TTL_SECS` | `3600` | Row expiry in CH + snapshot |
+| `METRICS_PORT` | `8091` | `/health`, `/metrics`, `/api/threat-scores` |
 
 ## Models
 
@@ -90,6 +98,32 @@ python3 scripts/ml/compare_stub_vs_ueba.py
 | `ueba_zscore_v0` | **M5.2** | Unsupervised mean abs-z vs population baseline |
 | `phishing_lexical_v0` | **M5.3** | Domain lexical heuristics + PhishTank / UT1 weak labels |
 | `cc_beacon_v0` | **M5.4** | C&C beacon scoring augmenting `beacon_periodic` |
+
+## M5.5 threat score write-back
+
+After each scoring cycle, `ml-worker` publishes scores ≥ `ML_WRITEBACK_MIN_SCORE` to ClickHouse `threat_score_cache` and refreshes an in-memory snapshot at `GET /api/threat-scores`.
+
+Proxy opt-in (default off):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `THREAT_SCORE_ENABLED` | `false` | Enable background poll + hot-path lookup |
+| `THREAT_SCORE_POLL_URL` | `http://127.0.0.1:8091/api/threat-scores` | ml-worker snapshot URL |
+| `THREAT_SCORE_POLL_INTERVAL_SECS` | `60` | Background poll interval |
+| `THREAT_SCORE_CACHE_TTL_SECS` | `300` | Local cache entry TTL |
+| `THREAT_SCORE_WARN_THRESHOLD` | `0.7` | Adds `ml_score` to `threat_sources` |
+| `THREAT_SCORE_BLOCK_THRESHOLD` | `0` | Block when score ≥ threshold (`0` = enrich only) |
+
+Lookup keys: `domain`, `client_ip`, `client_domain` (`{ip}|{domain}`). Highest matching score wins.
+
+```bash
+curl http://127.0.0.1:8091/api/threat-scores
+# Enable on proxy:
+THREAT_SCORE_ENABLED=true THREAT_SCORE_POLL_URL=http://127.0.0.1:8091/api/threat-scores \
+  cargo run -p bsdm-proxy --bin proxy
+```
+
+Ad-hoc SQL: [`scripts/clickhouse/m5_writeback_queries.sql`](../scripts/clickhouse/m5_writeback_queries.sql).
 
 ### UEBA scoring
 
@@ -161,12 +195,13 @@ python3 scripts/ml/eval_cc_beacon.py
 Panel **Top anomalous entities (UEBA z-score / ml-worker)** on [BSDM HTTP Traffic (ClickHouse)](../grafana/dashboards/bsdm-http-traffic-ch.json).  
 Panel **Top phishing-scored domains (lexical / ml-worker M5.3)** on the same dashboard.  
 Panel **Top C&C beacon pairs (cc_beacon_v0 / ml-worker M5.4)** on the same dashboard.  
-Ad-hoc SQL: [`scripts/clickhouse/m5_ueba_queries.sql`](../scripts/clickhouse/m5_ueba_queries.sql), [`scripts/clickhouse/m5_phishing_queries.sql`](../scripts/clickhouse/m5_phishing_queries.sql), [`scripts/clickhouse/m5_beacon_queries.sql`](../scripts/clickhouse/m5_beacon_queries.sql).
+Ad-hoc SQL: [`scripts/clickhouse/m5_ueba_queries.sql`](../scripts/clickhouse/m5_ueba_queries.sql), [`scripts/clickhouse/m5_phishing_queries.sql`](../scripts/clickhouse/m5_phishing_queries.sql), [`scripts/clickhouse/m5_beacon_queries.sql`](../scripts/clickhouse/m5_beacon_queries.sql), [`scripts/clickhouse/m5_writeback_queries.sql`](../scripts/clickhouse/m5_writeback_queries.sql).
 
 ## Verify
 
 ```bash
 curl http://127.0.0.1:8091/health
+curl http://127.0.0.1:8091/api/threat-scores
 clickhouse-client -q "SELECT count() FROM bsdm.entity_features"
 clickhouse-client -q "SELECT entity_id, score, model, severity FROM bsdm.ml_scores ORDER BY scored_at DESC LIMIT 10"
 ```
@@ -181,4 +216,4 @@ Epic: [#165](https://github.com/onixus/bsdm-proxy/issues/165) · [roadmap](roadm
 | M5.2 anomaly / UEBA | [#166](https://github.com/onixus/bsdm-proxy/issues/166) |
 | M5.3 phishing lexical | [#167](https://github.com/onixus/bsdm-proxy/issues/167) |
 | M5.4 C&C ML | [#168](https://github.com/onixus/bsdm-proxy/issues/168) |
-| M5.5 score write-back | [#169](https://github.com/onixus/bsdm-proxy/issues/169) |
+| M5.5 score write-back | [#169](https://github.com/onixus/bsdm-proxy/issues/169) ✅ |

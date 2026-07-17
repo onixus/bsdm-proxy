@@ -100,6 +100,23 @@ ORDER BY (client_ip, domain, window_start)
 TTL window_start + INTERVAL 90 DAY
 SETTINGS index_granularity = 8192;
 
+-- M5.5 threat score write-back cache (ml-worker → proxy poll).
+CREATE TABLE IF NOT EXISTS bsdm.threat_score_cache
+(
+    entity_type LowCardinality(String),
+    entity_id String,
+    score Float64,
+    severity LowCardinality(String),
+    model LowCardinality(String),
+    scored_at DateTime64(3, 'UTC'),
+    expires_at DateTime64(3, 'UTC')
+)
+ENGINE = MergeTree
+PARTITION BY toYYYYMMDD(scored_at)
+ORDER BY (entity_type, entity_id, scored_at)
+TTL expires_at
+SETTINGS index_granularity = 8192;
+
 -- Example: top phishing-scored domains (last 24h)
 -- SELECT entity_id, max(score) AS max_score, argMax(severity, score) AS severity
 -- FROM bsdm.ml_scores

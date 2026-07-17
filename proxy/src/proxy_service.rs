@@ -42,6 +42,7 @@ use crate::rate_limit::{RateLimitViolation, RateLimiter};
 use crate::session::{header_ci, resolve_location, SessionCorrelator};
 use crate::sharded_cache::HttpL1Cache;
 use crate::streaming_miss::TeeMissBody;
+use crate::threat_score_cache::ThreatScoreCache;
 use crate::tls::CertCache;
 use crate::upstream::{build_upstream_https_connector, UpstreamTlsConfig};
 
@@ -251,6 +252,7 @@ pub struct ProxyService {
     perf: PerfConfig,
     policy_cache: Arc<PolicyDecisionCache>,
     sessions: Arc<SessionCorrelator>,
+    threat_score_cache: Arc<ThreatScoreCache>,
 }
 
 impl ProxyService {
@@ -306,6 +308,7 @@ impl ProxyService {
         upstream_tls: UpstreamTlsConfig,
         perf: PerfConfig,
         policy_cache: Arc<PolicyDecisionCache>,
+        threat_score_cache: Arc<ThreatScoreCache>,
     ) -> Self {
         let http_cache = Arc::new(HttpL1Cache::new(
             cache_config.capacity,
@@ -339,6 +342,7 @@ impl ProxyService {
             perf,
             policy_cache,
             sessions: Arc::new(SessionCorrelator::from_env()),
+            threat_score_cache,
         }
     }
 
@@ -586,20 +590,37 @@ impl ProxyService {
         client_ip: &str,
     ) -> (Option<AclDecision>, Vec<String>, Vec<String>) {
         let policy_active = self.acl_engine.is_some() || self.categorization.is_some();
-        if policy_active && self.policy_cache.enabled() {
-            if let Some(hit) = self.policy_cache.lookup(username, domain, groups) {
-                self.metrics.policy_cache_hit_total.inc();
-                debug!("Policy cache hit for {:?} @ {}", username, domain);
-                return (hit.blocking, hit.categories, hit.threat_sources);
-            }
-        }
+        let mut from_cache = false;
+        let (mut blocking, category_names, mut threat_sources) =
+            if policy_active && self.policy_cache.enabled() {
+                if let Some(hit) = self.policy_cache.lookup(username, domain, groups) {
+                    from_cache = true;
+                    self.metrics.policy_cache_hit_total.inc();
+                    debug!("Policy cache hit for {:?} @ {}", username, domain);
+                    (hit.blocking, hit.categories, hit.threat_sources)
+                } else {
+                    let (category_names, threat_sources) = self.categorize_url(url);
+                    let blocking = self
+                        .check_acl(url, domain, &category_names, username, groups, client_ip)
+                        .await;
+                    (blocking, category_names, threat_sources)
+                }
+            } else {
+                let (category_names, threat_sources) = self.categorize_url(url);
+                let blocking = self
+                    .check_acl(url, domain, &category_names, username, groups, client_ip)
+                    .await;
+                (blocking, category_names, threat_sources)
+            };
 
-        let (category_names, threat_sources) = self.categorize_url(url);
-        let blocking = self
-            .check_acl(url, domain, &category_names, username, groups, client_ip)
-            .await;
+        self.threat_score_cache.apply_to_policy(
+            domain,
+            client_ip,
+            &mut threat_sources,
+            &mut blocking,
+        );
 
-        if policy_active && self.policy_cache.enabled() {
+        if policy_active && self.policy_cache.enabled() && !from_cache {
             self.policy_cache.store(
                 username,
                 domain,

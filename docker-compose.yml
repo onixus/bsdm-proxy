@@ -85,6 +85,9 @@ services:
       - ACL_AUTO_RELOAD=false
       - CATEGORIZATION_ENABLED=false
       - UT1_ENABLED=false
+      - THREAT_SCORE_ENABLED=${THREAT_SCORE_ENABLED:-false}
+      - THREAT_SCORE_POLL_URL=${THREAT_SCORE_POLL_URL:-http://ml-worker:8091/api/threat-scores}
+      - THREAT_SCORE_POLL_INTERVAL_SECS=${THREAT_SCORE_POLL_INTERVAL_SECS:-60}
       - UT1_PATH=/var/lib/ut1-blacklists
       - RUST_LOG=info,bsdm_proxy=debug
       - RUST_BACKTRACE=1
@@ -187,6 +190,10 @@ services:
       - ML_SCORES_TABLE=ml_scores
       - ML_PHISHING_FEATURES_TABLE=domain_phishing_features
       - ML_BEACON_FEATURES_TABLE=beacon_pair_features
+      - ML_SCORE_CACHE_TABLE=threat_score_cache
+      - ML_WRITEBACK_ENABLED=${ML_WRITEBACK_ENABLED:-true}
+      - ML_WRITEBACK_MIN_SCORE=${ML_WRITEBACK_MIN_SCORE:-0.5}
+      - ML_WRITEBACK_TTL_SECS=${ML_WRITEBACK_TTL_SECS:-3600}
       - ML_POLL_INTERVAL_SECS=${ML_POLL_INTERVAL_SECS:-120}
       - ML_LOOKBACK_SECS=${ML_LOOKBACK_SECS:-300}
       - ML_ENTITY_TYPES=${ML_ENTITY_TYPES:-client_ip}
