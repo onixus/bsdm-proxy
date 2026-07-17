@@ -300,7 +300,8 @@ pub fn should_start_htcp_server(config: &HierarchyConfig) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::OnceLock;
+    use tokio::sync::Mutex;
 
     fn env_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -318,7 +319,7 @@ mod tests {
 
     #[tokio::test]
     async fn load_and_reload_static_peers_from_json_file() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = env_lock().lock().await;
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("peers.json");
         std::fs::write(
