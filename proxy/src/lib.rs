@@ -21,6 +21,7 @@ pub mod http_types;
 pub mod icp;
 pub mod l2_cache;
 pub mod metrics;
+pub mod miss_coalesce;
 pub mod peer_discovery;
 pub mod peer_fetch;
 pub mod peers;

@@ -196,6 +196,7 @@ cargo build --release -p bsdm-proxy --bin proxy -p cache-indexer --bin cache-ind
 | `CACHE_SPILL_THRESHOLD_BYTES` | `262144` | Тела ≥ порога — в mmap spill (`0` = только inline) |
 | `CACHE_SPILL_DIR` | `{tmp}/bsdm-cache-spill` | Каталог spill-файлов (dir `0o700`, files `0o600` на Unix) |
 | `STREAMING_MISS_ENABLED` | `true` | Tee upstream MISS → client при записи в L1 |
+| `MISS_COALESCE_ENABLED` | `true` | Singleflight: параллельные GET/HEAD MISS → один upstream; waiters: `COALESCED-HIT` |
 | `CACHE_TTL_SECONDS` | `3600` | Fallback TTL кеша (сек), если нет `max-age` |
 | `MAX_CACHE_BODY_SIZE` | `10485760` | Макс. размер body (байт) |
 | `NEGATIVE_CACHE_ENABLED` | `true` | Кешировать upstream 403/404 |

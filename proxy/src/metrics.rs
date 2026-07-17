@@ -28,6 +28,7 @@ pub struct Metrics {
     // Cache metrics
     pub cache_hits_total: Counter,
     pub cache_misses_total: Counter,
+    pub cache_coalesced_total: Counter,
     pub cache_bypasses_total: Counter,
     pub cache_entries: Gauge,
     pub cache_size_bytes: Gauge,
@@ -148,6 +149,12 @@ impl Metrics {
             "Total number of cache misses",
         )?;
         registry.register(Box::new(cache_misses_total.clone()))?;
+
+        let cache_coalesced_total = Counter::new(
+            "bsdm_proxy_cache_coalesced_total",
+            "Cache MISSes served from a coalesced in-flight fill (singleflight waiters)",
+        )?;
+        registry.register(Box::new(cache_coalesced_total.clone()))?;
 
         let cache_bypasses_total = Counter::new(
             "bsdm_proxy_cache_bypasses_total",
@@ -412,6 +419,7 @@ impl Metrics {
             response_size_bytes,
             cache_hits_total,
             cache_misses_total,
+            cache_coalesced_total,
             cache_bypasses_total,
             cache_entries,
             cache_size_bytes,

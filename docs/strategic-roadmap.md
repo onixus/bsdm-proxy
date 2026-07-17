@@ -49,7 +49,7 @@
 
 - **Умный Rate Limiting:** квоты и токены (Token Bucket / Leaky Bucket) под API-ключи.
 - **Семантическое кэширование:** подготовка к векторным БД для LLM (hit при семантическом сходстве запроса).
-- **Request Coalescing:** защита от Cache Stampede — схлопывание параллельных MISS в один upstream-запрос.
+- **Request Coalescing:** ✅ singleflight для GET/HEAD MISS (`MISS_COALESCE_ENABLED`, metric `bsdm_proxy_cache_coalesced_total`, `X-Cache-Status: COALESCED-HIT`).
 
 ---
 

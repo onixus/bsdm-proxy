@@ -19,6 +19,8 @@ pub struct PerfConfig {
     pub metrics_sample_rate: u32,
     /// Stream upstream MISS bodies to the client while buffering for cache (#94).
     pub streaming_miss_enabled: bool,
+    /// Collapse concurrent identical GET/HEAD MISSes into one upstream fetch.
+    pub miss_coalesce_enabled: bool,
 }
 
 impl PerfConfig {
@@ -47,6 +49,7 @@ impl PerfConfig {
             .unwrap_or(0);
 
         let streaming_miss_enabled = env_bool("STREAMING_MISS_ENABLED", true);
+        let miss_coalesce_enabled = env_bool("MISS_COALESCE_ENABLED", true);
 
         Self {
             fast_cache_hit,
@@ -55,6 +58,7 @@ impl PerfConfig {
             kafka_sample_rate,
             metrics_sample_rate,
             streaming_miss_enabled,
+            miss_coalesce_enabled,
         }
     }
 
@@ -165,6 +169,7 @@ mod tests {
             kafka_sample_rate: 0,
             metrics_sample_rate: 0,
             streaming_miss_enabled: true,
+            miss_coalesce_enabled: true,
         };
         assert!(cfg.should_emit_kafka_event());
         assert!(cfg.record_detailed_metrics());
@@ -179,6 +184,7 @@ mod tests {
             kafka_sample_rate: 1,
             metrics_sample_rate: 0,
             streaming_miss_enabled: true,
+            miss_coalesce_enabled: true,
         };
         assert!(cfg.should_emit_kafka_event());
     }
