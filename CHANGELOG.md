@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- **Issue tracker hygiene** — [docs/issue-tracker.md](docs/issue-tracker.md); close completed epics #165/#125/#102/#112; backlog #187 gRPC, #188 Wasm, #189 vector DB; BLOCKERS wave 3 strikethrough
 - **Project docs refresh** — README / architecture / development / structure / docker / deployment / wiki index / env.example aligned with M1–M5 done and DX/AI Unreleased (Lite = proxy+SQLite, control plane, event sink, hierarchy peers paths, threat-score vars)
 
 ### Added

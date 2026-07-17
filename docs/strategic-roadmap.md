@@ -58,12 +58,13 @@
 | Стратегическая фаза | Пересекается с |
 |---------------------|----------------|
 | Lite | `docker-compose.lite.yml`, SQLite indexer, optional `kafka` Cargo feature (B21) |
-| DX | REST control plane ✅ ([control-plane.md](control-plane.md)); gRPC — later |
-| Wasm | новая платформа поверх M2 parity (TBD) |
-| AI-трафик | coalescing ✅, API-key RL ✅, LLM/semantic cache prep ✅; external vector DB — later |
+| DX | REST control plane ✅ ([control-plane.md](control-plane.md)); next: [gRPC #187](https://github.com/onixus/bsdm-proxy/issues/187) |
+| Wasm | [Wasmtime plugin host #188](https://github.com/onixus/bsdm-proxy/issues/188) |
+| AI-трафик | coalescing ✅, API-key RL ✅, LLM/semantic cache prep ✅; next: [vector DB #189](https://github.com/onixus/bsdm-proxy/issues/189) |
 
-Текущий product plan (Squid / ретропоиск / ML): [roadmap.md](roadmap.md).
+Текущий product plan (Squid / ретропоиск / ML): [roadmap.md](roadmap.md).  
+Статус GitHub issues: [issue-tracker.md](issue-tracker.md).
 
 ---
 
-*Добавлено: 2026-07*
+*Добавлено: 2026-07 · tracker hygiene 2026-07-17*

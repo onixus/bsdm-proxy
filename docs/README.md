@@ -49,7 +49,8 @@
 | Документ | Описание |
 |----------|----------|
 | [architecture.md](architecture.md) | Архитектура, потоки данных, блокеры |
-| [BLOCKERS.md](BLOCKERS.md) | Реестр блокеров B1–B25 |
+| [BLOCKERS.md](BLOCKERS.md) | Реестр блокеров B1–B26 (все ✅) |
+| [issue-tracker.md](issue-tracker.md) | Статус GitHub issues (open / close / next) |
 | [roadmap.md](roadmap.md) | Milestones Squid + ретропоиск + ML (M1–M5) |
 | [strategic-roadmap.md](strategic-roadmap.md) | Стратегия: Lite, DX, Wasm, AI-трафик |
 | [lite.md](lite.md) | Lite: proxy + SQLite (`docker-compose.lite.yml`) |
