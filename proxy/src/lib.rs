@@ -13,6 +13,7 @@ pub mod cache_digest;
 pub mod cache_freshness;
 pub mod cache_key;
 pub mod categorization;
+pub mod control_api;
 pub mod hierarchy;
 pub mod hierarchy_config;
 pub mod htcp;
@@ -40,7 +41,7 @@ pub mod upstream;
 // Re-export commonly used types
 pub use acl::{AclAction, AclDecision, AclEngine, AclEngineHandle, AclRule};
 pub use acl_api::{AclApiConfig, AclApiState};
-pub use acl_config::{load_acl_engine_from_file, parse_acl_action};
+pub use acl_config::{load_acl_engine_from_file, parse_acl_action, save_acl_engine_to_file};
 #[cfg(feature = "auth-kerberos")]
 pub use auth::KerberosConfig;
 #[cfg(feature = "auth-ntlm")]
@@ -53,6 +54,7 @@ pub use cache_compress::{BodyEncoding, CompressionConfig};
 pub use cache_digest::DigestRegistry;
 pub use cache_key::http_cache_key;
 pub use categorization::{CategorizationConfig, CategorizationEngine, Category};
+pub use control_api::ControlApiState;
 pub use hierarchy::{HierarchyConfig, HierarchyManager, HierarchyResult};
 pub use hierarchy_config::{
     build_hierarchy_manager, htcp_peer_port, htcp_server_bind_addr, icp_server_bind_addr,

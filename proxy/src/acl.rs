@@ -288,6 +288,33 @@ impl AclEngine {
         self.rebuild_regex_cache();
     }
 
+    /// Replace an existing rule by id. Returns false if the id was not found.
+    pub fn update_rule(&mut self, rule: AclRule) -> bool {
+        let Some(idx) = self.rules.iter().position(|r| r.id == rule.id) else {
+            return false;
+        };
+        info!(
+            "Updating ACL rule: {} (priority: {})",
+            rule.name, rule.priority
+        );
+        self.rules[idx] = rule;
+        self.rules.sort_by_key(|b| std::cmp::Reverse(b.priority));
+        self.rebuild_regex_cache();
+        true
+    }
+
+    /// Remove a rule by id. Returns false if the id was not found.
+    pub fn remove_rule(&mut self, id: &str) -> bool {
+        let before = self.rules.len();
+        self.rules.retain(|r| r.id != id);
+        if self.rules.len() == before {
+            return false;
+        }
+        info!("Removed ACL rule: {id}");
+        self.rebuild_regex_cache();
+        true
+    }
+
     /// Load rules from configuration
     pub fn load_rules(&mut self, rules: Vec<AclRule>) {
         info!("Loading {} ACL rules", rules.len());

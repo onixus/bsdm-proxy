@@ -45,6 +45,19 @@ impl HttpL1Cache {
         self.shard(&key).insert(key, value);
     }
 
+    pub fn remove(&self, key: &Arc<str>) -> Option<CachedResponse> {
+        self.shard(key).remove(key).map(|(_, v)| v)
+    }
+
+    /// Drop every L1 entry. Returns the number of entries before clear.
+    pub fn clear(&self) -> usize {
+        let before = self.len();
+        for shard in &self.shards {
+            shard.clear();
+        }
+        before
+    }
+
     pub fn len(&self) -> usize {
         self.shards.iter().map(|s| s.len()).sum()
     }

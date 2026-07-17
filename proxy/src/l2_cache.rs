@@ -210,6 +210,51 @@ impl RedisL2Cache {
             self.metrics.cache_l2_errors_total.inc();
         }
     }
+
+    pub async fn delete(&self, cache_key: &str) {
+        let key = self.redis_key(cache_key);
+        let mut conn = self.conn.clone();
+        if let Err(e) = conn.del::<_, ()>(&key).await {
+            warn!("Redis L2 delete failed for {key}: {e}");
+            self.metrics.cache_l2_errors_total.inc();
+        }
+    }
+
+    /// Best-effort delete of all keys with this cache's prefix (SCAN + DEL).
+    pub async fn flush_prefix(&self) {
+        let pattern = format!("{}*", self.key_prefix);
+        let mut conn = self.conn.clone();
+        let mut cursor: u64 = 0;
+        loop {
+            let result: Result<(u64, Vec<String>), _> = redis::cmd("SCAN")
+                .arg(cursor)
+                .arg("MATCH")
+                .arg(&pattern)
+                .arg("COUNT")
+                .arg(200)
+                .query_async(&mut conn)
+                .await;
+            match result {
+                Ok((next, keys)) => {
+                    if !keys.is_empty() {
+                        if let Err(e) = conn.del::<_, ()>(&keys).await {
+                            warn!("Redis L2 flush_prefix DEL failed: {e}");
+                            self.metrics.cache_l2_errors_total.inc();
+                        }
+                    }
+                    cursor = next;
+                    if cursor == 0 {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    warn!("Redis L2 flush_prefix SCAN failed: {e}");
+                    self.metrics.cache_l2_errors_total.inc();
+                    break;
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]

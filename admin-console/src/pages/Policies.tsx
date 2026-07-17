@@ -1,13 +1,20 @@
 import { useEffect, useState } from 'react'
-import { RefreshCw, RotateCcw } from 'lucide-react'
-import { fetchAclRules, reloadAclRules, type AclRule, type AclRulesResponse } from '../api/acl'
+import { RefreshCw, RotateCcw, Save, Trash2 } from 'lucide-react'
+import {
+  deleteAclRule,
+  fetchAclRules,
+  persistAclRules,
+  reloadAclRules,
+  type AclRule,
+  type AclRulesResponse,
+} from '../api/acl'
 import { Button } from '../components/ui/Button'
 import { Panel } from '../components/dashboard/MetricWidget'
 
 export function PoliciesPage() {
   const [data, setData] = useState<AclRulesResponse | null>(null)
   const [loading, setLoading] = useState(true)
-  const [reloading, setReloading] = useState(false)
+  const [busy, setBusy] = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -20,14 +27,37 @@ export function PoliciesPage() {
   }, [])
 
   const handleReload = async () => {
-    setReloading(true)
+    setBusy(true)
     try {
       await reloadAclRules()
       await load()
     } catch {
       alert('Reload failed — check ACL API connection in Settings')
     }
-    setReloading(false)
+    setBusy(false)
+  }
+
+  const handlePersist = async () => {
+    setBusy(true)
+    try {
+      await persistAclRules()
+      alert('Rules persisted to ACL_RULES_PATH')
+    } catch {
+      alert('Persist failed — ACL_RULES_PATH may be unset or unwritable')
+    }
+    setBusy(false)
+  }
+
+  const handleDelete = async (id: string) => {
+    if (!confirm(`Delete rule "${id}"?`)) return
+    setBusy(true)
+    try {
+      await deleteAclRule(id)
+      await load()
+    } catch {
+      alert('Delete failed — check ACL API token / connection')
+    }
+    setBusy(false)
   }
 
   return (
@@ -41,47 +71,56 @@ export function PoliciesPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" onClick={load} disabled={loading}>
+          <Button variant="secondary" onClick={load} disabled={loading || busy}>
             <RefreshCw className={`size-4 ${loading ? 'animate-spin' : ''}`} />
             Refresh
           </Button>
-          <Button variant="primary" onClick={handleReload} disabled={reloading}>
-            <RotateCcw className={`size-4 ${reloading ? 'animate-spin' : ''}`} />
-            Reload rules
+          <Button variant="secondary" onClick={handlePersist} disabled={busy}>
+            <Save className="size-4" />
+            Persist
+          </Button>
+          <Button variant="primary" onClick={handleReload} disabled={busy}>
+            <RotateCcw className={`size-4 ${busy ? 'animate-spin' : ''}`} />
+            Reload from file
           </Button>
         </div>
       </div>
 
       <Panel title={`Active rules (${data?.rules.length ?? 0})`}>
-        {/* Desktop table */}
         <div className="hidden overflow-x-auto md:block">
-          <table className="w-full min-w-[600px] text-left text-sm">
+          <table className="w-full min-w-[640px] text-left text-sm">
             <thead className="text-xs uppercase text-text-secondary">
               <tr>
                 <th className="pb-3 pr-4">Priority</th>
                 <th className="pb-3 pr-4">Name</th>
                 <th className="pb-3 pr-4">Type</th>
                 <th className="pb-3 pr-4">Action</th>
-                <th className="pb-3">Status</th>
+                <th className="pb-3 pr-4">Status</th>
+                <th className="pb-3"> </th>
               </tr>
             </thead>
             <tbody>
               {data?.rules.map((rule) => (
-                <RuleRow key={rule.id} rule={rule} />
+                <RuleRow key={rule.id} rule={rule} onDelete={handleDelete} disabled={busy} />
               ))}
             </tbody>
           </table>
         </div>
 
-        {/* Mobile cards */}
         <div className="space-y-3 md:hidden">
           {data?.rules.map((rule) => (
             <div key={rule.id} className="rounded-md border border-border bg-surface-0 p-4">
               <div className="flex items-start justify-between gap-2">
                 <span className="font-medium text-text-primary">{rule.name}</span>
-                <span className={`text-xs ${rule.enabled ? 'text-success' : 'text-text-secondary'}`}>
-                  {rule.enabled ? 'enabled' : 'disabled'}
-                </span>
+                <button
+                  type="button"
+                  className="text-danger"
+                  disabled={busy}
+                  onClick={() => handleDelete(rule.id)}
+                  aria-label={`Delete ${rule.id}`}
+                >
+                  <Trash2 className="size-4" />
+                </button>
               </div>
               <p className="mt-1 font-mono text-xs text-text-secondary">
                 P{rule.priority} · {rule.action} · {formatRuleType(rule)}
@@ -92,24 +131,45 @@ export function PoliciesPage() {
       </Panel>
 
       <div className="rounded-lg border border-border bg-surface-0 p-4 text-sm text-text-secondary">
-        Export full ACL JSON from Settings → Export ACL. Live edits via{' '}
-        <code className="rounded bg-surface-2 px-1 font-mono text-xs">POST /api/acl/rules</code>.
+        Live CRUD on metrics port:{' '}
+        <code className="rounded bg-surface-2 px-1 font-mono text-xs">PUT/DELETE /api/acl/rules/:id</code>
+        {' · '}
+        <code className="rounded bg-surface-2 px-1 font-mono text-xs">POST /api/acl/persist</code>
       </div>
     </div>
   )
 }
 
-function RuleRow({ rule }: { rule: AclRule }) {
+function RuleRow({
+  rule,
+  onDelete,
+  disabled,
+}: {
+  rule: AclRule
+  onDelete: (id: string) => void
+  disabled: boolean
+}) {
   return (
     <tr className="border-t border-border/50">
       <td className="py-3 pr-4 font-mono text-xs">{rule.priority}</td>
       <td className="py-3 pr-4">{rule.name}</td>
       <td className="py-3 pr-4 font-mono text-xs">{formatRuleType(rule)}</td>
       <td className="py-3 pr-4 capitalize">{rule.action}</td>
-      <td className="py-3">
+      <td className="py-3 pr-4">
         <span className={rule.enabled ? 'text-success' : 'text-text-secondary'}>
           {rule.enabled ? 'enabled' : 'disabled'}
         </span>
+      </td>
+      <td className="py-3">
+        <button
+          type="button"
+          className="touch-target rounded-md p-2 text-danger hover:bg-danger/10 disabled:opacity-40"
+          disabled={disabled}
+          onClick={() => onDelete(rule.id)}
+          aria-label={`Delete ${rule.id}`}
+        >
+          <Trash2 className="size-4" />
+        </button>
       </td>
     </tr>
   )

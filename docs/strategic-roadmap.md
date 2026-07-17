@@ -26,10 +26,10 @@
 
 *Фокус: удобство администрирования и эксплуатация в Cloud-Native среде.*
 
-- **Control Plane API:** REST/gRPC API для внешнего управления состоянием прокси.
-- **Горячая перезагрузка (Hot Reload):** upstream, ACL и политики без рестарта и сброса активных соединений.
-- **Умная инвалидация кэша:** API для сброса по Cache-Tags или regex URL.
-- **Встроенный мониторинг:** эндпоинт с Hit/Miss ratio, latency, throughput для Lite-режима без Grafana.
+- **Control Plane API:** ✅ REST на metrics port — ACL CRUD, `/api/stats`, `/api/cache/purge` ([control-plane.md](control-plane.md)). gRPC — later.
+- **Горячая перезагрузка (Hot Reload):** ✅ ACL (file auto-reload + API mutate/persist). Upstream/hierarchy — TBD.
+- **Умная инвалидация кэша:** ✅ URL / all purge (`POST /api/cache/purge`). Cache-Tags — TBD.
+- **Встроенный мониторинг:** ✅ `GET /api/stats` JSON (Lite, без Grafana).
 
 ---
 
