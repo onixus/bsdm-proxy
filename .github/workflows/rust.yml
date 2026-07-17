@@ -30,7 +30,8 @@ jobs:
             pkg-config \
             cmake \
             librdkafka-dev \
-            libclang-dev
+            libclang-dev \
+            protobuf-compiler
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -56,6 +57,11 @@ jobs:
 
       - name: Run tests
         run: cargo test --workspace --all-targets
+
+      - name: Build and test gRPC control plane feature
+        run: |
+          cargo clippy -p bsdm-proxy --features grpc --all-targets -- -D warnings
+          cargo test -p bsdm-proxy --features grpc --lib -- control_grpc
 
   security-audit:
     name: Security Audit

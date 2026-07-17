@@ -24,20 +24,14 @@ Blockers B1–B26: all ✅ in [BLOCKERS.md](BLOCKERS.md) (GitHub #32–#56).
 | [#108](https://github.com/onixus/bsdm-proxy/issues/108) | DNS sinkhole / DNS security | P3 backlog |
 | [#99](https://github.com/onixus/bsdm-proxy/issues/99) | ICAP adapter | P3 backlog |
 
-## Closing with implementation PR
-
-| Issue | Title |
-|-------|-------|
-| [#101](https://github.com/onixus/bsdm-proxy/issues/101) | Squid rock ↔ spill sizing guide |
-| [#103](https://github.com/onixus/bsdm-proxy/issues/103) | Hierarchy peer mTLS |
-| [#189](https://github.com/onixus/bsdm-proxy/issues/189) | External vector DB (Qdrant) for semantic cache |
-
 ## Next strategic backlog
 
 | Issue | Phase |
 |-------|-------|
-| [#187](https://github.com/onixus/bsdm-proxy/issues/187) | DX — gRPC control plane |
 | [#188](https://github.com/onixus/bsdm-proxy/issues/188) | Wasm — Wasmtime plugin host |
+
+*(#101 / #103 / #189 / #187 closed via implementation PRs.)*
+
 
 ---
 

@@ -14,6 +14,8 @@ pub mod cache_freshness;
 pub mod cache_key;
 pub mod categorization;
 pub mod control_api;
+#[cfg(feature = "grpc")]
+pub mod control_grpc;
 pub mod hierarchy;
 pub mod hierarchy_config;
 pub mod htcp;

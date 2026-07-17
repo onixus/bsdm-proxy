@@ -9,12 +9,13 @@
 | Rust | **1.88+** (рекомендуется latest stable) |
 | Cargo | stable |
 | librdkafka | dev-пакет (`librdkafka-dev`) — только при сборке с feature `kafka` (default) |
+| protoc | `protobuf-compiler` — только при сборке с feature `grpc` |
 | OpenSSL | dev-пакет (`libssl-dev`) |
 
 **Debian/Ubuntu:**
 ```bash
 sudo apt-get install -y \
-  libssl-dev pkg-config cmake librdkafka-dev libclang-dev
+  libssl-dev pkg-config cmake librdkafka-dev libclang-dev protobuf-compiler
 ```
 
 ## Структура workspace
@@ -50,6 +51,9 @@ bsdm-proxy/
 ```bash
 # Debug (default: auth-basic + kafka)
 cargo build -p bsdm-proxy --bin proxy
+
+# Optional gRPC control plane (needs protoc; runtime: CONTROL_GRPC_ENABLED=true)
+cargo build -p bsdm-proxy --features grpc --bin proxy
 
 # Lite — без rdkafka (HTTP EVENT_SINK only)
 cargo build -p bsdm-proxy --no-default-features --features auth-basic --bin proxy

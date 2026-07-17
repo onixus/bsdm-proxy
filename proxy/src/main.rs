@@ -272,8 +272,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         shutdown_rx.clone(),
         metrics_port,
         acl_api,
-        Some(control_api),
+        Some(control_api.clone()),
     ));
+
+    #[cfg(feature = "grpc")]
+    {
+        let grpc_enabled = std::env::var("CONTROL_GRPC_ENABLED")
+            .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+            .unwrap_or(false);
+        if grpc_enabled {
+            let bind = std::env::var("CONTROL_GRPC_BIND")
+                .unwrap_or_else(|_| "127.0.0.1:50051".to_string());
+            let grpc_state = control_api.clone();
+            tokio::spawn(async move {
+                if let Err(e) =
+                    bsdm_proxy::control_grpc::serve_control_grpc(grpc_state, &bind).await
+                {
+                    warn!("Control plane gRPC stopped: {e}");
+                }
+            });
+        } else {
+            info!("Control plane gRPC disabled (set CONTROL_GRPC_ENABLED=true; build with --features grpc)");
+        }
+    }
 
     if should_start_icp_server(&hierarchy_config) {
         let icp_bind = icp_server_bind_addr();

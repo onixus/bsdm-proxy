@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **DX gRPC control plane** — optional Cargo feature `grpc`; proto `proxy/proto/control_plane.proto`; `CONTROL_GRPC_ENABLED` / `CONTROL_GRPC_BIND`; mirrors REST stats/purge/hierarchy/upstream TLS ([#187](https://github.com/onixus/bsdm-proxy/issues/187))
 - **Hierarchy peer mTLS** — `HIERARCHY_PEER_MTLS_*` wraps peer HTTP fetch in TLS + client cert ([#103](https://github.com/onixus/bsdm-proxy/issues/103))
 - **Semantic vector backend** — pluggable similarity index (`SEMANTIC_VECTOR_BACKEND=local|qdrant`) + optional HTTP embed provider; metric `bsdm_proxy_semantic_cache_vector_errors_total` ([#189](https://github.com/onixus/bsdm-proxy/issues/189))
 - **AI semantic / LLM cache prep** — `SEMANTIC_CACHE_ENABLED` POST body-hash cache for chat/completions paths; optional local cosine near-hit; docs [semantic-cache.md](docs/semantic-cache.md)

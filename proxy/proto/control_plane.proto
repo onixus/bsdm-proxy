@@ -1,0 +1,90 @@
+syntax = "proto3";
+
+package bsdm.control.v1;
+
+// Optional gRPC control plane (feature `grpc`, CONTROL_GRPC_ENABLED=true).
+// Auth: metadata `authorization: Bearer <CONTROL_API_TOKEN>` for mutating RPCs
+// (same policy as REST). Public: GetStats, ListHierarchyPeers, GetUpstreamTls.
+
+service ControlPlane {
+  rpc GetStats(Empty) returns (StatsResponse);
+  rpc PurgeCache(PurgeRequest) returns (PurgeResponse);
+  rpc ListHierarchyPeers(Empty) returns (PeersListResponse);
+  rpc ReloadHierarchy(Empty) returns (HierarchyReloadResponse);
+  rpc GetUpstreamTls(Empty) returns (UpstreamTlsSnapshot);
+  rpc ReloadUpstreamTls(Empty) returns (UpstreamTlsReloadResponse);
+}
+
+message Empty {}
+
+message CacheStats {
+  uint64 hits = 1;
+  uint64 misses = 2;
+  uint64 bypasses = 3;
+  double hit_ratio = 4;
+  uint64 entries = 5;
+  uint64 capacity = 6;
+  uint64 shards = 7;
+  uint64 tags = 8;
+}
+
+message StatsResponse {
+  string service = 1;
+  uint64 uptime_secs = 2;
+  uint64 requests_in_flight = 3;
+  CacheStats cache = 4;
+}
+
+message PurgeRequest {
+  bool all = 1;
+  string url = 2;
+  string method = 3;
+  string tag = 4;
+  repeated string tags = 5;
+}
+
+message PurgeResponse {
+  string status = 1;
+  string scope = 2;
+  uint64 removed = 3;
+  string url = 4;
+  repeated string tags = 5;
+}
+
+message PeerInfo {
+  string id = 1;
+  string host = 2;
+  uint32 port = 3;
+  string peer_type = 4;
+  double weight = 5;
+  uint32 icp_port = 6; // 0 = unset
+  bool healthy = 7;
+  bool is_static = 8;
+}
+
+message PeersListResponse {
+  bool enabled = 1;
+  repeated PeerInfo peers = 2;
+}
+
+message HierarchyReloadResponse {
+  string status = 1;
+  string source = 2;
+  uint64 added = 3;
+  uint64 removed = 4;
+  uint64 preserved_discovery = 5;
+  string error = 6;
+}
+
+message UpstreamTlsSnapshot {
+  bool http2_enabled = 1;
+  string ca_cert_path = 2;
+  bool custom_ca = 3;
+  uint64 reloaded_at_unix = 4;
+}
+
+message UpstreamTlsReloadResponse {
+  string status = 1;
+  UpstreamTlsSnapshot tls = 2;
+  string error = 3;
+}
