@@ -11,8 +11,8 @@ See also: [strategic-roadmap.md](strategic-roadmap.md) Phase 2 · [acl.md](acl.m
 | `CONTROL_API_TOKEN` | Preferred Bearer token for mutating control APIs |
 | `ACL_API_TOKEN` | Fallback token (also used for `/api/acl/*`) |
 
-`GET /api/stats` and `GET /api/hierarchy/peers` are intentionally unauthenticated (local Lite monitoring).  
-`POST /api/cache/purge`, `POST /api/hierarchy/reload`, and all `/api/acl/*` require Bearer when a token is configured.
+`GET /api/stats`, `GET /api/hierarchy/peers`, and `GET /api/upstream/tls` are intentionally unauthenticated (local Lite monitoring).  
+`POST /api/cache/purge`, `POST /api/hierarchy/reload`, `POST /api/upstream/tls/reload`, and all `/api/acl/*` require Bearer when a token is configured.
 
 ```bash
 curl -H "Authorization: Bearer $CONTROL_API_TOKEN" ...
@@ -109,9 +109,41 @@ curl -X POST http://127.0.0.1:9090/api/hierarchy/reload \
 {"status":"reloaded","source":"file","added":2,"removed":1,"preserved_discovery":3}
 ```
 
+## Upstream TLS (hot reload)
+
+Rebuilds the shared Hyper upstream client pool after re-reading env / CA file. In-flight requests keep the previous pool until idle drain.
+
+| Method | Path | Notes |
+|--------|------|-------|
+| `GET` | `/api/upstream/tls` | Current snapshot (`http2_enabled`, `ca_cert_path`, `custom_ca`, `reloaded_at_unix`) |
+| `POST` | `/api/upstream/tls/reload` | Re-read `UPSTREAM_CA_CERT` + `UPSTREAM_HTTP2_ENABLED` |
+
+Typical flow: replace the PEM at `UPSTREAM_CA_CERT` (or flip `UPSTREAM_HTTP2_ENABLED` in the process env), then reload.
+
+```bash
+curl http://127.0.0.1:9090/api/upstream/tls
+
+curl -X POST http://127.0.0.1:9090/api/upstream/tls/reload \
+  -H "Authorization: Bearer $CONTROL_API_TOKEN"
+```
+
+```json
+{
+  "status": "reloaded",
+  "tls": {
+    "http2_enabled": false,
+    "ca_cert_path": "/etc/bsdm-proxy/upstream-ca.crt",
+    "custom_ca": true,
+    "reloaded_at_unix": 1720000000
+  }
+}
+```
+
+On failure (missing/invalid CA file) the previous client is kept and the API returns `400`.
+
 ## Roadmap leftovers
 
 - [x] Cache-Tags / Surrogate-Key purge (`{"tag":"..."}`)
 - [x] Hierarchy peer hot reload (`/api/hierarchy/*`)
-- [ ] Upstream TLS hot reload
+- [x] Upstream TLS hot reload (`/api/upstream/tls*`)
 - [ ] gRPC control plane

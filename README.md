@@ -202,8 +202,8 @@ cargo build --release -p bsdm-proxy --bin proxy -p cache-indexer --bin cache-ind
 | `NEGATIVE_CACHE_TTL_SECONDS` | `120` | TTL negative cache (сек) |
 | `CACHE_HONOR_CACHE_CONTROL` | `true` | Учитывать `Cache-Control`, ETag, revalidate |
 | `SHUTDOWN_TIMEOUT_SECONDS` | `30` | Таймаут graceful shutdown |
-| `UPSTREAM_CA_CERT` | — | PEM самоподписанного CA для upstream TLS (тесты/lab) |
-| `UPSTREAM_HTTP2_ENABLED` | `false` | HTTP/2 ALPN для upstream HTTPS |
+| `UPSTREAM_CA_CERT` | — | PEM самоподписанного CA для upstream TLS (тесты/lab); hot reload: `POST /api/upstream/tls/reload` |
+| `UPSTREAM_HTTP2_ENABLED` | `false` | HTTP/2 ALPN для upstream HTTPS (перечитывается при TLS reload) |
 | `CACHE_COMPRESSION` | `off` | At-rest сжатие кеша: `zstd`, `brotli`, `off` |
 | `CACHE_COMPRESS_MIN_BYTES` | `1024` | Мин. размер body для сжатия в кеше |
 | `CACHE_COMPRESS_ZSTD_LEVEL` | `3` | Уровень Zstd (1–22) |

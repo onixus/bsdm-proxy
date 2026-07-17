@@ -114,6 +114,7 @@ pub async fn metrics_server(
                                 if path == "/api/stats"
                                     || path.starts_with("/api/cache/")
                                     || path.starts_with("/api/hierarchy/")
+                                    || path.starts_with("/api/upstream/")
                                 {
                                     return Ok::<_, Infallible>(api.handle_request(req).await);
                                 }

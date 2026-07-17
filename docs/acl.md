@@ -2,7 +2,7 @@
 
 > См. также: [оглавление документации](README.md) · [пример правил](../config/acl-rules.example.json)
 
-> ⚠️ **Ограничения реализации:** REST ACL CRUD + persist, Cache-Tag purge, hierarchy peer reload — ✅ (см. [control-plane.md](control-plane.md)); upstream TLS hot reload — ещё в roadmap Phase 2.
+> ⚠️ **Ограничения реализации:** REST ACL CRUD + persist, Cache-Tag purge, hierarchy peer reload, upstream TLS reload — ✅ (см. [control-plane.md](control-plane.md)); gRPC control plane — ещё в roadmap Phase 2.
 
 Flexible access control system for BSDM-Proxy with multiple rule types and priority-based matching.
 

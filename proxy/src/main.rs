@@ -260,10 +260,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         l2_cache.clone(),
         hierarchy_peers,
         hierarchy_config.use_htcp,
+        service.upstream_client(),
     ));
     info!(
-        "Control plane API on :{}/api/stats · :{}/api/cache/purge · :{}/api/hierarchy/*",
-        metrics_port, metrics_port, metrics_port
+        "Control plane API on :{}/api/stats · :{}/api/cache/purge · :{}/api/hierarchy/* · :{}/api/upstream/tls",
+        metrics_port, metrics_port, metrics_port, metrics_port
     );
     tokio::spawn(metrics_server(
         metrics.clone(),

@@ -9,8 +9,6 @@ use hyper::header::{
     HeaderName, HeaderValue, AUTHORIZATION, IF_MODIFIED_SINCE, IF_NONE_MATCH, LOCATION,
 };
 use hyper::{Request, Response, StatusCode};
-use hyper_util::client::legacy::connect::HttpConnector;
-use hyper_util::rt::TokioExecutor;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -44,7 +42,7 @@ use crate::sharded_cache::HttpL1Cache;
 use crate::streaming_miss::TeeMissBody;
 use crate::threat_score_cache::ThreatScoreCache;
 use crate::tls::CertCache;
-use crate::upstream::{build_upstream_https_connector, UpstreamTlsConfig};
+use crate::upstream::{UpstreamClientHandle, UpstreamTlsConfig};
 
 pub struct ProxyPolicy {
     pub acl_engine: Option<Arc<AclEngineHandle>>,
@@ -243,8 +241,7 @@ pub struct ProxyService {
     #[cfg(feature = "kafka")]
     kafka_pipeline: Option<Arc<KafkaEventPipeline>>,
     http_pipeline: Option<Arc<HttpEventPipeline>>,
-    http_client:
-        hyper_util::client::legacy::Client<hyper_rustls::HttpsConnector<HttpConnector>, Body>,
+    http_client: UpstreamClientHandle,
     pub(crate) metrics: Arc<Metrics>,
     pub(crate) mitm_enabled: bool,
     auth: Option<Arc<AuthManager>>,
@@ -278,6 +275,10 @@ impl ProxyService {
 
     pub fn policy_cache(&self) -> Arc<PolicyDecisionCache> {
         self.policy_cache.clone()
+    }
+
+    pub fn upstream_client(&self) -> UpstreamClientHandle {
+        self.http_client.clone()
     }
 
     fn miss_completion_handle(&self) -> MissCompletionHandle {
@@ -320,13 +321,8 @@ impl ProxyService {
             cache_config.shard_count,
         ));
 
-        let https = build_upstream_https_connector(&upstream_tls)
-            .expect("failed to build upstream HTTPS connector");
-
-        let http_client = hyper_util::client::legacy::Client::builder(TokioExecutor::new())
-            .pool_idle_timeout(Duration::from_secs(90))
-            .pool_max_idle_per_host(32)
-            .build(https);
+        let http_client =
+            UpstreamClientHandle::new(upstream_tls).expect("failed to build upstream HTTPS client");
 
         Self {
             cert_cache,
@@ -736,7 +732,7 @@ impl ProxyService {
         let domain = Self::extract_domain(url);
         let upstream_start = Instant::now();
 
-        let response = match self.http_client.request(cond_req).await {
+        let response = match self.http_client.load().request(cond_req).await {
             Ok(resp) => resp,
             Err(e) => {
                 warn!("Revalidation upstream error for {}: {}", url, e);
@@ -1444,7 +1440,7 @@ impl ProxyService {
         let fetch_result = if let Some((_, response)) = peer_fetch {
             Ok(response)
         } else {
-            self.http_client.request(req).await
+            self.http_client.load().request(req).await
         };
 
         match fetch_result {
