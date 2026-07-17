@@ -31,6 +31,7 @@
 | [authentication.md](authentication.md) | Basic, LDAP, NTLM, Kerberos |
 | [logging.md](logging.md) | `RUST_LOG`, уровни |
 | [performance.md](performance.md) | Тюнинг RPS, bench |
+| [semantic-cache.md](semantic-cache.md) | LLM / semantic cache prep |
 | [acl.md](acl.md) | ACL + REST API |
 | [control-plane.md](control-plane.md) | DX Phase 2: stats, cache purge, ACL CRUD |
 | [categorization.md](categorization.md) | UT1 Blacklists, metrics, OTX |

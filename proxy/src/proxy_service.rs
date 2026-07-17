@@ -38,6 +38,10 @@ use crate::pipeline::{dispatch_cache_event, new_event_id, CacheEvent, HttpEventP
 use crate::pipeline::{flush_kafka, KafkaEventPipeline};
 use crate::policy_cache::PolicyDecisionCache;
 use crate::rate_limit::{extract_api_key, RateLimitViolation, RateLimiter};
+use crate::semantic_cache::{
+    content_cache_key, evaluate_llm_store, extract_embed_text, hash_embed, normalize_llm_body,
+    SemanticCacheConfig, SemanticIndex,
+};
 use crate::session::{header_ci, resolve_location, SessionCorrelator};
 use crate::sharded_cache::HttpL1Cache;
 use crate::streaming_miss::TeeMissBody;
@@ -65,6 +69,11 @@ struct MissCompletionHandle {
     digest_registry: Option<Arc<DigestRegistry>>,
     sessions: Arc<SessionCorrelator>,
     miss_flights: MissFlightMap,
+    semantic_config: SemanticCacheConfig,
+    semantic_index: SemanticIndex,
+    /// When set, this completion is an LLM/semantic POST fill.
+    llm_mode: bool,
+    llm_normalized_body: Option<Bytes>,
 }
 
 impl MissCompletionHandle {
@@ -152,11 +161,20 @@ impl MissCompletionHandle {
                 store_decision.must_revalidate,
             );
             self.store_in_l1_and_l2(cache_key.clone(), cached_response.clone());
+            if self.llm_mode {
+                if let Some(norm) = &self.llm_normalized_body {
+                    let emb =
+                        hash_embed(&extract_embed_text(norm), self.semantic_config.embed_dims);
+                    self.semantic_index.insert(emb, cache_key.clone());
+                }
+            }
             self.miss_flights
                 .complete(&cache_key, Some(cached_response));
             if let Some(g) = guard.as_mut() {
                 g.set_cache_status(if store_decision.is_negative {
                     "NEGATIVE_MISS"
+                } else if self.llm_mode {
+                    "LLM_MISS"
                 } else {
                     "MISS"
                 });
@@ -172,6 +190,8 @@ impl MissCompletionHandle {
         let cache_status = if stored && store_decision.store {
             if store_decision.is_negative {
                 "NEGATIVE_MISS"
+            } else if self.llm_mode {
+                "LLM_MISS"
             } else {
                 "MISS"
             }
@@ -260,6 +280,8 @@ pub struct ProxyService {
     sessions: Arc<SessionCorrelator>,
     threat_score_cache: Arc<ThreatScoreCache>,
     miss_flights: MissFlightMap,
+    semantic_config: SemanticCacheConfig,
+    semantic_index: SemanticIndex,
 }
 
 impl ProxyService {
@@ -288,6 +310,18 @@ impl ProxyService {
     }
 
     fn miss_completion_handle(&self) -> MissCompletionHandle {
+        self.miss_completion_handle_inner(false, None)
+    }
+
+    fn miss_completion_handle_llm(&self, normalized_body: Bytes) -> MissCompletionHandle {
+        self.miss_completion_handle_inner(true, Some(normalized_body))
+    }
+
+    fn miss_completion_handle_inner(
+        &self,
+        llm_mode: bool,
+        llm_normalized_body: Option<Bytes>,
+    ) -> MissCompletionHandle {
         MissCompletionHandle {
             http_cache: self.http_cache.clone(),
             cache_config: self.cache_config.clone(),
@@ -301,6 +335,10 @@ impl ProxyService {
             digest_registry: self.digest_registry.clone(),
             sessions: self.sessions.clone(),
             miss_flights: self.miss_flights.clone(),
+            semantic_config: self.semantic_config.clone(),
+            semantic_index: self.semantic_index.clone(),
+            llm_mode,
+            llm_normalized_body,
         }
     }
 
@@ -330,6 +368,8 @@ impl ProxyService {
 
         let http_client =
             UpstreamClientHandle::new(upstream_tls).expect("failed to build upstream HTTPS client");
+        let semantic_config = SemanticCacheConfig::from_env();
+        let semantic_index = SemanticIndex::new(semantic_config.max_index_entries);
 
         Self {
             cert_cache,
@@ -353,6 +393,8 @@ impl ProxyService {
             sessions: Arc::new(SessionCorrelator::from_env()),
             threat_score_cache,
             miss_flights: MissFlightMap::new(),
+            semantic_config,
+            semantic_index,
         }
     }
 
@@ -1254,8 +1296,8 @@ impl ProxyService {
         let detailed_metrics = self.perf.record_detailed_metrics();
         let http_method = req.method().clone();
         let method = http_method.as_str();
-        let uri = req.uri();
-        let url = uri.to_string();
+        let url = req.uri().to_string();
+        let mut req = Some(req);
 
         let mut guard = if detailed_metrics {
             Some(RequestMetricsGuard::new(
@@ -1272,17 +1314,21 @@ impl ProxyService {
         };
 
         let request_start = Instant::now();
+        let llm_mode = self.semantic_config.applies(method, &url);
 
-        let cache_key = self.generate_cache_key(method, &url);
+        let mut cache_key = self.generate_cache_key(method, &url);
 
+        let req_ref = req.as_ref().expect("request present");
         let (user_id, username) = if let Some(user) = proxy_user.as_deref() {
             Self::user_fields(Some(user))
         } else {
-            Self::extract_user_info(&req)
+            Self::extract_user_info(req_ref)
         };
-        let user_agent = Self::request_header_str(&req, "user-agent");
+        let user_agent = Self::request_header_str(req_ref, "user-agent");
 
-        if let Some(resp) = self.check_rate_limit(&client_ip, username.as_deref(), req.headers()) {
+        if let Some(resp) =
+            self.check_rate_limit(&client_ip, username.as_deref(), req_ref.headers())
+        {
             let code = resp.status().as_u16();
             if let Some(g) = guard.take() {
                 g.finish(code, 0, 0);
@@ -1292,10 +1338,10 @@ impl ProxyService {
             return resp;
         }
 
-        if self.perf.skip_policy_on_cache_serve() {
+        if self.perf.skip_policy_on_cache_serve() && !llm_mode {
             if let Some(resp) = self
                 .try_serve_cache_before_policy(
-                    &req,
+                    req.as_ref().expect("request present"),
                     &cache_key,
                     &url,
                     method,
@@ -1345,7 +1391,93 @@ impl ProxyService {
         }
 
         let cache_lookup_start = Instant::now();
-        if let Some(cached) = self.http_cache.get(&cache_key) {
+        let mut early_body = None::<(hyper::http::request::Parts, Bytes)>;
+        let mut llm_normalized: Option<Bytes> = None;
+
+        if llm_mode {
+            let (parts, body) = req.take().expect("request present").into_parts();
+            let body_bytes = match http_body_util::BodyExt::collect(body).await {
+                Ok(collected) => collected.to_bytes(),
+                Err(e) => {
+                    error!("LLM body collection failed: {}", e);
+                    let mut resp = Response::new(full(Bytes::from_static(b"400 Bad Request")));
+                    *resp.status_mut() = StatusCode::BAD_REQUEST;
+                    Self::finish_request_metrics(&mut guard, &mut fast_scope, 400, 0, 15);
+                    return resp;
+                }
+            };
+            let normalized = Bytes::from(normalize_llm_body(&body_bytes));
+            cache_key = content_cache_key(method, &url, &normalized);
+
+            if let Some(cached) = self.http_cache.get(&cache_key) {
+                if cached.can_serve_fresh() {
+                    debug!("LLM cache exact HIT: {} {}", method, url);
+                    self.metrics.semantic_cache_exact_hits_total.inc();
+                    return self.serve_l1_hit(
+                        &cached,
+                        &cache_key,
+                        &url,
+                        method,
+                        &user_id,
+                        &username,
+                        user_agent.as_deref(),
+                        &client_ip,
+                        &categories,
+                        &threat_sources,
+                        request_start,
+                        detailed_metrics,
+                        &mut guard,
+                        &mut fast_scope,
+                        "LLM_HIT",
+                        "LLM-HIT",
+                    );
+                }
+            }
+
+            if self.semantic_config.near_hit_enabled() {
+                let emb = hash_embed(
+                    &extract_embed_text(&normalized),
+                    self.semantic_config.embed_dims,
+                );
+                if let Some(near_key) = self
+                    .semantic_index
+                    .find_similar(&emb, self.semantic_config.similarity_threshold)
+                {
+                    if let Some(cached) = self.http_cache.get(&near_key) {
+                        if cached.can_serve_fresh() {
+                            debug!("LLM cache semantic HIT: {} {}", method, url);
+                            self.metrics.semantic_cache_similar_hits_total.inc();
+                            return self.serve_l1_hit(
+                                &cached,
+                                &near_key,
+                                &url,
+                                method,
+                                &user_id,
+                                &username,
+                                user_agent.as_deref(),
+                                &client_ip,
+                                &categories,
+                                &threat_sources,
+                                request_start,
+                                detailed_metrics,
+                                &mut guard,
+                                &mut fast_scope,
+                                "SEMANTIC_HIT",
+                                "SEMANTIC-HIT",
+                            );
+                        }
+                    }
+                }
+            }
+
+            llm_normalized = Some(normalized);
+            early_body = Some((parts, body_bytes));
+            if detailed_metrics {
+                self.metrics
+                    .cache_lookup_duration_seconds
+                    .observe(cache_lookup_start.elapsed().as_secs_f64());
+            }
+        } else if let Some(cached) = self.http_cache.get(&cache_key) {
             if detailed_metrics {
                 self.metrics
                     .cache_lookup_duration_seconds
@@ -1377,7 +1509,7 @@ impl ProxyService {
             if let Some(resp) = self
                 .try_revalidate_stale(
                     &cached,
-                    &req,
+                    req.as_ref().expect("request present"),
                     &cache_key,
                     &url,
                     method,
@@ -1397,60 +1529,62 @@ impl ProxyService {
             }
         }
 
-        if let Some(cached) = self.try_l2_cache_get(&cache_key).await {
-            debug!("Cache L2 HIT: {} {}", method, url);
-            self.http_cache.insert(cache_key.clone(), cached.clone());
-            let hit_label = if cached.is_negative {
-                "NEGATIVE_HIT"
-            } else {
-                "L2_HIT"
-            };
-            let x_status = if cached.is_negative {
-                "NEGATIVE-HIT"
-            } else {
-                "L2-HIT"
-            };
-            if let Some(g) = guard.as_mut() {
-                g.set_cache_status(hit_label);
-                self.metrics.cache_hits_total.inc();
+        if !llm_mode {
+            if let Some(cached) = self.try_l2_cache_get(&cache_key).await {
+                debug!("Cache L2 HIT: {} {}", method, url);
+                self.http_cache.insert(cache_key.clone(), cached.clone());
+                let hit_label = if cached.is_negative {
+                    "NEGATIVE_HIT"
+                } else {
+                    "L2_HIT"
+                };
+                let x_status = if cached.is_negative {
+                    "NEGATIVE-HIT"
+                } else {
+                    "L2-HIT"
+                };
+                if let Some(g) = guard.as_mut() {
+                    g.set_cache_status(hit_label);
+                    self.metrics.cache_hits_total.inc();
+                }
+
+                if detailed_metrics {
+                    self.emit_cache_hit_event(
+                        &url,
+                        method,
+                        &cache_key,
+                        hit_label,
+                        &cached,
+                        &user_id,
+                        &username,
+                        user_agent.as_deref(),
+                        &client_ip,
+                        &categories,
+                        &threat_sources,
+                        request_start,
+                    );
+                }
+
+                let response = cached.to_response_with_cache_status(x_status);
+                let body_size = cached.response_body_len();
+                if let Some(g) = guard.take() {
+                    g.finish(cached.status, 0, body_size);
+                } else if let Some(scope) = fast_scope.take() {
+                    scope.finish_cache_hit();
+                }
+                return response;
             }
 
             if detailed_metrics {
-                self.emit_cache_hit_event(
-                    &url,
-                    method,
-                    &cache_key,
-                    hit_label,
-                    &cached,
-                    &user_id,
-                    &username,
-                    user_agent.as_deref(),
-                    &client_ip,
-                    &categories,
-                    &threat_sources,
-                    request_start,
-                );
+                self.metrics
+                    .cache_lookup_duration_seconds
+                    .observe(cache_lookup_start.elapsed().as_secs_f64());
             }
-
-            let response = cached.to_response_with_cache_status(x_status);
-            let body_size = cached.response_body_len();
-            if let Some(g) = guard.take() {
-                g.finish(cached.status, 0, body_size);
-            } else if let Some(scope) = fast_scope.take() {
-                scope.finish_cache_hit();
-            }
-            return response;
-        }
-
-        if detailed_metrics {
-            self.metrics
-                .cache_lookup_duration_seconds
-                .observe(cache_lookup_start.elapsed().as_secs_f64());
         }
 
         // Collapse concurrent identical GET/HEAD MISSes onto one upstream fill.
         let mut flight_permit: Option<MissFlightPermit> = None;
-        if self.perf.miss_coalesce_enabled && CACHEABLE_METHODS.contains(&method) {
+        if self.perf.miss_coalesce_enabled && CACHEABLE_METHODS.contains(&method) && !llm_mode {
             match self.miss_flights.join(&cache_key) {
                 CoalesceJoin::Follower(wait) => {
                     if let Some(cached) = wait.wait().await {
@@ -1508,19 +1642,24 @@ impl ProxyService {
         debug!("Cache MISS: {} {}", method, url);
         self.metrics.cache_misses_total.inc();
 
-        let (parts, body) = req.into_parts();
-        let body_bytes = match http_body_util::BodyExt::collect(body).await {
-            Ok(collected) => collected.to_bytes(),
-            Err(e) => {
-                error!("Body collection failed: {}", e);
-                if let Some(permit) = flight_permit.take() {
-                    permit.complete(None);
+        let (parts, body_bytes) = if let Some(early) = early_body.take() {
+            early
+        } else {
+            let (parts, body) = req.take().expect("request present").into_parts();
+            let body_bytes = match http_body_util::BodyExt::collect(body).await {
+                Ok(collected) => collected.to_bytes(),
+                Err(e) => {
+                    error!("Body collection failed: {}", e);
+                    if let Some(permit) = flight_permit.take() {
+                        permit.complete(None);
+                    }
+                    let mut resp = Response::new(full(Bytes::from_static(b"400 Bad Request")));
+                    *resp.status_mut() = StatusCode::BAD_REQUEST;
+                    Self::finish_request_metrics(&mut guard, &mut fast_scope, 400, 0, 15);
+                    return resp;
                 }
-                let mut resp = Response::new(full(Bytes::from_static(b"400 Bad Request")));
-                *resp.status_mut() = StatusCode::BAD_REQUEST;
-                Self::finish_request_metrics(&mut guard, &mut fast_scope, 400, 0, 15);
-                return resp;
-            }
+            };
+            (parts, body_bytes)
         };
         let request_body_size = body_bytes.len();
         let req_for_peer = Request::from_parts(parts.clone(), full(body_bytes.clone()));
@@ -1529,9 +1668,12 @@ impl ProxyService {
         let domain = Self::extract_domain(&url);
         let upstream_start = Instant::now();
 
-        let peer_fetch = self
-            .try_fetch_via_hierarchy(method, &url, req_for_peer)
-            .await;
+        let peer_fetch = if llm_mode {
+            None
+        } else {
+            self.try_fetch_via_hierarchy(method, &url, req_for_peer)
+                .await
+        };
         let hierarchy_peer = peer_fetch.as_ref().map(|(peer, _)| peer.clone());
 
         let fetch_result = if let Some((_, response)) = peer_fetch {
@@ -1556,12 +1698,24 @@ impl ProxyService {
                     .observe(upstream_duration);
 
                 let headers_map = Self::headers_map_from_response(&response);
-                let store_precheck =
-                    evaluate_store_precheck(method, status_code, &headers_map, &self.cache_config);
+                let store_precheck = if llm_mode {
+                    evaluate_llm_store(
+                        status_code,
+                        0,
+                        self.cache_config.max_body_size,
+                        self.semantic_config.ttl,
+                    )
+                } else {
+                    evaluate_store_precheck(method, status_code, &headers_map, &self.cache_config)
+                };
 
                 if self.perf.streaming_miss_enabled {
                     let upstream_body = response.into_body();
-                    let x_cache = miss_x_cache_status_header(true, &store_precheck);
+                    let x_cache = if llm_mode && store_precheck.store {
+                        "LLM-MISS-STREAMING"
+                    } else {
+                        miss_x_cache_status_header(true, &store_precheck)
+                    };
                     if let Some(g) = guard.as_mut() {
                         g.set_cache_status(&cache_status_metric_label(x_cache));
                     }
@@ -1571,7 +1725,11 @@ impl ProxyService {
                         permit.disarm();
                     }
 
-                    let handle = self.miss_completion_handle();
+                    let handle = if llm_mode {
+                        self.miss_completion_handle_llm(llm_normalized.clone().unwrap_or_default())
+                    } else {
+                        self.miss_completion_handle()
+                    };
                     let cache_key_cb = cache_key.clone();
                     let url_cb = url.clone();
                     let method_cb = method.to_string();
@@ -1593,7 +1751,16 @@ impl ProxyService {
                         store_precheck.store,
                         self.cache_config.max_body_size,
                         move |body_bytes, stored| {
-                            let final_decision = if stored {
+                            let final_decision = if !stored {
+                                crate::cache_freshness::CacheStoreDecision::bypass()
+                            } else if handle.llm_mode {
+                                evaluate_llm_store(
+                                    status_code,
+                                    body_bytes.len(),
+                                    handle.cache_config.max_body_size,
+                                    handle.semantic_config.ttl,
+                                )
+                            } else {
                                 evaluate_store(
                                     &method_cb,
                                     status_code,
@@ -1601,8 +1768,6 @@ impl ProxyService {
                                     body_bytes.len(),
                                     &handle.cache_config,
                                 )
-                            } else {
-                                crate::cache_freshness::CacheStoreDecision::bypass()
                             };
                             handle.complete_cache_miss(
                                 cache_key_cb,
@@ -1667,40 +1832,79 @@ impl ProxyService {
                     permit.disarm();
                 }
 
-                let store_decision = evaluate_store(
-                    method,
-                    status_code,
-                    &headers_map,
-                    body_bytes.len(),
-                    &self.cache_config,
-                );
-                let _cache_status = self.complete_cache_miss(
-                    cache_key,
-                    &url,
-                    method,
-                    &domain,
-                    status_code,
-                    &headers_map,
-                    body_bytes.clone(),
-                    &store_decision,
-                    store_decision.store,
-                    user_id,
-                    username,
-                    user_agent,
-                    &client_ip,
-                    &categories,
-                    &threat_sources,
-                    request_start,
-                    request_body_size,
-                    hierarchy_peer,
-                    guard.take(),
-                    fast_scope.take(),
-                );
+                let store_decision = if llm_mode {
+                    evaluate_llm_store(
+                        status_code,
+                        body_bytes.len(),
+                        self.cache_config.max_body_size,
+                        self.semantic_config.ttl,
+                    )
+                } else {
+                    evaluate_store(
+                        method,
+                        status_code,
+                        &headers_map,
+                        body_bytes.len(),
+                        &self.cache_config,
+                    )
+                };
+                if llm_mode {
+                    self.miss_completion_handle_llm(llm_normalized.clone().unwrap_or_default())
+                        .complete_cache_miss(
+                            cache_key,
+                            &url,
+                            method,
+                            &domain,
+                            status_code,
+                            &headers_map,
+                            body_bytes.clone(),
+                            &store_decision,
+                            store_decision.store,
+                            user_id,
+                            username,
+                            user_agent,
+                            &client_ip,
+                            &categories,
+                            &threat_sources,
+                            request_start,
+                            request_body_size,
+                            hierarchy_peer,
+                            guard.take(),
+                            fast_scope.take(),
+                        );
+                } else {
+                    let _cache_status = self.complete_cache_miss(
+                        cache_key,
+                        &url,
+                        method,
+                        &domain,
+                        status_code,
+                        &headers_map,
+                        body_bytes.clone(),
+                        &store_decision,
+                        store_decision.store,
+                        user_id,
+                        username,
+                        user_agent,
+                        &client_ip,
+                        &categories,
+                        &threat_sources,
+                        request_start,
+                        request_body_size,
+                        hierarchy_peer,
+                        guard.take(),
+                        fast_scope.take(),
+                    );
+                }
 
                 let mut resp = Response::new(full(body_bytes));
                 *resp.status_mut() = status;
                 Self::apply_response_headers(&headers_map, &mut resp);
-                let header_label = miss_x_cache_status_header(false, &store_decision);
+                let header_label = if llm_mode && store_decision.store {
+                    "LLM-MISS"
+                } else {
+                    miss_x_cache_status_header(false, &store_decision)
+                };
                 Self::attach_x_cache_status(&mut resp, header_label);
                 resp
             }

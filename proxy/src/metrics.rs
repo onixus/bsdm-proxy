@@ -29,6 +29,8 @@ pub struct Metrics {
     pub cache_hits_total: Counter,
     pub cache_misses_total: Counter,
     pub cache_coalesced_total: Counter,
+    pub semantic_cache_exact_hits_total: Counter,
+    pub semantic_cache_similar_hits_total: Counter,
     pub cache_bypasses_total: Counter,
     pub cache_entries: Gauge,
     pub cache_size_bytes: Gauge,
@@ -155,6 +157,18 @@ impl Metrics {
             "Cache MISSes served from a coalesced in-flight fill (singleflight waiters)",
         )?;
         registry.register(Box::new(cache_coalesced_total.clone()))?;
+
+        let semantic_cache_exact_hits_total = Counter::new(
+            "bsdm_proxy_semantic_cache_exact_hits_total",
+            "LLM POST exact content-hash cache hits",
+        )?;
+        registry.register(Box::new(semantic_cache_exact_hits_total.clone()))?;
+
+        let semantic_cache_similar_hits_total = Counter::new(
+            "bsdm_proxy_semantic_cache_similar_hits_total",
+            "LLM POST near-neighbor semantic cache hits (local embedding cosine)",
+        )?;
+        registry.register(Box::new(semantic_cache_similar_hits_total.clone()))?;
 
         let cache_bypasses_total = Counter::new(
             "bsdm_proxy_cache_bypasses_total",
@@ -420,6 +434,8 @@ impl Metrics {
             cache_hits_total,
             cache_misses_total,
             cache_coalesced_total,
+            semantic_cache_exact_hits_total,
+            semantic_cache_similar_hits_total,
             cache_bypasses_total,
             cache_entries,
             cache_size_bytes,
