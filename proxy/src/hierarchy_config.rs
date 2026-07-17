@@ -3,8 +3,9 @@
 use crate::cache_digest::DigestRegistry;
 use crate::hierarchy::{HierarchyConfig, HierarchyManager};
 use crate::metrics::Metrics;
-use crate::peers::{PeerConfig, PeerRegistry, PeerType};
+use crate::peers::{PeerConfig, PeerRegistry, PeerType, ReplaceStaticStats};
 use crate::selection::parse_strategy;
+use serde::Deserialize;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{info, warn};
@@ -45,6 +46,113 @@ fn parse_peer_list(
             },
         )
         .collect()
+}
+
+fn sibling_default_query_port(use_htcp: bool) -> u16 {
+    if use_htcp {
+        htcp_peer_port()
+    } else {
+        std::env::var("ICP_PEER_PORT")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(3130)
+    }
+}
+
+fn peers_file_path() -> Option<String> {
+    std::env::var("CACHE_PEERS_PATH")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            std::env::var("HIERARCHY_PEERS_PATH")
+                .ok()
+                .filter(|s| !s.is_empty())
+        })
+}
+
+#[derive(Debug, Deserialize)]
+struct PeersFile {
+    #[serde(default)]
+    parents: Vec<String>,
+    #[serde(default)]
+    siblings: Vec<String>,
+}
+
+/// Where static peers were loaded from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PeerConfigSource {
+    File,
+    Env,
+}
+
+impl PeerConfigSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::File => "file",
+            Self::Env => "env",
+        }
+    }
+}
+
+/// Load static parent/sibling configs from peers JSON file or env vars.
+pub fn load_static_peer_configs(
+    use_htcp: bool,
+) -> Result<(Vec<PeerConfig>, PeerConfigSource), String> {
+    let sibling_port = sibling_default_query_port(use_htcp);
+    if let Some(path) = peers_file_path() {
+        let content = std::fs::read_to_string(&path)
+            .map_err(|e| format!("failed to read peers file {path}: {e}"))?;
+        let file: PeersFile = serde_json::from_str(&content)
+            .map_err(|e| format!("failed to parse peers JSON {path}: {e}"))?;
+        let mut configs = Vec::new();
+        for entry in file.parents {
+            configs.extend(parse_peer_list(&entry, PeerType::Parent, None));
+        }
+        for entry in file.siblings {
+            configs.extend(parse_peer_list(
+                &entry,
+                PeerType::Sibling,
+                Some(sibling_port),
+            ));
+        }
+        return Ok((configs, PeerConfigSource::File));
+    }
+
+    let mut configs = Vec::new();
+    if let Ok(parents) = std::env::var("CACHE_PARENTS") {
+        configs.extend(parse_peer_list(&parents, PeerType::Parent, None));
+    }
+    if let Ok(siblings) = std::env::var("CACHE_SIBLINGS") {
+        configs.extend(parse_peer_list(
+            &siblings,
+            PeerType::Sibling,
+            Some(sibling_port),
+        ));
+    }
+    Ok((configs, PeerConfigSource::Env))
+}
+
+#[derive(Debug, Clone)]
+pub struct HierarchyReloadReport {
+    pub stats: ReplaceStaticStats,
+    pub source: PeerConfigSource,
+}
+
+/// Hot-reload static peers into an existing registry (preserves discovery siblings).
+pub async fn reload_static_peers(
+    registry: &PeerRegistry,
+    use_htcp: bool,
+) -> Result<HierarchyReloadReport, String> {
+    let (configs, source) = load_static_peer_configs(use_htcp)?;
+    let stats = registry.replace_static_peers(configs).await;
+    info!(
+        "Hierarchy peers reloaded from {} (added={}, removed={}, preserved_discovery={})",
+        source.as_str(),
+        stats.added,
+        stats.removed,
+        stats.preserved_discovery
+    );
+    Ok(HierarchyReloadReport { stats, source })
 }
 
 pub fn load_hierarchy_config() -> HierarchyConfig {
@@ -106,26 +214,15 @@ pub async fn build_hierarchy_manager(
     ));
 
     let registry = PeerRegistry::new();
-    let sibling_query_port = if config.use_htcp {
-        htcp_peer_port()
-    } else {
-        std::env::var("ICP_PEER_PORT")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(3130)
-    };
-
-    if let Ok(parents) = std::env::var("CACHE_PARENTS") {
-        for peer_config in parse_peer_list(&parents, PeerType::Parent, None) {
-            registry.add_peer(peer_config).await;
-        }
+    let (configs, source) = load_static_peer_configs(config.use_htcp)?;
+    for peer_config in configs {
+        registry.add_peer(peer_config).await;
     }
-
-    if let Ok(siblings) = std::env::var("CACHE_SIBLINGS") {
-        for peer_config in parse_peer_list(&siblings, PeerType::Sibling, Some(sibling_query_port)) {
-            registry.add_peer(peer_config).await;
-        }
-    }
+    info!(
+        "Loaded {} static hierarchy peers from {}",
+        registry.all_peers().await.len(),
+        source.as_str()
+    );
 
     let strategy_name =
         std::env::var("CACHE_SELECTION_STRATEGY").unwrap_or_else(|_| "round-robin".to_string());
@@ -203,6 +300,13 @@ pub fn should_start_htcp_server(config: &HierarchyConfig) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::OnceLock;
+    use tokio::sync::Mutex;
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     #[test]
     fn parse_parents_list() {
@@ -211,6 +315,58 @@ mod tests {
         assert_eq!(peers[0].host, "127.0.0.1");
         assert_eq!(peers[0].port, 1488);
         assert!((peers[0].weight - 1.5).abs() < f64::EPSILON);
+    }
+
+    #[tokio::test]
+    async fn load_and_reload_static_peers_from_json_file() {
+        let _guard = env_lock().lock().await;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("peers.json");
+        std::fs::write(
+            &path,
+            r#"{"parents":["127.0.0.1:1488:1.5"],"siblings":["10.0.0.2:1488"]}"#,
+        )
+        .unwrap();
+        std::env::set_var("CACHE_PEERS_PATH", path.to_str().unwrap());
+        let (configs, source) = load_static_peer_configs(false).unwrap();
+        assert_eq!(source, PeerConfigSource::File);
+        assert_eq!(configs.len(), 2);
+        assert_eq!(configs[0].peer_type, PeerType::Parent);
+        assert_eq!(configs[1].peer_type, PeerType::Sibling);
+        assert_eq!(configs[1].icp_port, Some(3130));
+
+        let registry = PeerRegistry::new();
+        registry
+            .add_peer(PeerConfig {
+                host: "10.0.0.1".into(),
+                port: 1488,
+                peer_type: PeerType::Parent,
+                weight: 1.0,
+                icp_port: None,
+                max_connections: 100,
+            })
+            .await;
+        registry
+            .upsert_sibling(PeerConfig {
+                host: "10.0.0.9".into(),
+                port: 1488,
+                peer_type: PeerType::Sibling,
+                weight: 1.0,
+                icp_port: Some(3130),
+                max_connections: 100,
+            })
+            .await;
+
+        std::fs::write(&path, r#"{"parents":["10.0.0.2:1488:2.0"],"siblings":[]}"#).unwrap();
+        let report = reload_static_peers(&registry, false).await.unwrap();
+        std::env::remove_var("CACHE_PEERS_PATH");
+        assert_eq!(report.source, PeerConfigSource::File);
+        assert_eq!(report.stats.preserved_discovery, 1);
+        let peers = registry.all_peers().await;
+        assert_eq!(peers.len(), 2);
+        assert!(peers.iter().any(|p| p.config.host == "10.0.0.2"));
+        assert!(peers.iter().any(|p| p.config.host == "10.0.0.9"));
+        assert!(!peers.iter().any(|p| p.config.host == "10.0.0.1"));
     }
 
     #[test]

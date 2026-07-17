@@ -198,7 +198,7 @@ Backlog mapping: [swg-backlog-mapping.md](swg-backlog-mapping.md)
 | Фаза | Фокус | Ключевые элементы |
 |------|--------|-------------------|
 | **1. Lite** | VPS / edge, низкий порог | ✅ `docker-compose.lite.yml` + SQLite indexer; ✅ Cargo `kafka` feature (B21) |
-| **2. DX** | Control plane | ✅ REST ACL CRUD + `/api/stats` + cache purge; next: upstream hot reload / Cache-Tags |
+| **2. DX** | Control plane | ✅ REST ACL CRUD + `/api/stats` + URL/tag/all purge + hierarchy reload; next: upstream TLS hot reload |
 | **3. Wasm** | Плагины | Wasmtime в request/response pipeline, SDK (Rust/Go/AS), PoC auth-as-plugin |
 | **4. AI-трафик** | LLM / API proxy | token-bucket RL, semantic cache (vector DB prep), request coalescing |
 

@@ -253,14 +253,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         threat_score_cache,
     ));
 
+    let hierarchy_peers = hierarchy.as_ref().map(|m| m.peer_registry());
     let control_api = Arc::new(ControlApiState::from_env(
         metrics.clone(),
         service.http_cache(),
         l2_cache.clone(),
+        hierarchy_peers,
+        hierarchy_config.use_htcp,
     ));
     info!(
-        "Control plane API on :{}/api/stats · :{}/api/cache/purge",
-        metrics_port, metrics_port
+        "Control plane API on :{}/api/stats · :{}/api/cache/purge · :{}/api/hierarchy/*",
+        metrics_port, metrics_port, metrics_port
     );
     tokio::spawn(metrics_server(
         metrics.clone(),

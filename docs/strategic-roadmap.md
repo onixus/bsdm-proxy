@@ -26,8 +26,8 @@
 
 *Фокус: удобство администрирования и эксплуатация в Cloud-Native среде.*
 
-- **Control Plane API:** ✅ REST на metrics port — ACL CRUD, `/api/stats`, `/api/cache/purge` ([control-plane.md](control-plane.md)). gRPC — later.
-- **Горячая перезагрузка (Hot Reload):** ✅ ACL (file auto-reload + API mutate/persist). Upstream/hierarchy — TBD.
+- **Control Plane API:** ✅ REST на metrics port — ACL CRUD, `/api/stats`, `/api/cache/purge`, `/api/hierarchy/*` ([control-plane.md](control-plane.md)). gRPC — later.
+- **Горячая перезагрузка (Hot Reload):** ✅ ACL (file auto-reload + API mutate/persist). ✅ Hierarchy static peers (`POST /api/hierarchy/reload`). Upstream TLS — TBD.
 - **Умная инвалидация кэша:** ✅ URL / tag / all purge (`POST /api/cache/purge`). Cache-Tag + Surrogate-Key index on L1.
 - **Встроенный мониторинг:** ✅ `GET /api/stats` JSON (Lite, без Grafana).
 

@@ -1,4 +1,4 @@
-//! Control-plane REST helpers: Lite JSON stats + L1 cache purge (DX Phase 2).
+//! Control-plane REST helpers: Lite JSON stats, L1 cache purge, hierarchy peer reload (DX Phase 2).
 
 use bytes::Bytes;
 use http_body_util::BodyExt;
@@ -11,9 +11,11 @@ use std::time::Instant;
 use tracing::{info, warn};
 
 use crate::cache_key::http_cache_key;
+use crate::hierarchy_config::reload_static_peers;
 use crate::http_types::{full, Body};
 use crate::l2_cache::RedisL2Cache;
 use crate::metrics::Metrics;
+use crate::peers::PeerRegistry;
 use crate::sharded_cache::HttpL1Cache;
 
 #[derive(Clone)]
@@ -23,6 +25,8 @@ pub struct ControlApiState {
     l2_cache: Option<RedisL2Cache>,
     api_token: Option<String>,
     started_at: Instant,
+    peer_registry: Option<PeerRegistry>,
+    hierarchy_use_htcp: bool,
 }
 
 impl ControlApiState {
@@ -31,6 +35,8 @@ impl ControlApiState {
         http_cache: Arc<HttpL1Cache>,
         l2_cache: Option<RedisL2Cache>,
         api_token: Option<String>,
+        peer_registry: Option<PeerRegistry>,
+        hierarchy_use_htcp: bool,
     ) -> Self {
         Self {
             metrics,
@@ -38,6 +44,8 @@ impl ControlApiState {
             l2_cache,
             api_token,
             started_at: Instant::now(),
+            peer_registry,
+            hierarchy_use_htcp,
         }
     }
 
@@ -45,6 +53,8 @@ impl ControlApiState {
         metrics: Arc<Metrics>,
         http_cache: Arc<HttpL1Cache>,
         l2_cache: Option<RedisL2Cache>,
+        peer_registry: Option<PeerRegistry>,
+        hierarchy_use_htcp: bool,
     ) -> Self {
         let api_token = std::env::var("CONTROL_API_TOKEN")
             .ok()
@@ -54,7 +64,14 @@ impl ControlApiState {
                     .ok()
                     .filter(|t| !t.is_empty())
             });
-        Self::new(metrics, http_cache, l2_cache, api_token)
+        Self::new(
+            metrics,
+            http_cache,
+            l2_cache,
+            api_token,
+            peer_registry,
+            hierarchy_use_htcp,
+        )
     }
 
     pub async fn handle_request(&self, req: Request<Incoming>) -> Response<Body> {
@@ -77,8 +94,11 @@ impl ControlApiState {
         body: Bytes,
         headers: &HeaderMap,
     ) -> Response<Body> {
-        // Stats are public (Lite monitoring); mutations require token when configured.
-        let needs_auth = path != "/api/stats";
+        // Public monitoring GETs; mutations require token when configured.
+        let needs_auth = !matches!(
+            (method, path),
+            (&Method::GET, "/api/stats") | (&Method::GET, "/api/hierarchy/peers")
+        );
         if needs_auth && !self.is_authorized(headers) {
             return json_response(StatusCode::UNAUTHORIZED, r#"{"error":"unauthorized"}"#);
         }
@@ -86,6 +106,8 @@ impl ControlApiState {
         match (method, path) {
             (&Method::GET, "/api/stats") => self.stats(),
             (&Method::POST, "/api/cache/purge") => self.purge(body).await,
+            (&Method::GET, "/api/hierarchy/peers") => self.hierarchy_peers().await,
+            (&Method::POST, "/api/hierarchy/reload") => self.hierarchy_reload().await,
             _ => json_response(StatusCode::NOT_FOUND, r#"{"error":"not found"}"#),
         }
     }
@@ -125,6 +147,67 @@ impl ControlApiState {
             Err(_) => json_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 r#"{"error":"serialization failed"}"#,
+            ),
+        }
+    }
+
+    async fn hierarchy_peers(&self) -> Response<Body> {
+        let Some(registry) = &self.peer_registry else {
+            return json_response(
+                StatusCode::OK,
+                r#"{"enabled":false,"peers":[],"source_hint":"set HIERARCHY_ENABLED=true"}"#,
+            );
+        };
+        let peers = registry.all_peers().await;
+        let mut items = Vec::with_capacity(peers.len());
+        for peer in peers {
+            let is_static = registry.is_static(&peer.id).await;
+            items.push(PeerListItem {
+                id: peer.id.clone(),
+                host: peer.config.host.clone(),
+                port: peer.config.port,
+                peer_type: peer.config.peer_type.to_string(),
+                weight: peer.config.weight,
+                icp_port: peer.config.icp_port,
+                healthy: peer.is_healthy(),
+                is_static,
+            });
+        }
+        items.sort_by(|a, b| a.id.cmp(&b.id));
+        let payload = PeersListResponse {
+            enabled: true,
+            peers: items,
+        };
+        match serde_json::to_string(&payload) {
+            Ok(body) => json_response(StatusCode::OK, &body),
+            Err(_) => json_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                r#"{"error":"serialization failed"}"#,
+            ),
+        }
+    }
+
+    async fn hierarchy_reload(&self) -> Response<Body> {
+        let Some(registry) = &self.peer_registry else {
+            return json_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                r#"{"error":"hierarchy disabled (HIERARCHY_ENABLED=false)"}"#,
+            );
+        };
+        match reload_static_peers(registry, self.hierarchy_use_htcp).await {
+            Ok(report) => {
+                let body = format!(
+                    r#"{{"status":"reloaded","source":"{}","added":{},"removed":{},"preserved_discovery":{}}}"#,
+                    report.source.as_str(),
+                    report.stats.added,
+                    report.stats.removed,
+                    report.stats.preserved_discovery
+                );
+                json_response(StatusCode::OK, &body)
+            }
+            Err(e) => json_response(
+                StatusCode::BAD_REQUEST,
+                &format!(r#"{{"error":"{}"}}"#, escape_json(&e)),
             ),
         }
     }
@@ -232,6 +315,24 @@ struct CacheStats {
     tags: usize,
 }
 
+#[derive(Debug, Serialize)]
+struct PeersListResponse {
+    enabled: bool,
+    peers: Vec<PeerListItem>,
+}
+
+#[derive(Debug, Serialize)]
+struct PeerListItem {
+    id: String,
+    host: String,
+    port: u16,
+    peer_type: String,
+    weight: f64,
+    icp_port: Option<u16>,
+    healthy: bool,
+    is_static: bool,
+}
+
 #[derive(Debug, Default, Deserialize)]
 struct PurgeRequest {
     #[serde(default)]
@@ -277,12 +378,17 @@ fn escape_json(value: &str) -> String {
 mod tests {
     use super::*;
     use crate::metrics::Metrics;
+    use crate::peers::{PeerConfig, PeerType};
+
+    fn state_plain(metrics: Arc<Metrics>, cache: Arc<HttpL1Cache>) -> ControlApiState {
+        ControlApiState::new(metrics, cache, None, None, None, false)
+    }
 
     #[tokio::test]
     async fn stats_returns_json() {
         let metrics = Arc::new(Metrics::new().unwrap());
         let cache = Arc::new(HttpL1Cache::new(100, 4));
-        let state = ControlApiState::new(metrics, cache, None, None);
+        let state = state_plain(metrics, cache);
         let resp = state
             .dispatch(&Method::GET, "/api/stats", Bytes::new(), &HeaderMap::new())
             .await;
@@ -316,7 +422,7 @@ mod tests {
         );
         assert_eq!(cache.len(), 1);
 
-        let state = ControlApiState::new(metrics, cache.clone(), None, None);
+        let state = state_plain(metrics, cache.clone());
         let resp = state
             .dispatch(
                 &Method::POST,
@@ -351,7 +457,7 @@ mod tests {
             },
         );
         assert_eq!(cache.len(), 1);
-        let state = ControlApiState::new(metrics, cache.clone(), None, None);
+        let state = state_plain(metrics, cache.clone());
         let resp = state
             .dispatch(
                 &Method::POST,
@@ -366,5 +472,72 @@ mod tests {
         let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(v["scope"], "tag");
         assert_eq!(v["removed"], 1);
+    }
+
+    #[tokio::test]
+    async fn hierarchy_peers_when_disabled() {
+        let metrics = Arc::new(Metrics::new().unwrap());
+        let cache = Arc::new(HttpL1Cache::new(100, 4));
+        let state = state_plain(metrics, cache);
+        let resp = state
+            .dispatch(
+                &Method::GET,
+                "/api/hierarchy/peers",
+                Bytes::new(),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = BodyExt::collect(resp.into_body()).await.unwrap().to_bytes();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["enabled"], false);
+    }
+
+    #[tokio::test]
+    async fn hierarchy_peers_lists_registry() {
+        let metrics = Arc::new(Metrics::new().unwrap());
+        let cache = Arc::new(HttpL1Cache::new(100, 4));
+        let registry = PeerRegistry::new();
+        registry
+            .add_peer(PeerConfig {
+                host: "10.0.0.1".into(),
+                port: 1488,
+                peer_type: PeerType::Parent,
+                weight: 1.0,
+                icp_port: None,
+                max_connections: 100,
+            })
+            .await;
+        let state = ControlApiState::new(metrics, cache, None, None, Some(registry), false);
+        let resp = state
+            .dispatch(
+                &Method::GET,
+                "/api/hierarchy/peers",
+                Bytes::new(),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = BodyExt::collect(resp.into_body()).await.unwrap().to_bytes();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["enabled"], true);
+        assert_eq!(v["peers"].as_array().unwrap().len(), 1);
+        assert_eq!(v["peers"][0]["is_static"], true);
+    }
+
+    #[tokio::test]
+    async fn hierarchy_reload_unavailable_when_disabled() {
+        let metrics = Arc::new(Metrics::new().unwrap());
+        let cache = Arc::new(HttpL1Cache::new(100, 4));
+        let state = state_plain(metrics, cache);
+        let resp = state
+            .dispatch(
+                &Method::POST,
+                "/api/hierarchy/reload",
+                Bytes::new(),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
 }

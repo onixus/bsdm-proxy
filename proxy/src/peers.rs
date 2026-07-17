@@ -4,7 +4,7 @@
 //! Tracks peer health, RTT, statistics, and connection pools.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -209,24 +209,38 @@ impl CachePeer {
     }
 }
 
+/// Result of replacing statically configured peers (discovery peers preserved).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ReplaceStaticStats {
+    pub added: usize,
+    pub removed: usize,
+    pub preserved_discovery: usize,
+}
+
 /// Manages all cache peers
 #[derive(Clone)]
 pub struct PeerRegistry {
     peers: Arc<RwLock<HashMap<String, Arc<CachePeer>>>>,
+    /// IDs loaded from CACHE_PARENTS / CACHE_SIBLINGS / peers file (not multicast discovery).
+    static_ids: Arc<RwLock<HashSet<String>>>,
 }
 
 impl PeerRegistry {
     pub fn new() -> Self {
         Self {
             peers: Arc::new(RwLock::new(HashMap::new())),
+            static_ids: Arc::new(RwLock::new(HashSet::new())),
         }
     }
 
-    /// Add a peer to the registry
+    /// Add a statically configured peer to the registry.
     pub async fn add_peer(&self, config: PeerConfig) -> Arc<CachePeer> {
         let peer = Arc::new(CachePeer::new(config));
         let id = peer.id.clone();
-        self.peers.write().await.insert(id, peer.clone());
+        let mut peers = self.peers.write().await;
+        let mut static_ids = self.static_ids.write().await;
+        peers.insert(id.clone(), peer.clone());
+        static_ids.insert(id);
         peer
     }
 
@@ -245,7 +259,38 @@ impl PeerRegistry {
 
     /// Remove a peer from the registry
     pub async fn remove_peer(&self, id: &str) -> bool {
-        self.peers.write().await.remove(id).is_some()
+        let mut peers = self.peers.write().await;
+        let mut static_ids = self.static_ids.write().await;
+        static_ids.remove(id);
+        peers.remove(id).is_some()
+    }
+
+    pub async fn is_static(&self, id: &str) -> bool {
+        self.static_ids.read().await.contains(id)
+    }
+
+    /// Replace all statically configured peers; preserve discovery-added siblings.
+    pub async fn replace_static_peers(&self, configs: Vec<PeerConfig>) -> ReplaceStaticStats {
+        let mut peers = self.peers.write().await;
+        let mut static_ids = self.static_ids.write().await;
+        let preserved_discovery = peers.len().saturating_sub(static_ids.len());
+        let removed = static_ids.len();
+        for id in static_ids.drain() {
+            peers.remove(&id);
+        }
+        let mut added = 0;
+        for config in configs {
+            let peer = Arc::new(CachePeer::new(config));
+            let id = peer.id.clone();
+            peers.insert(id.clone(), peer);
+            static_ids.insert(id);
+            added += 1;
+        }
+        ReplaceStaticStats {
+            added,
+            removed,
+            preserved_discovery,
+        }
     }
 
     /// Get a peer by ID
@@ -431,6 +476,53 @@ mod tests {
 
         let siblings = registry.sibling_caches().await;
         assert_eq!(siblings.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn replace_static_preserves_discovery() {
+        let registry = PeerRegistry::new();
+        registry
+            .add_peer(PeerConfig {
+                host: "parent.example.com".into(),
+                port: 1488,
+                peer_type: PeerType::Parent,
+                weight: 1.0,
+                icp_port: None,
+                max_connections: 100,
+            })
+            .await;
+        registry
+            .upsert_sibling(PeerConfig {
+                host: "discovered.example.com".into(),
+                port: 1488,
+                peer_type: PeerType::Sibling,
+                weight: 1.0,
+                icp_port: Some(3130),
+                max_connections: 50,
+            })
+            .await;
+        assert_eq!(registry.all_peers().await.len(), 2);
+
+        let stats = registry
+            .replace_static_peers(vec![PeerConfig {
+                host: "parent2.example.com".into(),
+                port: 1488,
+                peer_type: PeerType::Parent,
+                weight: 1.0,
+                icp_port: None,
+                max_connections: 100,
+            }])
+            .await;
+        assert_eq!(stats.removed, 1);
+        assert_eq!(stats.added, 1);
+        assert_eq!(stats.preserved_discovery, 1);
+        assert_eq!(registry.all_peers().await.len(), 2);
+        assert!(registry.is_static("parent:parent2.example.com:1488").await);
+        assert!(
+            !registry
+                .is_static("sibling:discovered.example.com:1488")
+                .await
+        );
     }
 
     #[test]

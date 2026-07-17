@@ -117,6 +117,12 @@ CACHE_PARENTS=parent1.example.com:1488:1.0,parent2.example.com:1488:0.5
 # Sibling caches (host:port[:weight][:icp_port])
 CACHE_SIBLINGS=sibling1.example.com:1488,sibling2.example.com:1488:1.0:3130
 
+# Optional peers JSON file (overrides CACHE_PARENTS / CACHE_SIBLINGS when set)
+# CACHE_PEERS_PATH=/etc/bsdm/peers.json
+# HIERARCHY_PEERS_PATH=/etc/bsdm/peers.json   # alias
+# {"parents":["parent:1488:1.0"],"siblings":["sib:1488:1.0:3130"]}
+# Hot reload: POST /api/hierarchy/reload  (see control-plane.md)
+
 # ICP server bind (UDP, default 0.0.0.0:3130)
 ICP_BIND=0.0.0.0:3130
 
@@ -163,9 +169,13 @@ PEER_DISCOVERY_DIGEST_EVERY=5
 HIERARCHY_DIRECT_DOMAINS=localhost,127.0.0.1
 ```
 
+### Peers JSON file
+
+When `CACHE_PEERS_PATH` (or `HIERARCHY_PEERS_PATH`) is set, static peers load from that file instead of `CACHE_PARENTS` / `CACHE_SIBLINGS`. Call `POST /api/hierarchy/reload` on the metrics port after editing the file (discovery siblings are preserved). See [control-plane.md](control-plane.md).
+
 ### Configuration File (TOML)
 
-TOML config is **planned** for M2. Currently only environment variables are supported via `hierarchy_config.rs`.
+Full TOML config is still planned. Env vars + optional peers JSON cover runtime hierarchy peer changes.
 
 ## Implementation Status
 
