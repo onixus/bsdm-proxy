@@ -197,6 +197,10 @@ cargo build --release -p bsdm-proxy --bin proxy -p cache-indexer --bin cache-ind
 | `CACHE_SPILL_DIR` | `{tmp}/bsdm-cache-spill` | Каталог spill-файлов (dir `0o700`, files `0o600` на Unix) |
 | `STREAMING_MISS_ENABLED` | `true` | Tee upstream MISS → client при записи в L1 |
 | `MISS_COALESCE_ENABLED` | `true` | Singleflight: параллельные GET/HEAD MISS → один upstream; waiters: `COALESCED-HIT` |
+| `SEMANTIC_CACHE_ENABLED` | `false` | LLM POST cache (body-hash + optional similarity); см. [docs/semantic-cache.md](docs/semantic-cache.md) |
+| `SEMANTIC_CACHE_PATH_PREFIXES` | `/v1/chat/completions,…` | Path prefixes for LLM POST caching |
+| `SEMANTIC_CACHE_TTL_SECONDS` | `3600` | TTL for LLM cached responses |
+| `SEMANTIC_CACHE_SIMILARITY` | `1.0` | Cosine threshold; `<1` enables near-hit |
 | `CACHE_TTL_SECONDS` | `3600` | Fallback TTL кеша (сек), если нет `max-age` |
 | `MAX_CACHE_BODY_SIZE` | `10485760` | Макс. размер body (байт) |
 | `NEGATIVE_CACHE_ENABLED` | `true` | Кешировать upstream 403/404 |

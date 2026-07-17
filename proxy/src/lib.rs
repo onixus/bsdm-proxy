@@ -31,6 +31,7 @@ pub mod policy_cache;
 pub mod proxy_service;
 pub mod rate_limit;
 pub mod selection;
+pub mod semantic_cache;
 pub mod server;
 pub mod session;
 pub mod sharded_cache;
@@ -78,6 +79,9 @@ pub use policy_cache::{PolicyCacheConfig, PolicyDecisionCache};
 pub use proxy_service::{ProxyPolicy, ProxyService};
 pub use rate_limit::{extract_api_key, RateLimitConfig, RateLimitViolation, RateLimiter};
 pub use selection::{parse_strategy, SelectionStrategy};
+pub use semantic_cache::{
+    content_cache_key, normalize_llm_body, SemanticCacheConfig, SemanticIndex,
+};
 pub use server::{handle_connection, metrics_server, wait_shutdown_signal};
 pub use session::{SessionCorrelation, SessionCorrelator};
 pub use sharded_cache::HttpL1Cache;
