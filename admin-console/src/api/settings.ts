@@ -30,8 +30,18 @@ export function loadApiSettings(): ApiSettings {
   }
 }
 
+const SENSITIVE_API_KEYS = ['searchToken', 'aclToken'] as const satisfies readonly (keyof ApiSettings)[]
+
+function apiSettingsForStorage(settings: ApiSettings): Omit<ApiSettings, (typeof SENSITIVE_API_KEYS)[number]> {
+  const stored = { ...settings }
+  for (const key of SENSITIVE_API_KEYS) {
+    delete (stored as Partial<ApiSettings>)[key]
+  }
+  return stored as Omit<ApiSettings, (typeof SENSITIVE_API_KEYS)[number]>
+}
+
 export function saveApiSettings(settings: ApiSettings): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(settings))
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(apiSettingsForStorage(settings)))
 }
 
 export function resolveBaseUrl(configured: string, fallback = ''): string {

@@ -57,7 +57,9 @@ The UI talks to existing BSDM REST endpoints (no backend changes required):
 | `GET /metrics` | `:9090` | Dashboard |
 | `GET /api/ml/scores` | `:8091` | Dashboard (future; mock fallback) |
 
-Configure base URLs and Bearer tokens under **Settings → API**. Empty base URLs use Vite dev-server proxies defined in `vite.config.ts`.
+Configure base URLs under **Settings → API**. Empty base URLs use Vite dev-server proxies defined in `vite.config.ts`.
+
+Passwords and API tokens are **not** persisted to `localStorage` — they remain in memory for the current browser session only.
 
 When APIs are unreachable, the console shows **demo data** so layouts and XAI components remain testable offline.
 

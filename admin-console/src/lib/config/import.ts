@@ -101,16 +101,34 @@ export function importEnvFile(text: string, prev = defaultFormState): ConfigForm
 
 const FORM_STORAGE_KEY = 'bsdm-admin-config-form'
 
+/** Keys never written to localStorage (session-only secrets). */
+const SENSITIVE_FORM_KEYS = [
+  'ldapBindPassword',
+  'aclApiToken',
+  'phishtankApiKey',
+  'searchApiToken',
+] as const satisfies readonly (keyof ConfigFormState)[]
+
+function formForStorage(form: ConfigFormState): Omit<ConfigFormState, (typeof SENSITIVE_FORM_KEYS)[number]> {
+  const stored = { ...form }
+  for (const key of SENSITIVE_FORM_KEYS) {
+    delete (stored as Partial<ConfigFormState>)[key]
+  }
+  return stored as Omit<ConfigFormState, (typeof SENSITIVE_FORM_KEYS)[number]>
+}
+
 export function loadSavedForm(): ConfigFormState {
   try {
     const raw = localStorage.getItem(FORM_STORAGE_KEY)
     if (!raw) return { ...defaultFormState }
-    return { ...defaultFormState, ...JSON.parse(raw) }
+    const parsed = JSON.parse(raw) as Partial<ConfigFormState>
+    return { ...defaultFormState, ...parsed }
   } catch {
     return { ...defaultFormState }
   }
 }
 
+/** Persist non-secret fields only; passwords/tokens stay in memory for this session. */
 export function saveFormState(form: ConfigFormState): void {
-  localStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(form))
+  localStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(formForStorage(form)))
 }
