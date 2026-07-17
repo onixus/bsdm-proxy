@@ -6,6 +6,7 @@ members = [
     "cache-indexer",
     "alert-worker",
     "ml-worker",
+    "dns-sinkhole",
     "e2e",
 ]
 

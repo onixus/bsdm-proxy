@@ -14,6 +14,8 @@ Snapshot of open / recently completed work. Live list: [open issues](https://git
 | [#112](https://github.com/onixus/bsdm-proxy/issues/112) | Web config ACL UI | Superseded by `admin-console/` Policies |
 | [#186](https://github.com/onixus/bsdm-proxy/issues/186) | Permission probe | Invalid — close |
 | [#190](https://github.com/onixus/bsdm-proxy/issues/190) | Tracker hygiene meta | Close when the above are closed |
+| [#99](https://github.com/onixus/bsdm-proxy/issues/99) | ICAP adapter | Done — #195 |
+| [#108](https://github.com/onixus/bsdm-proxy/issues/108) | DNS sinkhole | Done — #197 (merge) |
 
 Blockers B1–B26: all ✅ in [BLOCKERS.md](BLOCKERS.md) (GitHub #32–#56).
 
@@ -21,15 +23,15 @@ Blockers B1–B26: all ✅ in [BLOCKERS.md](BLOCKERS.md) (GitHub #32–#56).
 
 | Issue | Title | Notes |
 |-------|-------|-------|
-| [#108](https://github.com/onixus/bsdm-proxy/issues/108) | DNS sinkhole / DNS security | P3 backlog |
+| — | — | No open P3 backlog items |
 
 ## Next strategic backlog
 
 | Issue | Phase |
 |-------|-------|
-| [#108](https://github.com/onixus/bsdm-proxy/issues/108) | P3 DNS sinkhole |
+| — | Optional polish (Wasm SDK, ICAP TLS, DoH) or new epic |
 
-*(#99 ICAP closed via implementation PR; #101 / #103 / #189 / #187 / #188 closed earlier.)*
+*(#99 ICAP / #108 DNS closed via implementation PRs; #101 / #103 / #189 / #187 / #188 closed earlier.)*
 
 
 ---

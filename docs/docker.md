@@ -11,8 +11,7 @@
 | Файл | Назначение |
 |------|------------|
 | `docker-compose.lite.yml` | **Lite:** proxy + SQLite indexer (MITM + L1 spill), без Kafka/CH |
-| `docker-compose.yml` | Полный стек: proxy, cache-indexer, kafka, zookeeper, clickhouse, prometheus, **alertmanager**, grafana; optional `alert-worker` (`--profile alerts`), `ml-worker` (`--profile ml`), `icap` (`--profile icap`) |
-| `docker-compose.test.yml` | Smoke/E2E external (upstream + proxy) |
+| `docker-compose.yml` | Полный стек: proxy, cache-indexer, kafka, zookeeper, clickhouse, prometheus, **alertmanager**, grafana; optional `alert-worker` (`--profile alerts`), `ml-worker` (`--profile ml`), `icap` (`--profile icap`), `dns-sinkhole` (`--profile dns-sinkhole`) || `docker-compose.test.yml` | Smoke/E2E external (upstream + proxy) |
 | `docker-compose.redis-l2.yml` | Два proxy + Redis L2 |
 | `docker-compose.hierarchy.yml` | Multi-instance + ICP |
 | `docker-compose.ha.yml` | HA lab |
@@ -72,6 +71,15 @@ docker compose --profile icap up -d icap
 ```
 
 Docs: [icap.md](icap.md).
+
+### DNS sinkhole sidecar
+
+```bash
+docker compose --profile dns-sinkhole up -d --build dns-sinkhole
+# dig @127.0.0.1 -p 5353 blocked.test A +short
+```
+
+Docs: [dns-sinkhole.md](dns-sinkhole.md).
 
 ### Grafana / Alertmanager (M4)
 

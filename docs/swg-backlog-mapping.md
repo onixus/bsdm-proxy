@@ -125,7 +125,7 @@
 | P3-1 | ICAP adapter (optional AV/URL) | legacy enterprise | sidecar pattern ✅ [#99](https://github.com/onixus/bsdm-proxy/issues/99) |
 | P3-2 | Event enrichment: `acl_action`, `threat_sources` | Netskope data lake | M3 schema |
 | P3-3 ✅ | Categorization Prometheus metrics | all | M4 |
-| P3-4 | DNS sinkhole module (optional) | Cisco Umbrella layer 1 | separate crate |
+| P3-4 | DNS sinkhole module (optional) | Cisco Umbrella layer 1 | separate crate ✅ [#108](https://github.com/onixus/bsdm-proxy/issues/108) |
 
 ### P4+ — Не копировать в v1
 
@@ -261,7 +261,7 @@ gantt
 | P3-1 ✅ | [#99](https://github.com/onixus/bsdm-proxy/issues/99) ICAP adapter | P3 |
 | P3-2 | [#102](https://github.com/onixus/bsdm-proxy/issues/102) Event schema enrichment | P3 |
 | P3-3 ✅ | [#105](https://github.com/onixus/bsdm-proxy/issues/105) Categorization metrics | P3 |
-| P3-4 | [#108](https://github.com/onixus/bsdm-proxy/issues/108) DNS sinkhole module | P3 |
+| P3-4 ✅ | [#108](https://github.com/onixus/bsdm-proxy/issues/108) DNS sinkhole module | P3 |
 
 P0-1 / P0-2 tracked by PR [#93](https://github.com/onixus/bsdm-proxy/pull/93) and PR [#92](https://github.com/onixus/bsdm-proxy/pull/92).
 

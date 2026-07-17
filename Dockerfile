@@ -36,6 +36,7 @@ COPY proxy ./proxy
 COPY cache-indexer ./cache-indexer
 COPY alert-worker ./alert-worker
 COPY ml-worker ./ml-worker
+COPY dns-sinkhole ./dns-sinkhole
 COPY e2e ./e2e
 
 # Настройка окружения для статической линковки
@@ -52,7 +53,7 @@ RUN if [ "$LITE_BUILD" = "1" ]; then \
         --no-default-features -p cache-indexer; \
     else \
       cargo build --release --target x86_64-unknown-linux-musl \
-        -p bsdm-proxy -p cache-indexer -p alert-worker -p ml-worker; \
+        -p bsdm-proxy -p cache-indexer -p alert-worker -p ml-worker -p dns-sinkhole; \
     fi
 
 # ============================================================
@@ -113,3 +114,22 @@ COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/ml-worker /u
 
 EXPOSE 8091
 CMD ["ml-worker"]
+
+# ============================================================
+# DNS sinkhole sidecar (RPZ-lite UDP proxy, P3 / #108)
+# ============================================================
+FROM alpine:3.21 AS dns-sinkhole
+RUN apk add --no-cache \
+    ca-certificates \
+    libgcc \
+    wget
+
+COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/dns-sinkhole /usr/local/bin/dns-sinkhole
+COPY examples/dns/blocklist.rpz /etc/bsdm-proxy/blocklist.rpz
+
+ENV DNS_SINKHOLE_ZONE_PATH=/etc/bsdm-proxy/blocklist.rpz \
+    DNS_SINKHOLE_BIND=0.0.0.0:53 \
+    METRICS_PORT=8092
+
+EXPOSE 53/udp 8092
+CMD ["dns-sinkhole"]
