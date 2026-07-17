@@ -46,7 +46,36 @@ ORDER BY (entity_type, entity_id, scored_at)
 TTL scored_at + INTERVAL 90 DAY
 SETTINGS index_granularity = 8192;
 
--- Example: top anomalous client IPs (last 24h)
+-- M5.3 per-domain lexical phishing features (ml-worker phishing_lexical_v0).
+CREATE TABLE IF NOT EXISTS bsdm.domain_phishing_features
+(
+    window_start DateTime64(3, 'UTC'),
+    window_secs UInt32,
+    domain String,
+    request_count UInt64,
+    unique_urls UInt64,
+    weak_label_phishing UInt64,
+    weak_label_phishtank UInt64,
+    weak_label_ut1 UInt64,
+    deny_count UInt64,
+    suspicious_path_hits UInt64,
+    avg_path_extra_len Float64,
+    domain_len UInt64,
+    hyphen_count UInt64,
+    digit_count UInt64,
+    subdomain_depth UInt64,
+    entropy Float64,
+    suspicious_keyword UInt8,
+    is_ip_hostname UInt8,
+    extracted_at DateTime64(3, 'UTC')
+)
+ENGINE = MergeTree
+PARTITION BY toYYYYMMDD(window_start)
+ORDER BY (domain, window_start)
+TTL window_start + INTERVAL 90 DAY
+SETTINGS index_granularity = 8192;
+
+-- Example: top phishing-scored domains (last 24h)
 -- SELECT entity_id, max(score) AS max_score, argMax(severity, score) AS severity
 -- FROM bsdm.ml_scores
 -- WHERE scored_at >= now() - INTERVAL 1 DAY

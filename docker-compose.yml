@@ -185,6 +185,7 @@ services:
       - CLICKHOUSE_TABLE=http_cache
       - ML_FEATURES_TABLE=entity_features
       - ML_SCORES_TABLE=ml_scores
+      - ML_PHISHING_FEATURES_TABLE=domain_phishing_features
       - ML_POLL_INTERVAL_SECS=${ML_POLL_INTERVAL_SECS:-120}
       - ML_LOOKBACK_SECS=${ML_LOOKBACK_SECS:-300}
       - ML_ENTITY_TYPES=${ML_ENTITY_TYPES:-client_ip}

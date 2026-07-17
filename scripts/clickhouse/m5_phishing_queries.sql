@@ -1,0 +1,40 @@
+-- M5.3 lexical phishing example queries for Grafana or ad-hoc SOC use.
+
+-- Top phishing-scored domains (last 24h)
+-- SELECT
+--   entity_id AS domain,
+--   max(score) AS max_score,
+--   argMax(severity, score) AS severity,
+--   max(scored_at) AS last_scored
+-- FROM bsdm.ml_scores
+-- WHERE scored_at >= now() - INTERVAL 1 DAY
+--   AND model = 'phishing_lexical_v0'
+-- GROUP BY entity_id
+-- ORDER BY max_score DESC
+-- LIMIT 50;
+
+-- Domains with weak labels (PhishTank / UT1 / phishing category) in feature store
+-- SELECT
+--   domain,
+--   max(request_count) AS requests,
+--   max(weak_label_phishtank) AS phishtank_hits,
+--   max(weak_label_ut1) AS ut1_hits,
+--   max(weak_label_phishing) AS category_hits,
+--   max(entropy) AS max_entropy
+-- FROM bsdm.domain_phishing_features
+-- WHERE extracted_at >= now() - INTERVAL 1 DAY
+--   AND (weak_label_phishtank > 0 OR weak_label_ut1 > 0 OR weak_label_phishing > 0)
+-- GROUP BY domain
+-- ORDER BY phishtank_hits DESC, category_hits DESC
+-- LIMIT 50;
+
+-- Precision proxy: scored high AND had weak label in same window
+-- SELECT
+--   countIf(score >= 0.8) AS high_scores,
+--   countIf(
+--     score >= 0.8
+--     AND JSONExtractUInt(features_json, 'weak_labels', 'phishtank') > 0
+--   ) AS high_with_phishtank_label
+-- FROM bsdm.ml_scores
+-- WHERE scored_at >= now() - INTERVAL 7 DAY
+--   AND model = 'phishing_lexical_v0';

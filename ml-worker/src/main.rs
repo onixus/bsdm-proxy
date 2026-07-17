@@ -3,6 +3,7 @@ mod clickhouse;
 mod config;
 mod features;
 mod metrics;
+mod phishing;
 mod scoring;
 mod webhook;
 
@@ -11,6 +12,10 @@ use clickhouse::ClickHouseClient;
 use config::Config;
 use features::{extract_sql, features_from_row};
 use metrics::WorkerMetrics;
+use phishing::{
+    extract_sql as phishing_extract_sql, features_from_row as phishing_from_row, lexical_signals,
+    score_domain, MODEL_PHISHING,
+};
 use scoring::{score_features, ScoreContext, MODEL_UEBA};
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -50,7 +55,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!(
         source = %config.fq_source(),
-        features = %config.fq_features(),
+        features = %if config.is_phishing_model() {
+            config.fq_phishing_features()
+        } else {
+            config.fq_features()
+        },
         scores = %config.fq_scores(),
         model = %config.model,
         entities = ?config.entity_types,
@@ -59,7 +68,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         baseline_lookback_secs = config.baseline_lookback.as_secs(),
         baseline_path = ?config.baseline_path,
         webhook = webhook.is_some(),
-        "ml-worker started (M5.2 UEBA z-score / stub)"
+        "ml-worker started (M5.3 phishing lexical / UEBA / stub)"
     );
 
     loop {
@@ -104,6 +113,78 @@ async fn cycle_once(
     webhook: Option<&WebhookClient>,
     metrics: &WorkerMetrics,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    if config.is_phishing_model() {
+        return cycle_phishing(config, ch, webhook, metrics).await;
+    }
+    cycle_ueba(config, ch, webhook, metrics).await
+}
+
+async fn cycle_phishing(
+    config: &Config,
+    ch: &ClickHouseClient,
+    webhook: Option<&WebhookClient>,
+    metrics: &WorkerMetrics,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sql = phishing_extract_sql(config);
+    let rows = ch.query_json_each_row(&sql).await?;
+    let mut domains = Vec::new();
+    for row in rows {
+        match phishing_from_row(&row) {
+            Ok(f) => domains.push(f),
+            Err(e) => {
+                warn!("skip phishing feature row: {e}");
+                metrics.errors.inc();
+            }
+        }
+    }
+
+    let feature_jsons: Vec<_> = domains
+        .iter()
+        .map(|f| {
+            let lex = lexical_signals(&f.domain);
+            f.to_insert_json(&lex)
+        })
+        .collect();
+    ch.insert_json_each_row(&config.fq_phishing_features(), &feature_jsons)
+        .await?;
+    metrics.features_written.inc_by(feature_jsons.len() as u64);
+    metrics.last_cycle_features.set(feature_jsons.len() as i64);
+
+    let mut score_jsons = Vec::new();
+    for f in &domains {
+        let scored = score_domain(f, config.score_threshold);
+        if let Some(wh) = webhook {
+            if scored.score >= config.score_threshold {
+                if let Err(e) = wh.post_score(&scored).await {
+                    warn!("webhook failed for {}: {e}", scored.entity_id);
+                    metrics.errors.inc();
+                } else {
+                    metrics.webhooks_sent.inc();
+                }
+            }
+        }
+        score_jsons.push(scored.to_insert_json());
+    }
+    ch.insert_json_each_row(&config.fq_scores(), &score_jsons)
+        .await?;
+    metrics.scores_written.inc_by(score_jsons.len() as u64);
+    metrics.cycles.inc();
+
+    info!(
+        domains = feature_jsons.len(),
+        scores = score_jsons.len(),
+        model = MODEL_PHISHING,
+        "phishing cycle complete"
+    );
+    Ok(())
+}
+
+async fn cycle_ueba(
+    config: &Config,
+    ch: &ClickHouseClient,
+    webhook: Option<&WebhookClient>,
+    metrics: &WorkerMetrics,
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut all_features = Vec::new();
     for entity_type in &config.entity_types {
         let sql = extract_sql(config, entity_type);
@@ -125,8 +206,6 @@ async fn cycle_once(
     metrics.features_written.inc_by(feature_jsons.len() as u64);
     metrics.last_cycle_features.set(feature_jsons.len() as i64);
 
-    // Refresh baseline after writing features so the current cycle can use prior history;
-    // first cycles with empty history fall back to stub.
     let baselines = load_baselines(config, ch).await?;
     if config.model == MODEL_UEBA && baselines.is_empty() {
         warn!("UEBA baseline empty — falling back to anomaly_stub_v0 until enough history");
