@@ -1,0 +1,43 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-surface-0: #0f1419;
+  --color-surface-1: #1a1f2e;
+  --color-surface-2: #242b3d;
+  --color-surface-3: #2f384f;
+  --color-accent: #e94560;
+  --color-accent-hover: #d63851;
+  --color-success: #4ecca3;
+  --color-warning: #ff9800;
+  --color-danger: #ef4444;
+  --color-text-primary: #eaeaea;
+  --color-text-secondary: #a0a0a0;
+  --color-border: #2a2a4e;
+  --font-sans: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-mono: 'Courier New', ui-monospace, monospace;
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --touch-min: 2.75rem;
+}
+
+@layer base {
+  html {
+    @apply antialiased;
+  }
+
+  body {
+    @apply bg-surface-0 text-text-primary font-sans min-h-screen;
+  }
+
+  * {
+    @apply border-border;
+  }
+}
+
+@layer utilities {
+  .touch-target {
+    min-height: var(--touch-min);
+    min-width: var(--touch-min);
+  }
+}
