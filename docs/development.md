@@ -59,6 +59,8 @@ cargo build -p bsdm-proxy --features grpc --bin proxy
 # Optional Wasm plugin host (runtime: WASM_ENABLED + WASM_MODULE_PATH)
 cargo build -p bsdm-proxy --features wasm --bin proxy
 
+# Optional ICAP (runtime: ICAP_ENABLED + ICAP_URL) — always compiled; see docs/icap.md
+
 # Lite — без rdkafka (HTTP EVENT_SINK only)
 cargo build -p bsdm-proxy --no-default-features --features auth-basic --bin proxy
 cargo build -p cache-indexer --no-default-features --bin cache-indexer

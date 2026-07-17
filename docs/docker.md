@@ -11,8 +11,7 @@
 | Файл | Назначение |
 |------|------------|
 | `docker-compose.lite.yml` | **Lite:** proxy + SQLite indexer (MITM + L1 spill), без Kafka/CH |
-| `docker-compose.yml` | Полный стек: proxy, cache-indexer, kafka, zookeeper, clickhouse, prometheus, **alertmanager**, grafana; optional `alert-worker` (`--profile alerts`), `ml-worker` (`--profile ml`), `dns-sinkhole` (`--profile dns-sinkhole`) |
-| `docker-compose.test.yml` | Smoke/E2E external (upstream + proxy) |
+| `docker-compose.yml` | Полный стек: proxy, cache-indexer, kafka, zookeeper, clickhouse, prometheus, **alertmanager**, grafana; optional `alert-worker` (`--profile alerts`), `ml-worker` (`--profile ml`), `icap` (`--profile icap`), `dns-sinkhole` (`--profile dns-sinkhole`) || `docker-compose.test.yml` | Smoke/E2E external (upstream + proxy) |
 | `docker-compose.redis-l2.yml` | Два proxy + Redis L2 |
 | `docker-compose.hierarchy.yml` | Multi-instance + ICP |
 | `docker-compose.ha.yml` | HA lab |
@@ -63,6 +62,15 @@ ALERT_WEBHOOK_URL=https://siem.example/hooks/bsdm \
 ```
 
 Docs: [alerting.md](alerting.md).
+
+### ICAP sidecar (AV / URL)
+
+```bash
+docker compose --profile icap up -d icap
+# Proxy env: ICAP_ENABLED=true ICAP_URL=icap://icap:1344/srv_clamav
+```
+
+Docs: [icap.md](icap.md).
 
 ### DNS sinkhole sidecar
 

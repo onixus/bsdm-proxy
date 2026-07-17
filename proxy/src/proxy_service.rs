@@ -27,6 +27,7 @@ use crate::cache_key::http_cache_key;
 use crate::categorization::CategorizationEngine;
 use crate::hierarchy::{HierarchyManager, HierarchyResult};
 use crate::http_types::{empty, full, Body};
+use crate::icap::{IcapClient, IcapOutcome};
 use crate::l2_cache::RedisL2Cache;
 use crate::metrics::{FastRequestScope, Metrics, RequestMetricsGuard};
 use crate::miss_coalesce::{CoalesceJoin, MissFlightMap, MissFlightPermit};
@@ -303,6 +304,8 @@ pub struct ProxyService {
     peer_tls: PeerTlsConfig,
     #[cfg(feature = "wasm")]
     wasm_hook: Option<Arc<WasmHookEngine>>,
+    /// Optional ICAP adaptation client (`ICAP_ENABLED`).
+    icap: Option<Arc<IcapClient>>,
 }
 
 impl ProxyService {
@@ -397,6 +400,7 @@ impl ProxyService {
         }
         #[cfg(feature = "wasm")]
         let wasm_hook = try_load_from_env();
+        let icap = IcapClient::try_from_env();
 
         Self {
             cert_cache,
@@ -425,6 +429,7 @@ impl ProxyService {
             peer_tls,
             #[cfg(feature = "wasm")]
             wasm_hook,
+            icap,
         }
     }
 
@@ -980,6 +985,111 @@ impl ProxyService {
     ) -> Option<Response<Body>> {
         let mut headers = hyper::HeaderMap::new();
         self.run_wasm_hook(method, url, client_ip, username, &mut headers)
+    }
+
+    /// Map ICAP HTTP response / errors into a client `Response`.
+    fn icap_to_response(&self, outcome: Result<IcapOutcome, String>) -> Option<Response<Body>> {
+        match outcome {
+            Ok(IcapOutcome::Allow) => None,
+            Ok(IcapOutcome::HttpResponse {
+                status,
+                headers,
+                body,
+            }) => {
+                let status_code = StatusCode::from_u16(status).unwrap_or(StatusCode::FORBIDDEN);
+                let mut resp = Response::new(full(body));
+                *resp.status_mut() = status_code;
+                Self::apply_response_headers(&headers, &mut resp);
+                resp.headers_mut().insert(
+                    HeaderName::from_static("x-icap-action"),
+                    HeaderValue::from_static("adapted"),
+                );
+                Some(resp)
+            }
+            Err(e) => {
+                let Some(client) = &self.icap else {
+                    return None;
+                };
+                if client.fail_open() {
+                    warn!("ICAP error (fail-open): {e}");
+                    None
+                } else {
+                    warn!("ICAP error (fail-closed): {e}");
+                    Some(
+                        Response::builder()
+                            .status(StatusCode::BAD_GATEWAY)
+                            .header("Content-Type", "text/plain; charset=utf-8")
+                            .header("X-Icap-Action", "error")
+                            .body(full(Bytes::from(format!("502 Bad Gateway: icap: {e}"))))
+                            .unwrap_or_else(|_| {
+                                Response::new(full(Bytes::from_static(b"502 Bad Gateway")))
+                            }),
+                    )
+                }
+            }
+        }
+    }
+
+    /// REQMOD after request body is available (before upstream/peer fetch).
+    async fn run_icap_reqmod(
+        &self,
+        method: &str,
+        url: &str,
+        headers: &HashMap<String, String>,
+        body: &[u8],
+    ) -> Option<Response<Body>> {
+        let Some(client) = &self.icap else {
+            return None;
+        };
+        if !client.reqmod_enabled() {
+            return None;
+        }
+        self.icap_to_response(client.reqmod(method, url, headers, body).await)
+    }
+
+    /// RESPMOD on buffered upstream response (streaming MISS not adapted).
+    async fn run_icap_respmod(
+        &self,
+        method: &str,
+        url: &str,
+        req_headers: &HashMap<String, String>,
+        status: u16,
+        resp_headers: &HashMap<String, String>,
+        body: &[u8],
+    ) -> Option<(u16, HashMap<String, String>, Bytes)> {
+        let Some(client) = &self.icap else {
+            return None;
+        };
+        if !client.respmod_enabled() {
+            return None;
+        }
+        match client
+            .respmod(method, url, req_headers, status, resp_headers, body)
+            .await
+        {
+            Ok(IcapOutcome::Allow) => None,
+            Ok(IcapOutcome::HttpResponse {
+                status,
+                headers,
+                body,
+            }) => Some((status, headers, body)),
+            Err(e) => {
+                if client.fail_open() {
+                    warn!("ICAP RESPMOD error (fail-open): {e}");
+                    None
+                } else {
+                    warn!("ICAP RESPMOD error (fail-closed): {e}");
+                    Some((
+                        502,
+                        HashMap::from([(
+                            "content-type".into(),
+                            "text/plain; charset=utf-8".into(),
+                        )]),
+                        Bytes::from(format!("502 Bad Gateway: icap: {e}")),
+                    ))
+                }
+            }
+        }
     }
 
     pub(crate) async fn authenticate_proxy(
@@ -1811,6 +1921,29 @@ impl ProxyService {
             (parts, body_bytes)
         };
         let request_body_size = body_bytes.len();
+
+        // ICAP REQMOD (optional): before peer/upstream fetch.
+        let icap_req_headers: HashMap<String, String> = parts
+            .headers
+            .iter()
+            .filter_map(|(k, v)| {
+                v.to_str()
+                    .ok()
+                    .map(|s| (k.as_str().to_string(), s.to_string()))
+            })
+            .collect();
+        if let Some(resp) = self
+            .run_icap_reqmod(method, &url, &icap_req_headers, &body_bytes)
+            .await
+        {
+            if let Some(permit) = flight_permit.take() {
+                permit.complete(None);
+            }
+            let code = resp.status().as_u16();
+            Self::finish_request_metrics(&mut guard, &mut fast_scope, code, request_body_size, 0);
+            return resp;
+        }
+
         let req_for_peer = Request::from_parts(parts.clone(), full(body_bytes.clone()));
         let req = Request::from_parts(parts, full(body_bytes));
 
@@ -1975,6 +2108,24 @@ impl ProxyService {
                         return resp;
                     }
                 };
+
+                // ICAP RESPMOD (optional, buffered path only).
+                let (status_code, headers_map, body_bytes) = if let Some((st, hdrs, body)) = self
+                    .run_icap_respmod(
+                        method,
+                        &url,
+                        &icap_req_headers,
+                        status_code,
+                        &headers_map,
+                        &body_bytes,
+                    )
+                    .await
+                {
+                    (st, hdrs, body)
+                } else {
+                    (status_code, headers_map, body_bytes)
+                };
+                let status = StatusCode::from_u16(status_code).unwrap_or(StatusCode::OK);
 
                 // Buffered path: complete_cache_miss finishes the flight; disarm Drop.
                 if let Some(permit) = flight_permit.take() {

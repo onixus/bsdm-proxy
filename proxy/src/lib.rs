@@ -20,6 +20,7 @@ pub mod hierarchy;
 pub mod hierarchy_config;
 pub mod htcp;
 pub mod http_types;
+pub mod icap;
 pub mod icp;
 pub mod l2_cache;
 pub mod metrics;

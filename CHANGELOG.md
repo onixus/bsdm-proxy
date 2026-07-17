@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **DNS sinkhole sidecar** — workspace crate `dns-sinkhole` (UDP RPZ-lite proxy); ADR 0004; compose profile `dns-sinkhole`; docs [dns-sinkhole.md](docs/dns-sinkhole.md) ([#108](https://github.com/onixus/bsdm-proxy/issues/108))
+- **ICAP adapter PoC** — env `ICAP_ENABLED` / `ICAP_URL`; REQMOD before upstream + RESPMOD on buffered MISS; compose profile `icap` (c-icap/ClamAV); docs [icap.md](docs/icap.md) ([#99](https://github.com/onixus/bsdm-proxy/issues/99))
 - **Wasm plugin host PoC** — Cargo feature `wasm` (Wasmtime); post-auth request hook with fuel limits; PoC `examples/wasm/deny_blocked_suffix.wat`; docs [wasm-plugins.md](docs/wasm-plugins.md) ([#188](https://github.com/onixus/bsdm-proxy/issues/188))
 - **DX gRPC control plane** — optional Cargo feature `grpc`; proto `proxy/proto/control_plane.proto`; `CONTROL_GRPC_ENABLED` / `CONTROL_GRPC_BIND`; mirrors REST stats/purge/hierarchy/upstream TLS ([#187](https://github.com/onixus/bsdm-proxy/issues/187))
 - **Hierarchy peer mTLS** — `HIERARCHY_PEER_MTLS_*` wraps peer HTTP fetch in TLS + client cert ([#103](https://github.com/onixus/bsdm-proxy/issues/103))

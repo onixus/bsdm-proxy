@@ -122,7 +122,7 @@
 
 | ID | Задача | Лидеры | Заметки |
 |----|--------|--------|---------|
-| P3-1 | ICAP adapter (optional AV/URL) | legacy enterprise | sidecar pattern |
+| P3-1 | ICAP adapter (optional AV/URL) | legacy enterprise | sidecar pattern ✅ [#99](https://github.com/onixus/bsdm-proxy/issues/99) |
 | P3-2 | Event enrichment: `acl_action`, `threat_sources` | Netskope data lake | M3 schema |
 | P3-3 ✅ | Categorization Prometheus metrics | all | M4 |
 | P3-4 | DNS sinkhole module (optional) | Cisco Umbrella layer 1 | separate crate ✅ [#108](https://github.com/onixus/bsdm-proxy/issues/108) |
@@ -258,7 +258,7 @@ gantt
 | P2-3 | [#107](https://github.com/onixus/bsdm-proxy/issues/107) HA / k8s deployment | P2 | [k8s-architecture.md](k8s-architecture.md) |
 | P2-4 | [#110](https://github.com/onixus/bsdm-proxy/issues/110) Search API (M3) | P2 |
 | P2-5 | [#112](https://github.com/onixus/bsdm-proxy/issues/112) Web config ACL UI | P2 |
-| P3-1 | [#99](https://github.com/onixus/bsdm-proxy/issues/99) ICAP adapter | P3 |
+| P3-1 ✅ | [#99](https://github.com/onixus/bsdm-proxy/issues/99) ICAP adapter | P3 |
 | P3-2 | [#102](https://github.com/onixus/bsdm-proxy/issues/102) Event schema enrichment | P3 |
 | P3-3 ✅ | [#105](https://github.com/onixus/bsdm-proxy/issues/105) Categorization metrics | P3 |
 | P3-4 ✅ | [#108](https://github.com/onixus/bsdm-proxy/issues/108) DNS sinkhole module | P3 |

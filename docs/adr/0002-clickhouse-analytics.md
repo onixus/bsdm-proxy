@@ -20,7 +20,7 @@ Roadmap M3–M5 workloads:
 | M4 Threat analytics | windows, periodic patterns, GROUP BY | ClickHouse |
 | M5 ML | batch feature extraction | ClickHouse |
 
-Corporate medium: **~4M events/day**, 42-day retention ([capacity-planning.md](../capacity-planning.md)).
+Corporate medium (estimate): **~4M events/day**, 42-day retention ([capacity-planning.md](../capacity-planning.md)).
 
 OpenSearch was RAM-heavy and optimized for full-text search; BSDM queries are **structured analytics**. Migration completed in phases 0–4 ([#125](https://github.com/onixus/bsdm-proxy/issues/125)).
 
