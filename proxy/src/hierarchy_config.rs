@@ -357,11 +357,7 @@ mod tests {
             })
             .await;
 
-        std::fs::write(
-            &path,
-            r#"{"parents":["10.0.0.2:1488:2.0"],"siblings":[]}"#,
-        )
-        .unwrap();
+        std::fs::write(&path, r#"{"parents":["10.0.0.2:1488:2.0"],"siblings":[]}"#).unwrap();
         let report = reload_static_peers(&registry, false).await.unwrap();
         std::env::remove_var("CACHE_PEERS_PATH");
         assert_eq!(report.source, PeerConfigSource::File);

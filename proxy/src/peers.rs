@@ -518,7 +518,11 @@ mod tests {
         assert_eq!(stats.preserved_discovery, 1);
         assert_eq!(registry.all_peers().await.len(), 2);
         assert!(registry.is_static("parent:parent2.example.com:1488").await);
-        assert!(!registry.is_static("sibling:discovered.example.com:1488").await);
+        assert!(
+            !registry
+                .is_static("sibling:discovered.example.com:1488")
+                .await
+        );
     }
 
     #[test]

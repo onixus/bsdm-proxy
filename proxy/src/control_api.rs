@@ -508,8 +508,7 @@ mod tests {
                 max_connections: 100,
             })
             .await;
-        let state =
-            ControlApiState::new(metrics, cache, None, None, Some(registry), false);
+        let state = ControlApiState::new(metrics, cache, None, None, Some(registry), false);
         let resp = state
             .dispatch(
                 &Method::GET,
