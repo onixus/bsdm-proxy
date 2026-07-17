@@ -40,6 +40,7 @@ cargo install oha   # или бинарь с https://github.com/hatoo/oha
 | `KAFKA_QUEUE_CAPACITY` | `8192` | Bounded in-memory queue перед Kafka producer (#106) |
 | `METRICS_SAMPLE_RATE` | `0` | `N` → histograms для 1 из N запросов (`0` = все) |
 | `STREAMING_MISS_ENABLED` | `true` | Tee upstream MISS body to client while buffering for L1 |
+| `MISS_COALESCE_ENABLED` | `true` | Singleflight: parallel identical GET/HEAD MISSes share one upstream fill; waiters get `COALESCED-HIT` |
 
 > **Production ACL:** `PERF_FAST_CACHE_HIT=true` пропускает ACL и categorization на cache HIT. Используйте **только для bench/lab**, не в production с включённой политикой.
 

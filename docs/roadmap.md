@@ -200,7 +200,7 @@ Backlog mapping: [swg-backlog-mapping.md](swg-backlog-mapping.md)
 | **1. Lite** | VPS / edge, низкий порог | ✅ `docker-compose.lite.yml` + SQLite indexer; ✅ Cargo `kafka` feature (B21) |
 | **2. DX** | Control plane | ✅ REST ACL/stats/purge/hierarchy/upstream-TLS reload; next: gRPC control plane |
 | **3. Wasm** | Плагины | Wasmtime в request/response pipeline, SDK (Rust/Go/AS), PoC auth-as-plugin |
-| **4. AI-трафик** | LLM / API proxy | token-bucket RL, semantic cache (vector DB prep), request coalescing |
+| **4. AI-трафик** | LLM / API proxy | ✅ request coalescing (singleflight MISS); next: token-bucket API-key RL, semantic cache |
 
 Порядок реализации по умолчанию: **Lite → DX → Wasm / AI** (AI coalescing может частично пересекаться с perf-треком раньше Wasm).
 

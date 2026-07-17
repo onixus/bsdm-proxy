@@ -29,6 +29,7 @@ use crate::hierarchy::{HierarchyManager, HierarchyResult};
 use crate::http_types::{empty, full, Body};
 use crate::l2_cache::RedisL2Cache;
 use crate::metrics::{FastRequestScope, Metrics, RequestMetricsGuard};
+use crate::miss_coalesce::{CoalesceJoin, MissFlightMap, MissFlightPermit};
 use crate::peer_fetch::fetch_via_peer;
 use crate::peers::CachePeer;
 use crate::perf::PerfConfig;
@@ -63,6 +64,7 @@ struct MissCompletionHandle {
     perf: PerfConfig,
     digest_registry: Option<Arc<DigestRegistry>>,
     sessions: Arc<SessionCorrelator>,
+    miss_flights: MissFlightMap,
 }
 
 impl MissCompletionHandle {
@@ -149,7 +151,9 @@ impl MissCompletionHandle {
                 store_decision.is_negative,
                 store_decision.must_revalidate,
             );
-            self.store_in_l1_and_l2(cache_key.clone(), cached_response);
+            self.store_in_l1_and_l2(cache_key.clone(), cached_response.clone());
+            self.miss_flights
+                .complete(&cache_key, Some(cached_response));
             if let Some(g) = guard.as_mut() {
                 g.set_cache_status(if store_decision.is_negative {
                     "NEGATIVE_MISS"
@@ -158,6 +162,7 @@ impl MissCompletionHandle {
                 });
             }
         } else {
+            self.miss_flights.complete(&cache_key, None);
             self.metrics.cache_bypasses_total.inc();
             if let Some(g) = guard.as_mut() {
                 g.set_cache_status("BYPASS");
@@ -254,6 +259,7 @@ pub struct ProxyService {
     policy_cache: Arc<PolicyDecisionCache>,
     sessions: Arc<SessionCorrelator>,
     threat_score_cache: Arc<ThreatScoreCache>,
+    miss_flights: MissFlightMap,
 }
 
 impl ProxyService {
@@ -294,6 +300,7 @@ impl ProxyService {
             perf: self.perf.clone(),
             digest_registry: self.digest_registry.clone(),
             sessions: self.sessions.clone(),
+            miss_flights: self.miss_flights.clone(),
         }
     }
 
@@ -345,6 +352,7 @@ impl ProxyService {
             policy_cache,
             sessions: Arc::new(SessionCorrelator::from_env()),
             threat_score_cache,
+            miss_flights: MissFlightMap::new(),
         }
     }
 
@@ -1411,6 +1419,63 @@ impl ProxyService {
                 .observe(cache_lookup_start.elapsed().as_secs_f64());
         }
 
+        // Collapse concurrent identical GET/HEAD MISSes onto one upstream fill.
+        let mut flight_permit: Option<MissFlightPermit> = None;
+        if self.perf.miss_coalesce_enabled && CACHEABLE_METHODS.contains(&method) {
+            match self.miss_flights.join(&cache_key) {
+                CoalesceJoin::Follower(wait) => {
+                    if let Some(cached) = wait.wait().await {
+                        debug!("Cache COALESCED HIT: {} {}", method, url);
+                        self.metrics.cache_coalesced_total.inc();
+                        return self.serve_l1_hit(
+                            &cached,
+                            &cache_key,
+                            &url,
+                            method,
+                            &user_id,
+                            &username,
+                            user_agent.as_deref(),
+                            &client_ip,
+                            &categories,
+                            &threat_sources,
+                            request_start,
+                            detailed_metrics,
+                            &mut guard,
+                            &mut fast_scope,
+                            "COALESCED",
+                            "COALESCED-HIT",
+                        );
+                    }
+                    // Leader failed / bypassed — check L1 then fetch without coalescing.
+                    if let Some(cached) = self.http_cache.get(&cache_key) {
+                        if cached.can_serve_fresh() {
+                            return self.serve_l1_hit(
+                                &cached,
+                                &cache_key,
+                                &url,
+                                method,
+                                &user_id,
+                                &username,
+                                user_agent.as_deref(),
+                                &client_ip,
+                                &categories,
+                                &threat_sources,
+                                request_start,
+                                detailed_metrics,
+                                &mut guard,
+                                &mut fast_scope,
+                                "HIT",
+                                "HIT",
+                            );
+                        }
+                    }
+                }
+                CoalesceJoin::Leader(permit) => {
+                    flight_permit = Some(permit);
+                }
+            }
+        }
+
         debug!("Cache MISS: {} {}", method, url);
         self.metrics.cache_misses_total.inc();
 
@@ -1419,6 +1484,9 @@ impl ProxyService {
             Ok(collected) => collected.to_bytes(),
             Err(e) => {
                 error!("Body collection failed: {}", e);
+                if let Some(permit) = flight_permit.take() {
+                    permit.complete(None);
+                }
                 let mut resp = Response::new(full(Bytes::from_static(b"400 Bad Request")));
                 *resp.status_mut() = StatusCode::BAD_REQUEST;
                 Self::finish_request_metrics(&mut guard, &mut fast_scope, 400, 0, 15);
@@ -1467,6 +1535,11 @@ impl ProxyService {
                     let x_cache = miss_x_cache_status_header(true, &store_precheck);
                     if let Some(g) = guard.as_mut() {
                         g.set_cache_status(&cache_status_metric_label(x_cache));
+                    }
+
+                    // Completion path finishes the flight; disarm Drop.
+                    if let Some(permit) = flight_permit.take() {
+                        permit.disarm();
                     }
 
                     let handle = self.miss_completion_handle();
@@ -1540,6 +1613,9 @@ impl ProxyService {
                     Ok(collected) => collected.to_bytes(),
                     Err(e) => {
                         error!("Response body collection failed: {}", e);
+                        if let Some(permit) = flight_permit.take() {
+                            permit.complete(None);
+                        }
                         self.metrics
                             .upstream_errors_total
                             .with_label_values(&[&domain, "body_read"])
@@ -1556,6 +1632,11 @@ impl ProxyService {
                         return resp;
                     }
                 };
+
+                // Buffered path: complete_cache_miss finishes the flight; disarm Drop.
+                if let Some(permit) = flight_permit.take() {
+                    permit.disarm();
+                }
 
                 let store_decision = evaluate_store(
                     method,
@@ -1596,6 +1677,9 @@ impl ProxyService {
             }
             Err(e) => {
                 error!("Upstream error for {}: {}", url, e);
+                if let Some(permit) = flight_permit.take() {
+                    permit.complete(None);
+                }
                 self.metrics
                     .upstream_errors_total
                     .with_label_values(&[&domain, "connection"])
