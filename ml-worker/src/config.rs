@@ -10,6 +10,8 @@ pub struct Config {
     pub clickhouse_table: String,
     pub features_table: String,
     pub scores_table: String,
+    /// M5.3 domain lexical feature store.
+    pub phishing_features_table: String,
     pub clickhouse_user: Option<String>,
     pub clickhouse_password: Option<String>,
     pub poll_interval: Duration,
@@ -61,6 +63,8 @@ impl Config {
             features_table: std::env::var("ML_FEATURES_TABLE")
                 .unwrap_or_else(|_| "entity_features".into()),
             scores_table: std::env::var("ML_SCORES_TABLE").unwrap_or_else(|_| "ml_scores".into()),
+            phishing_features_table: std::env::var("ML_PHISHING_FEATURES_TABLE")
+                .unwrap_or_else(|_| "domain_phishing_features".into()),
             clickhouse_user: std::env::var("CLICKHOUSE_USER")
                 .ok()
                 .filter(|s| !s.is_empty()),
@@ -98,6 +102,17 @@ impl Config {
 
     pub fn fq_scores(&self) -> String {
         format!("{}.{}", self.clickhouse_database, self.scores_table)
+    }
+
+    pub fn fq_phishing_features(&self) -> String {
+        format!(
+            "{}.{}",
+            self.clickhouse_database, self.phishing_features_table
+        )
+    }
+
+    pub fn is_phishing_model(&self) -> bool {
+        self.model == "phishing_lexical_v0"
     }
 }
 

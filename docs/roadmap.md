@@ -25,7 +25,7 @@
 | [M2.5 — Data plane](#m25--data-plane-throughput-v03x) | v0.3.x–0.3.2 | Tiered L1, streaming, P1 hot path | ✅ Done |
 | [M3 — Retro-search](#m3--retro-search) | v0.3.1+ | ClickHouse, Search API, Grafana, k8s CHI | ✅ Done (~95%) |
 | [M4 — Threat analytics](#m4--threat-analytics-v05x) | v0.5.x | Rule-based угрозы, алерты, C&C / Shannon | ✅ Done |
-| [M5 — ML security](#m5--ml-security-v10x) | v1.0.x | Feature store, anomaly / phishing / C&C ML | ~25% (M5.2 UEBA) |
+| [M5 — ML security](#m5--ml-security-v10x) | v1.0.x | Feature store, anomaly / phishing / C&C ML | ~40% (M5.3 phishing) |
 
 ```mermaid
 gantt
@@ -137,16 +137,22 @@ Async scoring off the proxy hot path. Design: [ADR 0003](adr/0003-ml-worker-feat
 - [x] ADR 0003 — CH feature store + `ml-worker` ([#46](https://github.com/onixus/bsdm-proxy/issues/46) / B15)
 - [x] DDL + crate + compose profile `ml` ([#170](https://github.com/onixus/bsdm-proxy/pull/170))
 
-### M5.2 — UEBA z-score ✅ / in this PR
+### M5.2 — UEBA z-score ✅
 
 - [x] Population baseline from `entity_features` (live CH or `ML_BASELINE_PATH`)
 - [x] Model `ueba_zscore_v0` (default); stub fallback when baseline empty
 - [x] `scripts/ml/export_baseline.py`, `compare_stub_vs_ueba.py`
 - [x] Grafana panel + `m5_ueba_queries.sql` ([#166](https://github.com/onixus/bsdm-proxy/issues/166))
 
+### M5.3 — Lexical phishing ✅ / in this PR
+
+- [x] Model `phishing_lexical_v0` on `domain` entities
+- [x] Weak labels: `categories=phishing`, `threat_sources` phishtank / ut1
+- [x] `domain_phishing_features` table + lexical signals (entropy, keywords, IP host)
+- [x] Grafana panel + `m5_phishing_queries.sql` + `eval_phishing_lexical.py` ([#167](https://github.com/onixus/bsdm-proxy/issues/167))
+
 ### Planned
 
-- [ ] **M5.3** Lexical phishing score + weak labels (PhishTank / UT1)
 - [ ] **M5.4** C&C ML augmenting `beacon_periodic`
 - [ ] **M5.5** Optional `threat_score` write-back / cached inline score (not on hot path until proven)
 
@@ -209,4 +215,4 @@ Backlog mapping: [swg-backlog-mapping.md](swg-backlog-mapping.md)
 
 ---
 
-*Обновлено: 2026-07-16 — M5.2 UEBA z-score; next M5.3 phishing lexical*
+*Обновлено: 2026-07-17 — M5.3 phishing lexical; next M5.4 C&C ML*

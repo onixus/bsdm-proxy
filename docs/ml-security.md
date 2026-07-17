@@ -66,7 +66,8 @@ python3 scripts/ml/compare_stub_vs_ueba.py
 | `ML_LOOKBACK_SECS` | `300` | Feature window length |
 | `ML_ENTITY_TYPES` | `client_ip` | `client_ip`, `username`, `domain` |
 | `ML_MIN_REQUESTS` | `10` | Min events per entity window |
-| `ML_MODEL` | `ueba_zscore_v0` | `ueba_zscore_v0` or `anomaly_stub_v0` |
+| `ML_MODEL` | `ueba_zscore_v0` | `ueba_zscore_v0`, `anomaly_stub_v0`, or `phishing_lexical_v0` |
+| `ML_PHISHING_FEATURES_TABLE` | `domain_phishing_features` | M5.3 domain feature store |
 | `ML_SCORE_THRESHOLD` | `0.8` | Webhook / severity cut |
 | `ML_BASELINE_LOOKBACK_SECS` | `86400` | History for population stats |
 | `ML_BASELINE_MIN_SAMPLES` | `30` | Min windows per entity_type |
@@ -81,7 +82,7 @@ python3 scripts/ml/compare_stub_vs_ueba.py
 |-------|-------|-----------|
 | `anomaly_stub_v0` | M5.1 | Heuristic rate/deny/threat mix; also **fallback** when baseline empty |
 | `ueba_zscore_v0` | **M5.2** | Unsupervised mean abs-z vs population baseline |
-| *(planned)* lexical phishing | M5.3 | Domain/URL features + weak labels |
+| `phishing_lexical_v0` | **M5.3** | Domain lexical heuristics + PhishTank / UT1 weak labels |
 | *(planned)* C&C ML | M5.4 | Augment `beacon_periodic` |
 
 ### UEBA scoring
@@ -96,10 +97,37 @@ score = 0.4\cdot\mathrm{mean}(c) + 0.6\cdot\max(c)
 
 Features: request_count, unique_domains/urls, deny/threat counts & ratios, avg size/duration, gap_cv, max_domain_len.
 
+### Phishing lexical scoring (M5.3)
+
+Set `ML_MODEL=phishing_lexical_v0` (scores `domain` entities from `http_cache`):
+
+```bash
+CLICKHOUSE_URL=http://127.0.0.1:8123 \
+  ML_MODEL=phishing_lexical_v0 \
+  ML_MIN_REQUESTS=5 \
+  METRICS_PORT=8091 \
+  cargo run -p ml-worker --release
+```
+
+Weak labels from existing categorization pipeline:
+
+| Signal | Source field |
+|--------|----------------|
+| Phishing category | `has(categories, 'phishing')` |
+| PhishTank hit | `has(threat_sources, 'phishtank')` |
+| UT1 hit | `has(threat_sources, 'ut1')` |
+
+Lexical signals (computed in Rust): domain length, hyphens, digits, subdomain depth, Shannon entropy, suspicious keywords, IP-as-hostname, suspicious URL paths.
+
+```bash
+python3 scripts/ml/eval_phishing_lexical.py
+```
+
 ## Grafana
 
 Panel **Top anomalous entities (UEBA z-score / ml-worker)** on [BSDM HTTP Traffic (ClickHouse)](../grafana/dashboards/bsdm-http-traffic-ch.json).  
-Ad-hoc SQL: [`scripts/clickhouse/m5_ueba_queries.sql`](../scripts/clickhouse/m5_ueba_queries.sql).
+Panel **Top phishing-scored domains (lexical / ml-worker M5.3)** on the same dashboard.  
+Ad-hoc SQL: [`scripts/clickhouse/m5_ueba_queries.sql`](../scripts/clickhouse/m5_ueba_queries.sql), [`scripts/clickhouse/m5_phishing_queries.sql`](../scripts/clickhouse/m5_phishing_queries.sql).
 
 ## Verify
 

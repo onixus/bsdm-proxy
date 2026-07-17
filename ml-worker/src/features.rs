@@ -180,6 +180,7 @@ mod tests {
             clickhouse_table: "http_cache".into(),
             features_table: "entity_features".into(),
             scores_table: "ml_scores".into(),
+            phishing_features_table: "domain_phishing_features".into(),
             clickhouse_user: None,
             clickhouse_password: None,
             poll_interval: std::time::Duration::from_secs(60),

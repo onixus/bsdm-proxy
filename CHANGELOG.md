@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **M5.3 lexical phishing** — `phishing_lexical_v0`: domain lexical heuristics + weak labels from PhishTank / UT1 / `phishing` category; `domain_phishing_features` table; Grafana panel; `scripts/ml/eval_phishing_lexical.py` ([#167](https://github.com/onixus/bsdm-proxy/issues/167))
 - **Admin console (UI/UX)** — React + Tailwind SPA in `admin-console/`: unified dashboard, logs with explainable ML (XAI), policies, settings; migrates `web-config` export logic
 - **M5.2 UEBA z-score** — `ueba_zscore_v0` (default): population baseline from `entity_features` or `ML_BASELINE_PATH`; Grafana anomalous-entities panel; `scripts/ml/export_baseline.py` + `compare_stub_vs_ueba.py` ([#166](https://github.com/onixus/bsdm-proxy/issues/166))
 - **M5.1 ML worker scaffold** — crate `ml-worker` extracts entity windows into ClickHouse `entity_features`, scores with `anomaly_stub_v0` into `ml_scores`, optional webhook; compose profile `ml`, packaging/systemd; ADR 0003 / [docs/ml-security.md](docs/ml-security.md) (B15 / #46)
