@@ -1,14 +1,18 @@
-//! Token-bucket rate limiting per client IP and authenticated user.
+//! Token-bucket rate limiting per client IP, authenticated user, and API key.
 
+use hyper::header::{HeaderMap, AUTHORIZATION};
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Instant;
 
-/// Which limit was exceeded.
+/// Which limit was exceeded (or missing required credential).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RateLimitViolation {
     Ip,
     User,
+    ApiKey,
+    /// `RATE_LIMIT_API_KEY_REQUIRED=true` but no key was present.
+    ApiKeyMissing,
 }
 
 /// Per-key token bucket.
@@ -49,6 +53,14 @@ pub struct RateLimitConfig {
     pub ip_burst: f64,
     pub user_rps: f64,
     pub user_burst: f64,
+    pub api_key_rps: f64,
+    pub api_key_burst: f64,
+    /// Header name for API key (default `x-api-key`).
+    pub api_key_header: String,
+    /// Also accept `Authorization: Bearer <key>`.
+    pub api_key_bearer: bool,
+    /// Reject requests without an API key when rate limiting is enabled.
+    pub api_key_required: bool,
     pub max_keys: usize,
 }
 
@@ -60,6 +72,11 @@ impl Default for RateLimitConfig {
             ip_burst: 200.0,
             user_rps: 50.0,
             user_burst: 100.0,
+            api_key_rps: 20.0,
+            api_key_burst: 40.0,
+            api_key_header: "x-api-key".to_string(),
+            api_key_bearer: true,
+            api_key_required: false,
             max_keys: 10_000,
         }
     }
@@ -75,6 +92,19 @@ impl RateLimitConfig {
         let ip_burst = parse_positive_f64("RATE_LIMIT_IP_BURST", ip_rps * 2.0);
         let user_rps = parse_positive_f64("RATE_LIMIT_USER_RPS", 50.0);
         let user_burst = parse_positive_f64("RATE_LIMIT_USER_BURST", user_rps * 2.0);
+        let api_key_rps = parse_positive_f64("RATE_LIMIT_API_KEY_RPS", 20.0);
+        let api_key_burst = parse_positive_f64("RATE_LIMIT_API_KEY_BURST", api_key_rps * 2.0);
+        let api_key_header = std::env::var("RATE_LIMIT_API_KEY_HEADER")
+            .ok()
+            .map(|s| s.trim().to_ascii_lowercase())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "x-api-key".to_string());
+        let api_key_bearer = std::env::var("RATE_LIMIT_API_KEY_BEARER")
+            .map(|v| !matches!(v.to_ascii_lowercase().as_str(), "0" | "false" | "no"))
+            .unwrap_or(true);
+        let api_key_required = std::env::var("RATE_LIMIT_API_KEY_REQUIRED")
+            .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+            .unwrap_or(false);
         let max_keys = std::env::var("RATE_LIMIT_MAX_KEYS")
             .ok()
             .and_then(|s| s.parse().ok())
@@ -87,6 +117,11 @@ impl RateLimitConfig {
             ip_burst,
             user_rps,
             user_burst,
+            api_key_rps,
+            api_key_burst,
+            api_key_header,
+            api_key_bearer,
+            api_key_required,
             max_keys,
         }
     }
@@ -100,11 +135,43 @@ fn parse_positive_f64(name: &str, default: f64) -> f64 {
         .unwrap_or(default)
 }
 
-/// Token-bucket rate limiter with separate buckets per IP and per user.
+/// Extract API key from request headers using config (header and/or Bearer).
+pub fn extract_api_key(headers: &HeaderMap, config: &RateLimitConfig) -> Option<String> {
+    let header_name = config.api_key_header.as_str();
+    for (name, value) in headers.iter() {
+        if name.as_str().eq_ignore_ascii_case(header_name) {
+            if let Ok(v) = value.to_str() {
+                let key = v.trim();
+                if !key.is_empty() {
+                    return Some(key.to_string());
+                }
+            }
+        }
+    }
+
+    if config.api_key_bearer {
+        if let Some(value) = headers.get(AUTHORIZATION).and_then(|v| v.to_str().ok()) {
+            if let Some(token) = value
+                .strip_prefix("Bearer ")
+                .or_else(|| value.strip_prefix("bearer "))
+            {
+                let key = token.trim();
+                if !key.is_empty() {
+                    return Some(key.to_string());
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Token-bucket rate limiter with separate buckets per IP, user, and API key.
 pub struct RateLimiter {
     config: RateLimitConfig,
     ip_buckets: Mutex<HashMap<String, TokenBucket>>,
     user_buckets: Mutex<HashMap<String, TokenBucket>>,
+    api_key_buckets: Mutex<HashMap<String, TokenBucket>>,
 }
 
 impl RateLimiter {
@@ -113,6 +180,7 @@ impl RateLimiter {
             config,
             ip_buckets: Mutex::new(HashMap::new()),
             user_buckets: Mutex::new(HashMap::new()),
+            api_key_buckets: Mutex::new(HashMap::new()),
         }
     }
 
@@ -121,9 +189,18 @@ impl RateLimiter {
     }
 
     /// Returns `Some(violation)` when the request must be rejected.
-    pub fn check(&self, client_ip: &str, username: Option<&str>) -> Option<RateLimitViolation> {
+    pub fn check(
+        &self,
+        client_ip: &str,
+        username: Option<&str>,
+        api_key: Option<&str>,
+    ) -> Option<RateLimitViolation> {
         if !self.config.enabled {
             return None;
+        }
+
+        if self.config.api_key_required && api_key.filter(|k| !k.is_empty()).is_none() {
+            return Some(RateLimitViolation::ApiKeyMissing);
         }
 
         if !self.try_acquire(
@@ -143,6 +220,17 @@ impl RateLimiter {
                 self.config.user_burst,
             ) {
                 return Some(RateLimitViolation::User);
+            }
+        }
+
+        if let Some(key) = api_key.filter(|k| !k.is_empty()) {
+            if !self.try_acquire(
+                &self.api_key_buckets,
+                key,
+                self.config.api_key_rps,
+                self.config.api_key_burst,
+            ) {
+                return Some(RateLimitViolation::ApiKey);
             }
         }
 
@@ -176,6 +264,7 @@ impl RateLimiter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hyper::header::HeaderValue;
     use std::thread;
     use std::time::Duration;
 
@@ -186,6 +275,11 @@ mod tests {
             ip_burst,
             user_rps: 10.0,
             user_burst: 10.0,
+            api_key_rps: 10.0,
+            api_key_burst: 10.0,
+            api_key_header: "x-api-key".to_string(),
+            api_key_bearer: true,
+            api_key_required: false,
             max_keys: 100,
         }
     }
@@ -193,16 +287,16 @@ mod tests {
     #[test]
     fn disabled_allows_all() {
         let limiter = RateLimiter::new(RateLimitConfig::default());
-        assert!(limiter.check("10.0.0.1", None).is_none());
+        assert!(limiter.check("10.0.0.1", None, None).is_none());
     }
 
     #[test]
     fn burst_then_reject() {
         let limiter = RateLimiter::new(enabled_config(1.0, 2.0));
-        assert!(limiter.check("10.0.0.1", None).is_none());
-        assert!(limiter.check("10.0.0.1", None).is_none());
+        assert!(limiter.check("10.0.0.1", None, None).is_none());
+        assert!(limiter.check("10.0.0.1", None, None).is_none());
         assert_eq!(
-            limiter.check("10.0.0.1", None),
+            limiter.check("10.0.0.1", None, None),
             Some(RateLimitViolation::Ip)
         );
     }
@@ -210,12 +304,12 @@ mod tests {
     #[test]
     fn separate_ips_have_separate_buckets() {
         let limiter = RateLimiter::new(enabled_config(1.0, 1.0));
-        assert!(limiter.check("10.0.0.1", None).is_none());
+        assert!(limiter.check("10.0.0.1", None, None).is_none());
         assert_eq!(
-            limiter.check("10.0.0.1", None),
+            limiter.check("10.0.0.1", None, None),
             Some(RateLimitViolation::Ip)
         );
-        assert!(limiter.check("10.0.0.2", None).is_none());
+        assert!(limiter.check("10.0.0.2", None, None).is_none());
     }
 
     #[test]
@@ -226,27 +320,73 @@ mod tests {
             ip_burst: 1000.0,
             user_rps: 1.0,
             user_burst: 1.0,
+            api_key_rps: 1000.0,
+            api_key_burst: 1000.0,
+            api_key_header: "x-api-key".to_string(),
+            api_key_bearer: true,
+            api_key_required: false,
             max_keys: 100,
         };
         let limiter = RateLimiter::new(config);
-        assert!(limiter.check("10.0.0.1", Some("alice")).is_none());
+        assert!(limiter.check("10.0.0.1", Some("alice"), None).is_none());
         assert_eq!(
-            limiter.check("10.0.0.1", Some("alice")),
+            limiter.check("10.0.0.1", Some("alice"), None),
             Some(RateLimitViolation::User)
         );
-        assert!(limiter.check("10.0.0.1", Some("bob")).is_none());
+        assert!(limiter.check("10.0.0.1", Some("bob"), None).is_none());
+    }
+
+    #[test]
+    fn api_key_limit_applies_per_key() {
+        let mut config = enabled_config(1000.0, 1000.0);
+        config.api_key_rps = 1.0;
+        config.api_key_burst = 1.0;
+        let limiter = RateLimiter::new(config);
+        assert!(limiter.check("10.0.0.1", None, Some("key-a")).is_none());
+        assert_eq!(
+            limiter.check("10.0.0.1", None, Some("key-a")),
+            Some(RateLimitViolation::ApiKey)
+        );
+        assert!(limiter.check("10.0.0.1", None, Some("key-b")).is_none());
+    }
+
+    #[test]
+    fn api_key_required_rejects_missing() {
+        let mut config = enabled_config(1000.0, 1000.0);
+        config.api_key_required = true;
+        let limiter = RateLimiter::new(config);
+        assert_eq!(
+            limiter.check("10.0.0.1", None, None),
+            Some(RateLimitViolation::ApiKeyMissing)
+        );
+        assert!(limiter.check("10.0.0.1", None, Some("secret")).is_none());
+    }
+
+    #[test]
+    fn extract_api_key_from_header_and_bearer() {
+        let config = RateLimitConfig::default();
+        let mut headers = HeaderMap::new();
+        headers.insert("x-api-key", HeaderValue::from_static("from-header"));
+        assert_eq!(
+            extract_api_key(&headers, &config).as_deref(),
+            Some("from-header")
+        );
+
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer tok-1"));
+        assert_eq!(extract_api_key(&headers, &config).as_deref(), Some("tok-1"));
     }
 
     #[test]
     fn tokens_refill_over_time() {
         let limiter = RateLimiter::new(enabled_config(10.0, 1.0));
-        assert!(limiter.check("10.0.0.1", None).is_none());
+        assert!(limiter.check("10.0.0.1", None, None).is_none());
         assert_eq!(
-            limiter.check("10.0.0.1", None),
+            limiter.check("10.0.0.1", None, None),
             Some(RateLimitViolation::Ip)
         );
         thread::sleep(Duration::from_millis(150));
-        assert!(limiter.check("10.0.0.1", None).is_none());
+        assert!(limiter.check("10.0.0.1", None, None).is_none());
     }
 
     #[test]
@@ -257,11 +397,16 @@ mod tests {
             ip_burst: 1.0,
             user_rps: 1.0,
             user_burst: 1.0,
+            api_key_rps: 1.0,
+            api_key_burst: 1.0,
+            api_key_header: "x-api-key".to_string(),
+            api_key_bearer: true,
+            api_key_required: false,
             max_keys: 2,
         };
         let limiter = RateLimiter::new(config);
-        assert!(limiter.check("10.0.0.1", None).is_none());
-        assert!(limiter.check("10.0.0.2", None).is_none());
-        assert!(limiter.check("10.0.0.3", None).is_none());
+        assert!(limiter.check("10.0.0.1", None, None).is_none());
+        assert!(limiter.check("10.0.0.2", None, None).is_none());
+        assert!(limiter.check("10.0.0.3", None, None).is_none());
     }
 }

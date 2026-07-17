@@ -199,7 +199,7 @@ Local L1 miss → ICP query siblings → select parent → fetch_via_peer → or
 | **B3** | Hierarchy без HTTP fetch к peer | ✅ Done | `peer_fetch.rs`, `main.rs` |
 | **B4** | ICP server не запускается | ✅ Done | `icp.rs`, `main.rs` |
 | **B5** | `ca.key` обязателен при старте | ✅ Done | `tls.rs` |
-| **B6** | Rate limiting | ✅ Done | `rate_limit.rs` |
+| **B6** | Rate limiting | ✅ Done | `rate_limit.rs` (IP / user / API key) |
 
 ### 🟠 High — M2 Squid parity / M3 Retro-search
 

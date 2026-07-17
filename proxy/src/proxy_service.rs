@@ -37,7 +37,7 @@ use crate::pipeline::{dispatch_cache_event, new_event_id, CacheEvent, HttpEventP
 #[cfg(feature = "kafka")]
 use crate::pipeline::{flush_kafka, KafkaEventPipeline};
 use crate::policy_cache::PolicyDecisionCache;
-use crate::rate_limit::{RateLimitViolation, RateLimiter};
+use crate::rate_limit::{extract_api_key, RateLimitViolation, RateLimiter};
 use crate::session::{header_ci, resolve_location, SessionCorrelator};
 use crate::sharded_cache::HttpL1Cache;
 use crate::streaming_miss::TeeMissBody;
@@ -869,33 +869,61 @@ impl ProxyService {
         &self,
         client_ip: &str,
         username: Option<&str>,
+        headers: &hyper::HeaderMap,
     ) -> Option<Response<Body>> {
-        let violation = self.rate_limiter.check(client_ip, username)?;
-        let limit_type = match violation {
-            RateLimitViolation::Ip => "ip",
-            RateLimitViolation::User => "user",
+        let api_key = extract_api_key(headers, self.rate_limiter.config());
+        let violation = self
+            .rate_limiter
+            .check(client_ip, username, api_key.as_deref())?;
+        let (limit_type, status, body) = match violation {
+            RateLimitViolation::Ip => (
+                "ip",
+                StatusCode::TOO_MANY_REQUESTS,
+                &b"429 Too Many Requests: rate limit exceeded"[..],
+            ),
+            RateLimitViolation::User => (
+                "user",
+                StatusCode::TOO_MANY_REQUESTS,
+                &b"429 Too Many Requests: rate limit exceeded"[..],
+            ),
+            RateLimitViolation::ApiKey => (
+                "api_key",
+                StatusCode::TOO_MANY_REQUESTS,
+                &b"429 Too Many Requests: API key rate limit exceeded"[..],
+            ),
+            RateLimitViolation::ApiKeyMissing => (
+                "api_key_missing",
+                StatusCode::UNAUTHORIZED,
+                &b"401 Unauthorized: API key required"[..],
+            ),
         };
         self.metrics
             .rate_limit_rejected_total
             .with_label_values(&[limit_type])
             .inc();
+        let key_prefix = api_key
+            .as_deref()
+            .map(|k| &k[..k.len().min(4)])
+            .unwrap_or("-");
         warn!(
-            "Rate limit exceeded ({}) for client_ip={} user={}",
+            "Rate limit ({}) for client_ip={} user={} api_key_prefix={}",
             limit_type,
             client_ip,
-            username.unwrap_or("-")
+            username.unwrap_or("-"),
+            key_prefix
         );
-        Some(Self::rate_limit_response())
+        Some(Self::rate_limit_response(status, body))
     }
 
-    fn rate_limit_response() -> Response<Body> {
-        Response::builder()
-            .status(StatusCode::TOO_MANY_REQUESTS)
-            .header("Content-Type", "text/plain; charset=utf-8")
-            .header("Retry-After", "1")
-            .body(full(Bytes::from_static(
-                b"429 Too Many Requests: rate limit exceeded",
-            )))
+    fn rate_limit_response(status: StatusCode, body: &'static [u8]) -> Response<Body> {
+        let mut builder = Response::builder()
+            .status(status)
+            .header("Content-Type", "text/plain; charset=utf-8");
+        if status == StatusCode::TOO_MANY_REQUESTS {
+            builder = builder.header("Retry-After", "1");
+        }
+        builder
+            .body(full(Bytes::from_static(body)))
             .unwrap_or_else(|_| Response::new(full(Bytes::from_static(b"429 Too Many Requests"))))
     }
 
@@ -1254,11 +1282,12 @@ impl ProxyService {
         };
         let user_agent = Self::request_header_str(&req, "user-agent");
 
-        if let Some(resp) = self.check_rate_limit(&client_ip, username.as_deref()) {
+        if let Some(resp) = self.check_rate_limit(&client_ip, username.as_deref(), req.headers()) {
+            let code = resp.status().as_u16();
             if let Some(g) = guard.take() {
-                g.finish(429, 0, 0);
+                g.finish(code, 0, 0);
             } else if let Some(scope) = fast_scope.take() {
-                scope.finish(429);
+                scope.finish(code);
             }
             return resp;
         }

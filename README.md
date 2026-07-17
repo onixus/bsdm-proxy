@@ -258,6 +258,11 @@ Token-bucket лимиты на IP и аутентифицированного п
 | `RATE_LIMIT_IP_BURST` | `200` | Burst на IP |
 | `RATE_LIMIT_USER_RPS` | `50` | Запросов/сек на пользователя |
 | `RATE_LIMIT_USER_BURST` | `100` | Burst на пользователя |
+| `RATE_LIMIT_API_KEY_RPS` | `20` | Запросов/сек на API key (`X-API-Key` / Bearer) |
+| `RATE_LIMIT_API_KEY_BURST` | `40` | Burst на API key |
+| `RATE_LIMIT_API_KEY_HEADER` | `x-api-key` | Имя заголовка с ключом |
+| `RATE_LIMIT_API_KEY_BEARER` | `true` | Также читать `Authorization: Bearer` |
+| `RATE_LIMIT_API_KEY_REQUIRED` | `false` | Без ключа → `401` (когда RL включён) |
 | `RATE_LIMIT_MAX_KEYS` | `10000` | Макс. отслеживаемых ключей |
 
 ### Redis L2 cache (опционально)
