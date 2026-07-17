@@ -12,6 +12,8 @@ pub struct Config {
     pub scores_table: String,
     /// M5.3 domain lexical feature store.
     pub phishing_features_table: String,
+    /// M5.4 client→domain beacon feature store.
+    pub beacon_features_table: String,
     pub clickhouse_user: Option<String>,
     pub clickhouse_password: Option<String>,
     pub poll_interval: Duration,
@@ -27,6 +29,12 @@ pub struct Config {
     pub z_clip: f64,
     /// Optional JSON artifact (`BaselineSet`) instead of live CH stats.
     pub baseline_path: Option<PathBuf>,
+    /// M5.4 beacon lookback (defaults align with alert-worker).
+    pub beacon_lookback: Duration,
+    pub beacon_min_hits: u64,
+    pub beacon_min_interval_secs: u64,
+    pub beacon_max_interval_secs: u64,
+    pub beacon_max_gap_cv: f64,
     pub webhook_url: Option<String>,
     pub webhook_timeout: Duration,
     pub metrics_port: u16,
@@ -65,6 +73,8 @@ impl Config {
             scores_table: std::env::var("ML_SCORES_TABLE").unwrap_or_else(|_| "ml_scores".into()),
             phishing_features_table: std::env::var("ML_PHISHING_FEATURES_TABLE")
                 .unwrap_or_else(|_| "domain_phishing_features".into()),
+            beacon_features_table: std::env::var("ML_BEACON_FEATURES_TABLE")
+                .unwrap_or_else(|_| "beacon_pair_features".into()),
             clickhouse_user: std::env::var("CLICKHOUSE_USER")
                 .ok()
                 .filter(|s| !s.is_empty()),
@@ -85,6 +95,11 @@ impl Config {
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
                 .map(PathBuf::from),
+            beacon_lookback: Duration::from_secs(env_u64("ML_BEACON_LOOKBACK_SECS", 3600)),
+            beacon_min_hits: env_u64("ML_BEACON_MIN_HITS", 5),
+            beacon_min_interval_secs: env_u64("ML_BEACON_MIN_INTERVAL_SECS", 45),
+            beacon_max_interval_secs: env_u64("ML_BEACON_MAX_INTERVAL_SECS", 900),
+            beacon_max_gap_cv: env_f64("ML_BEACON_MAX_GAP_CV", 0.25)?,
             webhook_url,
             webhook_timeout: Duration::from_secs(env_u64("ML_WEBHOOK_TIMEOUT_SECS", 10)),
             metrics_port: env_u64("METRICS_PORT", 8091) as u16,
@@ -113,6 +128,17 @@ impl Config {
 
     pub fn is_phishing_model(&self) -> bool {
         self.model == "phishing_lexical_v0"
+    }
+
+    pub fn is_beacon_model(&self) -> bool {
+        self.model == "cc_beacon_v0"
+    }
+
+    pub fn fq_beacon_features(&self) -> String {
+        format!(
+            "{}.{}",
+            self.clickhouse_database, self.beacon_features_table
+        )
     }
 }
 

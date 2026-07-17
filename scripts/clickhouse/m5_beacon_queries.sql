@@ -1,0 +1,39 @@
+-- M5.4 C&C beacon ML example queries for Grafana or ad-hoc SOC use.
+
+-- Top cc_beacon_v0 scores (last 24h)
+-- SELECT
+--   entity_id,
+--   max(score) AS max_score,
+--   argMax(severity, score) AS severity,
+--   max(scored_at) AS last_scored
+-- FROM bsdm.ml_scores
+-- WHERE scored_at >= now() - INTERVAL 1 DAY
+--   AND model = 'cc_beacon_v0'
+-- GROUP BY entity_id
+-- ORDER BY max_score DESC
+-- LIMIT 50;
+
+-- Compare ml-worker scores vs alert-worker beacon_periodic weak label
+-- SELECT
+--   entity_id,
+--   score,
+--   JSONExtractBool(features_json, 'beacon_periodic_match') AS periodic_match
+-- FROM bsdm.ml_scores
+-- WHERE scored_at >= now() - INTERVAL 1 DAY
+--   AND model = 'cc_beacon_v0'
+-- ORDER BY score DESC
+-- LIMIT 100;
+
+-- Feature store: lowest gap_cv pairs (most regular beacons)
+-- SELECT
+--   client_ip,
+--   domain,
+--   gap_count,
+--   gap_cv,
+--   avg_gap_secs,
+--   avg_response_size,
+--   off_hours_count
+-- FROM bsdm.beacon_pair_features
+-- WHERE extracted_at >= now() - INTERVAL 1 DAY
+-- ORDER BY gap_cv ASC, gap_count DESC
+-- LIMIT 50;

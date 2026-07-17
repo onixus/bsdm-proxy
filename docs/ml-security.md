@@ -66,8 +66,14 @@ python3 scripts/ml/compare_stub_vs_ueba.py
 | `ML_LOOKBACK_SECS` | `300` | Feature window length |
 | `ML_ENTITY_TYPES` | `client_ip` | `client_ip`, `username`, `domain` |
 | `ML_MIN_REQUESTS` | `10` | Min events per entity window |
-| `ML_MODEL` | `ueba_zscore_v0` | `ueba_zscore_v0`, `anomaly_stub_v0`, or `phishing_lexical_v0` |
+| `ML_MODEL` | `ueba_zscore_v0` | `ueba_zscore_v0`, `anomaly_stub_v0`, `phishing_lexical_v0`, or `cc_beacon_v0` |
 | `ML_PHISHING_FEATURES_TABLE` | `domain_phishing_features` | M5.3 domain feature store |
+| `ML_BEACON_FEATURES_TABLE` | `beacon_pair_features` | M5.4 client→domain feature store |
+| `ML_BEACON_LOOKBACK_SECS` | `3600` | Beacon window (aligns with `ALERT_BEACON_LOOKBACK_SECS`) |
+| `ML_BEACON_MIN_HITS` | `5` | Min regular gaps (aligns with alert-worker) |
+| `ML_BEACON_MIN_INTERVAL_SECS` | `45` | Min gap between requests |
+| `ML_BEACON_MAX_INTERVAL_SECS` | `900` | Max gap between requests |
+| `ML_BEACON_MAX_GAP_CV` | `0.25` | Max coefficient of variation for periodic beacon |
 | `ML_SCORE_THRESHOLD` | `0.8` | Webhook / severity cut |
 | `ML_BASELINE_LOOKBACK_SECS` | `86400` | History for population stats |
 | `ML_BASELINE_MIN_SAMPLES` | `30` | Min windows per entity_type |
@@ -83,7 +89,7 @@ python3 scripts/ml/compare_stub_vs_ueba.py
 | `anomaly_stub_v0` | M5.1 | Heuristic rate/deny/threat mix; also **fallback** when baseline empty |
 | `ueba_zscore_v0` | **M5.2** | Unsupervised mean abs-z vs population baseline |
 | `phishing_lexical_v0` | **M5.3** | Domain lexical heuristics + PhishTank / UT1 weak labels |
-| *(planned)* C&C ML | M5.4 | Augment `beacon_periodic` |
+| `cc_beacon_v0` | **M5.4** | C&C beacon scoring augmenting `beacon_periodic` |
 
 ### UEBA scoring
 
@@ -123,11 +129,39 @@ Lexical signals (computed in Rust): domain length, hyphens, digits, subdomain de
 python3 scripts/ml/eval_phishing_lexical.py
 ```
 
+### C&C beacon scoring (M5.4)
+
+Set `ML_MODEL=cc_beacon_v0` (scores `(client_ip, domain)` pairs):
+
+```bash
+CLICKHOUSE_URL=http://127.0.0.1:8123 \
+  ML_MODEL=cc_beacon_v0 \
+  ML_BEACON_LOOKBACK_SECS=3600 \
+  METRICS_PORT=8091 \
+  cargo run -p ml-worker --release
+```
+
+Augments M4 alert-worker `beacon_periodic` with behavioral signals:
+
+| Signal | Description |
+|--------|-------------|
+| **Weak label** | Passes `beacon_periodic` thresholds (gap_cv ≤ 0.25, ≥5 hits, gap 45–900s) |
+| Regularity | Low gap coefficient of variation |
+| Small payloads | avg response_size < 512 B |
+| POST ratio | High POST fraction |
+| Off-hours | Traffic 22:00–06:00 UTC |
+| Low URL diversity | ≤2 unique URLs with many requests |
+
+```bash
+python3 scripts/ml/eval_cc_beacon.py
+```
+
 ## Grafana
 
 Panel **Top anomalous entities (UEBA z-score / ml-worker)** on [BSDM HTTP Traffic (ClickHouse)](../grafana/dashboards/bsdm-http-traffic-ch.json).  
 Panel **Top phishing-scored domains (lexical / ml-worker M5.3)** on the same dashboard.  
-Ad-hoc SQL: [`scripts/clickhouse/m5_ueba_queries.sql`](../scripts/clickhouse/m5_ueba_queries.sql), [`scripts/clickhouse/m5_phishing_queries.sql`](../scripts/clickhouse/m5_phishing_queries.sql).
+Panel **Top C&C beacon pairs (cc_beacon_v0 / ml-worker M5.4)** on the same dashboard.  
+Ad-hoc SQL: [`scripts/clickhouse/m5_ueba_queries.sql`](../scripts/clickhouse/m5_ueba_queries.sql), [`scripts/clickhouse/m5_phishing_queries.sql`](../scripts/clickhouse/m5_phishing_queries.sql), [`scripts/clickhouse/m5_beacon_queries.sql`](../scripts/clickhouse/m5_beacon_queries.sql).
 
 ## Verify
 

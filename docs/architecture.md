@@ -68,7 +68,7 @@ flowchart TB
 | MITM | `proxy/src/tls.rs` | ✅ |
 | Hierarchy / ICP | `hierarchy.rs`, `peer_fetch.rs`, `icp.rs`, `hierarchy_config.rs` | ✅ opt-in (`HIERARCHY_ENABLED`) |
 | Event indexer | `cache-indexer/src/main.rs` | ✅ |
-| ML / analytics worker | `ml-worker` (:8091) | ✅ M5.3 phishing lexical + UEBA; C&C models TBD |
+| ML / analytics worker | `ml-worker` (:8091) | ✅ M5.4 C&C beacon + phishing + UEBA; write-back TBD |
 
 ---
 
