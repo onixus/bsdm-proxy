@@ -67,8 +67,10 @@ flowchart TB
 | Policy library | `proxy/src/lib.rs` — `acl`, `auth`, `categorization` | ✅ |
 | MITM | `proxy/src/tls.rs` | ✅ |
 | Hierarchy / ICP | `hierarchy.rs`, `peer_fetch.rs`, `icp.rs`, `hierarchy_config.rs` | ✅ opt-in (`HIERARCHY_ENABLED`) |
-| Event indexer | `cache-indexer/src/main.rs` | ✅ |
-| ML / analytics worker | `ml-worker` (:8091) | ✅ M5.5 write-back + M5.4 beacon + phishing + UEBA |
+| Event indexer | `cache-indexer` | ✅ Kafka→CH or Lite HTTP→SQLite |
+| Control plane | `control_api.rs` (:9090) | ✅ stats / purge / hierarchy / TLS |
+| ML / analytics worker | `ml-worker` (:8091) | ✅ M5.1–M5.5 (UEBA / phishing / C&C / write-back) |
+| Admin UI | `admin-console/` | ✅ React SPA |
 
 ---
 
@@ -79,28 +81,33 @@ TCP accept
   → HTTP/1.1 parse
   → CONNECT? → [MITM TLS | raw tunnel]
   → authenticate_proxy()          # Proxy-Authorization
+  → rate_limit (IP / user / API key)
   → check_policy()
        → categorization.categorize()   # UT1 Blacklists / OTX / custom
        → acl_engine.check_access()     # ArcSwap snapshot (lock-free read)
        → threat_score_cache.lookup()   # M5.5 opt-in O(1) ML score (async poll)
-  → L1 cache lookup (GET/HEAD)
+  → [optional] LLM exact / semantic near-hit (POST chat/completions)
+  → L1 cache lookup (GET/HEAD) → Redis L2 (opt)
+  → [if miss coalesce] singleflight waiters → COALESCED-HIT
   → [if HIERARCHY_ENABLED] resolve_source()
        → ICP query siblings (parallel UDP)
        → select parent (round-robin / weighted / closest / hash)
        → fetch_via_peer() on SiblingHit / ParentHit
   → upstream HTTP request (origin fallback)
   → cache insert + response
-  → send_to_kafka_async()         # fire-and-forget
+  → emit event (Kafka | EVENT_SINK_URL HTTP | noop)
 ```
 
 **Ключевые файлы:**
 
 | Этап | Файл | Функция |
 |------|------|---------|
-| Entry | `main.rs` | `handle_connection`, `handle_request` |
+| Entry | `main.rs`, `proxy_service.rs` | `handle_connection`, `handle_request` |
 | Auth | `auth.rs` | `AuthManager::authenticate` |
-| Policy | `main.rs` | `ProxyService::check_policy` |
-| Cache | `main.rs`, `cache_key.rs` | `http_cache`, `http_cache_key` |
+| Policy | `proxy_service.rs` | `ProxyService::check_policy` |
+| LLM cache | `semantic_cache.rs` | exact body-hash + optional near-hit |
+| Coalesce | `miss_coalesce.rs` | singleflight MISS |
+| Cache | `proxy_service.rs`, `cache_key.rs` | `http_cache`, `http_cache_key` |
 | Hierarchy | `hierarchy.rs`, `hierarchy_config.rs` | `resolve_source`, env loading |
 | Peer fetch | `peer_fetch.rs` | `fetch_via_peer` |
 | ICP | `icp.rs`, `main.rs` | `IcpServer::serve`, `IcpClient::query_peers` |
@@ -122,8 +129,9 @@ TCP accept
 ```
 CacheEvent (proxy_service / pipeline)
   → Kafka topic cache-events (env KAFKA_*, bounded queue)
-  → cache-indexer consumer
-  → ClickHouse INSERT `bsdm.http_cache` (JSONEachRow)
+     OR POST EVENT_SINK_URL (Lite)
+  → cache-indexer (Kafka consumer | /api/events)
+  → ClickHouse INSERT `bsdm.http_cache`  OR  SQLite / memory
 ```
 
 ```mermaid
@@ -152,21 +160,21 @@ sequenceDiagram
 ```
 proxy/
 ├── src/
-│   ├── main.rs          ← монолит: ProxyService, cache, Kafka, HTTP server, ICP spawn
-│   ├── lib.rs           ← acl, auth, categorization, hierarchy, icp, peers, selection
-│   ├── hierarchy.rs     ← resolve_source, sibling ICP, parent selection
-│   ├── hierarchy_config.rs ← env: HIERARCHY_ENABLED, CACHE_PARENTS, …
-│   ├── peer_fetch.rs    ← HTTP forward-proxy к parent/sibling
-│   ├── cache_key.rs     ← shared cache key (proxy + ICP handler)
-│   ├── peers.rs         ← peer registry, health, stats
-│   ├── icp.rs           ← ICP v2 UDP client/server
-│   ├── selection.rs     ← round-robin, weighted, closest, hash
-│   ├── tls.rs           ← MITM cert cache
-│   ├── metrics.rs       ← Prometheus
-│   ├── policy_config.rs ← env loading
-│   └── auth_config.rs
+│   ├── main.rs          ← startup, listeners, ICP/HTCP/discovery spawn
+│   ├── proxy_service.rs ← request path: auth → RL → policy → L1/L2 → coalesce/semantic → upstream
+│   ├── control_api.rs   ← DX REST: /api/stats, purge, hierarchy, upstream TLS
+│   ├── miss_coalesce.rs ← singleflight GET/HEAD MISS
+│   ├── semantic_cache.rs← LLM POST body-hash + local similarity index
+│   ├── threat_score_cache.rs ← M5.5 async poll + O(1) lookup
+│   ├── tag_index.rs     ← Cache-Tag / Surrogate-Key purge index
+│   ├── hierarchy.rs / hierarchy_config.rs / peer_fetch.rs / peers.rs / icp.rs / htcp.rs
+│   ├── cache_key.rs, tls.rs, metrics.rs, rate_limit.rs, upstream.rs
+│   └── lib.rs           ← module re-exports
 cache-indexer/
-└── src/main.rs          ← Kafka → ClickHouse
+└── src/                 ← Kafka|HTTP events → ClickHouse|SQLite|memory + Search API
+ml-worker/               ← M5 feature store + scores + threat-score API
+alert-worker/            ← M4 webhook alerts
+admin-console/           ← React admin UI
 e2e/                     ← smoke + E2E harness
 ```
 
@@ -245,7 +253,8 @@ M1  ██████████████  B1–B6 ✅
 M2  ██████████████  B7–B9 B13–B14 B21–B25 ✅
 M3  █████████████░  B10–B12 B17 ✅ · B20 ✅
 M4  ██████████████  B16 ✅ · B18 ✅ · B19 ✅ · B20 ✅
-M5  ██░░░░░░░░░░░░  B15 scaffold ✅ · models M5.2+```
+M5  ██████████████  B15 ✅ · M5.1–M5.5 (UEBA / phishing / C&C / write-back)
+```
 
 ---
 
@@ -258,7 +267,7 @@ Critical/high блокеры B1–B14, B17, B22–B26 — **закрыты**. An
 ### Волна 3 — M4/M5 foundation
 
 1. ~~**B16** — rich event schema~~ ✅ (`session_id`, `acl_action`, `threat_sources`)
-2. ~~**B15** — analytics / ML worker scaffold~~ ✅ (`ml-worker`, ADR 0003); trained models still open
+2. ~~**B15** — analytics / ML worker~~ ✅ (`ml-worker`, ADR 0003; M5.1–M5.5)
 3. ~~**B18** — behavioral / beacon signals~~ ✅ (`beacon_periodic`)
 4. ~~**B19** — SIEM webhook~~ ✅ (`alert-worker`)
 5. ~~**B8** — online categorization off hot path~~ ✅ (#104)
@@ -293,4 +302,4 @@ flowchart LR
 
 ---
 
-*Версия документа: 0.5.0 · M1–M4 done · M5.1 ml-worker scaffold*
+*Версия документа: 0.5.0 · M1–M5 done · DX/AI prep (control plane, coalescing, LLM cache)*

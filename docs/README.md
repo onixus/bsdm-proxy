@@ -2,7 +2,7 @@
 
 Центральное оглавление. Страницы wiki — в каталоге `docs/`.
 
-**Текущая версия:** 0.5.0 · Analytics: Kafka → ClickHouse · [roadmap](roadmap.md)
+**Текущая версия:** 0.5.0 · M1–M5 done · Unreleased: DX/AI · Analytics: Kafka → ClickHouse (или Lite: HTTP → SQLite) · [roadmap](roadmap.md)
 
 ## Начало работы
 
@@ -33,7 +33,7 @@
 | [performance.md](performance.md) | Тюнинг RPS, bench |
 | [semantic-cache.md](semantic-cache.md) | LLM / semantic cache prep |
 | [acl.md](acl.md) | ACL + REST API |
-| [control-plane.md](control-plane.md) | DX Phase 2: stats, cache purge, ACL CRUD |
+| [control-plane.md](control-plane.md) | DX: stats, purge, hierarchy/TLS reload, ACL CRUD |
 | [categorization.md](categorization.md) | UT1 Blacklists, metrics, OTX |
 | [hierarchical-caching.md](hierarchical-caching.md) | ICP/HTCP hierarchy |
 | [clickhouse-analytics.md](clickhouse-analytics.md) | ClickHouse analytics |
@@ -41,6 +41,8 @@
 | [ml-security.md](ml-security.md) | ML worker + feature store (M5) |
 | [adr/0003-ml-worker-feature-store.md](adr/0003-ml-worker-feature-store.md) | ADR: CH feature store |
 | [search-api.md](search-api.md) | REST Search API |
+| [benchmarks-httparchive.md](benchmarks-httparchive.md) | HTTP Archive CDN URL workload |
+| [../admin-console/README.md](../admin-console/README.md) | Admin Console (Vite UI) |
 
 ## Архитектура и roadmap
 
@@ -50,7 +52,7 @@
 | [BLOCKERS.md](BLOCKERS.md) | Реестр блокеров B1–B25 |
 | [roadmap.md](roadmap.md) | Milestones Squid + ретропоиск + ML (M1–M5) |
 | [strategic-roadmap.md](strategic-roadmap.md) | Стратегия: Lite, DX, Wasm, AI-трафик |
-| [lite.md](lite.md) | Lite mode: `docker-compose.lite.yml` |
+| [lite.md](lite.md) | Lite: proxy + SQLite (`docker-compose.lite.yml`) |
 | [swg-backlog-mapping.md](swg-backlog-mapping.md) | Mapping vs SWG vendors |
 | [adr/0001-tiered-sharded-l1-cache.md](adr/0001-tiered-sharded-l1-cache.md) | ADR tiered L1 |
 | [adr/0002-clickhouse-analytics.md](adr/0002-clickhouse-analytics.md) | ADR ClickHouse |

@@ -10,8 +10,8 @@
 
 | Файл | Назначение |
 |------|------------|
-| `docker-compose.lite.yml` | **Lite:** один caching proxy (MITM + L1 spill), без Kafka/CH |
-| `docker-compose.yml` | Полный стек: proxy, cache-indexer, kafka, zookeeper, clickhouse, prometheus, **alertmanager**, grafana; optional `alert-worker` (`--profile alerts`) |
+| `docker-compose.lite.yml` | **Lite:** proxy + SQLite indexer (MITM + L1 spill), без Kafka/CH |
+| `docker-compose.yml` | Полный стек: proxy, cache-indexer, kafka, zookeeper, clickhouse, prometheus, **alertmanager**, grafana; optional `alert-worker` (`--profile alerts`), `ml-worker` (`--profile ml`) |
 | `docker-compose.test.yml` | Smoke/E2E external (upstream + proxy) |
 | `docker-compose.redis-l2.yml` | Два proxy + Redis L2 |
 | `docker-compose.hierarchy.yml` | Multi-instance + ICP |
@@ -38,14 +38,14 @@ docker compose build proxy cache-indexer
 
 ---
 
-## Lite (standalone proxy)
+## Lite (proxy + SQLite Search API)
 
 ```bash
 ./scripts/gen-ca.sh
 docker compose -f docker-compose.lite.yml up -d --build
 ```
 
-Один сервис `proxy`, без analytics plane. Docs: [lite.md](lite.md).
+Сервисы: `proxy` + `cache-indexer` (`INDEX_STORE=sqlite`, `EVENT_SINK_URL`). Без Kafka/ClickHouse. Docs: [lite.md](lite.md).
 
 ## Полный стек
 

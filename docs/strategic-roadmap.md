@@ -57,10 +57,10 @@
 
 | Стратегическая фаза | Пересекается с |
 |---------------------|----------------|
-| Lite | packaging, docker, optional analytics path (после M3 full stack) |
-| DX | ACL REST API (частично есть), metrics; расширяет control plane |
-| Wasm | новая платформа поверх M2 parity |
-| AI-трафик | rate limiting (B6 ✅), M5; semantic cache — отдельный трек |
+| Lite | `docker-compose.lite.yml`, SQLite indexer, optional `kafka` Cargo feature (B21) |
+| DX | REST control plane ✅ ([control-plane.md](control-plane.md)); gRPC — later |
+| Wasm | новая платформа поверх M2 parity (TBD) |
+| AI-трафик | coalescing ✅, API-key RL ✅, LLM/semantic cache prep ✅; external vector DB — later |
 
 Текущий product plan (Squid / ретропоиск / ML): [roadmap.md](roadmap.md).
 
