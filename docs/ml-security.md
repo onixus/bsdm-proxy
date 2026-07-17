@@ -195,6 +195,7 @@ python3 scripts/ml/eval_cc_beacon.py
 Panel **Top anomalous entities (UEBA z-score / ml-worker)** on [BSDM HTTP Traffic (ClickHouse)](../grafana/dashboards/bsdm-http-traffic-ch.json).  
 Panel **Top phishing-scored domains (lexical / ml-worker M5.3)** on the same dashboard.  
 Panel **Top C&C beacon pairs (cc_beacon_v0 / ml-worker M5.4)** on the same dashboard.  
+Panel **Active threat score cache (M5.5 write-back)** on the same dashboard.  
 Ad-hoc SQL: [`scripts/clickhouse/m5_ueba_queries.sql`](../scripts/clickhouse/m5_ueba_queries.sql), [`scripts/clickhouse/m5_phishing_queries.sql`](../scripts/clickhouse/m5_phishing_queries.sql), [`scripts/clickhouse/m5_beacon_queries.sql`](../scripts/clickhouse/m5_beacon_queries.sql), [`scripts/clickhouse/m5_writeback_queries.sql`](../scripts/clickhouse/m5_writeback_queries.sql).
 
 ## Verify

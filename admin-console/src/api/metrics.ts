@@ -50,14 +50,20 @@ export async function fetchDashboardMetrics(): Promise<DashboardMetric[]> {
 }
 
 export async function fetchTopMlScores(): Promise<MlScoreRow[]> {
-  const settings = loadApiSettings()
-  try {
-    return await apiFetch<MlScoreRow[]>('/api/ml/scores?limit=10', {
-      baseUrl: settings.mlBaseUrl,
-    })
-  } catch {
-    return mockMlScores()
-  }
+  const { fetchThreatScores } = await import('./threatScores')
+  const snap = await fetchThreatScores()
+  return snap.scores
+    .slice()
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 10)
+    .map((s) => ({
+      entity_id: s.entity_id,
+      entity_type: s.entity_type,
+      score: s.score,
+      severity: s.severity,
+      model: s.model,
+      scored_at: s.scored_at,
+    }))
 }
 
 function mockMetrics(): DashboardMetric[] {
@@ -66,13 +72,5 @@ function mockMetrics(): DashboardMetric[] {
     { id: 'hit-rate', label: 'Cache hit rate', value: '87.2', unit: '%', trend: 'up', status: 'ok' },
     { id: 'denied', label: 'Denied (24h)', value: 342, trend: 'flat', status: 'warn' },
     { id: 'ml-alerts', label: 'ML anomalies', value: 7, trend: 'down', status: 'warn' },
-  ]
-}
-
-function mockMlScores(): MlScoreRow[] {
-  return [
-    { entity_id: '10.0.1.42', entity_type: 'client_ip', score: 0.91, severity: 'critical', model: 'ueba_zscore_v0', scored_at: new Date().toISOString() },
-    { entity_id: '10.0.1.88', entity_type: 'client_ip', score: 0.72, severity: 'high', model: 'ueba_zscore_v0', scored_at: new Date().toISOString() },
-    { entity_id: 'jdoe', entity_type: 'username', score: 0.55, severity: 'medium', model: 'anomaly_stub_v0', scored_at: new Date().toISOString() },
   ]
 }

@@ -6,11 +6,13 @@ import {
   Settings,
   X,
   Activity,
+  Brain,
 } from 'lucide-react'
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/logs', label: 'Logs', icon: ScrollText },
+  { to: '/threat-scores', label: 'Threat scores', icon: Brain },
   { to: '/policies', label: 'Policies', icon: Shield },
   { to: '/settings', label: 'Settings', icon: Settings },
 ] as const

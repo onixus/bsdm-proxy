@@ -218,7 +218,7 @@ Local L1 miss → ICP query siblings → select parent → fetch_via_peer → or
 
 | ID | Блокер | Описание | Milestone |
 |----|--------|----------|-----------|
-| **B15** | Analytics/ML worker | ✅ M5.1 scaffold (`ml-worker` + CH feature store); models → M5.2+ | M5 |
+| **B15** | Analytics/ML worker | ✅ M5.1–M5.5 (`ml-worker` + CH feature store + write-back) | M5 |
 | **B16** | Event schema for analytics | ✅ Done (`session_id`, `acl_action`, `threat_sources`) | M3–M4 |
 | **B17** | Analytics UI in compose | ✅ Done (Grafana + ClickHouse; OS Dashboards removed) | M3 |
 | **B18** | Behavioral / beacon signals | ✅ Done (`beacon_periodic` in alert-worker) | M4 |
