@@ -10,12 +10,9 @@ import {
   XCircle,
   RefreshCw,
   Zap,
-  Sliders,
   ShieldCheck,
   Search,
-  FileCode,
   Layers,
-  ArrowRight,
 } from 'lucide-react'
 
 import {
@@ -44,7 +41,6 @@ export function WasmPluginsPage() {
   const [plugins, setPlugins] = useState<WasmPlugin[]>([])
   const [config, setConfig] = useState<WasmGlobalConfig | null>(null)
   const [stats, setStats] = useState<WasmStats | null>(null)
-  const [loading, setLoading] = useState(true)
 
   // Search filter
   const [searchQuery, setSearchQuery] = useState('')
@@ -53,7 +49,7 @@ export function WasmPluginsPage() {
   const [testMethod, setTestMethod] = useState('GET')
   const [testUrl, setTestUrl] = useState('https://evil.blocked.test/phish')
   const [testClientIp, setTestClientIp] = useState('192.168.1.50')
-  const [testUsername, setTestUsername] = useState('alice')
+  const [testUsername] = useState('alice')
   const [testResult, setTestResult] = useState<WasmTestResult | null>(null)
   const [testing, setTesting] = useState(false)
 
@@ -81,7 +77,6 @@ export function WasmPluginsPage() {
   const [cfgMaxMem, setCfgMaxMem] = useState(16)
 
   const loadData = async () => {
-    setLoading(true)
     try {
       const [pList, cfg, st] = await Promise.all([
         fetchWasmPlugins(),
@@ -100,8 +95,6 @@ export function WasmPluginsPage() {
       }
     } catch (err) {
       console.error('Error loading Wasm plugin data:', err)
-    } finally {
-      setLoading(false)
     }
   }
 

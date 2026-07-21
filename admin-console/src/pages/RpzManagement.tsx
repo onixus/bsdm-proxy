@@ -10,14 +10,10 @@ import {
   XCircle,
   Settings,
   Trash2,
-  FileText,
   Globe,
   Radio,
-  Sliders,
   Database,
-  ArrowUpRight,
   ShieldCheck,
-  AlertTriangle,
 } from 'lucide-react'
 
 import {
@@ -40,7 +36,6 @@ import {
   type RpzStats,
   type RpzAction,
   type RpzListFormat,
-  type RpzListSource,
 } from '../api/rpz'
 
 import { Button } from '../components/ui/Button'

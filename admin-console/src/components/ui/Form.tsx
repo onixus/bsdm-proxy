@@ -90,3 +90,23 @@ export function FormSection({ title, children }: { title: string; children: Reac
 export function FormGrid({ children }: { children: React.ReactNode }) {
   return <div className="grid gap-4 sm:grid-cols-2">{children}</div>
 }
+
+export function FormField({
+  label,
+  required,
+  children,
+}: {
+  label: string
+  required?: boolean
+  children: React.ReactNode
+}) {
+  return (
+    <div className="space-y-1.5">
+      <label className="block text-xs font-semibold text-text-primary">
+        {label} {required && <span className="text-accent">*</span>}
+      </label>
+      {children}
+    </div>
+  )
+}
+
