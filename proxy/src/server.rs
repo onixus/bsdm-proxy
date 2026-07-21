@@ -401,7 +401,25 @@ async fn handle_connect_mitm(
                 }
             };
 
-            Ok::<_, Infallible>(service.handle_request(req, client_ip, proxy_user).await)
+            let method = req.method().as_str().to_string();
+            let url = req.uri().to_string();
+            let req_headers = req.headers().clone();
+            let username = proxy_user.as_deref().map(|u| u.username.clone());
+
+            let mut resp = service.handle_request(req, client_ip.clone(), proxy_user).await;
+
+            #[cfg(feature = "wasm")]
+            service.run_wasm_hook_response(
+                &method,
+                &url,
+                &client_ip,
+                username.as_deref(),
+                &req_headers,
+                resp.status().as_u16(),
+                resp.headers_mut(),
+            );
+
+            Ok::<_, Infallible>(resp)
         }
     });
 
@@ -546,7 +564,25 @@ pub async fn handle_connection(
                 Err(resp) => return Ok(resp),
             };
 
-            Ok::<_, Infallible>(service.handle_request(req, client_ip, proxy_user).await)
+            let method = req.method().as_str().to_string();
+            let url = req.uri().to_string();
+            let req_headers = req.headers().clone();
+            let username = proxy_user.as_deref().map(|u| u.username.clone());
+
+            let mut resp = service.handle_request(req, client_ip.clone(), proxy_user).await;
+
+            #[cfg(feature = "wasm")]
+            service.run_wasm_hook_response(
+                &method,
+                &url,
+                &client_ip,
+                username.as_deref(),
+                &req_headers,
+                resp.status().as_u16(),
+                resp.headers_mut(),
+            );
+
+            Ok::<_, Infallible>(resp)
         }
     });
 

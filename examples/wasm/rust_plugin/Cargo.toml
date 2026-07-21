@@ -1,0 +1,11 @@
+[package]
+name = "rust_plugin"
+version = "0.1.0"
+edition = "2021" # Or 2024 if rustc supports it
+
+[lib]
+crate-type = ["cdylib"]
+test = false
+
+[dependencies]
+bsdm-wasm-sdk = { path = "../../../bsdm-wasm-sdk" }

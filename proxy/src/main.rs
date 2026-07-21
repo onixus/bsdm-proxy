@@ -261,6 +261,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         hierarchy_peers,
         hierarchy_config.use_htcp,
         service.upstream_client(),
+        #[cfg(feature = "wasm")]
+        service.wasm_hook.clone(),
     ));
     info!(
         "Control plane API on :{}/api/stats · :{}/api/cache/purge · :{}/api/hierarchy/* · :{}/api/upstream/tls",

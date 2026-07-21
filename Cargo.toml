@@ -7,7 +7,7 @@ members = [
     "alert-worker",
     "ml-worker",
     "dns-sinkhole",
-    "e2e",
+    "e2e", "bsdm-wasm-sdk", "examples/wasm/rust_plugin",
 ]
 
 [workspace.dependencies]
