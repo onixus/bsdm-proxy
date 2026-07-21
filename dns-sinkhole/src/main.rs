@@ -1,5 +1,6 @@
 mod config;
 mod dns;
+mod doh_dot;
 mod server;
 mod zone;
 

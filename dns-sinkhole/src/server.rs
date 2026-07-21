@@ -231,6 +231,13 @@ mod tests {
             ttl: 60,
             metrics_port: 0,
             upstream_timeout: Duration::from_millis(500),
+            doh_enabled: true,
+            doh_bind: "127.0.0.1:0".parse().unwrap(),
+            doh_path: "/dns-query".into(),
+            dot_enabled: true,
+            dot_bind: "127.0.0.1:0".parse().unwrap(),
+            tls_cert_path: None,
+            tls_key_path: None,
         };
         let sock = Arc::new(UdpSocket::bind(cfg.bind).await.unwrap());
         let addr = sock.local_addr().unwrap();

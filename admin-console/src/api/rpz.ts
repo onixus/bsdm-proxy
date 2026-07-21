@@ -41,6 +41,11 @@ export interface DnsSinkholeConfig {
   logBlocks: boolean
   wildcardMatching: boolean
   upstreamDns: string[]
+  dohEnabled: boolean
+  dohBind: string
+  dohPath: string
+  dotEnabled: boolean
+  dotBind: string
 }
 
 export interface RpzTestResult {
@@ -62,6 +67,8 @@ export interface RpzStats {
   activeLists: number
   totalRules: number
   blocked24h: number
+  dohQueries24h: number
+  dotQueries24h: number
   topDomains: {
     domain: string
     count: number
@@ -194,6 +201,11 @@ export async function fetchSinkholeConfig(): Promise<DnsSinkholeConfig> {
         logBlocks: true,
         wildcardMatching: true,
         upstreamDns: ['1.1.1.1', '8.8.8.8'],
+        dohEnabled: true,
+        dohBind: '0.0.0.0:8443',
+        dohPath: '/dns-query',
+        dotEnabled: true,
+        dotBind: '0.0.0.0:853',
       }
     }
     return memoryConfig
@@ -221,9 +233,10 @@ export async function testDomainQuery(domain: string): Promise<RpzTestResult> {
     return await apiFetch<RpzTestResult>(`/api/dns/rpz/test?domain=${encodeURIComponent(domain)}`, {
       baseUrl,
       token,
+      method: 'POST',
     })
   } catch {
-    return mockTestDomain(domain)
+    return mockTestQuery(domain)
   }
 }
 
@@ -240,6 +253,8 @@ export async function fetchRpzStats(): Promise<RpzStats> {
       activeLists: active.length,
       totalRules,
       blocked24h: 142850,
+      dohQueries24h: 68420,
+      dotQueries24h: 31200,
       topDomains: [
         { domain: 'tracker.adtech-analytics.com', count: 32410, action: 'SINKHOLE', category: 'Ads & Telemetry' },
         { domain: 'malware-drop.badsite.ru', count: 18920, action: 'NXDOMAIN', category: 'Malware' },

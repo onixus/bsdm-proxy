@@ -1038,6 +1038,7 @@ dependencies = [
 name = "dns-sinkhole"
 version = "0.5.7+033"
 dependencies = [
+ "base64",
  "prometheus",
  "tempfile",
  "tokio",
