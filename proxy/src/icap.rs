@@ -123,14 +123,21 @@ struct ParsedIcapUrl {
 }
 
 fn parse_icap_url(url: &str) -> Result<ParsedIcapUrl, String> {
-    let (rest, is_tls) =
-        if let Some(r) = url.strip_prefix("icaps://").or_else(|| url.strip_prefix("ICAPS://")) {
-            (r, true)
-        } else if let Some(r) = url.strip_prefix("icap://").or_else(|| url.strip_prefix("ICAP://")) {
-            (r, false)
-        } else {
-            return Err(format!("ICAP_URL must start with icap:// or icaps:// (got {url})"));
-        };
+    let (rest, is_tls) = if let Some(r) = url
+        .strip_prefix("icaps://")
+        .or_else(|| url.strip_prefix("ICAPS://"))
+    {
+        (r, true)
+    } else if let Some(r) = url
+        .strip_prefix("icap://")
+        .or_else(|| url.strip_prefix("ICAP://"))
+    {
+        (r, false)
+    } else {
+        return Err(format!(
+            "ICAP_URL must start with icap:// or icaps:// (got {url})"
+        ));
+    };
 
     let (authority, path) = match rest.split_once('/') {
         Some((a, p)) => (a, format!("/{p}")),

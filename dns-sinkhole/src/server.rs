@@ -5,8 +5,8 @@ use crate::dns::{
     a_rdata, aaaa_rdata, build_response, formerr, parse_query, Query, CLASS_IN, RCODE_NXDOMAIN,
     RCODE_SERVFAIL, TYPE_A, TYPE_AAAA,
 };
-use crate::zone::{Zone, ZoneAction};
 use crate::doh_dot::{decode_doh_base64url, encode_dot_frame, parse_dot_length};
+use crate::zone::{Zone, ZoneAction};
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
 use hyper::body::Incoming;
@@ -438,7 +438,6 @@ pub async fn run_doh(
         });
     }
 }
-
 
 #[cfg(test)]
 mod tests {
