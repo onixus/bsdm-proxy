@@ -266,6 +266,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Control plane API on :{}/api/stats · :{}/api/cache/purge · :{}/api/hierarchy/* · :{}/api/upstream/tls",
         metrics_port, metrics_port, metrics_port, metrics_port
     );
+    if !control_api.auth_required() {
+        warn!(
+            "CONTROL_API_TOKEN is not set — mutating endpoints on :{}/api/cache/purge, \
+             /api/hierarchy/reload and /api/upstream/tls/reload are unauthenticated; \
+             set CONTROL_API_TOKEN or restrict access to METRICS_PORT",
+            metrics_port
+        );
+    }
     tokio::spawn(metrics_server(
         metrics.clone(),
         draining.clone(),

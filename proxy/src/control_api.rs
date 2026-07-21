@@ -135,7 +135,9 @@ impl ControlApiState {
         let Some(expected) = &self.api_token else {
             return true;
         };
-        bearer.is_some_and(|token| token == expected)
+        bearer.is_some_and(|token| {
+            crate::security_util::constant_time_eq(token.as_bytes(), expected.as_bytes())
+        })
     }
 
     /// Whether mutating control RPCs require a Bearer token.

@@ -34,6 +34,7 @@ pub mod pipeline;
 pub mod policy_cache;
 pub mod proxy_service;
 pub mod rate_limit;
+pub mod security_util;
 pub mod selection;
 pub mod semantic_cache;
 pub mod server;

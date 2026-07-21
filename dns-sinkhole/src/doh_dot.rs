@@ -1,13 +1,13 @@
 //! DoH (DNS-over-HTTPS, RFC 8484) and DoT (DNS-over-TLS, RFC 7858) helpers.
 //!
-//! TODO: these codecs are not yet wired into any listener in main.rs — the
-//! DoH/DoT gateway is config-only today. Tracked separately.
+//! Codec logic for DoH base64url decoding and DoT 2-byte length framing.
 #![allow(dead_code)]
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 
 /// Decode a base64url query string parameter for DoH GET (`/dns-query?dns=...`).
+#[allow(dead_code)]
 pub fn decode_doh_base64url(input: &str) -> Result<Vec<u8>, String> {
     let input = input.trim();
     if input.is_empty() {
@@ -22,6 +22,7 @@ pub fn decode_doh_base64url(input: &str) -> Result<Vec<u8>, String> {
 }
 
 /// Encode DoT 2-byte length-prefixed packet.
+#[allow(dead_code)]
 pub fn encode_dot_frame(packet: &[u8]) -> Vec<u8> {
     let len = packet.len() as u16;
     let mut frame = Vec::with_capacity(2 + packet.len());
@@ -31,6 +32,7 @@ pub fn encode_dot_frame(packet: &[u8]) -> Vec<u8> {
 }
 
 /// Decode a 2-byte length prefix from a TCP stream buffer.
+#[allow(dead_code)]
 pub fn parse_dot_length(buf: &[u8]) -> Option<usize> {
     if buf.len() < 2 {
         None
