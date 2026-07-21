@@ -32,6 +32,9 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Generate MITM CA (docker-compose.lite.yml has MITM_ENABLED=true)
+        run: ./scripts/gen-ca.sh
+
       - name: Start bsdm-proxy (Lite Mode)
         run: |
           # Запускаем облегченный стек без Kafka/ClickHouse, чтобы не ловить OOM на воркере
