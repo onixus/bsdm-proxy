@@ -7,6 +7,7 @@ import {
   X,
   Activity,
   Brain,
+  Radio,
 } from 'lucide-react'
 
 const navItems = [
@@ -14,6 +15,7 @@ const navItems = [
   { to: '/logs', label: 'Logs', icon: ScrollText },
   { to: '/threat-scores', label: 'Threat scores', icon: Brain },
   { to: '/policies', label: 'Policies', icon: Shield },
+  { to: '/rpz', label: 'RPZ Sinkhole', icon: Radio },
   { to: '/settings', label: 'Settings', icon: Settings },
 ] as const
 
