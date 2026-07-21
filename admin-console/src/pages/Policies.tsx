@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { RefreshCw, RotateCcw, Save, Trash2, Cpu, Zap, ShieldCheck } from 'lucide-react'
+import { RefreshCw, RotateCcw, Save, Trash2, Cpu, Zap } from 'lucide-react'
 import {
   deleteAclRule,
   fetchAclRules,
