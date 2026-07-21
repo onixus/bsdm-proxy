@@ -76,7 +76,8 @@ impl Config {
             .unwrap_or_else(|_| "0.0.0.0:8443".into())
             .parse()
             .map_err(|e| format!("DNS_SINKHOLE_DOH_BIND: {e}"))?;
-        let doh_path = std::env::var("DNS_SINKHOLE_DOH_PATH").unwrap_or_else(|_| "/dns-query".into());
+        let doh_path =
+            std::env::var("DNS_SINKHOLE_DOH_PATH").unwrap_or_else(|_| "/dns-query".into());
 
         let dot_enabled = env_bool("DNS_SINKHOLE_DOT_ENABLED", true);
         let dot_bind = std::env::var("DNS_SINKHOLE_DOT_BIND")
@@ -84,8 +85,12 @@ impl Config {
             .parse()
             .map_err(|e| format!("DNS_SINKHOLE_DOT_BIND: {e}"))?;
 
-        let tls_cert_path = std::env::var("DNS_SINKHOLE_TLS_CERT").ok().filter(|s| !s.is_empty());
-        let tls_key_path = std::env::var("DNS_SINKHOLE_TLS_KEY").ok().filter(|s| !s.is_empty());
+        let tls_cert_path = std::env::var("DNS_SINKHOLE_TLS_CERT")
+            .ok()
+            .filter(|s| !s.is_empty());
+        let tls_key_path = std::env::var("DNS_SINKHOLE_TLS_KEY")
+            .ok()
+            .filter(|s| !s.is_empty());
 
         Ok(Self {
             enabled,

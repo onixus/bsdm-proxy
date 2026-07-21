@@ -164,8 +164,16 @@ impl EbpfXdpManager {
 
         EbpfStats {
             active_blocked_ips: count,
-            packets_dropped_total: if dropped == 0 && count > 0 { 184250 } else { dropped },
-            bytes_dropped_total: if dropped == 0 && count > 0 { 117920000 } else { dropped * 64 },
+            packets_dropped_total: if dropped == 0 && count > 0 {
+                184250
+            } else {
+                dropped
+            },
+            bytes_dropped_total: if dropped == 0 && count > 0 {
+                117920000
+            } else {
+                dropped * 64
+            },
             kernel_latency_us: 0.45,
         }
     }
