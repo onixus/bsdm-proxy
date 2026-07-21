@@ -57,6 +57,20 @@ jobs:
             fi
           done
 
+          echo "Ожидание запуска mock-upstream..."
+          for i in {1..30}; do
+            if curl -s -I http://localhost:18080/ping | grep -q "HTTP/"; then
+              echo "✅ mock-upstream успешно запущен и отвечает!"
+              break
+            fi
+            sleep 1
+            if [ $i -eq 30 ]; then
+              echo "❌ mock-upstream не запустился за 30 секунд. Логи контейнера:"
+              docker compose -f docker-compose.lite.yml logs mock-upstream
+              exit 1
+            fi
+          done
+
       - name: Run Standard Load Test Script
         run: |
           chmod +x ./scripts/run-load-test.sh
