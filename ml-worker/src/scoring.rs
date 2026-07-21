@@ -89,14 +89,14 @@ pub fn flight_risk_v0(
     // Relative to baseline:
     let relative_signal = if let Some(b) = baseline {
         let z_count = b.job_search_count.z(features.job_search_count as f64, eps);
-        
+
         let ratio = if features.request_count == 0 {
             0.0
         } else {
             features.job_search_count as f64 / features.request_count as f64
         };
         let z_ratio = b.job_search_ratio.z(ratio, eps);
-        
+
         let max_z = z_count.max(z_ratio).clamp(0.0, clip);
         max_z / clip
     } else {
@@ -203,6 +203,7 @@ mod tests {
             unique_urls: 5,
             deny_count: deny,
             threat_hit_count: threat,
+            job_search_count: 0,
             avg_response_size: 100.0,
             avg_duration_ms: 10.0,
             gap_cv: 0.5,
@@ -234,12 +235,14 @@ mod tests {
             unique_urls: m(5.0, 2.0),
             deny_count: m(1.0, 1.0),
             threat_hit_count: m(0.0, 0.5),
+            job_search_count: m(0.0, 0.0),
             avg_response_size: m(100.0, 20.0),
             avg_duration_ms: m(10.0, 3.0),
             gap_cv: m(0.5, 0.2),
             max_domain_len: m(12.0, 4.0),
             deny_ratio: m(0.05, 0.05),
             threat_ratio: m(0.0, 0.05),
+            job_search_ratio: m(0.0, 0.0),
         };
         let mut set = BaselineSet::default();
         set.baselines.insert("client_ip".into(), b);

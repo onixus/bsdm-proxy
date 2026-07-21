@@ -150,14 +150,20 @@ pub fn baseline_from_row(
         unique_urls: moments(row, "unique_urls")?,
         deny_count: moments(row, "deny_count")?,
         threat_hit_count: moments(row, "threat_hit_count")?,
-        job_search_count: moments(row, "job_search_count").unwrap_or(FeatureMoments{mean: 0.0, std: 0.0}),
+        job_search_count: moments(row, "job_search_count").unwrap_or(FeatureMoments {
+            mean: 0.0,
+            std: 0.0,
+        }),
         avg_response_size: moments(row, "avg_response_size")?,
         avg_duration_ms: moments(row, "avg_duration_ms")?,
         gap_cv: moments(row, "gap_cv")?,
         max_domain_len: moments(row, "max_domain_len")?,
         deny_ratio: moments(row, "deny_ratio")?,
         threat_ratio: moments(row, "threat_ratio")?,
-        job_search_ratio: moments(row, "job_search_ratio").unwrap_or(FeatureMoments{mean: 0.0, std: 0.0}),
+        job_search_ratio: moments(row, "job_search_ratio").unwrap_or(FeatureMoments {
+            mean: 0.0,
+            std: 0.0,
+        }),
     })
 }
 
