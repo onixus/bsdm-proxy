@@ -8,6 +8,7 @@ import {
   Activity,
   Brain,
   Radio,
+  Cpu,
 } from 'lucide-react'
 
 const navItems = [
@@ -16,6 +17,7 @@ const navItems = [
   { to: '/threat-scores', label: 'Threat scores', icon: Brain },
   { to: '/policies', label: 'Policies', icon: Shield },
   { to: '/rpz', label: 'RPZ Sinkhole', icon: Radio },
+  { to: '/wasm', label: 'Wasm Plugins', icon: Cpu },
   { to: '/settings', label: 'Settings', icon: Settings },
 ] as const
 
