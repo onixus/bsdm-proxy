@@ -7,6 +7,7 @@ use serde::Serialize;
 
 pub const MODEL_STUB: &str = "anomaly_stub_v0";
 pub const MODEL_UEBA: &str = "ueba_zscore_v0";
+pub const MODEL_FLIGHT_RISK: &str = "flight_risk_v0";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ScoreResult {
@@ -73,6 +74,45 @@ pub fn ueba_zscore_v0(
     baseline.score(features, z_clip)
 }
 
+/// Flight risk profile: high score if job search activity is significantly above baseline or high in absolute terms.
+pub fn flight_risk_v0(
+    features: &EntityFeatures,
+    baseline: Option<&EntityTypeBaseline>,
+    z_clip: f64,
+) -> f64 {
+    let clip = z_clip.max(1.0);
+    let eps = 1e-6;
+
+    // Absolute heuristic: if they have >= 3 job searches in this window, that's already a signal.
+    let absolute_signal = ((features.job_search_count as f64) / 10.0).clamp(0.0, 1.0);
+
+    // Relative to baseline:
+    let relative_signal = if let Some(b) = baseline {
+        let z_count = b.job_search_count.z(features.job_search_count as f64, eps);
+        
+        let ratio = if features.request_count == 0 {
+            0.0
+        } else {
+            features.job_search_count as f64 / features.request_count as f64
+        };
+        let z_ratio = b.job_search_ratio.z(ratio, eps);
+        
+        let max_z = z_count.max(z_ratio).clamp(0.0, clip);
+        max_z / clip
+    } else {
+        0.0
+    };
+
+    // Combine absolute and relative signals. We weigh absolute highly if no baseline is present.
+    let score = if baseline.is_some() {
+        0.3 * absolute_signal + 0.7 * relative_signal
+    } else {
+        absolute_signal
+    };
+
+    score.clamp(0.0, 1.0)
+}
+
 pub fn severity_for(score: f64, threshold: f64) -> &'static str {
     if score >= threshold.max(0.9) {
         "critical"
@@ -115,6 +155,13 @@ pub fn score_features(features: &EntityFeatures, ctx: &ScoreContext<'_>) -> Scor
                     format!("{MODEL_STUB}+fallback_no_baseline"),
                 )
             }
+        }
+        MODEL_FLIGHT_RISK => {
+            let baseline = ctx.baselines.and_then(|set| set.get(&features.entity_type));
+            (
+                flight_risk_v0(features, baseline, ctx.z_clip),
+                MODEL_FLIGHT_RISK.to_string(),
+            )
         }
         other => (
             anomaly_stub_v0(features, ctx.min_requests),

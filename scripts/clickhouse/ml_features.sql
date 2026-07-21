@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS bsdm.entity_features
     unique_urls UInt64,
     deny_count UInt64,
     threat_hit_count UInt64,
+    job_search_count UInt64,
     avg_response_size Float64,
     avg_duration_ms Float64,
     gap_cv Float64,

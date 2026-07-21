@@ -32,12 +32,14 @@ pub struct EntityTypeBaseline {
     pub unique_urls: FeatureMoments,
     pub deny_count: FeatureMoments,
     pub threat_hit_count: FeatureMoments,
+    pub job_search_count: FeatureMoments,
     pub avg_response_size: FeatureMoments,
     pub avg_duration_ms: FeatureMoments,
     pub gap_cv: FeatureMoments,
     pub max_domain_len: FeatureMoments,
     pub deny_ratio: FeatureMoments,
     pub threat_ratio: FeatureMoments,
+    pub job_search_ratio: FeatureMoments,
 }
 
 impl EntityTypeBaseline {
@@ -112,6 +114,8 @@ SELECT
   ifNull(stddevSamp(deny_count), 0) AS std_deny_count,
   avg(threat_hit_count) AS mean_threat_hit_count,
   ifNull(stddevSamp(threat_hit_count), 0) AS std_threat_hit_count,
+  avg(job_search_count) AS mean_job_search_count,
+  ifNull(stddevSamp(job_search_count), 0) AS std_job_search_count,
   avg(avg_response_size) AS mean_avg_response_size,
   ifNull(stddevSamp(avg_response_size), 0) AS std_avg_response_size,
   avg(avg_duration_ms) AS mean_avg_duration_ms,
@@ -123,7 +127,9 @@ SELECT
   avg(if(request_count = 0, 0, deny_count / request_count)) AS mean_deny_ratio,
   ifNull(stddevSamp(if(request_count = 0, 0, deny_count / request_count)), 0) AS std_deny_ratio,
   avg(if(request_count = 0, 0, threat_hit_count / request_count)) AS mean_threat_ratio,
-  ifNull(stddevSamp(if(request_count = 0, 0, threat_hit_count / request_count)), 0) AS std_threat_ratio
+  ifNull(stddevSamp(if(request_count = 0, 0, threat_hit_count / request_count)), 0) AS std_threat_ratio,
+  avg(if(request_count = 0, 0, job_search_count / request_count)) AS mean_job_search_ratio,
+  ifNull(stddevSamp(if(request_count = 0, 0, job_search_count / request_count)), 0) AS std_job_search_ratio
 FROM {table}
 WHERE extracted_at >= now() - INTERVAL {lookback} SECOND
 GROUP BY entity_type
@@ -144,12 +150,14 @@ pub fn baseline_from_row(
         unique_urls: moments(row, "unique_urls")?,
         deny_count: moments(row, "deny_count")?,
         threat_hit_count: moments(row, "threat_hit_count")?,
+        job_search_count: moments(row, "job_search_count").unwrap_or(FeatureMoments{mean: 0.0, std: 0.0}),
         avg_response_size: moments(row, "avg_response_size")?,
         avg_duration_ms: moments(row, "avg_duration_ms")?,
         gap_cv: moments(row, "gap_cv")?,
         max_domain_len: moments(row, "max_domain_len")?,
         deny_ratio: moments(row, "deny_ratio")?,
         threat_ratio: moments(row, "threat_ratio")?,
+        job_search_ratio: moments(row, "job_search_ratio").unwrap_or(FeatureMoments{mean: 0.0, std: 0.0}),
     })
 }
 
@@ -226,6 +234,7 @@ mod tests {
             unique_urls: 5,
             deny_count: deny,
             threat_hit_count: 0,
+            job_search_count: 0,
             avg_response_size: 100.0,
             avg_duration_ms: 10.0,
             gap_cv: 0.5,
@@ -250,6 +259,8 @@ mod tests {
             max_domain_len: m(12.0, 4.0),
             deny_ratio: m(0.05, 0.05),
             threat_ratio: m(0.0, 0.05),
+            job_search_count: m(0.0, 0.1),
+            job_search_ratio: m(0.0, 0.01),
         }
     }
 

@@ -70,7 +70,7 @@ python3 scripts/ml/compare_stub_vs_ueba.py
 | `ML_LOOKBACK_SECS` | `300` | Feature window length |
 | `ML_ENTITY_TYPES` | `client_ip` | `client_ip`, `username`, `domain` |
 | `ML_MIN_REQUESTS` | `10` | Min events per entity window |
-| `ML_MODEL` | `ueba_zscore_v0` | `ueba_zscore_v0`, `anomaly_stub_v0`, `phishing_lexical_v0`, or `cc_beacon_v0` |
+| `ML_MODEL` | `ueba_zscore_v0` | `ueba_zscore_v0`, `anomaly_stub_v0`, `phishing_lexical_v0`, `cc_beacon_v0`, `flight_risk_v0` |
 | `ML_PHISHING_FEATURES_TABLE` | `domain_phishing_features` | M5.3 domain feature store |
 | `ML_BEACON_FEATURES_TABLE` | `beacon_pair_features` | M5.4 client→domain feature store |
 | `ML_BEACON_LOOKBACK_SECS` | `3600` | Beacon window (aligns with `ALERT_BEACON_LOOKBACK_SECS`) |
@@ -98,6 +98,7 @@ python3 scripts/ml/compare_stub_vs_ueba.py
 | `ueba_zscore_v0` | **M5.2** | Unsupervised mean abs-z vs population baseline |
 | `phishing_lexical_v0` | **M5.3** | Domain lexical heuristics + PhishTank / UT1 weak labels |
 | `cc_beacon_v0` | **M5.4** | C&C beacon scoring augmenting `beacon_periodic` |
+| `flight_risk_v0` | **HR/UEBA** | Profiles frequency of job search site visits to predict employee flight risk |
 
 ## M5.5 threat score write-back
 
@@ -135,7 +136,7 @@ c = \min(|z|, z_{clip}) / z_{clip},\quad
 score = 0.4\cdot\mathrm{mean}(c) + 0.6\cdot\max(c)
 \]
 
-Features: request_count, unique_domains/urls, deny/threat counts & ratios, avg size/duration, gap_cv, max_domain_len.
+Features: request_count, unique_domains/urls, deny/threat counts & ratios, avg size/duration, gap_cv, max_domain_len, job_search_count.
 
 ### Phishing lexical scoring (M5.3)
 
@@ -189,6 +190,20 @@ Augments M4 alert-worker `beacon_periodic` with behavioral signals:
 ```bash
 python3 scripts/ml/eval_cc_beacon.py
 ```
+
+### Flight Risk profiling (HR / UEBA)
+
+Set `ML_MODEL=flight_risk_v0` (scores entities like `client_ip` or `username`):
+
+```bash
+CLICKHOUSE_URL=http://127.0.0.1:8123 \
+  ML_MODEL=flight_risk_v0 \
+  METRICS_PORT=8091 \
+  cargo run -p ml-worker --release
+```
+
+Calculates the chance of an employee quitting based on visits to `JobSearch`, `Careers`, or `Recruitment` sites. Combines absolute thresholds (e.g. >3 visits in a window) with a z-score relative to the company's historical baseline for job searching behavior.
+
 
 ## Grafana
 
