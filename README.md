@@ -69,9 +69,36 @@
 | **Prometheus** | 9091 | Сбор метрик |
 | **Grafana** | 3000 | Дашборды proxy + HTTP Traffic (`admin` / `admin`) |
 
-## Быстрый старт (Docker)
+## Быстрый старт
 
-### Lite — proxy + SQLite Search API (без Kafka / ClickHouse)
+Для максимального удобства используйте `Makefile` (на Linux/macOS) или `setup.ps1` (на Windows).
+
+### Установка в одну команду (Linux / macOS)
+
+Запустите интерактивный скрипт установки из корня репозитория:
+```bash
+sudo ./install.sh
+```
+
+Для локальной разработки используйте `Makefile`:
+```bash
+make help          # Список всех команд
+make setup         # Генерация CA сертификатов
+make docker-lite   # Запуск Lite-версии в Docker
+make docker-full   # Запуск полной версии с аналитикой
+make run           # Локальный запуск
+```
+
+### Windows (Локальная разработка)
+
+Запустите скрипт настройки из PowerShell (сгенерирует сертификаты и предложит запустить прокси):
+```powershell
+.\setup.ps1
+```
+
+### Docker Compose (Lite)
+
+Lite — proxy + SQLite Search API (без Kafka / ClickHouse)
 
 ```bash
 ./scripts/gen-ca.sh
