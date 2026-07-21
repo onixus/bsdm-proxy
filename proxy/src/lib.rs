@@ -16,6 +16,7 @@ pub mod categorization;
 pub mod control_api;
 #[cfg(feature = "grpc")]
 pub mod control_grpc;
+pub mod ebpf;
 pub mod hierarchy;
 pub mod hierarchy_config;
 pub mod htcp;
@@ -63,6 +64,7 @@ pub use cache_digest::DigestRegistry;
 pub use cache_key::http_cache_key;
 pub use categorization::{CategorizationConfig, CategorizationEngine, Category};
 pub use control_api::ControlApiState;
+pub use ebpf::{EbpfStats, EbpfXdpConfig, EbpfXdpManager, XdpMode};
 pub use hierarchy::{HierarchyConfig, HierarchyManager, HierarchyResult};
 pub use hierarchy_config::{
     build_hierarchy_manager, htcp_peer_port, htcp_server_bind_addr, icp_server_bind_addr,
