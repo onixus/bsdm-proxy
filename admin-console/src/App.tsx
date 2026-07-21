@@ -1,5 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AppLayout } from './components/layout/AppLayout'
+import { ClusterMeshPage } from './pages/ClusterMesh'
 import { DashboardPage } from './pages/Dashboard'
 import { LogsPage } from './pages/Logs'
 import { PoliciesPage } from './pages/Policies'
@@ -19,6 +20,7 @@ export function App() {
           <Route path="/policies" element={<PoliciesPage />} />
           <Route path="/rpz" element={<RpzManagementPage />} />
           <Route path="/wasm" element={<WasmPluginsPage />} />
+          <Route path="/cluster" element={<ClusterMeshPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
