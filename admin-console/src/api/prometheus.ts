@@ -47,7 +47,12 @@ function parseLabels(raw: string): Record<string, string> {
   const re = /([a-zA-Z_][a-zA-Z0-9_]*)="((?:[^"\\]|\\.)*)"/g
   let m: RegExpExecArray | null
   while ((m = re.exec(raw)) !== null) {
-    labels[m[1]] = m[2].replace(/\\"/g, '"').replace(/\\\\/g, '\\').replace(/\\n/g, '\n')
+    labels[m[1]] = m[2].replace(/\\([\\n"])/g, (_match, ch: string) => {
+      if (ch === 'n') return '\n'
+      if (ch === '"') return '"'
+      if (ch === '\\') return '\\'
+      return `\\${ch}`
+    })
   }
   return labels
 }
