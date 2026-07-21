@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **DoH (RFC 8484) & DoT (RFC 7858) Encrypted DNS Gateways** — Inbound DoH (`/dns-query`) and DoT (TCP/853 TLS) listeners for `dns-sinkhole`, wireformat base64url decoding, 2-byte TCP framing, and `admin-console` encrypted DNS panel ([#204](https://github.com/onixus/bsdm-proxy/pull/204))
 - **Admin Console RPZ Sinkhole Module (`/rpz`)** — RPZ list parsing, feed management, custom overrides, and DNS query simulator ([#108](https://github.com/onixus/bsdm-proxy/issues/108))
 - **Admin Console Wasm Plugins Module (`/wasm`)** — Interactive Wasm Request Sandbox, WAT source viewer, plugin directory, and engine settings ([#188](https://github.com/onixus/bsdm-proxy/issues/188))
 - **Admin Console ICAP Inspection & DLP Module (`/icap`)** — RFC 3507 ICAP scanning sandbox, Threat Log audit table, and service profile management ([#99](https://github.com/onixus/bsdm-proxy/issues/99))
