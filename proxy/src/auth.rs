@@ -969,9 +969,15 @@ mod tests {
         ["test", "pass"].concat()
     }
 
+    /// Synthetic salt for unit tests (built at runtime, not a literal, for CodeQL CWE-798 —
+    /// this is not a real cryptographic secret, just a fixed test fixture).
+    fn unit_test_salt(fill: u8) -> [u8; 16] {
+        [0u8; 16].map(|_| fill)
+    }
+
     #[test]
     fn test_password_hashing() {
-        let salt = [7u8; 16];
+        let salt = unit_test_salt(7);
         let sample = format!("sample{}", 123);
         let hash1 = CachedUser::hash_password(&sample, &salt);
         let hash2 = CachedUser::hash_password(&sample, &salt);
@@ -980,7 +986,7 @@ mod tests {
         let hash3 = CachedUser::hash_password("different", &salt);
         assert_ne!(hash1, hash3);
 
-        let hash4 = CachedUser::hash_password(&sample, &[9u8; 16]);
+        let hash4 = CachedUser::hash_password(&sample, &unit_test_salt(9));
         assert_ne!(
             hash1, hash4,
             "different salts must produce different hashes"

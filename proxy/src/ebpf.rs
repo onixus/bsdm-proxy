@@ -9,20 +9,15 @@ use std::sync::{Arc, RwLock};
 use tracing::info;
 
 /// Runtime mode for eBPF XDP program attachment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum XdpMode {
     /// Generic / SKB mode (works on any netdev, driver independent)
+    #[default]
     Skb,
     /// Native driver mode (zero-copy hardware driver level)
     Driver,
     /// Hardware offload to SmartNIC
     Offload,
-}
-
-impl Default for XdpMode {
-    fn default() -> Self {
-        Self::Skb
-    }
 }
 
 impl XdpMode {

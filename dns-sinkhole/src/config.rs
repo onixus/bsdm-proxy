@@ -23,12 +23,22 @@ pub struct Config {
     pub ttl: u32,
     pub metrics_port: u16,
     pub upstream_timeout: Duration,
+    // Parsed from env for the DoH/DoT gateway, but `main.rs` only starts the
+    // plain UDP listener (`server::run`) today — no DoH/DoT listener reads
+    // these yet, so they're dead code until that wiring lands.
+    #[allow(dead_code)]
     pub doh_enabled: bool,
+    #[allow(dead_code)]
     pub doh_bind: SocketAddr,
+    #[allow(dead_code)]
     pub doh_path: String,
+    #[allow(dead_code)]
     pub dot_enabled: bool,
+    #[allow(dead_code)]
     pub dot_bind: SocketAddr,
+    #[allow(dead_code)]
     pub tls_cert_path: Option<String>,
+    #[allow(dead_code)]
     pub tls_key_path: Option<String>,
 }
 
