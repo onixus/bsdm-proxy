@@ -22,7 +22,7 @@ use tracing::{debug, info, warn};
 
 pub enum IcapStream {
     Plain(TcpStream),
-    Tls(tokio_rustls::client::TlsStream<TcpStream>),
+    Tls(Box<tokio_rustls::client::TlsStream<TcpStream>>),
 }
 
 impl AsyncRead for IcapStream {
@@ -33,7 +33,7 @@ impl AsyncRead for IcapStream {
     ) -> Poll<std::io::Result<()>> {
         match self.get_mut() {
             IcapStream::Plain(s) => Pin::new(s).poll_read(cx, buf),
-            IcapStream::Tls(s) => Pin::new(s).poll_read(cx, buf),
+            IcapStream::Tls(s) => Pin::new(&mut **s).poll_read(cx, buf),
         }
     }
 }
@@ -46,21 +46,21 @@ impl AsyncWrite for IcapStream {
     ) -> Poll<std::io::Result<usize>> {
         match self.get_mut() {
             IcapStream::Plain(s) => Pin::new(s).poll_write(cx, buf),
-            IcapStream::Tls(s) => Pin::new(s).poll_write(cx, buf),
+            IcapStream::Tls(s) => Pin::new(&mut **s).poll_write(cx, buf),
         }
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         match self.get_mut() {
             IcapStream::Plain(s) => Pin::new(s).poll_flush(cx),
-            IcapStream::Tls(s) => Pin::new(s).poll_flush(cx),
+            IcapStream::Tls(s) => Pin::new(&mut **s).poll_flush(cx),
         }
     }
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         match self.get_mut() {
             IcapStream::Plain(s) => Pin::new(s).poll_shutdown(cx),
-            IcapStream::Tls(s) => Pin::new(s).poll_shutdown(cx),
+            IcapStream::Tls(s) => Pin::new(&mut **s).poll_shutdown(cx),
         }
     }
 }
@@ -319,7 +319,7 @@ impl IcapClient {
                 .connect(domain, tcp_stream)
                 .await
                 .map_err(|e| format!("ICAP TLS handshake failed: {e}"))?;
-            IcapStream::Tls(tls_stream)
+            IcapStream::Tls(Box::new(tls_stream))
         } else {
             IcapStream::Plain(tcp_stream)
         };

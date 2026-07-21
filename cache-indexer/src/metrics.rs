@@ -4,6 +4,7 @@ use prometheus::{CounterVec, Histogram, HistogramOpts, Opts, Registry};
 use std::time::Instant;
 
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct IndexerMetrics {
     registry: Registry,
     pub inserts_total: CounterVec,
@@ -11,6 +12,7 @@ pub struct IndexerMetrics {
     pub batch_duration_seconds: Histogram,
 }
 
+#[allow(dead_code)]
 impl IndexerMetrics {
     pub fn new() -> Result<Self, prometheus::Error> {
         let registry = Registry::new();

@@ -104,7 +104,7 @@ impl EbpfXdpManager {
                 if !std::path::Path::new("bpf/xdp_drop.o").exists() {
                     info!("Compiling bpf/xdp_drop.c ...");
                     let out = Command::new("clang")
-                        .args(&[
+                        .args([
                             "-O2",
                             "-target",
                             "bpf",
@@ -134,12 +134,12 @@ impl EbpfXdpManager {
 
                 // Detach previous first, ignore errors
                 let _ = Command::new("ip")
-                    .args(&["link", "set", "dev", &config.interface, mode_str, "off"])
+                    .args(["link", "set", "dev", &config.interface, mode_str, "off"])
                     .output();
 
                 info!("Attaching XDP program to {}", config.interface);
                 let attach = Command::new("ip")
-                    .args(&[
+                    .args([
                         "link",
                         "set",
                         "dev",
@@ -312,7 +312,7 @@ impl Drop for EbpfXdpManager {
                 XdpMode::Skb => "xdpgeneric",
             };
             let _ = Command::new("ip")
-                .args(&[
+                .args([
                     "link",
                     "set",
                     "dev",

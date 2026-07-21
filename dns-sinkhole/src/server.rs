@@ -3,7 +3,7 @@
 use crate::config::{BlockAction, Config};
 use crate::dns::{
     a_rdata, aaaa_rdata, build_response, formerr, parse_query, Query, CLASS_IN, RCODE_NXDOMAIN,
-    RCODE_SERVFAIL, TYPE_A, TYPE_AAAA,
+    TYPE_A, TYPE_AAAA,
 };
 use crate::doh_dot::{decode_doh_base64url, encode_dot_frame, parse_dot_length};
 use crate::zone::{Zone, ZoneAction};
@@ -25,7 +25,7 @@ use tokio::net::{TcpListener, UdpSocket};
 use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use tokio_rustls::rustls::ServerConfig;
 use tokio_rustls::TlsAcceptor;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 pub struct Metrics {
     pub queries: IntCounter,
@@ -215,13 +215,13 @@ pub fn load_certs(cert_path: &str, key_path: &str) -> Result<ServerConfig, Strin
     let key_file = File::open(key_path).map_err(|e| format!("key open: {e}"))?;
     let mut key_reader = BufReader::new(key_file);
     let mut keys = rustls_pemfile::pkcs8_private_keys(&mut key_reader)
-        .map(|r| PrivateKeyDer::Pkcs8(r.unwrap().into_owned()))
+        .map(|r| PrivateKeyDer::Pkcs8(r.unwrap().clone_key()))
         .collect::<Vec<_>>();
     if keys.is_empty() {
         let key_file = File::open(key_path).map_err(|e| format!("key open: {e}"))?;
         let mut key_reader = BufReader::new(key_file);
         keys = rustls_pemfile::rsa_private_keys(&mut key_reader)
-            .map(|r| PrivateKeyDer::Pkcs1(r.unwrap().into_owned()))
+            .map(|r| PrivateKeyDer::Pkcs1(r.unwrap().clone_key()))
             .collect::<Vec<_>>();
     }
     if keys.is_empty() {
