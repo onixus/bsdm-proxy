@@ -230,6 +230,7 @@ mod tests {
 
     #[test]
     fn compression_config_parses_zstd() {
+        std::env::remove_var("CACHE_COMPRESSION");
         std::env::set_var("CACHE_COMPRESSION", "zstd");
         let cfg = CompressionConfig::from_env();
         assert_eq!(cfg.codec, BodyEncoding::Zstd);
