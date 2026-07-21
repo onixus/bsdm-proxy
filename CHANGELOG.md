@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Admin Console RPZ Sinkhole Module (`/rpz`)** — RPZ list parsing, feed management, custom overrides, and DNS query simulator ([#108](https://github.com/onixus/bsdm-proxy/issues/108))
+- **Admin Console Wasm Plugins Module (`/wasm`)** — Interactive Wasm Request Sandbox, WAT source viewer, plugin directory, and engine settings ([#188](https://github.com/onixus/bsdm-proxy/issues/188))
+- **Admin Console ICAP Inspection & DLP Module (`/icap`)** — RFC 3507 ICAP scanning sandbox, Threat Log audit table, and service profile management ([#99](https://github.com/onixus/bsdm-proxy/issues/99))
+- **Admin Console gRPC Control Plane Mesh Module (`/cluster`)** — Multi-node cluster topology grid, real-time gRPC policy push, and cluster-wide cache purge ([#187](https://github.com/onixus/bsdm-proxy/issues/187))
+- **Admin Console AI Semantic Cache & Vector DB Module (`/ai-cache`)** — Qdrant vector match simulator, cosine similarity tuning, token savings analytics ($285.00/24h) ([#189](https://github.com/onixus/bsdm-proxy/issues/189))
+
 ## [0.5.7+033] - 2026-07-17
 
 Release **0.5.07.033** (Cargo/semver `0.5.7+033`). Post-M5: DX control plane, Wasm, AI traffic helpers, P3 ICAP + DNS sinkhole.

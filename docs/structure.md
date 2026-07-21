@@ -32,7 +32,7 @@ bsdm-proxy/
 ├── alert-worker/           # CH rule polling → webhook / SIEM
 ├── bsdm-events/            # Shared event schema
 ├── e2e/                    # Integration tests
-├── admin-console/          # Unified admin UI (React)
+├── admin-console/          # Unified React admin UI (Dashboard, Logs, Policies, RPZ, Wasm, ICAP, Mesh, AI Cache)
 ├── charts/bsdm/            # Helm chart (K8s proxy Deployment)
 ├── config/                 # Примеры ACL-правил
 ├── packaging/              # Release tarball, systemd units, install.sh

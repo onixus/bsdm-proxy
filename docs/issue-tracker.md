@@ -14,8 +14,11 @@ Snapshot of open / recently completed work. Live list: [open issues](https://git
 | [#112](https://github.com/onixus/bsdm-proxy/issues/112) | Web config ACL UI | Superseded by `admin-console/` Policies |
 | [#186](https://github.com/onixus/bsdm-proxy/issues/186) | Permission probe | Invalid — close |
 | [#190](https://github.com/onixus/bsdm-proxy/issues/190) | Tracker hygiene meta | Close when the above are closed |
-| [#99](https://github.com/onixus/bsdm-proxy/issues/99) | ICAP adapter | Done — #195 |
-| [#108](https://github.com/onixus/bsdm-proxy/issues/108) | DNS sinkhole | Done — #197 (merge) |
+| [#99](https://github.com/onixus/bsdm-proxy/issues/99) | ICAP adapter & UI | Done — #195, #200 |
+| [#108](https://github.com/onixus/bsdm-proxy/issues/108) | DNS sinkhole & UI | Done — #197, #200 |
+| [#188](https://github.com/onixus/bsdm-proxy/issues/188) | Wasm plugins & UI | Done — #200 |
+| [#187](https://github.com/onixus/bsdm-proxy/issues/187) | gRPC control plane & Mesh UI | Done — #201 |
+| [#189](https://github.com/onixus/bsdm-proxy/issues/189) | Vector DB & AI Cache UI | Done — #202 |
 
 Blockers B1–B26: all ✅ in [BLOCKERS.md](BLOCKERS.md) (GitHub #32–#56).
 
@@ -31,9 +34,9 @@ Blockers B1–B26: all ✅ in [BLOCKERS.md](BLOCKERS.md) (GitHub #32–#56).
 |-------|-------|
 | — | Optional polish (Wasm SDK, ICAP TLS, DoH) or new epic |
 
-*(#99 ICAP / #108 DNS closed via implementation PRs; #101 / #103 / #189 / #187 / #188 closed earlier.)*
+*(#99 ICAP / #108 DNS / #187 gRPC Mesh / #188 Wasm / #189 AI Cache closed via implementation PRs #200, #201, #202.)*
 
 
 ---
 
-*Updated: 2026-07-17*
+*Updated: 2026-07-21*

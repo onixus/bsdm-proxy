@@ -63,7 +63,7 @@
 | **metrics** | 9090 | `/health`, `/ready`, `/metrics` + [control plane](docs/control-plane.md) (`/api/stats`, purge, hierarchy, TLS) |
 | **cache-indexer** | 8080 | Kafka → ClickHouse (или Lite SQLite + `POST /api/events`), `/api/search` |
 | **ml-worker** | 8091 | M5: features/scores + threat-score API (compose profile `ml`) |
-| **admin-console** | — | Unified UI (dashboard, logs, policies); см. [admin-console/](admin-console/) |
+| **admin-console** | — | Unified React UI (Dashboard, Logs, Policies, RPZ Sinkhole, Wasm Plugins, ICAP Inspection, Cluster Mesh, AI Cache); см. [admin-console/](admin-console/) |
 | **Kafka** | 9092 | Очередь событий кеша |
 | **ClickHouse** | 8123 / 9000 | Аналитика HTTP-трафика |
 | **Prometheus** | 9091 | Сбор метрик |
