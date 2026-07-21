@@ -11,11 +11,6 @@ pub enum BlockAction {
     NxDomain,
 }
 
-// TODO: doh_enabled/doh_bind/doh_path/dot_enabled/dot_bind/tls_cert_path/tls_key_path
-// are parsed from env but main.rs never starts DoH/DoT listeners using them — the
-// DoH/DoT gateway feature is config-only today. Tracked separately; wiring up real
-// listeners is a larger change out of scope here.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct Config {
     pub enabled: bool,
@@ -28,22 +23,12 @@ pub struct Config {
     pub ttl: u32,
     pub metrics_port: u16,
     pub upstream_timeout: Duration,
-    // Parsed from env for the DoH/DoT gateway, but `main.rs` only starts the
-    // plain UDP listener (`server::run`) today — no DoH/DoT listener reads
-    // these yet, so they're dead code until that wiring lands.
-    #[allow(dead_code)]
     pub doh_enabled: bool,
-    #[allow(dead_code)]
     pub doh_bind: SocketAddr,
-    #[allow(dead_code)]
     pub doh_path: String,
-    #[allow(dead_code)]
     pub dot_enabled: bool,
-    #[allow(dead_code)]
     pub dot_bind: SocketAddr,
-    #[allow(dead_code)]
     pub tls_cert_path: Option<String>,
-    #[allow(dead_code)]
     pub tls_key_path: Option<String>,
 }
 

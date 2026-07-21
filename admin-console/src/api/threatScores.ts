@@ -52,6 +52,11 @@ export function factorsForThreatScore(entry: ThreatScoreEntry): MlFactor[] {
         { label: 'Volume anomaly', weight: s >= 0.8 ? 'high' : 'medium', detail: 'Request rate vs population baseline' },
         { label: 'Deny / threat mix', weight: s >= 0.7 ? 'high' : 'low', detail: 'Elevated deny or threat_hit ratio in window' },
       ]
+    case 'flight_risk_v0':
+      return [
+        { label: 'Job Search Frequency', weight: s >= 0.7 ? 'high' : 'medium', detail: 'Frequency of visits to careers/recruitment sites' },
+        { label: 'Baseline Deviation', weight: s >= 0.8 ? 'high' : 'medium', detail: 'Job search activity significantly above population norm' },
+      ]
     default:
       return [
         { label: 'Model score', weight: s >= 0.8 ? 'high' : 'medium', detail: `Aggregated score from ${entry.model}` },
@@ -88,6 +93,15 @@ function mockThreatScores(): ThreatScoreSnapshot {
         score: 0.76,
         severity: 'high',
         model: 'ueba_zscore_v0',
+        scored_at: now,
+        expires_at: now,
+      },
+      {
+        entity_type: 'username',
+        entity_id: 'john.doe',
+        score: 0.85,
+        severity: 'high',
+        model: 'flight_risk_v0',
         scored_at: now,
         expires_at: now,
       },
