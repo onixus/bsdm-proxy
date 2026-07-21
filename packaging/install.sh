@@ -53,6 +53,15 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ $# -eq 0 && -t 0 ]]; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [[ -f "${SCRIPT_DIR}/scripts/interactive-install.sh" ]]; then
+    exec "${SCRIPT_DIR}/scripts/interactive-install.sh"
+  elif [[ -f "${SCRIPT_DIR}/../scripts/interactive-install.sh" ]]; then
+    exec "${SCRIPT_DIR}/../scripts/interactive-install.sh"
+  fi
+fi
+
 if [[ "$(id -u)" -ne 0 ]]; then
   echo "Run as root (sudo ./install.sh)" >&2
   exit 1
