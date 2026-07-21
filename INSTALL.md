@@ -44,7 +44,33 @@ sudo apt-get update && sudo apt-get install -y \
 
 ## 🚀 Варианты развертывания
 
-### Вариант 1: Docker Compose (Рекомендуется для Dev / Lab)
+### Вариант 0: Быстрая автоматическая установка (Рекомендуется)
+
+Для Linux и macOS мы предоставляем удобный интерактивный установщик и `Makefile`.
+
+#### Интерактивный установщик (Linux)
+Скрипт сам настроит systemd, сертификаты и прокси-службы:
+```bash
+sudo ./install.sh
+```
+
+#### Makefile (Для разработчиков)
+```bash
+make help          # Посмотреть все команды
+make setup         # Сгенерировать CA
+make docker-lite   # Запустить легковесный Docker Compose стек
+make run           # Запустить прокси локально
+```
+
+#### Windows
+Запустите `setup.ps1` из PowerShell. Скрипт проверит/сгенерирует сертификаты (через Git Bash OpenSSL) и локально запустит Lite-версию прокси:
+```powershell
+.\setup.ps1
+```
+
+---
+
+### Вариант 1: Docker Compose (Ручной запуск)
 
 #### 1. Lite-режим (Proxy + SQLite Search API, без Kafka и ClickHouse)
 Подходит для локальной разработки и легких серверов.

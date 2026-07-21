@@ -252,7 +252,7 @@ export function WasmPluginsPage() {
             <span className="text-2xl font-bold text-text-primary">Wasmtime v46</span>
           </div>
           <div className="mt-2 text-xs text-text-secondary">
-            Fuel default: {config?.defaultFuelLimit.toLocaleString()} · Fail-open: {config?.failOpenDefault ? 'Yes' : 'No'}
+            Fuel default: {config?.defaultFuelLimit?.toLocaleString()} · Fail-open: {config?.failOpenDefault ? 'Yes' : 'No'}
           </div>
         </div>
 
@@ -292,7 +292,7 @@ export function WasmPluginsPage() {
             </span>
           </div>
           <div className="mt-2 text-xs text-text-secondary">
-            Total denied: {stats?.denyCount.toLocaleString()} requests
+            Total denied: {stats?.denyCount?.toLocaleString()} requests
           </div>
         </div>
 
