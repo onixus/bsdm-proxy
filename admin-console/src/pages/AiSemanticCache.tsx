@@ -221,7 +221,7 @@ export function AiSemanticCachePage() {
           </div>
           <div className="mt-3 flex items-baseline justify-between">
             <span className="text-2xl font-bold text-text-primary">
-              {config?.vectorBackend.toUpperCase() || 'QDRANT'}
+              {config?.vectorBackend?.toUpperCase() || 'QDRANT'}
             </span>
             <span className="text-xs font-mono text-accent">
               Collection: {config?.vectorCollection || 'bsdm_semantic'}
@@ -261,7 +261,7 @@ export function AiSemanticCachePage() {
           </div>
           <div className="mt-3 flex items-baseline justify-between">
             <span className="text-2xl font-bold text-success">
-              ${stats?.estimatedCostSavingsUsd.toFixed(2) || '285.00'}
+              ${stats?.estimatedCostSavingsUsd?.toFixed(2) || '285.00'}
             </span>
             <span className="text-xs text-success font-semibold">USD</span>
           </div>

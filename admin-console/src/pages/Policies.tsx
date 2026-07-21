@@ -158,7 +158,7 @@ export function PoliciesPage() {
                 </span>
               </div>
               <div className="mt-2 text-lg font-bold font-mono text-text-primary">
-                {ebpfStats?.mode.toUpperCase() || 'DRIVER'} ({ebpfStats?.interface || 'eth0'})
+                {ebpfStats?.mode?.toUpperCase() || 'DRIVER'} ({ebpfStats?.interface || 'eth0'})
               </div>
             </div>
 
@@ -168,7 +168,7 @@ export function PoliciesPage() {
                 <Zap className="size-4 text-accent" />
               </div>
               <div className="mt-2 text-lg font-bold font-mono text-text-primary">
-                {ebpfStats?.packetsDroppedTotal.toLocaleString() || '184,250'} pkts
+                {ebpfStats?.packetsDroppedTotal?.toLocaleString() || '184,250'} pkts
               </div>
             </div>
 

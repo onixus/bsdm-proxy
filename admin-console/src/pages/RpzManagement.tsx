@@ -447,7 +447,7 @@ export function RpzManagementPage() {
               https://{sinkholeConfig?.dohBind || '0.0.0.0:8443'}{sinkholeConfig?.dohPath || '/dns-query'}
             </div>
             <div className="flex justify-between text-xs text-text-secondary pt-1 border-t border-border/50">
-              <span>24h Encrypted Queries: <strong className="text-text-primary font-mono">{stats?.dohQueries24h.toLocaleString() || '68,420'}</strong></span>
+              <span>24h Encrypted Queries: <strong className="text-text-primary font-mono">{stats?.dohQueries24h?.toLocaleString() || '68,420'}</strong></span>
               <span className="text-success font-semibold">GET / POST wireformat</span>
             </div>
           </div>
@@ -462,7 +462,7 @@ export function RpzManagementPage() {
               tls://{sinkholeConfig?.dotBind || '0.0.0.0:853'}
             </div>
             <div className="flex justify-between text-xs text-text-secondary pt-1 border-t border-border/50">
-              <span>24h Encrypted Queries: <strong className="text-text-primary font-mono">{stats?.dotQueries24h.toLocaleString() || '31,200'}</strong></span>
+              <span>24h Encrypted Queries: <strong className="text-text-primary font-mono">{stats?.dotQueries24h?.toLocaleString() || '31,200'}</strong></span>
               <span className="text-success font-semibold">TCP 853 TLS 2-byte frame</span>
             </div>
           </div>
