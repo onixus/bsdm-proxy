@@ -32,6 +32,7 @@ import {
 import { Button } from '../components/ui/Button'
 import { Modal } from '../components/ui/Modal'
 import { FormField } from '../components/ui/Form'
+import { PreviewBanner } from '../components/ui/DataState'
 
 export function AiSemanticCachePage() {
   const [, startTransition] = useTransition()
@@ -171,6 +172,7 @@ export function AiSemanticCachePage() {
 
   return (
     <div className="space-y-6">
+      <PreviewBanner feature="AI semantic cache management" />
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>

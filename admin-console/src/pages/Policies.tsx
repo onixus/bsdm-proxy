@@ -11,8 +11,11 @@ import {
 import { fetchEbpfStats, fetchEbpfBlockedIps, type EbpfStats, type EbpfBlockedIp } from '../api/ebpf'
 import { Button } from '../components/ui/Button'
 import { Panel } from '../components/dashboard/MetricWidget'
+import { PreviewBanner } from '../components/ui/DataState'
+import { useToast } from '../components/ui/Toast'
 
 export function PoliciesPage() {
+  const { toast } = useToast()
   const [data, setData] = useState<AclRulesResponse | null>(null)
   const [ebpfStats, setEbpfStats] = useState<EbpfStats | null>(null)
   const [ebpfIps, setEbpfIps] = useState<EbpfBlockedIp[]>([])
@@ -41,8 +44,9 @@ export function PoliciesPage() {
     try {
       await reloadAclRules()
       await load()
+      toast('success', 'ACL rules reloaded from file')
     } catch {
-      alert('Reload failed — check ACL API connection in Settings')
+      toast('error', 'Reload failed — check ACL API connection in Settings')
     }
     setBusy(false)
   }
@@ -51,9 +55,9 @@ export function PoliciesPage() {
     setBusy(true)
     try {
       await persistAclRules()
-      alert('Rules persisted to ACL_RULES_PATH')
+      toast('success', 'Rules persisted to ACL_RULES_PATH')
     } catch {
-      alert('Persist failed — ACL_RULES_PATH may be unset or unwritable')
+      toast('error', 'Persist failed — ACL_RULES_PATH may be unset or unwritable')
     }
     setBusy(false)
   }
@@ -64,8 +68,9 @@ export function PoliciesPage() {
     try {
       await deleteAclRule(id)
       await load()
+      toast('success', `Rule "${id}" deleted`)
     } catch {
-      alert('Delete failed — check ACL API token / connection')
+      toast('error', 'Delete failed — check ACL API token / connection')
     }
     setBusy(false)
   }
@@ -143,6 +148,7 @@ export function PoliciesPage() {
       {/* eBPF XDP Kernel Bypass Panel */}
       <Panel title="eBPF / XDP Kernel Packet Drop Bypass (L4 Hardware Layer)">
         <div className="space-y-4">
+          <PreviewBanner feature="The eBPF/XDP stats view" />
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div className="rounded-md border border-border bg-surface-0 p-3">
               <div className="flex items-center justify-between text-xs text-text-secondary">

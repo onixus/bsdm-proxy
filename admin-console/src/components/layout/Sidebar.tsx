@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard,
@@ -6,16 +7,23 @@ import {
   Settings,
   X,
   Activity,
+  BarChart3,
   Brain,
+  FlaskConical,
+  Moon,
   Radio,
   Cpu,
   Network,
   Sparkles,
+  Sun,
 } from 'lucide-react'
+import { isDemoMode } from '../../api/source'
+import { applyTheme, loadTheme, type Theme } from '../../lib/theme'
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/logs', label: 'Logs', icon: ScrollText },
+  { to: '/analytics', label: 'Analytics', icon: BarChart3 },
   { to: '/threat-scores', label: 'Threat scores', icon: Brain },
   { to: '/policies', label: 'Policies', icon: Shield },
   { to: '/rpz', label: 'RPZ Sinkhole', icon: Radio },
@@ -31,6 +39,21 @@ interface SidebarProps {
 }
 
 export function Sidebar({ open, onClose }: SidebarProps) {
+  const [theme, setTheme] = useState<Theme>(loadTheme)
+  const [demoOn, setDemoOn] = useState(isDemoMode)
+
+  useEffect(() => {
+    const onDemo = (e: Event) => setDemoOn(Boolean((e as CustomEvent).detail))
+    window.addEventListener('bsdm-demo-mode', onDemo)
+    return () => window.removeEventListener('bsdm-demo-mode', onDemo)
+  }, [])
+
+  const toggleTheme = () => {
+    const next = theme === 'dark' ? 'light' : 'dark'
+    setTheme(next)
+    applyTheme(next)
+  }
+
   return (
     <>
       {/* Mobile overlay */}
@@ -49,17 +72,28 @@ export function Sidebar({ open, onClose }: SidebarProps) {
             <Activity className="size-6 text-accent" />
             <span className="font-bold text-text-primary">BSDM Console</span>
           </div>
-          <button
-            type="button"
-            className="touch-target flex items-center justify-center rounded-md p-2 text-text-secondary hover:bg-surface-2 lg:hidden"
-            onClick={onClose}
-            aria-label="Close menu"
-          >
-            <X className="size-5" />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              className="flex items-center justify-center rounded-md p-2 text-text-secondary hover:bg-surface-2 hover:text-text-primary"
+              onClick={toggleTheme}
+              aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+              title={theme === 'dark' ? 'Light theme' : 'Dark theme'}
+            >
+              {theme === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
+            </button>
+            <button
+              type="button"
+              className="touch-target flex items-center justify-center rounded-md p-2 text-text-secondary hover:bg-surface-2 lg:hidden"
+              onClick={onClose}
+              aria-label="Close menu"
+            >
+              <X className="size-5" />
+            </button>
+          </div>
         </div>
 
-        <nav className="flex-1 space-y-1 p-3">
+        <nav className="flex-1 space-y-1 overflow-y-auto p-3">
           {navItems.map(({ to, label, icon: Icon, ...rest }) => (
             <NavLink
               key={to}
@@ -80,8 +114,14 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           ))}
         </nav>
 
-        <div className="border-t border-border p-4 text-xs text-text-secondary">
-          Single pane of glass · v0.5
+        <div className="space-y-2 border-t border-border p-4">
+          {demoOn && (
+            <div className="flex items-center gap-2 rounded-md border border-warning/40 bg-warning/10 px-2.5 py-1.5 text-xs font-semibold text-warning">
+              <FlaskConical className="size-3.5" />
+              Demo mode — sample data may render
+            </div>
+          )}
+          <p className="text-xs text-text-secondary">Single pane of glass · v0.6</p>
         </div>
       </aside>
     </>

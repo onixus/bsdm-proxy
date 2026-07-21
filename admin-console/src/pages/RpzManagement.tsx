@@ -41,6 +41,7 @@ import {
 import { Button } from '../components/ui/Button'
 import { Modal } from '../components/ui/Modal'
 import { FormField } from '../components/ui/Form'
+import { PreviewBanner } from '../components/ui/DataState'
 
 export function RpzManagementPage() {
   const [, startTransition] = useTransition()
@@ -274,6 +275,11 @@ export function RpzManagementPage() {
       logBlocks: cfgLogBlocks,
       wildcardMatching: cfgWildcard,
       upstreamDns: sinkholeConfig?.upstreamDns || ['1.1.1.1'],
+      dohEnabled: sinkholeConfig?.dohEnabled ?? false,
+      dohBind: sinkholeConfig?.dohBind ?? '0.0.0.0:443',
+      dohPath: sinkholeConfig?.dohPath ?? '/dns-query',
+      dotEnabled: sinkholeConfig?.dotEnabled ?? false,
+      dotBind: sinkholeConfig?.dotBind ?? '0.0.0.0:853',
     })
     setSinkholeConfig(updated)
     setConfigModalOpen(false)
@@ -290,6 +296,7 @@ export function RpzManagementPage() {
 
   return (
     <div className="space-y-6">
+      <PreviewBanner feature="RPZ feed management" />
       {/* Page Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>

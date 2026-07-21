@@ -337,7 +337,7 @@ async fn handle_connect_tunnel(
             service
                 .metrics
                 .upstream_errors_total
-                .with_label_values(&[&authority, "connect"])
+                .with_label_values(&[authority.as_str(), "connect"])
                 .inc();
         }
     }

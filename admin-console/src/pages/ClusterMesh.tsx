@@ -29,6 +29,7 @@ import {
 import { Button } from '../components/ui/Button'
 import { Modal } from '../components/ui/Modal'
 import { FormField } from '../components/ui/Form'
+import { PreviewBanner } from '../components/ui/DataState'
 
 export function ClusterMeshPage() {
   const [, startTransition] = useTransition()
@@ -188,6 +189,10 @@ export function ClusterMeshPage() {
 
   return (
     <div className="space-y-6">
+      <PreviewBanner feature="Cluster mesh management">
+        {' '}The real gRPC control plane exposes GetStats / PurgeCache / hierarchy RPCs, but node CRUD and mesh-wide
+        stats have no REST API yet.
+      </PreviewBanner>
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>

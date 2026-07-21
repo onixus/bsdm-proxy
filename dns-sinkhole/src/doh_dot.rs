@@ -1,4 +1,8 @@
 //! DoH (DNS-over-HTTPS, RFC 8484) and DoT (DNS-over-TLS, RFC 7858) helpers.
+//!
+//! TODO: these codecs are not yet wired into any listener in main.rs — the
+//! DoH/DoT gateway is config-only today. Tracked separately.
+#![allow(dead_code)]
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;

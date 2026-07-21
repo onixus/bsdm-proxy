@@ -10,18 +10,31 @@ Replaces the legacy static [`web-config/`](../web-config/) generator with a mode
 |-------|--------|
 | Framework | React 19 + TypeScript |
 | Build | Vite 8 |
-| Styling | Tailwind CSS 4 (`@theme` design tokens) |
+| Styling | Tailwind CSS 4 (`@theme inline` tokens, runtime dark/light switch) |
+| Data fetching | TanStack Query (polling, retry, stale-while-revalidate) |
 | Routing | React Router 7 (client-side, no full page reloads) |
+| Charts | Hand-rolled SVG (line/sparkline/segment/bar-list) — no chart library |
 | Icons | lucide-react |
 
 ## Routes
 
 | Path | Purpose |
 |------|---------|
-| `/` | Dashboard — metric widgets, ML anomaly summary |
-| `/logs` | Retro-search logs + XAI modal on blocked requests |
+| `/` | Dashboard — RED metrics from Prometheus `/metrics` + `/api/stats`, live charts, top upstreams, ML anomalies, hierarchy peers |
+| `/logs` | Retro-search with server+client filters, live tail, pagination, CSV export, session timeline, XAI modal |
+| `/analytics` | Aggregations over the search sample: traffic over time, status/cache/decision mix, top talkers, threat severity |
+| `/threat-scores` | ML write-back snapshot with model filter and traffic drill-down |
 | `/policies` | Runtime ACL rules viewer / reload |
-| `/settings` | Config generator + API endpoint configuration |
+| `/settings` | Live node state + config generator (cache, auth, filtering, threat/ML, hierarchy/TLS, rate-limit/eBPF/Wasm, events) |
+
+## Data honesty
+
+Every fetcher returns `Sourced<T>` — payload plus provenance (`live` or `demo`).
+A failed request renders a real **error state**; sample data appears **only**
+when the user enables demo mode (Settings → Console API), and is always marked
+with a "Demo" badge. Pages whose backend endpoints don't exist yet (RPZ, Wasm,
+Cluster Mesh, AI Cache, eBPF stats) carry an explicit "Preview — no backend
+endpoint" banner.
 
 ## Quick start
 

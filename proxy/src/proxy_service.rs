@@ -823,7 +823,7 @@ impl ProxyService {
                 warn!("Revalidation upstream error for {}: {}", url, e);
                 self.metrics
                     .upstream_errors_total
-                    .with_label_values(&[&domain, "revalidate"])
+                    .with_label_values(&[domain.as_str(), "revalidate"])
                     .inc();
                 return None;
             }
@@ -2094,7 +2094,7 @@ impl ProxyService {
                         }
                         self.metrics
                             .upstream_errors_total
-                            .with_label_values(&[&domain, "body_read"])
+                            .with_label_values(&[domain.as_str(), "body_read"])
                             .inc();
                         let mut resp = Response::new(full(Bytes::from_static(b"502 Bad Gateway")));
                         *resp.status_mut() = StatusCode::BAD_GATEWAY;
@@ -2215,7 +2215,7 @@ impl ProxyService {
                 }
                 self.metrics
                     .upstream_errors_total
-                    .with_label_values(&[&domain, "connection"])
+                    .with_label_values(&[domain.as_str(), "connection"])
                     .inc();
                 let mut response = Response::new(full(Bytes::from_static(b"502 Bad Gateway")));
                 *response.status_mut() = StatusCode::BAD_GATEWAY;

@@ -92,6 +92,40 @@ export function applyEnvToForm(map: Record<string, string>, prev: ConfigFormStat
   if (map.CLICKHOUSE_TABLE) next.clickhouseTable = map.CLICKHOUSE_TABLE
   if (map.SEARCH_API_TOKEN) next.searchApiToken = map.SEARCH_API_TOKEN
 
+  if (map.UPSTREAM_CA_CERT) next.upstreamCaCert = map.UPSTREAM_CA_CERT
+  next.upstreamHttp2Enabled = truthyEnv(map.UPSTREAM_HTTP2_ENABLED ?? 'false')
+  next.preserveHeaderCase = truthyEnv(map.HTTP_PRESERVE_HEADER_CASE ?? 'false')
+
+  next.threatScoreEnabled = truthyEnv(map.THREAT_SCORE_ENABLED ?? 'false')
+  if (map.THREAT_SCORE_POLL_URL) next.threatScorePollUrl = map.THREAT_SCORE_POLL_URL
+  if (map.THREAT_SCORE_POLL_INTERVAL_SECS) next.threatScorePollInterval = map.THREAT_SCORE_POLL_INTERVAL_SECS
+  if (map.THREAT_SCORE_BLOCK_THRESHOLD) next.threatScoreBlockThreshold = map.THREAT_SCORE_BLOCK_THRESHOLD
+  if (map.THREAT_SCORE_WARN_THRESHOLD) next.threatScoreWarnThreshold = map.THREAT_SCORE_WARN_THRESHOLD
+
+  if (map.HIERARCHY_PEERS_PATH) next.hierarchyPeersPath = map.HIERARCHY_PEERS_PATH
+  next.icpServerEnabled = truthyEnv(map.ICP_SERVER_ENABLED ?? 'false')
+  if (map.ICP_BIND) next.icpBind = map.ICP_BIND
+  next.htcpServerEnabled = truthyEnv(map.HTCP_SERVER_ENABLED ?? 'false')
+  if (map.HTCP_BIND) next.htcpBind = map.HTCP_BIND
+  next.peerDiscoveryEnabled = truthyEnv(map.PEER_DISCOVERY_ENABLED ?? 'false')
+  if (map.PEER_DISCOVERY_MULTICAST) next.peerDiscoveryMulticast = map.PEER_DISCOVERY_MULTICAST
+
+  next.rateLimitEnabled = truthyEnv(map.RATE_LIMIT_ENABLED ?? 'false')
+  if (map.RATE_LIMIT_MAX_KEYS) next.rateLimitMaxKeys = map.RATE_LIMIT_MAX_KEYS
+
+  next.ebpfXdpEnabled = truthyEnv(map.EBPF_XDP_ENABLED ?? 'false')
+  if (map.EBPF_XDP_IFACE) next.ebpfXdpIface = map.EBPF_XDP_IFACE
+  if (map.EBPF_XDP_MODE) next.ebpfXdpMode = map.EBPF_XDP_MODE
+
+  next.wasmEnabled = truthyEnv(map.WASM_ENABLED ?? 'false')
+  if (map.WASM_MODULE_PATH) next.wasmModulePath = map.WASM_MODULE_PATH
+  next.wasmFailOpen = map.WASM_FAIL_OPEN !== 'false'
+  if (map.WASM_FUEL) next.wasmFuel = map.WASM_FUEL
+
+  next.controlGrpcEnabled = truthyEnv(map.CONTROL_GRPC_ENABLED ?? 'false')
+  if (map.CONTROL_GRPC_BIND) next.controlGrpcBind = map.CONTROL_GRPC_BIND
+  if (map.CONTROL_API_TOKEN) next.controlApiToken = map.CONTROL_API_TOKEN
+
   return next
 }
 
@@ -107,6 +141,7 @@ const SENSITIVE_FORM_KEYS = [
   'aclApiToken',
   'phishtankApiKey',
   'searchApiToken',
+  'controlApiToken',
 ] as const satisfies readonly (keyof ConfigFormState)[]
 
 function formForStorage(form: ConfigFormState): Omit<ConfigFormState, (typeof SENSITIVE_FORM_KEYS)[number]> {
