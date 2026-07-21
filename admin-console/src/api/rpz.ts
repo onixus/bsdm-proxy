@@ -236,7 +236,7 @@ export async function testDomainQuery(domain: string): Promise<RpzTestResult> {
       method: 'POST',
     })
   } catch {
-    return mockTestQuery(domain)
+    return mockTestDomain(domain)
   }
 }
 

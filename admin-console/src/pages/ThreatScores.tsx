@@ -1,36 +1,25 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { RefreshCw } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { RefreshCw, Search } from 'lucide-react'
 import {
   factorsForThreatScore,
   fetchThreatScores,
   type ThreatScoreEntry,
 } from '../api/threatScores'
+import { useSourcedQuery } from '../hooks/useSourced'
 import { Button } from '../components/ui/Button'
 import { Panel } from '../components/dashboard/MetricWidget'
+import { ErrorState, SourceBadge } from '../components/ui/DataState'
 import { InsightPanel, ThreatIndicator } from '../components/xai/ThreatIndicator'
 import { Modal } from '../components/ui/Modal'
 import { severityBadge } from '../theme/tokens'
 
 export function ThreatScoresPage() {
-  const [snapshot, setSnapshot] = useState<{ generated_at?: string; scores: ThreatScoreEntry[] }>({
-    scores: [],
-  })
-  const [loading, setLoading] = useState(true)
+  const result = useSourcedQuery(['threat-scores'], fetchThreatScores, { refetchInterval: 60_000 })
+  const snapshot = result.data?.data ?? { scores: [] as ThreatScoreEntry[] }
+  const loading = result.isFetching
   const [selected, setSelected] = useState<ThreatScoreEntry | null>(null)
   const [modelFilter, setModelFilter] = useState<string>('all')
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    const data = await fetchThreatScores()
-    setSnapshot(data)
-    setLoading(false)
-  }, [])
-
-  useEffect(() => {
-    load()
-    const id = window.setInterval(load, 60_000)
-    return () => window.clearInterval(id)
-  }, [load])
 
   const models = useMemo(() => {
     const set = new Set(snapshot.scores.map((s) => s.model))
@@ -49,21 +38,32 @@ export function ThreatScoresPage() {
     <div className="mx-auto max-w-7xl space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-text-primary">Threat scores</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold text-text-primary">Threat scores</h1>
+            {result.data && <SourceBadge source={result.data.source} />}
+          </div>
           <p className="text-sm text-text-secondary">
             M5.5 write-back snapshot from ml-worker — proxy polls this async (O(1) hot path)
           </p>
-          {snapshot.generated_at && (
+          {'generated_at' in snapshot && snapshot.generated_at && (
             <p className="mt-1 font-mono text-xs text-text-secondary">
               Generated {new Date(snapshot.generated_at).toLocaleString()}
             </p>
           )}
         </div>
-        <Button variant="secondary" onClick={load} disabled={loading}>
+        <Button variant="secondary" onClick={() => result.refetch()} disabled={loading}>
           <RefreshCw className={`size-4 ${loading ? 'animate-spin' : ''}`} />
           Refresh
         </Button>
       </div>
+
+      {result.isError && (
+        <ErrorState
+          title="ML worker unreachable"
+          detail={result.error.message}
+          onRetry={() => result.refetch()}
+        />
+      )}
 
       <div className="flex flex-wrap gap-2">
         {models.map((m) => (
@@ -183,6 +183,12 @@ function ScoreDetailModal({
         </div>
         <ThreatIndicator score={entry.score} size="lg" />
         <InsightPanel factors={factors} model={entry.model} />
+        <Link
+          to={`/logs?q=${encodeURIComponent(entry.entity_id.split('|').pop() ?? entry.entity_id)}`}
+          className="inline-flex items-center gap-2 rounded-md border border-accent/40 bg-accent/10 px-3 py-2 text-sm font-medium text-accent hover:bg-accent/20"
+        >
+          <Search className="size-4" /> Investigate related traffic
+        </Link>
         <p className="text-xs text-text-secondary">
           Scored {entry.scored_at} · expires {entry.expires_at}. Proxy enriches{' '}
           <code className="rounded bg-surface-0 px-1 font-mono">threat_sources</code> when{' '}

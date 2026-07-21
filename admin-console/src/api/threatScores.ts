@@ -1,5 +1,6 @@
 import { loadApiSettings } from './settings'
 import { apiFetch } from './client'
+import { demo, isDemoMode, live, type Sourced } from './source'
 import type { MlFactor } from './search'
 
 export interface ThreatScoreEntry {
@@ -17,14 +18,17 @@ export interface ThreatScoreSnapshot {
   scores: ThreatScoreEntry[]
 }
 
-export async function fetchThreatScores(): Promise<ThreatScoreSnapshot> {
+export async function fetchThreatScores(): Promise<Sourced<ThreatScoreSnapshot>> {
   const settings = loadApiSettings()
   try {
-    return await apiFetch<ThreatScoreSnapshot>('/api/threat-scores', {
-      baseUrl: settings.mlBaseUrl,
-    })
-  } catch {
-    return mockThreatScores()
+    return live(
+      await apiFetch<ThreatScoreSnapshot>('/api/threat-scores', {
+        baseUrl: settings.mlBaseUrl,
+      }),
+    )
+  } catch (err) {
+    if (isDemoMode()) return demo(mockThreatScores())
+    throw err
   }
 }
 

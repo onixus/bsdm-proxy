@@ -35,6 +35,7 @@ import {
 import { Button } from '../components/ui/Button'
 import { Modal } from '../components/ui/Modal'
 import { FormField } from '../components/ui/Form'
+import { PreviewBanner } from '../components/ui/DataState'
 
 export function WasmPluginsPage() {
   const [, startTransition] = useTransition()
@@ -207,6 +208,7 @@ export function WasmPluginsPage() {
 
   return (
     <div className="space-y-6">
+      <PreviewBanner feature="Wasm plugin management" />
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>

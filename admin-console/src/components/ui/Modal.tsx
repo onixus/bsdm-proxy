@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 import { Button } from './Button'
 
@@ -69,12 +69,18 @@ export function CodePreview({ content }: { content: string }) {
 }
 
 export function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
   return (
     <Button
       variant="secondary"
-      onClick={() => navigator.clipboard.writeText(text).then(() => alert('Copied'))}
+      onClick={() =>
+        navigator.clipboard.writeText(text).then(() => {
+          setCopied(true)
+          window.setTimeout(() => setCopied(false), 1500)
+        })
+      }
     >
-      Copy
+      {copied ? 'Copied ✓' : 'Copy'}
     </Button>
   )
 }

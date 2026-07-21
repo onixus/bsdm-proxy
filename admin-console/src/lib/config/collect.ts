@@ -85,6 +85,62 @@ export function collectConfig(form: ConfigFormState): ProxyConfig {
   if (form.aclApiToken) config.ACL_API_TOKEN = form.aclApiToken
   if (form.searchApiToken) config.SEARCH_API_TOKEN = form.searchApiToken
 
+  if (form.upstreamCaCert) config.UPSTREAM_CA_CERT = form.upstreamCaCert
+  if (form.upstreamHttp2Enabled) config.UPSTREAM_HTTP2_ENABLED = 'true'
+  if (form.preserveHeaderCase) config.HTTP_PRESERVE_HEADER_CASE = 'true'
+
+  if (form.threatScoreEnabled) {
+    Object.assign(config, {
+      THREAT_SCORE_ENABLED: 'true',
+      THREAT_SCORE_POLL_URL: form.threatScorePollUrl,
+      THREAT_SCORE_POLL_INTERVAL_SECS: form.threatScorePollInterval,
+      THREAT_SCORE_BLOCK_THRESHOLD: form.threatScoreBlockThreshold,
+      THREAT_SCORE_WARN_THRESHOLD: form.threatScoreWarnThreshold,
+    })
+  }
+
+  if (form.hierarchyPeersPath) config.HIERARCHY_PEERS_PATH = form.hierarchyPeersPath
+  if (form.icpServerEnabled) {
+    config.ICP_SERVER_ENABLED = 'true'
+    config.ICP_BIND = form.icpBind
+  }
+  if (form.htcpServerEnabled) {
+    config.HTCP_SERVER_ENABLED = 'true'
+    config.HTCP_BIND = form.htcpBind
+  }
+  if (form.peerDiscoveryEnabled) {
+    config.PEER_DISCOVERY_ENABLED = 'true'
+    config.PEER_DISCOVERY_MULTICAST = form.peerDiscoveryMulticast
+  }
+
+  if (form.rateLimitEnabled) {
+    config.RATE_LIMIT_ENABLED = 'true'
+    config.RATE_LIMIT_MAX_KEYS = form.rateLimitMaxKeys
+  }
+
+  if (form.ebpfXdpEnabled) {
+    Object.assign(config, {
+      EBPF_XDP_ENABLED: 'true',
+      EBPF_XDP_IFACE: form.ebpfXdpIface,
+      EBPF_XDP_MODE: form.ebpfXdpMode,
+    })
+  }
+
+  if (form.wasmEnabled) {
+    Object.assign(config, {
+      WASM_ENABLED: 'true',
+      WASM_MODULE_PATH: form.wasmModulePath,
+      WASM_FAIL_OPEN: String(form.wasmFailOpen),
+      WASM_FUEL: form.wasmFuel,
+    })
+  }
+
+  if (form.controlGrpcEnabled) {
+    config.CONTROL_GRPC_ENABLED = 'true'
+    config.CONTROL_GRPC_BIND = form.controlGrpcBind
+  }
+  if (form.controlApiToken) config.CONTROL_API_TOKEN = form.controlApiToken
+
   return config
 }
 

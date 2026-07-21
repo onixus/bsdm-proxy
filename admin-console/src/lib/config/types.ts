@@ -118,6 +118,40 @@ export interface ConfigFormState {
   searchApiToken: string
   prometheusEnabled: boolean
   grafanaEnabled: boolean
+  // Upstream TLS / HTTP
+  upstreamCaCert: string
+  upstreamHttp2Enabled: boolean
+  preserveHeaderCase: boolean
+  // Threat score enforcement (ml-worker write-back)
+  threatScoreEnabled: boolean
+  threatScorePollUrl: string
+  threatScorePollInterval: string
+  threatScoreBlockThreshold: string
+  threatScoreWarnThreshold: string
+  // Cache hierarchy (ICP/HTCP)
+  hierarchyPeersPath: string
+  icpServerEnabled: boolean
+  icpBind: string
+  htcpServerEnabled: boolean
+  htcpBind: string
+  peerDiscoveryEnabled: boolean
+  peerDiscoveryMulticast: string
+  // Rate limiting
+  rateLimitEnabled: boolean
+  rateLimitMaxKeys: string
+  // eBPF / XDP
+  ebpfXdpEnabled: boolean
+  ebpfXdpIface: string
+  ebpfXdpMode: string
+  // Wasm request hooks
+  wasmEnabled: boolean
+  wasmModulePath: string
+  wasmFailOpen: boolean
+  wasmFuel: string
+  // gRPC control plane
+  controlGrpcEnabled: boolean
+  controlGrpcBind: string
+  controlApiToken: string
 }
 
 export const defaultFormState: ConfigFormState = {
@@ -187,4 +221,31 @@ export const defaultFormState: ConfigFormState = {
   searchApiToken: '',
   prometheusEnabled: true,
   grafanaEnabled: true,
+  upstreamCaCert: '',
+  upstreamHttp2Enabled: false,
+  preserveHeaderCase: false,
+  threatScoreEnabled: false,
+  threatScorePollUrl: 'http://127.0.0.1:8091/api/threat-scores',
+  threatScorePollInterval: '30',
+  threatScoreBlockThreshold: '0.9',
+  threatScoreWarnThreshold: '0.7',
+  hierarchyPeersPath: '',
+  icpServerEnabled: false,
+  icpBind: '0.0.0.0:3130',
+  htcpServerEnabled: false,
+  htcpBind: '0.0.0.0:4827',
+  peerDiscoveryEnabled: false,
+  peerDiscoveryMulticast: '239.255.77.77:3132',
+  rateLimitEnabled: false,
+  rateLimitMaxKeys: '100000',
+  ebpfXdpEnabled: false,
+  ebpfXdpIface: 'eth0',
+  ebpfXdpMode: 'driver',
+  wasmEnabled: false,
+  wasmModulePath: '/etc/bsdm-proxy/hooks.wasm',
+  wasmFailOpen: true,
+  wasmFuel: '1000000',
+  controlGrpcEnabled: false,
+  controlGrpcBind: '127.0.0.1:50051',
+  controlApiToken: '',
 }

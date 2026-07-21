@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AppLayout } from './components/layout/AppLayout'
 import { AiSemanticCachePage } from './pages/AiSemanticCache'
+import { AnalyticsPage } from './pages/Analytics'
 import { ClusterMeshPage } from './pages/ClusterMesh'
 import { DashboardPage } from './pages/Dashboard'
 import { LogsPage } from './pages/Logs'
@@ -17,6 +18,7 @@ export function App() {
         <Routes>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/logs" element={<LogsPage />} />
+          <Route path="/analytics" element={<AnalyticsPage />} />
           <Route path="/threat-scores" element={<ThreatScoresPage />} />
           <Route path="/policies" element={<PoliciesPage />} />
           <Route path="/rpz" element={<RpzManagementPage />} />
