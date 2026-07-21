@@ -307,8 +307,22 @@ function getMockPlugins(): WasmPlugin[] {
 }
 
 function mockTestPlugin(req: WasmTestRequest): WasmTestResult {
-  const url = req.url.toLowerCase()
-  if (url.includes('.blocked.test') || url.includes('evil.com') || url.includes('/phish')) {
+  const rawUrl = req.url.toLowerCase().trim()
+  let hostname = ''
+  try {
+    const parsed = new URL(rawUrl.includes('://') ? rawUrl : `https://${rawUrl}`)
+    hostname = parsed.hostname
+  } catch {
+    hostname = rawUrl
+  }
+
+  const isBlockedHost =
+    hostname === 'evil.com' ||
+    hostname.endsWith('.evil.com') ||
+    hostname.endsWith('.blocked.test') ||
+    hostname === 'blocked.test'
+
+  if (isBlockedHost || rawUrl.includes('/phish')) {
     return {
       decision: 'DENY',
       denyReason: 'blocked by wasm PoC (.blocked.test pattern matched)',
