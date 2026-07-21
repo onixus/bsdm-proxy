@@ -82,13 +82,17 @@ impl CachedUser {
         self.cached_at.elapsed() > self.ttl
     }
 
-    fn verify_password(&self, password: &str) -> bool {
-        let hash = Self::hash_password(password);
-        self.password_hash == hash
+    /// `salt` should be a per-process random value (see [`AuthManager::salt`]) so that
+    /// cached hashes cannot be matched against precomputed dictionaries if process
+    /// memory is ever exposed, and the comparison itself runs in constant time.
+    fn verify_password(&self, password: &str, salt: &[u8]) -> bool {
+        let hash = Self::hash_password(password, salt);
+        crate::security_util::constant_time_eq(self.password_hash.as_bytes(), hash.as_bytes())
     }
 
-    fn hash_password(password: &str) -> String {
+    fn hash_password(password: &str, salt: &[u8]) -> String {
         let mut hasher = Sha256::new();
+        hasher.update(salt);
         hasher.update(password.as_bytes());
         hex::encode(hasher.finalize())
     }
@@ -293,15 +297,18 @@ impl ConnAuthCache {
     }
 }
 
-fn proxy_auth_fingerprint<T>(req: &Request<T>) -> Option<String> {
+fn proxy_auth_fingerprint<T>(req: &Request<T>, salt: &[u8]) -> Option<String> {
     let value = req.headers().get(PROXY_AUTHORIZATION)?.to_str().ok()?;
-    Some(CachedUser::hash_password(value))
+    Some(CachedUser::hash_password(value, salt))
 }
 
 /// Authentication manager
 pub struct AuthManager {
     config: AuthConfig,
     user_cache: Arc<RwLock<HashMap<String, CachedUser>>>,
+    /// Per-process random salt mixed into cached password hashes so they can't be
+    /// matched against precomputed dictionaries if process memory is ever exposed.
+    salt: [u8; 16],
     #[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]
     handshake_sessions: Arc<RwLock<HashMap<String, HandshakeSession>>>,
     #[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]
@@ -340,6 +347,7 @@ impl AuthManager {
         Self {
             config,
             user_cache: Arc::new(RwLock::new(HashMap::new())),
+            salt: rand::random(),
             #[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]
             handshake_sessions: Arc::new(RwLock::new(HashMap::new())),
             #[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]
@@ -402,9 +410,13 @@ impl AuthManager {
     }
 
     /// Handle proxy authentication including multi-round NTLM / Kerberos.
+    #[cfg_attr(
+        not(any(feature = "auth-ntlm", feature = "auth-kerberos")),
+        allow(unused_variables)
+    )]
     pub async fn handle_proxy_auth<T>(
         &self,
-        _client_key: &str,
+        client_key: &str,
         req: &Request<T>,
         conn_auth: Option<&ConnAuthCache>,
     ) -> ProxyAuthOutcome {
@@ -413,7 +425,7 @@ impl AuthManager {
             return self.handle_sspi_auth(client_key, req, conn_auth).await;
         }
 
-        let cred_fp = proxy_auth_fingerprint(req);
+        let cred_fp = proxy_auth_fingerprint(req, &self.salt);
         if let Some(cache) = conn_auth {
             if let Some(user) = cache.get(cred_fp.as_deref()).await {
                 debug!("Connection auth cache hit for {}", user.username);
@@ -563,7 +575,7 @@ impl AuthManager {
 
         // Check cache first
         if let Some(cached) = self.get_cached_user(username).await {
-            if !cached.is_expired() && cached.verify_password(password) {
+            if !cached.is_expired() && cached.verify_password(password, &self.salt) {
                 debug!("User {} authenticated from cache", username);
                 return Ok(cached.user_info.clone());
             }
@@ -753,7 +765,7 @@ impl AuthManager {
     async fn cache_user(&self, username: &str, password: &str, user_info: UserInfo) {
         let cached = CachedUser {
             user_info,
-            password_hash: CachedUser::hash_password(password),
+            password_hash: CachedUser::hash_password(password, &self.salt),
             cached_at: Instant::now(),
             ttl: self.config.cache_ttl,
         };
@@ -959,13 +971,20 @@ mod tests {
 
     #[test]
     fn test_password_hashing() {
+        let salt = [7u8; 16];
         let sample = format!("sample{}", 123);
-        let hash1 = CachedUser::hash_password(&sample);
-        let hash2 = CachedUser::hash_password(&sample);
+        let hash1 = CachedUser::hash_password(&sample, &salt);
+        let hash2 = CachedUser::hash_password(&sample, &salt);
         assert_eq!(hash1, hash2);
 
-        let hash3 = CachedUser::hash_password("different");
+        let hash3 = CachedUser::hash_password("different", &salt);
         assert_ne!(hash1, hash3);
+
+        let hash4 = CachedUser::hash_password(&sample, &[9u8; 16]);
+        assert_ne!(
+            hash1, hash4,
+            "different salts must produce different hashes"
+        );
     }
 
     #[cfg(feature = "auth-ldap")]
@@ -1013,7 +1032,7 @@ mod tests {
         // Should be cached
         let cached = manager.get_cached_user("testuser").await;
         assert!(cached.is_some());
-        assert!(cached.unwrap().verify_password(&secret));
+        assert!(cached.unwrap().verify_password(&secret, &manager.salt));
     }
 
     #[tokio::test]

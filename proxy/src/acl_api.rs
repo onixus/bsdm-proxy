@@ -110,7 +110,9 @@ impl AclApiState {
             .get(AUTHORIZATION)
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.strip_prefix("Bearer "))
-            .is_some_and(|token| token == expected)
+            .is_some_and(|token| {
+                crate::security_util::constant_time_eq(token.as_bytes(), expected.as_bytes())
+            })
     }
 
     fn invalidate_policy_cache(&self) {
