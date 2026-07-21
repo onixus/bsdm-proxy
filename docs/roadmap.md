@@ -211,6 +211,7 @@ Backlog mapping: [swg-backlog-mapping.md](swg-backlog-mapping.md)
 | Документ | Тема |
 |----------|------|
 | [strategic-roadmap.md](strategic-roadmap.md) | Стратегические фазы Lite / DX / Wasm / AI |
+| [competitive-roadmap.md](competitive-roadmap.md) | Конкурентный анализ SSE/SASE и Next-Gen Roadmap |
 | [lite.md](lite.md) | Lite compose: proxy + SQLite Search API |
 | [architecture.md](architecture.md) | Компоненты, блокеры |
 | [adr/0002-clickhouse-analytics.md](adr/0002-clickhouse-analytics.md) | ClickHouse ADR |
