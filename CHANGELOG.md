@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Admin Console Wasm Plugins Module (`/wasm`)** — Interactive Wasm Request Sandbox, WAT source viewer, plugin directory, and engine settings ([#188](https://github.com/onixus/bsdm-proxy/issues/188))
 - **Admin Console ICAP Inspection & DLP Module (`/icap`)** — RFC 3507 ICAP scanning sandbox, Threat Log audit table, and service profile management ([#99](https://github.com/onixus/bsdm-proxy/issues/99))
 - **Admin Console gRPC Control Plane Mesh Module (`/cluster`)** — Multi-node cluster topology grid, real-time gRPC policy push, and cluster-wide cache purge ([#187](https://github.com/onixus/bsdm-proxy/issues/187))
+- **eBPF / XDP Kernel Packet Drop Bypass Module** — Zero-CPU packet drops at NIC driver layer (`EBPF_XDP_ENABLED`), reference `bpf/xdp_drop.c`, and `admin-console` eBPF Policies panel
 - **Admin Console AI Semantic Cache & Vector DB Module (`/ai-cache`)** — Qdrant vector match simulator, cosine similarity tuning, token savings analytics ($285.00/24h) ([#189](https://github.com/onixus/bsdm-proxy/issues/189))
 
 ## [0.5.7+033] - 2026-07-17
