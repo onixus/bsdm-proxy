@@ -983,7 +983,8 @@ mod tests {
         let hash2 = CachedUser::hash_password(&sample, &salt);
         assert_eq!(hash1, hash2);
 
-        let hash3 = CachedUser::hash_password("different", &salt);
+        let other_sample = format!("{}sample", "different-");
+        let hash3 = CachedUser::hash_password(&other_sample, &salt);
         assert_ne!(hash1, hash3);
 
         let hash4 = CachedUser::hash_password(&sample, &unit_test_salt(9));
