@@ -23,6 +23,13 @@ pub struct Config {
     pub ttl: u32,
     pub metrics_port: u16,
     pub upstream_timeout: Duration,
+    pub doh_enabled: bool,
+    pub doh_bind: SocketAddr,
+    pub doh_path: String,
+    pub dot_enabled: bool,
+    pub dot_bind: SocketAddr,
+    pub tls_cert_path: Option<String>,
+    pub tls_key_path: Option<String>,
 }
 
 impl Config {
@@ -63,6 +70,23 @@ impl Config {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(2_000_u64);
+
+        let doh_enabled = env_bool("DNS_SINKHOLE_DOH_ENABLED", true);
+        let doh_bind = std::env::var("DNS_SINKHOLE_DOH_BIND")
+            .unwrap_or_else(|_| "0.0.0.0:8443".into())
+            .parse()
+            .map_err(|e| format!("DNS_SINKHOLE_DOH_BIND: {e}"))?;
+        let doh_path = std::env::var("DNS_SINKHOLE_DOH_PATH").unwrap_or_else(|_| "/dns-query".into());
+
+        let dot_enabled = env_bool("DNS_SINKHOLE_DOT_ENABLED", true);
+        let dot_bind = std::env::var("DNS_SINKHOLE_DOT_BIND")
+            .unwrap_or_else(|_| "0.0.0.0:853".into())
+            .parse()
+            .map_err(|e| format!("DNS_SINKHOLE_DOT_BIND: {e}"))?;
+
+        let tls_cert_path = std::env::var("DNS_SINKHOLE_TLS_CERT").ok().filter(|s| !s.is_empty());
+        let tls_key_path = std::env::var("DNS_SINKHOLE_TLS_KEY").ok().filter(|s| !s.is_empty());
+
         Ok(Self {
             enabled,
             bind,
@@ -74,6 +98,13 @@ impl Config {
             ttl: ttl.max(1),
             metrics_port,
             upstream_timeout: Duration::from_millis(timeout_ms.max(1)),
+            doh_enabled,
+            doh_bind,
+            doh_path,
+            dot_enabled,
+            dot_bind,
+            tls_cert_path,
+            tls_key_path,
         })
     }
 }

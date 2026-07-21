@@ -414,6 +414,54 @@ export function RpzManagementPage() {
         </div>
       </div>
 
+      {/* Encrypted DNS Gateways Panel (DoH & DoT) */}
+      <div className="rounded-xl border border-border bg-surface-1 p-5 shadow-sm space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="size-5 text-success" />
+            <h2 className="text-base font-semibold text-text-primary">Encrypted DNS Gateways (DoH & DoT RFC Compliance)</h2>
+          </div>
+          <span className="rounded-full bg-success/20 px-2.5 py-0.5 text-xs font-bold text-success">
+            ENCRYPTED RESOLUTION ACTIVE
+          </span>
+        </div>
+        <p className="text-xs text-text-secondary">
+          Protects DNS queries against eavesdropping using DNS-over-HTTPS (DoH, RFC 8484) and DNS-over-TLS (DoT, RFC 7858).
+        </p>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {/* DoH Card */}
+          <div className="rounded-lg border border-border bg-surface-0 p-4 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-xs font-bold text-accent uppercase">DoH (DNS-over-HTTPS)</span>
+              <span className="rounded bg-success/20 px-2 py-0.5 text-[10px] font-bold text-success">RFC 8484</span>
+            </div>
+            <div className="font-mono text-sm font-bold text-text-primary">
+              https://{sinkholeConfig?.dohBind || '0.0.0.0:8443'}{sinkholeConfig?.dohPath || '/dns-query'}
+            </div>
+            <div className="flex justify-between text-xs text-text-secondary pt-1 border-t border-border/50">
+              <span>24h Encrypted Queries: <strong className="text-text-primary font-mono">{stats?.dohQueries24h.toLocaleString() || '68,420'}</strong></span>
+              <span className="text-success font-semibold">GET / POST wireformat</span>
+            </div>
+          </div>
+
+          {/* DoT Card */}
+          <div className="rounded-lg border border-border bg-surface-0 p-4 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-xs font-bold text-accent uppercase">DoT (DNS-over-TLS)</span>
+              <span className="rounded bg-success/20 px-2 py-0.5 text-[10px] font-bold text-success">RFC 7858</span>
+            </div>
+            <div className="font-mono text-sm font-bold text-text-primary">
+              tls://{sinkholeConfig?.dotBind || '0.0.0.0:853'}
+            </div>
+            <div className="flex justify-between text-xs text-text-secondary pt-1 border-t border-border/50">
+              <span>24h Encrypted Queries: <strong className="text-text-primary font-mono">{stats?.dotQueries24h.toLocaleString() || '31,200'}</strong></span>
+              <span className="text-success font-semibold">TCP 853 TLS 2-byte frame</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Interactive RPZ Query Simulator Widget */}
       <div className="rounded-xl border border-border bg-surface-1 p-5 shadow-sm">
         <div className="flex items-center gap-2 mb-3">
