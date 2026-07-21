@@ -9,6 +9,7 @@ import {
   Brain,
   Radio,
   Cpu,
+  Network,
 } from 'lucide-react'
 
 const navItems = [
@@ -18,6 +19,7 @@ const navItems = [
   { to: '/policies', label: 'Policies', icon: Shield },
   { to: '/rpz', label: 'RPZ Sinkhole', icon: Radio },
   { to: '/wasm', label: 'Wasm Plugins', icon: Cpu },
+  { to: '/cluster', label: 'Cluster Mesh', icon: Network },
   { to: '/settings', label: 'Settings', icon: Settings },
 ] as const
 
