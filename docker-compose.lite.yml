@@ -49,6 +49,7 @@ services:
     ports:
       - "1488:1488"
       - "9090:9090"
+      - "18080:18080"
     environment:
       - HTTP_PORT=1488
       - METRICS_PORT=9090
@@ -82,6 +83,25 @@ services:
       timeout: 5s
       retries: 5
       start_period: 5s
+
+  # Mock upstream for scripts/run-load-test.sh (load-test.yml CI workflow).
+  # Shares the proxy container's network namespace so a single loopback
+  # address (127.0.0.1:18080) is reachable both from the CI runner host
+  # (via the proxy service's published port) and from inside the proxy
+  # process itself when it forwards requests to the upstream.
+  mock-upstream:
+    image: python:3.12-slim
+    network_mode: "service:proxy"
+    depends_on:
+      proxy:
+        condition: service_started
+    volumes:
+      - ./scripts/mock-upstream-threaded.py:/mock-upstream.py:ro
+    environment:
+      - MOCK_HOST=0.0.0.0
+      - MOCK_PORT=18080
+    command: ["python3", "/mock-upstream.py"]
+    restart: unless-stopped
 
 networks:
   bsdm-lite:

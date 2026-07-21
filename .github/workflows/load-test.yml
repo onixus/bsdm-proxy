@@ -35,13 +35,14 @@ jobs:
       - name: Start bsdm-proxy (Lite Mode)
         run: |
           # Запускаем облегченный стек без Kafka/ClickHouse, чтобы не ловить OOM на воркере
-          docker compose -f docker-compose.lite.yml up -d proxy
-          
+          # (mock-upstream делит network namespace с proxy — см. docker-compose.lite.yml)
+          docker compose -f docker-compose.lite.yml up -d mock-upstream
+
       - name: Wait for Proxy Readiness
         run: |
           echo "Ожидание запуска прокси-сервера..."
           for i in {1..30}; do
-            if curl -s -I http://localhost:8080 | grep -q "HTTP/"; then
+            if curl -s -I http://localhost:9090/health | grep -q "HTTP/"; then
               echo "✅ bsdm-proxy успешно запущен и отвечает!"
               break
             fi
@@ -56,13 +57,15 @@ jobs:
       - name: Run Standard Load Test Script
         run: |
           chmod +x ./scripts/run-load-test.sh
-          ./scripts/run-load-test.sh
+          PROXY=http://127.0.0.1:1488 METRICS_URL=http://127.0.0.1:9090 UPSTREAM=http://127.0.0.1:18080 \
+            ./scripts/run-load-test.sh
 
       - name: Run High-Intensity wrk Benchmark (Lua Script)
         run: |
           echo "=== Запуск бенчмарка wrk с использованием wrk-proxy.lua ==="
           # Настройки адаптированы под 2 ядра GitHub воркера (-t2)
-          wrk -t2 -c100 -d30s -s ./scripts/wrk-proxy.lua http://localhost:8080
+          # wrk-proxy.lua использует прокси как forward-proxy (см. usage в самом файле)
+          wrk -t2 -c100 -d30s -s ./scripts/wrk-proxy.lua http://localhost:1488
           
       - name: Container Resource Metrics
         if: always()
