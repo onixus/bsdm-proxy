@@ -19,6 +19,13 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 prometheus = "0.14"
 base64 = "0.22"
+hyper = { version = "1.10", features = ["full", "server"] }
+hyper-util = { version = "0.1", features = ["full", "server", "server-auto"] }
+http-body-util = "0.1"
+bytes = "1.12"
+tokio-rustls = { version = "0.26", features = ["ring"] }
+rustls = { version = "0.23", features = ["ring"] }
+rustls-pemfile = "2.2"
 
 [dev-dependencies]
 tokio = { workspace = true }

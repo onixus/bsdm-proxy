@@ -5,8 +5,9 @@
 
 use std::collections::HashSet;
 use std::net::IpAddr;
+use std::process::Command;
 use std::sync::{Arc, RwLock};
-use tracing::info;
+use tracing::{error, info, warn};
 
 /// Runtime mode for eBPF XDP program attachment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -98,11 +99,94 @@ impl EbpfXdpManager {
                 "Initializing eBPF XDP manager on interface {} (mode: {:?})",
                 config.interface, config.mode
             );
+
+            if std::env::consts::OS == "linux" {
+                if !std::path::Path::new("bpf/xdp_drop.o").exists() {
+                    info!("Compiling bpf/xdp_drop.c ...");
+                    let out = Command::new("clang")
+                        .args([
+                            "-O2",
+                            "-target",
+                            "bpf",
+                            "-c",
+                            "bpf/xdp_drop.c",
+                            "-o",
+                            "bpf/xdp_drop.o",
+                        ])
+                        .output();
+                    match out {
+                        Ok(o) if o.status.success() => {
+                            info!("Compiled bpf/xdp_drop.o successfully")
+                        }
+                        Ok(o) => error!(
+                            "Failed to compile XDP program: {}",
+                            String::from_utf8_lossy(&o.stderr)
+                        ),
+                        Err(e) => error!("Failed to invoke clang: {}", e),
+                    }
+                }
+
+                let mode_str = match config.mode {
+                    XdpMode::Driver => "xdp",
+                    XdpMode::Offload => "xdpoffload",
+                    XdpMode::Skb => "xdpgeneric",
+                };
+
+                // Detach previous first, ignore errors
+                let _ = Command::new("ip")
+                    .args(["link", "set", "dev", &config.interface, mode_str, "off"])
+                    .output();
+
+                info!("Attaching XDP program to {}", config.interface);
+                let attach = Command::new("ip")
+                    .args([
+                        "link",
+                        "set",
+                        "dev",
+                        &config.interface,
+                        mode_str,
+                        "obj",
+                        "bpf/xdp_drop.o",
+                        "sec",
+                        "xdp",
+                    ])
+                    .output();
+                match attach {
+                    Ok(o) if !o.status.success() => error!(
+                        "Failed to attach XDP: {}",
+                        String::from_utf8_lossy(&o.stderr)
+                    ),
+                    Err(e) => error!("Failed to invoke ip command: {}", e),
+                    _ => {}
+                }
+            } else {
+                warn!("eBPF XDP is only supported on Linux. Operating in mocked mode.");
+            }
         }
         Self {
             config,
             blocked_ips: Arc::new(RwLock::new(HashSet::new())),
             packets_dropped: Arc::new(RwLock::new(0)),
+        }
+    }
+
+    fn ip_to_hex(ip: &IpAddr) -> String {
+        match ip {
+            IpAddr::V4(v4) => {
+                let octets = v4.octets();
+                format!(
+                    "{:02x} {:02x} {:02x} {:02x}",
+                    octets[0], octets[1], octets[2], octets[3]
+                )
+            }
+            IpAddr::V6(v6) => {
+                let octets = v6.octets();
+                octets
+                    .iter()
+                    .map(|b| format!("{:02x}", b))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            }
         }
     }
 
@@ -119,6 +203,31 @@ impl EbpfXdpManager {
         if let Ok(mut set) = self.blocked_ips.write() {
             let inserted = set.insert(ip);
             if inserted && self.config.enabled {
+                if std::env::consts::OS == "linux" {
+                    let hex = Self::ip_to_hex(&ip);
+                    let args = vec![
+                        "map",
+                        "update",
+                        "name",
+                        &self.config.map_name,
+                        "key",
+                        "hex",
+                        &hex,
+                        "value",
+                        "hex",
+                        "01",
+                    ];
+                    let out = Command::new("bpftool").args(&args).output();
+                    if let Ok(o) = out {
+                        if !o.status.success() {
+                            error!(
+                                "Failed to update BPF map for {}: {}",
+                                ip,
+                                String::from_utf8_lossy(&o.stderr)
+                            );
+                        }
+                    }
+                }
                 info!("eBPF XDP: Synced blocked IP {} to kernel BPF map", ip);
             }
             inserted
@@ -132,6 +241,19 @@ impl EbpfXdpManager {
         if let Ok(mut set) = self.blocked_ips.write() {
             let removed = set.remove(ip);
             if removed && self.config.enabled {
+                if std::env::consts::OS == "linux" {
+                    let hex = Self::ip_to_hex(ip);
+                    let args = vec![
+                        "map",
+                        "delete",
+                        "name",
+                        &self.config.map_name,
+                        "key",
+                        "hex",
+                        &hex,
+                    ];
+                    let _ = Command::new("bpftool").args(&args).output();
+                }
                 info!("eBPF XDP: Removed IP {} from kernel BPF map", ip);
             }
             removed
@@ -178,6 +300,28 @@ impl EbpfXdpManager {
             .read()
             .map(|set| set.iter().copied().collect())
             .unwrap_or_default()
+    }
+}
+
+impl Drop for EbpfXdpManager {
+    fn drop(&mut self) {
+        if self.config.enabled && std::env::consts::OS == "linux" {
+            let mode_str = match self.config.mode {
+                XdpMode::Driver => "xdp",
+                XdpMode::Offload => "xdpoffload",
+                XdpMode::Skb => "xdpgeneric",
+            };
+            let _ = Command::new("ip")
+                .args([
+                    "link",
+                    "set",
+                    "dev",
+                    &self.config.interface,
+                    mode_str,
+                    "off",
+                ])
+                .output();
+        }
     }
 }
 

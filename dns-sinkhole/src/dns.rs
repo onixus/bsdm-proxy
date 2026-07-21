@@ -7,6 +7,7 @@ pub const TYPE_AAAA: u16 = 28;
 pub const CLASS_IN: u16 = 1;
 pub const RCODE_NXDOMAIN: u8 = 3;
 pub const RCODE_FORMERR: u8 = 1;
+#[allow(dead_code)]
 pub const RCODE_SERVFAIL: u8 = 2;
 
 #[derive(Debug, Clone)]

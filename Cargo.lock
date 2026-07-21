@@ -1039,9 +1039,16 @@ name = "dns-sinkhole"
 version = "0.5.7+033"
 dependencies = [
  "base64",
+ "bytes",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "prometheus",
+ "rustls",
+ "rustls-pemfile",
  "tempfile",
  "tokio",
+ "tokio-rustls",
  "tracing",
  "tracing-subscriber",
 ]

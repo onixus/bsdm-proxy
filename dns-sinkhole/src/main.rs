@@ -52,6 +52,44 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let zone = Arc::new(zone);
+
+    if cfg.doh_enabled || cfg.dot_enabled {
+        if let (Some(cert), Some(key)) = (&cfg.tls_cert_path, &cfg.tls_key_path) {
+            match server::load_certs(cert, key) {
+                Ok(tls_config) => {
+                    let tls_config = Arc::new(tls_config);
+                    if cfg.doh_enabled {
+                        let c = cfg.clone();
+                        let z = zone.clone();
+                        let m = metrics.clone();
+                        let t = tls_config.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = server::run_doh(c, z, m, t).await {
+                                error!("DoH server error: {e}");
+                            }
+                        });
+                    }
+                    if cfg.dot_enabled {
+                        let c = cfg.clone();
+                        let z = zone.clone();
+                        let m = metrics.clone();
+                        let t = tls_config.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = server::run_dot(c, z, m, t).await {
+                                error!("DoT server error: {e}");
+                            }
+                        });
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to load TLS certificates for DoH/DoT: {e}");
+                }
+            }
+        } else {
+            error!("DoH/DoT enabled but TLS_CERT or TLS_KEY path is not set");
+        }
+    }
+
     server::run(cfg, zone, metrics).await?;
     Ok(())
 }

@@ -3,13 +3,28 @@
 use crate::config::{BlockAction, Config};
 use crate::dns::{
     a_rdata, aaaa_rdata, build_response, formerr, parse_query, Query, CLASS_IN, RCODE_NXDOMAIN,
-    RCODE_SERVFAIL, TYPE_A, TYPE_AAAA,
+    TYPE_A, TYPE_AAAA,
 };
+use crate::doh_dot::{decode_doh_base64url, encode_dot_frame, parse_dot_length};
 use crate::zone::{Zone, ZoneAction};
+use bytes::Bytes;
+use http_body_util::{BodyExt, Full};
+use hyper::body::Incoming;
+use hyper::server::conn::http1;
+use hyper::service::service_fn;
+use hyper::{Method, Request, Response, StatusCode};
+use hyper_util::rt::TokioIo;
 use prometheus::{IntCounter, Registry};
+use std::convert::Infallible;
+use std::fs::File;
+use std::io::BufReader;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
-use tokio::net::UdpSocket;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, UdpSocket};
+use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use tokio_rustls::rustls::ServerConfig;
+use tokio_rustls::TlsAcceptor;
 use tracing::{debug, info, warn};
 
 pub struct Metrics {
@@ -101,42 +116,42 @@ async fn handle_one(
     zone: &Zone,
     metrics: &Metrics,
 ) -> Result<(), String> {
+    let resp = process_dns_query(packet, cfg, zone, metrics).await?;
+    sock.send_to(&resp, peer)
+        .await
+        .map_err(|e| format!("send: {e}"))?;
+    Ok(())
+}
+
+pub async fn process_dns_query(
+    packet: &[u8],
+    cfg: &Config,
+    zone: &Zone,
+    metrics: &Metrics,
+) -> Result<Vec<u8>, String> {
     let query = match parse_query(packet) {
         Ok(q) => q,
-        Err(e) => {
+        Err(_) => {
             let id = if packet.len() >= 2 {
                 u16::from_be_bytes([packet[0], packet[1]])
             } else {
                 0
             };
-            let _ = sock.send_to(&formerr(id), peer).await;
-            return Err(e);
+            return Ok(formerr(id));
         }
     };
 
     if query.question.qclass != CLASS_IN {
-        let resp = build_response(&query, 0, &[]);
-        sock.send_to(&resp, peer)
-            .await
-            .map_err(|e| format!("send: {e}"))?;
-        return Ok(());
+        return Ok(build_response(&query, 0, &[]));
     }
 
     if let Some(action) = zone.lookup(&query.question.name) {
         metrics.blocked.inc();
-        let resp = build_block_response(cfg, &query, action);
-        sock.send_to(&resp, peer)
-            .await
-            .map_err(|e| format!("send: {e}"))?;
-        return Ok(());
+        return Ok(build_block_response(cfg, &query, action));
     }
 
     metrics.forwarded.inc();
-    let upstream = forward(cfg, packet).await?;
-    sock.send_to(&upstream, peer)
-        .await
-        .map_err(|e| format!("send: {e}"))?;
-    Ok(())
+    forward(cfg, packet).await
 }
 
 fn build_block_response(cfg: &Config, query: &Query, action: &ZoneAction) -> Vec<u8> {
@@ -190,10 +205,238 @@ async fn forward(cfg: &Config, packet: &[u8]) -> Result<Vec<u8>, String> {
     }
 }
 
-/// SERVFAIL helper for tests / callers.
-#[allow(dead_code)]
-pub fn servfail(query: &Query) -> Vec<u8> {
-    build_response(query, RCODE_SERVFAIL, &[])
+pub fn load_certs(cert_path: &str, key_path: &str) -> Result<ServerConfig, String> {
+    let cert_file = File::open(cert_path).map_err(|e| format!("cert open: {e}"))?;
+    let mut cert_reader = BufReader::new(cert_file);
+    let certs: Vec<CertificateDer<'static>> = rustls_pemfile::certs(&mut cert_reader)
+        .map(|r| r.unwrap().into_owned())
+        .collect();
+
+    let key_file = File::open(key_path).map_err(|e| format!("key open: {e}"))?;
+    let mut key_reader = BufReader::new(key_file);
+    let mut keys = rustls_pemfile::pkcs8_private_keys(&mut key_reader)
+        .map(|r| PrivateKeyDer::Pkcs8(r.unwrap().clone_key()))
+        .collect::<Vec<_>>();
+    if keys.is_empty() {
+        let key_file = File::open(key_path).map_err(|e| format!("key open: {e}"))?;
+        let mut key_reader = BufReader::new(key_file);
+        keys = rustls_pemfile::rsa_private_keys(&mut key_reader)
+            .map(|r| PrivateKeyDer::Pkcs1(r.unwrap().clone_key()))
+            .collect::<Vec<_>>();
+    }
+    if keys.is_empty() {
+        return Err("No private keys found".into());
+    }
+
+    ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, keys.remove(0))
+        .map_err(|e| format!("tls config: {e}"))
+}
+
+pub async fn run_dot(
+    cfg: Config,
+    zone: Arc<Zone>,
+    metrics: Arc<Metrics>,
+    tls_config: Arc<ServerConfig>,
+) -> Result<(), String> {
+    let acceptor = TlsAcceptor::from(tls_config);
+    let listener = TcpListener::bind(cfg.dot_bind)
+        .await
+        .map_err(|e| format!("bind dot {}: {e}", cfg.dot_bind))?;
+    info!(bind = %cfg.dot_bind, "dns-sinkhole DoT listening");
+
+    loop {
+        let (stream, peer) = match listener.accept().await {
+            Ok(v) => v,
+            Err(e) => {
+                warn!("dot accept: {e}");
+                continue;
+            }
+        };
+
+        let acceptor = acceptor.clone();
+        let zone = zone.clone();
+        let metrics = metrics.clone();
+        let cfg = cfg.clone();
+
+        tokio::spawn(async move {
+            let mut tls_stream = match acceptor.accept(stream).await {
+                Ok(s) => s,
+                Err(e) => {
+                    debug!("dot tls handshake {peer}: {e}");
+                    return;
+                }
+            };
+
+            let mut len_buf = [0u8; 2];
+            loop {
+                if tls_stream.read_exact(&mut len_buf).await.is_err() {
+                    break;
+                }
+                let len = match parse_dot_length(&len_buf) {
+                    Some(l) => l,
+                    None => break,
+                };
+                let mut buf = vec![0u8; len];
+                if tls_stream.read_exact(&mut buf).await.is_err() {
+                    break;
+                }
+
+                metrics.queries.inc();
+                let resp = match process_dns_query(&buf, &cfg, &zone, &metrics).await {
+                    Ok(r) => r,
+                    Err(e) => {
+                        debug!("dot query error {peer}: {e}");
+                        break;
+                    }
+                };
+
+                let frame = encode_dot_frame(&resp);
+                if tls_stream.write_all(&frame).await.is_err() {
+                    break;
+                }
+            }
+        });
+    }
+}
+
+pub async fn run_doh(
+    cfg: Config,
+    zone: Arc<Zone>,
+    metrics: Arc<Metrics>,
+    tls_config: Arc<ServerConfig>,
+) -> Result<(), String> {
+    let acceptor = TlsAcceptor::from(tls_config);
+    let listener = TcpListener::bind(cfg.doh_bind)
+        .await
+        .map_err(|e| format!("bind doh {}: {e}", cfg.doh_bind))?;
+    info!(bind = %cfg.doh_bind, path = %cfg.doh_path, "dns-sinkhole DoH listening");
+
+    loop {
+        let (stream, peer) = match listener.accept().await {
+            Ok(v) => v,
+            Err(e) => {
+                warn!("doh accept: {e}");
+                continue;
+            }
+        };
+
+        let acceptor = acceptor.clone();
+        let zone = zone.clone();
+        let metrics = metrics.clone();
+        let cfg = cfg.clone();
+
+        tokio::spawn(async move {
+            let tls_stream = match acceptor.accept(stream).await {
+                Ok(s) => s,
+                Err(e) => {
+                    debug!("doh tls handshake {peer}: {e}");
+                    return;
+                }
+            };
+
+            let io = TokioIo::new(tls_stream);
+            let service = service_fn(move |req: Request<Incoming>| {
+                let zone = zone.clone();
+                let metrics = metrics.clone();
+                let cfg = cfg.clone();
+                async move {
+                    if req.uri().path() != cfg.doh_path {
+                        return Ok::<_, Infallible>(
+                            Response::builder()
+                                .status(StatusCode::NOT_FOUND)
+                                .body(Full::new(Bytes::from("Not Found")))
+                                .unwrap(),
+                        );
+                    }
+
+                    let packet = if req.method() == Method::GET {
+                        let query = req.uri().query().unwrap_or("");
+                        let mut dns_param = None;
+                        for pair in query.split('&') {
+                            if let Some(val) = pair.strip_prefix("dns=") {
+                                dns_param = Some(val);
+                                break;
+                            }
+                        }
+                        match dns_param {
+                            Some(val) => match decode_doh_base64url(val) {
+                                Ok(p) => p,
+                                Err(_) => {
+                                    return Ok::<_, Infallible>(
+                                        Response::builder()
+                                            .status(StatusCode::BAD_REQUEST)
+                                            .body(Full::new(Bytes::from("Invalid dns param")))
+                                            .unwrap(),
+                                    );
+                                }
+                            },
+                            None => {
+                                return Ok::<_, Infallible>(
+                                    Response::builder()
+                                        .status(StatusCode::BAD_REQUEST)
+                                        .body(Full::new(Bytes::from("Missing dns param")))
+                                        .unwrap(),
+                                );
+                            }
+                        }
+                    } else if req.method() == Method::POST {
+                        if req.headers().get("content-type").map(|v| v.as_bytes())
+                            != Some(b"application/dns-message")
+                        {
+                            return Ok::<_, Infallible>(
+                                Response::builder()
+                                    .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
+                                    .body(Full::new(Bytes::from("Unsupported media type")))
+                                    .unwrap(),
+                            );
+                        }
+                        match req.into_body().collect().await {
+                            Ok(body) => body.to_bytes().to_vec(),
+                            Err(_) => {
+                                return Ok::<_, Infallible>(
+                                    Response::builder()
+                                        .status(StatusCode::BAD_REQUEST)
+                                        .body(Full::new(Bytes::from("Body error")))
+                                        .unwrap(),
+                                );
+                            }
+                        }
+                    } else {
+                        return Ok::<_, Infallible>(
+                            Response::builder()
+                                .status(StatusCode::METHOD_NOT_ALLOWED)
+                                .body(Full::new(Bytes::from("Method not allowed")))
+                                .unwrap(),
+                        );
+                    };
+
+                    metrics.queries.inc();
+                    match process_dns_query(&packet, &cfg, &zone, &metrics).await {
+                        Ok(resp) => Ok::<_, Infallible>(
+                            Response::builder()
+                                .status(StatusCode::OK)
+                                .header("content-type", "application/dns-message")
+                                .header("cache-control", format!("max-age={}", cfg.ttl))
+                                .body(Full::new(Bytes::from(resp)))
+                                .unwrap(),
+                        ),
+                        Err(_) => Ok::<_, Infallible>(
+                            Response::builder()
+                                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                .body(Full::new(Bytes::from("Server error")))
+                                .unwrap(),
+                        ),
+                    }
+                }
+            });
+
+            if let Err(e) = http1::Builder::new().serve_connection(io, service).await {
+                debug!("doh http error {peer}: {e}");
+            }
+        });
+    }
 }
 
 #[cfg(test)]

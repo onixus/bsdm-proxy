@@ -7,13 +7,63 @@
 //! See [docs/icap.md](../../docs/icap.md).
 
 use bytes::Bytes;
+use hyper_rustls::ConfigBuilderExt;
+use rustls::pki_types::ServerName;
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::net::TcpStream;
+use tokio_rustls::TlsConnector;
 use tracing::{debug, info, warn};
+
+pub enum IcapStream {
+    Plain(TcpStream),
+    Tls(Box<tokio_rustls::client::TlsStream<TcpStream>>),
+}
+
+impl AsyncRead for IcapStream {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            IcapStream::Plain(s) => Pin::new(s).poll_read(cx, buf),
+            IcapStream::Tls(s) => Pin::new(&mut **s).poll_read(cx, buf),
+        }
+    }
+}
+
+impl AsyncWrite for IcapStream {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        match self.get_mut() {
+            IcapStream::Plain(s) => Pin::new(s).poll_write(cx, buf),
+            IcapStream::Tls(s) => Pin::new(&mut **s).poll_write(cx, buf),
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            IcapStream::Plain(s) => Pin::new(s).poll_flush(cx),
+            IcapStream::Tls(s) => Pin::new(&mut **s).poll_flush(cx),
+        }
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            IcapStream::Plain(s) => Pin::new(s).poll_shutdown(cx),
+            IcapStream::Tls(s) => Pin::new(&mut **s).poll_shutdown(cx),
+        }
+    }
+}
 
 /// Runtime configuration from environment.
 #[derive(Debug, Clone)]
@@ -69,13 +119,26 @@ struct ParsedIcapUrl {
     port: u16,
     service_path: String,
     addr: SocketAddr,
+    is_tls: bool,
 }
 
 fn parse_icap_url(url: &str) -> Result<ParsedIcapUrl, String> {
-    let rest = url
+    let (rest, is_tls) = if let Some(r) = url
+        .strip_prefix("icaps://")
+        .or_else(|| url.strip_prefix("ICAPS://"))
+    {
+        (r, true)
+    } else if let Some(r) = url
         .strip_prefix("icap://")
         .or_else(|| url.strip_prefix("ICAP://"))
-        .ok_or_else(|| format!("ICAP_URL must start with icap:// (got {url})"))?;
+    {
+        (r, false)
+    } else {
+        return Err(format!(
+            "ICAP_URL must start with icap:// or icaps:// (got {url})"
+        ));
+    };
+
     let (authority, path) = match rest.split_once('/') {
         Some((a, p)) => (a, format!("/{p}")),
         None => (rest, "/".to_string()),
@@ -86,7 +149,7 @@ fn parse_icap_url(url: &str) -> Result<ParsedIcapUrl, String> {
             .map_err(|_| format!("invalid ICAP port in {url}"))?;
         (h.to_string(), port)
     } else {
-        (authority.to_string(), 1344)
+        (authority.to_string(), if is_tls { 11344 } else { 1344 })
     };
     let addr = resolve_host(&host, port)?;
     Ok(ParsedIcapUrl {
@@ -94,6 +157,7 @@ fn parse_icap_url(url: &str) -> Result<ParsedIcapUrl, String> {
         port,
         service_path: if path.is_empty() { "/".into() } else { path },
         addr,
+        is_tls,
     })
 }
 
@@ -234,13 +298,32 @@ impl IcapClient {
 
     async fn exchange_inner(&self, request: &[u8]) -> Result<IcapOutcome, String> {
         debug!(
-            "ICAP connect {} ({} bytes)",
+            "ICAP connect {} ({} bytes, is_tls={})",
             self.parsed.addr,
-            request.len()
+            request.len(),
+            self.parsed.is_tls
         );
-        let mut stream = TcpStream::connect(self.parsed.addr)
+        let tcp_stream = TcpStream::connect(self.parsed.addr)
             .await
             .map_err(|e| format!("ICAP connect {}: {e}", self.parsed.addr))?;
+
+        let mut stream = if self.parsed.is_tls {
+            let tls_config = rustls::ClientConfig::builder()
+                .with_webpki_roots()
+                .with_no_client_auth();
+            let connector = TlsConnector::from(Arc::new(tls_config));
+            let domain = ServerName::try_from(self.parsed.host.clone())
+                .map_err(|e| format!("Invalid ICAP TLS server name '{}': {e}", self.parsed.host))?
+                .to_owned();
+            let tls_stream = connector
+                .connect(domain, tcp_stream)
+                .await
+                .map_err(|e| format!("ICAP TLS handshake failed: {e}"))?;
+            IcapStream::Tls(Box::new(tls_stream))
+        } else {
+            IcapStream::Plain(tcp_stream)
+        };
+
         stream
             .write_all(request)
             .await
@@ -664,5 +747,14 @@ mod tests {
         let p = parse_icap_url("icap://127.0.0.1/srv_clamav").unwrap();
         assert_eq!(p.port, 1344);
         assert_eq!(p.service_path, "/srv_clamav");
+        assert!(!p.is_tls);
+    }
+
+    #[test]
+    fn parse_icaps_url_defaults_port() {
+        let p = parse_icap_url("icaps://127.0.0.1/srv_clamav").unwrap();
+        assert_eq!(p.port, 11344);
+        assert_eq!(p.service_path, "/srv_clamav");
+        assert!(p.is_tls);
     }
 }
