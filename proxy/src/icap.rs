@@ -740,7 +740,7 @@ mod tests {
         let p = parse_icap_url("icap://127.0.0.1/srv_clamav").unwrap();
         assert_eq!(p.port, 1344);
         assert_eq!(p.service_path, "/srv_clamav");
-        assert_eq!(p.is_tls, false);
+        assert!(!p.is_tls);
     }
 
     #[test]
@@ -748,6 +748,6 @@ mod tests {
         let p = parse_icap_url("icaps://127.0.0.1/srv_clamav").unwrap();
         assert_eq!(p.port, 11344);
         assert_eq!(p.service_path, "/srv_clamav");
-        assert_eq!(p.is_tls, true);
+        assert!(p.is_tls);
     }
 }
