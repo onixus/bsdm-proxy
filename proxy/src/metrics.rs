@@ -515,7 +515,7 @@ impl Metrics {
         }
         for cat in categories {
             self.categorization_blocked_total
-                .with_label_values(&[cat, action])
+                .with_label_values(&[cat.as_str(), action])
                 .inc();
         }
     }
