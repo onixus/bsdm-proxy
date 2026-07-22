@@ -49,12 +49,19 @@ impl WasmHookConfig {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct WasmHookRequest {
     pub method: String,
     pub url: String,
     pub client_ip: String,
     pub username: Option<String>,
+    pub headers: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct WasmHookResponseContext {
+    pub status: u16,
+    pub headers: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone)]
@@ -67,11 +74,20 @@ pub enum WasmHookDecision {
     },
 }
 
+#[derive(Debug, Clone)]
+pub enum WasmHookResponseDecision {
+    Continue {
+        set_headers: HashMap<String, String>,
+    },
+}
+
 struct HostState {
     request: WasmHookRequest,
+    response: Option<WasmHookResponseContext>,
     denied: bool,
     deny_reason: String,
     set_headers: HashMap<String, String>,
+    set_res_headers: HashMap<String, String>,
     limits: StoreLimits,
 }
 
@@ -135,9 +151,11 @@ impl WasmHookEngine {
 
         let host = HostState {
             request,
+            response: None,
             denied: false,
             deny_reason: String::new(),
             set_headers: HashMap::new(),
+            set_res_headers: HashMap::new(),
             limits: StoreLimitsBuilder::new()
                 .memory_size(16 << 20)
                 .instances(1)
@@ -177,6 +195,76 @@ impl WasmHookEngine {
         }
     }
 
+    pub fn evaluate_response(
+        &self,
+        request: WasmHookRequest,
+        response: WasmHookResponseContext,
+    ) -> Result<WasmHookResponseDecision, String> {
+        let mut linker = Linker::new(&self.engine);
+        register_host(&mut linker)?;
+
+        let host = HostState {
+            request,
+            response: Some(response),
+            denied: false,
+            deny_reason: String::new(),
+            set_headers: HashMap::new(),
+            set_res_headers: HashMap::new(),
+            limits: StoreLimitsBuilder::new()
+                .memory_size(16 << 20)
+                .instances(1)
+                .memories(1)
+                .tables(2)
+                .build(),
+        };
+        let mut store = Store::new(&self.engine, host);
+        store.limiter(|s| &mut s.limits);
+        store
+            .set_fuel(self.fuel)
+            .map_err(|e| format!("set fuel: {e}"))?;
+
+        let instance = linker
+            .instantiate(&mut store, &self.module)
+            .map_err(|e| format!("instantiate: {e}"))?;
+
+        // If the module doesn't export on_response, just return
+        if let Ok(on_response) = instance.get_typed_func::<(), ()>(&mut store, "on_response") {
+            on_response
+                .call(&mut store, ())
+                .map_err(|e| format!("on_response trap: {e}"))?;
+        }
+
+        let host = store.into_data();
+        Ok(WasmHookResponseDecision::Continue {
+            set_headers: host.set_res_headers,
+        })
+    }
+
+    pub fn reload(&mut self) -> Result<(), String> {
+        // Read the module bytes again if there's a path
+        if let Ok(cfg_path) = std::env::var("WASM_MODULE_PATH") {
+            let path = cfg_path.trim();
+            if !path.is_empty() {
+                let bytes = std::fs::read(path).map_err(|e| format!("read {path}: {e}"))?;
+                let mut config = Config::new();
+                config.consume_fuel(true);
+                config.cranelift_opt_level(wasmtime::OptLevel::Speed);
+                let engine = Engine::new(&config).map_err(|e| format!("wasm engine: {e}"))?;
+                let module = if Path::new(path).extension().and_then(|e| e.to_str()) == Some("wat")
+                    || looks_like_wat(&bytes)
+                {
+                    Module::new(&engine, &bytes).map_err(|e| format!("compile wat: {e}"))?
+                } else {
+                    Module::new(&engine, &bytes).map_err(|e| format!("compile wasm: {e}"))?
+                };
+                self.engine = engine;
+                self.module = module;
+                info!("Wasm hook reloaded from {}", path);
+            }
+        }
+        Ok(())
+    }
+
     pub fn fail_open(&self) -> bool {
         self.fail_open
     }
@@ -205,6 +293,27 @@ fn read_guest_str(
         .get(ptr as usize..(ptr as usize + len as usize))
         .ok_or_else(|| "guest string OOB".to_string())?;
     String::from_utf8(data.to_vec()).map_err(|e| format!("utf8: {e}"))
+}
+
+fn write_guest_str(caller: &mut Caller<'_, HostState>, ptr: i32, max_len: i32, val: &str) -> i32 {
+    if ptr < 0 || max_len < 0 {
+        return -1;
+    }
+    let mem = match caller.get_export("memory").and_then(|e| e.into_memory()) {
+        Some(m) => m,
+        None => return -1,
+    };
+    let bytes = val.as_bytes();
+    let to_write = bytes.len().min(max_len as usize);
+    let data = match mem
+        .data_mut(caller)
+        .get_mut(ptr as usize..(ptr as usize + to_write))
+    {
+        Some(d) => d,
+        None => return -1,
+    };
+    data.copy_from_slice(&bytes[..to_write]);
+    to_write as i32
 }
 
 fn register_host(linker: &mut Linker<HostState>) -> Result<(), String> {
@@ -285,6 +394,84 @@ fn register_host(linker: &mut Linker<HostState>) -> Result<(), String> {
         )
         .map_err(|e| format!("link deny: {e}"))?;
 
+    linker
+        .func_wrap(
+            "bsdm",
+            "get_request_header",
+            |mut caller: Caller<'_, HostState>, np: i32, nl: i32, optr: i32, omax: i32| -> i32 {
+                let Ok(name) = read_guest_str(&mut caller, np, nl) else {
+                    return -1;
+                };
+                let val = caller
+                    .data()
+                    .request
+                    .headers
+                    .get(&name.to_ascii_lowercase())
+                    .cloned()
+                    .unwrap_or_default();
+                write_guest_str(&mut caller, optr, omax, &val)
+            },
+        )
+        .map_err(|e| format!("link get_request_header: {e}"))?;
+
+    linker
+        .func_wrap(
+            "bsdm",
+            "get_client_ip",
+            |mut caller: Caller<'_, HostState>, optr: i32, omax: i32| -> i32 {
+                let val = caller.data().request.client_ip.clone();
+                write_guest_str(&mut caller, optr, omax, &val)
+            },
+        )
+        .map_err(|e| format!("link get_client_ip: {e}"))?;
+
+    linker
+        .func_wrap(
+            "bsdm",
+            "get_username",
+            |mut caller: Caller<'_, HostState>, optr: i32, omax: i32| -> i32 {
+                let val = caller.data().request.username.clone().unwrap_or_default();
+                write_guest_str(&mut caller, optr, omax, &val)
+            },
+        )
+        .map_err(|e| format!("link get_username: {e}"))?;
+
+    linker
+        .func_wrap(
+            "bsdm",
+            "set_response_header",
+            |mut caller: Caller<'_, HostState>, np: i32, nl: i32, vp: i32, vl: i32| {
+                let Ok(name) = read_guest_str(&mut caller, np, nl) else {
+                    return;
+                };
+                let Ok(value) = read_guest_str(&mut caller, vp, vl) else {
+                    return;
+                };
+                if !name.is_empty() {
+                    caller
+                        .data_mut()
+                        .set_res_headers
+                        .insert(name.to_ascii_lowercase(), value);
+                }
+            },
+        )
+        .map_err(|e| format!("link set_response_header: {e}"))?;
+
+    linker
+        .func_wrap(
+            "bsdm",
+            "get_response_status",
+            |caller: Caller<'_, HostState>| -> i32 {
+                caller
+                    .data()
+                    .response
+                    .as_ref()
+                    .map(|r| r.status as i32)
+                    .unwrap_or(-1)
+            },
+        )
+        .map_err(|e| format!("link get_response_status: {e}"))?;
+
     Ok(())
 }
 
@@ -316,10 +503,10 @@ pub fn engine_from_wat(wat: &str, fuel: u64, fail_open: bool) -> Result<WasmHook
     WasmHookEngine::load_bytes(wat.as_bytes(), Path::new("inline.wat"), fuel, fail_open)
 }
 
-pub fn try_load_from_env() -> Option<Arc<WasmHookEngine>> {
+pub fn try_load_from_env() -> Option<Arc<std::sync::RwLock<WasmHookEngine>>> {
     let cfg = WasmHookConfig::from_env();
     match WasmHookEngine::from_config(&cfg) {
-        Ok(Some(eng)) => Some(Arc::new(eng)),
+        Ok(Some(eng)) => Some(Arc::new(std::sync::RwLock::new(eng))),
         Ok(None) => None,
         Err(e) => {
             warn!("Wasm hook disabled: {e}");
@@ -341,6 +528,7 @@ mod tests {
                 url: "https://example.com/ok".into(),
                 client_ip: "127.0.0.1".into(),
                 username: None,
+                headers: HashMap::new(),
             })
             .unwrap();
         match d {
@@ -363,6 +551,7 @@ mod tests {
                 url: "https://evil.blocked.test/phish".into(),
                 client_ip: "10.0.0.1".into(),
                 username: Some("alice".into()),
+                headers: HashMap::new(),
             })
             .unwrap();
         match d {
@@ -382,6 +571,7 @@ mod tests {
                 url: "https://example.com/".into(),
                 client_ip: "127.0.0.1".into(),
                 username: None,
+                headers: HashMap::new(),
             })
             .unwrap_err();
         assert!(

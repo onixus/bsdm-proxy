@@ -50,7 +50,7 @@ use crate::threat_score_cache::ThreatScoreCache;
 use crate::tls::CertCache;
 use crate::upstream::{UpstreamClientHandle, UpstreamTlsConfig};
 #[cfg(feature = "wasm")]
-use crate::wasm_host::{try_load_from_env, WasmHookDecision, WasmHookEngine, WasmHookRequest};
+use crate::wasm_host::{try_load_from_env, WasmHookDecision, WasmHookRequest};
 
 pub struct ProxyPolicy {
     pub acl_engine: Option<Arc<AclEngineHandle>>,
@@ -303,7 +303,7 @@ pub struct ProxyService {
     semantic_index: SemanticIndex,
     peer_tls: PeerTlsConfig,
     #[cfg(feature = "wasm")]
-    wasm_hook: Option<Arc<WasmHookEngine>>,
+    pub wasm_hook: Option<Arc<std::sync::RwLock<crate::wasm_host::WasmHookEngine>>>,
     /// Optional ICAP adaptation client (`ICAP_ENABLED`).
     icap: Option<Arc<IcapClient>>,
 }
@@ -917,14 +917,22 @@ impl ProxyService {
         username: Option<&str>,
         headers: &mut hyper::HeaderMap,
     ) -> Option<Response<Body>> {
-        let Some(hook) = &self.wasm_hook else {
+        let Some(hook_arc) = &self.wasm_hook else {
             return None;
         };
+        let hook = hook_arc.read().unwrap();
+        let mut req_headers = HashMap::new();
+        for (k, v) in headers.iter() {
+            if let Ok(val_str) = v.to_str() {
+                req_headers.insert(k.as_str().to_ascii_lowercase(), val_str.to_string());
+            }
+        }
         let decision = match hook.evaluate(WasmHookRequest {
             method: method.to_string(),
             url: url.to_string(),
             client_ip: client_ip.to_string(),
             username: username.map(str::to_string),
+            headers: req_headers,
         }) {
             Ok(d) => d,
             Err(e) => {
@@ -970,6 +978,74 @@ impl ProxyService {
                             Response::new(full(Bytes::from_static(b"403 Forbidden")))
                         }),
                 )
+            }
+        }
+    }
+
+    #[cfg(feature = "wasm")]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn run_wasm_hook_response(
+        &self,
+        method: &str,
+        url: &str,
+        client_ip: &str,
+        username: Option<&str>,
+        req_headers: &hyper::HeaderMap,
+        resp_status: u16,
+        resp_headers: &mut hyper::HeaderMap,
+    ) {
+        let Some(hook_arc) = &self.wasm_hook else {
+            return;
+        };
+        let hook = hook_arc.read().unwrap();
+
+        let mut req_hdrs = HashMap::new();
+        for (k, v) in req_headers.iter() {
+            if let Ok(val_str) = v.to_str() {
+                req_hdrs.insert(k.as_str().to_ascii_lowercase(), val_str.to_string());
+            }
+        }
+        let request = WasmHookRequest {
+            method: method.to_string(),
+            url: url.to_string(),
+            client_ip: client_ip.to_string(),
+            username: username.map(str::to_string),
+            headers: req_hdrs,
+        };
+
+        let mut res_hdrs = HashMap::new();
+        for (k, v) in resp_headers.iter() {
+            if let Ok(val_str) = v.to_str() {
+                res_hdrs.insert(k.as_str().to_ascii_lowercase(), val_str.to_string());
+            }
+        }
+        let response = crate::wasm_host::WasmHookResponseContext {
+            status: resp_status,
+            headers: res_hdrs,
+        };
+
+        let decision = match hook.evaluate_response(request, response) {
+            Ok(d) => d,
+            Err(e) => {
+                if !hook.fail_open() {
+                    warn!("Wasm response hook error (fail-closed, but too late to drop body cleanly): {e}");
+                } else {
+                    warn!("Wasm response hook error (fail-open): {e}");
+                }
+                return;
+            }
+        };
+
+        match decision {
+            crate::wasm_host::WasmHookResponseDecision::Continue { set_headers } => {
+                for (name, value) in set_headers {
+                    if let (Ok(hn), Ok(hv)) = (
+                        HeaderName::from_bytes(name.as_bytes()),
+                        HeaderValue::from_str(&value),
+                    ) {
+                        resp_headers.insert(hn, hv);
+                    }
+                }
             }
         }
     }

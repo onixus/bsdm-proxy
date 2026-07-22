@@ -29,9 +29,12 @@ pub struct ControlApiState {
     peer_registry: Option<PeerRegistry>,
     hierarchy_use_htcp: bool,
     upstream_client: UpstreamClientHandle,
+    #[cfg(feature = "wasm")]
+    wasm_hook: Option<Arc<std::sync::RwLock<crate::wasm_host::WasmHookEngine>>>,
 }
 
 impl ControlApiState {
+    #[cfg_attr(feature = "wasm", allow(clippy::too_many_arguments))]
     pub fn new(
         metrics: Arc<Metrics>,
         http_cache: Arc<HttpL1Cache>,
@@ -40,6 +43,9 @@ impl ControlApiState {
         peer_registry: Option<PeerRegistry>,
         hierarchy_use_htcp: bool,
         upstream_client: UpstreamClientHandle,
+        #[cfg(feature = "wasm")] wasm_hook: Option<
+            Arc<std::sync::RwLock<crate::wasm_host::WasmHookEngine>>,
+        >,
     ) -> Self {
         Self {
             metrics,
@@ -50,6 +56,8 @@ impl ControlApiState {
             peer_registry,
             hierarchy_use_htcp,
             upstream_client,
+            #[cfg(feature = "wasm")]
+            wasm_hook,
         }
     }
 
@@ -60,6 +68,9 @@ impl ControlApiState {
         peer_registry: Option<PeerRegistry>,
         hierarchy_use_htcp: bool,
         upstream_client: UpstreamClientHandle,
+        #[cfg(feature = "wasm")] wasm_hook: Option<
+            Arc<std::sync::RwLock<crate::wasm_host::WasmHookEngine>>,
+        >,
     ) -> Self {
         let api_token = std::env::var("CONTROL_API_TOKEN")
             .ok()
@@ -77,6 +88,8 @@ impl ControlApiState {
             peer_registry,
             hierarchy_use_htcp,
             upstream_client,
+            #[cfg(feature = "wasm")]
+            wasm_hook,
         )
     }
 
@@ -118,6 +131,8 @@ impl ControlApiState {
             (&Method::POST, "/api/hierarchy/reload") => self.hierarchy_reload().await,
             (&Method::GET, "/api/upstream/tls") => self.upstream_tls_status(),
             (&Method::POST, "/api/upstream/tls/reload") => self.upstream_tls_reload(),
+            #[cfg(feature = "wasm")]
+            (&Method::POST, "/api/wasm/reload") => self.wasm_reload(),
             _ => json_response(StatusCode::NOT_FOUND, r#"{"error":"not found"}"#),
         }
     }
@@ -414,6 +429,28 @@ impl ControlApiState {
             ),
         }
     }
+
+    #[cfg(feature = "wasm")]
+    fn wasm_reload(&self) -> Response<Body> {
+        let Some(hook_arc) = &self.wasm_hook else {
+            return json_response(
+                StatusCode::BAD_REQUEST,
+                r#"{"error":"WASM hook is not enabled"}"#,
+            );
+        };
+        let mut hook = hook_arc.write().unwrap();
+        match hook.reload() {
+            Ok(_) => json_response(StatusCode::OK, r#"{"status":"reloaded"}"#),
+            Err(e) => {
+                warn!("WASM hook reload failed: {e}");
+                let error_json = serde_json::json!({
+                    "error": "reload failed",
+                    "details": e
+                });
+                json_response(StatusCode::INTERNAL_SERVER_ERROR, &error_json.to_string())
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -532,7 +569,17 @@ mod tests {
     }
 
     fn state_plain(metrics: Arc<Metrics>, cache: Arc<HttpL1Cache>) -> ControlApiState {
-        ControlApiState::new(metrics, cache, None, None, None, false, test_upstream())
+        ControlApiState::new(
+            metrics,
+            cache,
+            None,
+            None,
+            None,
+            false,
+            test_upstream(),
+            #[cfg(feature = "wasm")]
+            None,
+        )
     }
 
     #[tokio::test]
@@ -667,6 +714,8 @@ mod tests {
             Some(registry),
             false,
             test_upstream(),
+            #[cfg(feature = "wasm")]
+            None,
         );
         let resp = state
             .dispatch(
