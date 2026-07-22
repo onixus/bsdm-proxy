@@ -38,6 +38,8 @@ COPY alert-worker ./alert-worker
 COPY ml-worker ./ml-worker
 COPY dns-sinkhole ./dns-sinkhole
 COPY e2e ./e2e
+COPY bsdm-wasm-sdk ./bsdm-wasm-sdk
+COPY examples ./examples
 
 # Настройка окружения для статической линковки
 ENV OPENSSL_STATIC=1 \
