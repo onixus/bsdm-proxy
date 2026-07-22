@@ -1,10 +1,11 @@
 # syntax=docker/dockerfile:1
 
 # ============================================================
-# Unified builder stage - собирает оба бинарника
+# Unified builder stage - собирает все бинарники
 # ============================================================
 FROM rust:1-alpine AS builder
 ARG TARGETARCH
+ARG LITE_BUILD=0
 WORKDIR /build
 
 # Установка зависимостей для сборки (включая bash для rdkafka)
@@ -37,8 +38,46 @@ RUN case "$TARGETARCH" in \
 # Добавляем musl target
 RUN rustup target add $(cat /rust_target.txt)
 
-# Копируем весь workspace
+# Настройка окружения для статической линковки
+ENV OPENSSL_STATIC=1 \
+    OPENSSL_LIB_DIR=/usr/lib \
+    OPENSSL_INCLUDE_DIR=/usr/include \
+    RUSTFLAGS="-C target-feature=+crt-static"
+
+# ---- Dependency cache layer ----
+# Копируем только манифесты и lock-файл, создаём заглушки src,
+# собираем зависимости — этот слой кэшируется, пока Cargo.lock не изменится.
 COPY Cargo.toml Cargo.lock ./
+COPY bsdm-events/Cargo.toml ./bsdm-events/Cargo.toml
+COPY proxy/Cargo.toml ./proxy/Cargo.toml
+COPY cache-indexer/Cargo.toml ./cache-indexer/Cargo.toml
+COPY alert-worker/Cargo.toml ./alert-worker/Cargo.toml
+COPY ml-worker/Cargo.toml ./ml-worker/Cargo.toml
+COPY dns-sinkhole/Cargo.toml ./dns-sinkhole/Cargo.toml
+COPY e2e/Cargo.toml ./e2e/Cargo.toml
+COPY bsdm-wasm-sdk/Cargo.toml ./bsdm-wasm-sdk/Cargo.toml
+
+# Создаём минимальные lib.rs/main.rs-заглушки чтобы cargo fetch + build deps
+RUN mkdir -p bsdm-events/src proxy/src cache-indexer/src \
+             alert-worker/src ml-worker/src dns-sinkhole/src \
+             e2e/src bsdm-wasm-sdk/src && \
+    echo "pub fn _stub() {}" > bsdm-events/src/lib.rs && \
+    echo "fn main() {}" > proxy/src/main.rs && \
+    touch proxy/src/lib.rs && \
+    echo "fn main() {}" > cache-indexer/src/main.rs && \
+    echo "fn main() {}" > alert-worker/src/main.rs && \
+    echo "fn main() {}" > ml-worker/src/main.rs && \
+    echo "fn main() {}" > dns-sinkhole/src/main.rs && \
+    echo "pub fn _stub() {}" > e2e/src/lib.rs && \
+    echo "pub fn _stub() {}" > bsdm-wasm-sdk/src/lib.rs
+
+# Fetch + compile dependencies only (stubs will fail to link but deps get cached)
+RUN cargo build --release --target $(cat /rust_target.txt) \
+      -p bsdm-events 2>/dev/null || true && \
+    cargo build --release --target $(cat /rust_target.txt) \
+      -p bsdm-proxy 2>/dev/null || true
+
+# ---- Source copy (invalidates cache only when source changes) ----
 COPY bsdm-events ./bsdm-events
 COPY proxy ./proxy
 COPY cache-indexer ./cache-indexer
@@ -48,12 +87,6 @@ COPY dns-sinkhole ./dns-sinkhole
 COPY e2e ./e2e
 COPY bsdm-wasm-sdk ./bsdm-wasm-sdk
 COPY examples ./examples
-
-# Настройка окружения для статической линковки
-ENV OPENSSL_STATIC=1 \
-    OPENSSL_LIB_DIR=/usr/lib \
-    OPENSSL_INCLUDE_DIR=/usr/include \
-    RUSTFLAGS="-C target-feature=+crt-static"
 
 # Собираем бинарники workspace в release режиме
 RUN if [ "$LITE_BUILD" = "1" ]; then \
