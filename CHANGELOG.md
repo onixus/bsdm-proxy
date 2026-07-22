@@ -67,7 +67,7 @@ Milestone **M4 Threat analytics**: rule-based alerts, C&C / Shannon heuristics, 
 - **Lite SQLite indexer** — `INDEX_STORE=sqlite|memory`, `POST /api/events`, proxy `EVENT_SINK_URL`; Lite compose includes indexer ([docs/lite.md](docs/lite.md))
 - **Lite compose (Phase 1)** — [`docker-compose.lite.yml`](docker-compose.lite.yml) standalone proxy (no Kafka/CH); [`scripts/gen-ca.sh`](scripts/gen-ca.sh); docs [`docs/lite.md`](docs/lite.md)
 - **Alert worker (B19 / #50)** — `alert-worker` polls ClickHouse threat rules and POSTs SIEM JSON webhooks; compose profile `alerts`, Dockerfile target, Prometheus scrape, docs [`docs/alerting.md`](docs/alerting.md)
-- **Strategic roadmap** — Lite / DX / Wasm / AI-traffic phases in [`docs/strategic-roadmap.md`](docs/strategic-roadmap.md); linked from README and [`docs/roadmap.md`](docs/roadmap.md)
+- **Strategic roadmap** — Lite / DX / Wasm / AI-traffic phases in [`docs/roadmap.md`](docs/roadmap.md)
 - **Web config GUI** — restored General/Cache/Kafka/Auth tabs; Performance, import `.env`, export `acl-rules.json`; compose aligned with root `docker-compose.yml` (P2-5)
 - **Categorization Prometheus metrics** + M4 threat panels / SQL ([#105](https://github.com/onixus/bsdm-proxy/issues/105))
 - Soft `session_id` / redirect-chain correlation; k8s ClickHouse Operator analytics plane ([#135](https://github.com/onixus/bsdm-proxy/issues/135))

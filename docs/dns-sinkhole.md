@@ -2,13 +2,13 @@
 
 Optional **DNS-layer** filtering (Cisco Umbrella–style first hop). Separate on-ramp from the explicit forward proxy.
 
-Issue: [#108](https://github.com/onixus/bsdm-proxy/issues/108) · Mapping: [swg-backlog-mapping.md](swg-backlog-mapping.md) P3-4 · ADR: [adr/0004-dns-sinkhole-sidecar.md](adr/0004-dns-sinkhole-sidecar.md)
+Issue: [#108](https://github.com/onixus/bsdm-proxy/issues/108) · Roadmap: [roadmap.md](roadmap.md) · ADR: [adr/0004-dns-sinkhole-sidecar.md](adr/0004-dns-sinkhole-sidecar.md)
 
 ## Scope decision
 
 | Option | Verdict |
 |--------|---------|
-| Inline in `bsdm-proxy` hot path | **Rejected** — different on-ramp; pollutes cache/MITM path ([swg anti-pattern](swg-backlog-mapping.md)) |
+| Inline in `bsdm-proxy` hot path | **Rejected** — different on-ramp; pollutes cache/MITM path |
 | Full recursive resolver / BIND RPZ | **Out of scope** for PoC — ops already have Unbound/BIND |
 | **Sidecar UDP DNS proxy** (`dns-sinkhole` crate) | **Accepted** — blocklist/RPZ-lite → sinkhole or NXDOMAIN; else forward to upstream |
 

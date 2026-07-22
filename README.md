@@ -110,7 +110,7 @@ curl 'http://127.0.0.1:8080/api/search?domain=httpbin.org&limit=5'
 
 Стек: `proxy` (:1488) + `cache-indexer` SQLite (:8080, `EVENT_SINK_URL`). Сборка без `rdkafka`: `--no-default-features` / `LITE_BUILD=1`.
 
-Подробнее: [docs/lite.md](docs/lite.md) · Strategic Phase 1: [docs/strategic-roadmap.md](docs/strategic-roadmap.md)
+Подробнее: [docs/lite.md](docs/lite.md) · Lite Mode: [docs/roadmap.md](docs/roadmap.md)
 
 ### Полный стек (analytics)
 
@@ -537,9 +537,8 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test, cargo-audi
 | [docs/alerting.md](docs/alerting.md) | Alert worker + Grafana/AM (M4) |
 | [docs/search-api.md](docs/search-api.md) | REST Search API (`/api/search`) |
 | [docs/adr/0002-clickhouse-analytics.md](docs/adr/0002-clickhouse-analytics.md) | ADR: ClickHouse как analytics store |
-| [docs/architecture.md](docs/architecture.md) | Архитектура и блокеры |
-| [docs/roadmap.md](docs/roadmap.md) | Roadmap и milestones (M1–M5) |
-| [docs/strategic-roadmap.md](docs/strategic-roadmap.md) | Стратегия: Lite, DX, Wasm, AI |
+| [docs/architecture.md](docs/architecture.md) | Архитектура и потоки данных |
+| [docs/roadmap.md](docs/roadmap.md) | Единый Roadmap, вехи M1–M5, фазы и план работ Q3 2026 – Q2 2027 |
 | [docs/capacity-planning.md](docs/capacity-planning.md) | Планирование ёмкости (корп. сценарии) |
 | [CHANGELOG.md](CHANGELOG.md) | История изменений |
 | [docs/releases/v0.5.7+033.md](docs/releases/v0.5.7+033.md) | Release notes 0.5.07.033 |
@@ -552,35 +551,21 @@ CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test, cargo-audi
 
 ## Roadmap
 
-Цель: **альтернатива Squid с ретропоиском и ML** для аномалий, фишинга и C&C.
+Цель: **Альтернатива Squid с ретропоиском, ML и трансформацией в Gartner SSE / SASE платформу**.
 
-План работ (M1–M5): **[docs/roadmap.md](docs/roadmap.md)** · Стратегия (Lite / DX / Wasm / AI): **[docs/strategic-roadmap.md](docs/strategic-roadmap.md)** · SWG: [docs/swg-backlog-mapping.md](docs/swg-backlog-mapping.md)
+Единый план работ и архитектура: **[docs/roadmap.md](docs/roadmap.md)**
 
-### Engineering milestones
+### Ключевые этапы
 
-| Milestone | Версия | Фокус | Статус |
-|-----------|--------|-------|--------|
-| **M1** Foundation | v0.2.x | Прокси, ACL, категоризация, observability | ✅ Done |
-| **M2** Squid parity | v0.3.x | L2, ACL API, NTLM/Kerberos, hierarchy Phase 4 | ✅ Done |
-| **M2.5** Data plane | v0.3.1–0.3.2 | Tiered L1, streaming MISS, P1 hot path | ✅ Done |
-| **M3** Retro-search | v0.3.1+ | ClickHouse, Grafana, Search API, k8s CHI | ✅ Done |
-| **M4** Threat analytics | v0.5.x | Rule-based алерты, C&C / Shannon, Grafana/AM | ✅ Done |
-| **M5** ML security | Unreleased / 0.5.x+ | UEBA, phishing lexical, C&C beacon, threat-score write-back | ✅ Done |
-
-Кратко: **M1–M5 closed**. Unreleased: DX control plane + hot reload, Lite `kafka` feature, AI coalescing / API-key RL / LLM cache prep. Next: Wasm, gRPC control plane, external vector DB.
-
-### Стратегические фазы
-
-Вектор рыночной ценности и удобства (детально — [strategic-roadmap.md](docs/strategic-roadmap.md)):
-
-| Фаза | Фокус | Статус |
-|------|--------|--------|
-| **1. Lite** | Proxy + SQLite Search API без Kafka/CH; `kafka` Cargo feature | ✅ |
-| **2. DX** | REST control plane, hot reload (ACL/hierarchy/TLS), purge, `/api/stats` | ✅ REST; gRPC — later |
-| **3. Wasm** | Wasmtime-плагины, SDK, модульность ядра | TBD |
-| **4. AI-трафик** | Coalescing, API-key RL, LLM/semantic cache prep | ✅ prep; external vector DB — later |
-
-Порядок по умолчанию: Lite → DX → Wasm / AI.
+| Milestone / Phase | Версия | Фокус | Статус |
+|-------------------|--------|-------|--------|
+| **M1–M5 Core Engine** | v0.2–v0.5 | SWG parity, ClickHouse ретропоиск, Alerting, ML Security | ✅ Done |
+| **Strategic Phases 1–4** | v0.6 | Lite mode, REST/gRPC Control Plane, WASM SDK, AI Cache | ✅ Done |
+| **Speed & Encryption** | v0.6 | eBPF XDP kernel drops, DoH (RFC 8484) & DoT (RFC 7858) | ✅ Done |
+| **Q3 2026: GenAI CASB & DLP** | Q3 2026 | LLM Data Guard (Wasm), Inline DLP Engine (v1) | 🚀 В разработке |
+| **Q4 2026: ZTNA & Endpoint** | Q4 2026 | BSDM Connect (WireGuard agent), Identity-Aware Reverse Proxy | 📅 Запланировано |
+| **Q1 2027: Multi-Cluster** | Q1 2027 | Global Session State (Redis), P2P Real-time Threat Sync | 📅 Запланировано |
+| **Q2 2027: Ecosystem & AI** | Q2 2027 | BSDM WASM Plugin Hub, Local SLM Zero-Day Domain AI | 📅 Запланировано |
 
 ## Лицензия
 

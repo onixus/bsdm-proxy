@@ -53,13 +53,10 @@
 
 | Документ | Описание |
 |----------|----------|
-| [architecture.md](architecture.md) | Архитектура, потоки данных, блокеры |
-| [BLOCKERS.md](BLOCKERS.md) | Реестр блокеров B1–B26 (все ✅) |
-| [issue-tracker.md](issue-tracker.md) | Статус GitHub issues (open / close / next) |
-| [roadmap.md](roadmap.md) | Milestones Squid + ретропоиск + ML (M1–M5) |
-| [strategic-roadmap.md](strategic-roadmap.md) | Стратегия: Lite, DX, Wasm, AI-трафик |
+| [architecture.md](architecture.md) | Архитектура, потоки данных |
+| [roadmap.md](roadmap.md) | Единый Roadmap, вехи M1–M5, фазы и план работ Q3 2026 – Q2 2027 (SSE/SASE) |
 | [lite.md](lite.md) | Lite: proxy + SQLite (`docker-compose.lite.yml`) |
-| [swg-backlog-mapping.md](swg-backlog-mapping.md) | Mapping vs SWG vendors |
+| [capacity-planning.md](capacity-planning.md) | Расчёт аппаратных ресурсов |
 | [adr/0001-tiered-sharded-l1-cache.md](adr/0001-tiered-sharded-l1-cache.md) | ADR tiered L1 |
 | [adr/0002-clickhouse-analytics.md](adr/0002-clickhouse-analytics.md) | ADR ClickHouse |
 

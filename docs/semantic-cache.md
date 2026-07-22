@@ -2,7 +2,7 @@
 
 Content-addressable caching for LLM-style `POST` APIs, plus optional near-hit via a pluggable similarity index (local memory or **Qdrant**).
 
-See [strategic-roadmap.md](strategic-roadmap.md) Phase 4 · issue [#189](https://github.com/onixus/bsdm-proxy/issues/189).
+See [roadmap.md](roadmap.md) (AI Traffic Phase) · issue [#189](https://github.com/onixus/bsdm-proxy/issues/189).
 
 ## Enable
 

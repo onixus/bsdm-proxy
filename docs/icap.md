@@ -2,7 +2,7 @@
 
 Optional **ICAP** (RFC 3507) client for enterprise AV / URL filtering sidecars — Squid `adaptation_access` equivalent. Async sidecar pattern; not inline DLP.
 
-Issue: [#99](https://github.com/onixus/bsdm-proxy/issues/99) · Mapping: [swg-backlog-mapping.md](swg-backlog-mapping.md) P3-1.
+Issue: [#99](https://github.com/onixus/bsdm-proxy/issues/99) · Roadmap: [roadmap.md](roadmap.md).
 
 ## Status (PoC)
 
