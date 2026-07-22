@@ -12,10 +12,12 @@ pub mod cache_compress;
 pub mod cache_digest;
 pub mod cache_freshness;
 pub mod cache_key;
+pub mod casb;
 pub mod categorization;
 pub mod control_api;
 #[cfg(feature = "grpc")]
 pub mod control_grpc;
+pub mod dlp;
 pub mod ebpf;
 pub mod hierarchy;
 pub mod hierarchy_config;

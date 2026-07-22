@@ -104,6 +104,8 @@ mod tests {
             session_id: "s1".into(),
             parent_event_id: None,
             redirect_url: None,
+            dlp_violation: None,
+            casb_alert: None,
             event_id: format!("e-{ts}"),
         }
     }

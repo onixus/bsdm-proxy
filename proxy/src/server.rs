@@ -320,6 +320,8 @@ async fn handle_connect_tunnel(
                             session_id: corr.session_id,
                             parent_event_id: corr.parent_event_id,
                             redirect_url: None,
+                            dlp_violation: None,
+                            casb_alert: None,
                             event_id,
                         };
                         service.send_cache_event(event);

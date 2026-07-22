@@ -261,6 +261,8 @@ impl MissCompletionHandle {
                     session_id: corr.session_id,
                     parent_event_id: corr.parent_event_id,
                     redirect_url,
+                    dlp_violation: None,
+                    casb_alert: None,
                     event_id,
                 };
                 self.send_cache_event(event);
@@ -306,6 +308,8 @@ pub struct ProxyService {
     pub wasm_hook: Option<Arc<std::sync::RwLock<crate::wasm_host::WasmHookEngine>>>,
     /// Optional ICAP adaptation client (`ICAP_ENABLED`).
     icap: Option<Arc<IcapClient>>,
+    dlp_engine: Arc<crate::dlp::DlpEngine>,
+    casb_engine: Arc<crate::casb::CasbEngine>,
 }
 
 impl ProxyService {
@@ -430,6 +434,8 @@ impl ProxyService {
             #[cfg(feature = "wasm")]
             wasm_hook,
             icap,
+            dlp_engine: Arc::new(crate::dlp::DlpEngine::new()),
+            casb_engine: Arc::new(crate::casb::CasbEngine::new()),
         }
     }
 
@@ -500,6 +506,8 @@ impl ProxyService {
                 session_id: corr.session_id,
                 parent_event_id: corr.parent_event_id,
                 redirect_url,
+                dlp_violation: None,
+                casb_alert: None,
                 event_id,
             };
             self.send_cache_event(event);
@@ -560,6 +568,8 @@ impl ProxyService {
                 session_id: corr.session_id,
                 parent_event_id: corr.parent_event_id,
                 redirect_url,
+                dlp_violation: None,
+                casb_alert: None,
                 event_id,
             };
             self.send_cache_event(event);
@@ -1718,10 +1728,68 @@ impl ProxyService {
 
         if llm_mode {
             let (parts, body) = req.take().expect("request present").into_parts();
-            let body_bytes = match http_body_util::BodyExt::collect(body).await {
+            let is_casb = self.casb_engine.is_llm_provider(&domain);
+            let dlp_body = crate::dlp::DlpBodyStream::new(body, self.dlp_engine.clone());
+            let body_bytes = match http_body_util::BodyExt::collect(dlp_body).await {
                 Ok(collected) => collected.to_bytes(),
                 Err(e) => {
-                    error!("LLM body collection failed: {}", e);
+                    let err_msg = e.to_string();
+                    error!("LLM body collection failed: {}", err_msg);
+                    if err_msg.contains("DLP Violation") {
+                        let mut resp = Response::new(full(Bytes::from_static(
+                            b"403 Forbidden: DLP Violation",
+                        )));
+                        *resp.status_mut() = StatusCode::FORBIDDEN;
+                        Self::finish_request_metrics(&mut guard, &mut fast_scope, 403, 0, 30);
+
+                        if self.perf.should_emit_kafka_event() {
+                            let event = CacheEvent {
+                                url: url.to_string(),
+                                method: method.to_string(),
+                                status: 403,
+                                cache_key: cache_key.to_string(),
+                                cache_status: "BLOCKED".to_string(),
+                                timestamp: SystemTime::now()
+                                    .duration_since(SystemTime::UNIX_EPOCH)
+                                    .unwrap()
+                                    .as_secs(),
+                                headers: parts
+                                    .headers
+                                    .iter()
+                                    .filter_map(|(k, v)| {
+                                        v.to_str()
+                                            .ok()
+                                            .map(|s| (k.as_str().to_string(), s.to_string()))
+                                    })
+                                    .collect(),
+                                user_id: user_id.clone(),
+                                username: username.clone(),
+                                client_ip: client_ip.to_string(),
+                                domain: domain.to_string(),
+                                response_size: 30,
+                                request_duration_ms: request_start.elapsed().as_millis() as u64,
+                                content_type: None,
+                                user_agent: user_agent.clone(),
+                                categories: categories.to_vec(),
+                                threat_sources: threat_sources.to_vec(),
+                                acl_action: Some("deny".to_string()),
+                                session_id: String::new(),
+                                parent_event_id: None,
+                                redirect_url: None,
+                                dlp_violation: Some(err_msg.clone()),
+                                casb_alert: if is_casb {
+                                    Some("GenAI Leak Prevented".to_string())
+                                } else {
+                                    None
+                                },
+                                event_id: new_event_id(),
+                            };
+                            self.send_cache_event(event);
+                        }
+
+                        return resp;
+                    }
+
                     let mut resp = Response::new(full(Bytes::from_static(b"400 Bad Request")));
                     *resp.status_mut() = StatusCode::BAD_REQUEST;
                     Self::finish_request_metrics(&mut guard, &mut fast_scope, 400, 0, 15);
@@ -1981,13 +2049,79 @@ impl ProxyService {
             early
         } else {
             let (parts, body) = req.take().expect("request present").into_parts();
-            let body_bytes = match http_body_util::BodyExt::collect(body).await {
+            let is_casb = self.casb_engine.is_llm_provider(&domain);
+            let dlp_body = crate::dlp::DlpBodyStream::new(body, self.dlp_engine.clone());
+            let body_bytes = match http_body_util::BodyExt::collect(dlp_body).await {
                 Ok(collected) => collected.to_bytes(),
                 Err(e) => {
-                    error!("Body collection failed: {}", e);
+                    let err_msg = e.to_string();
+                    error!("Body collection failed: {}", err_msg);
                     if let Some(permit) = flight_permit.take() {
                         permit.complete(None);
                     }
+                    if err_msg.contains("DLP Violation") {
+                        let mut resp = Response::new(full(Bytes::from_static(
+                            b"403 Forbidden: DLP Violation",
+                        )));
+                        *resp.status_mut() = StatusCode::FORBIDDEN;
+                        Self::finish_request_metrics(&mut guard, &mut fast_scope, 403, 0, 30);
+
+                        if self.perf.should_emit_kafka_event() {
+                            let event = CacheEvent {
+                                url: url.to_string(),
+                                method: method.to_string(),
+                                status: 403,
+                                cache_key: cache_key.to_string(),
+                                cache_status: "BLOCKED".to_string(),
+                                timestamp: SystemTime::now()
+                                    .duration_since(SystemTime::UNIX_EPOCH)
+                                    .unwrap()
+                                    .as_secs(),
+                                headers: parts
+                                    .headers
+                                    .iter()
+                                    .filter_map(|(k, v)| {
+                                        v.to_str()
+                                            .ok()
+                                            .map(|s| (k.as_str().to_string(), s.to_string()))
+                                    })
+                                    .collect(),
+                                user_id: user_id.clone(),
+                                username: username.clone(),
+                                client_ip: client_ip.to_string(),
+                                domain: domain.to_string(),
+                                response_size: 30,
+                                request_duration_ms: request_start.elapsed().as_millis() as u64,
+                                content_type: None,
+                                user_agent: user_agent.clone(),
+                                categories: categories.to_vec(),
+                                threat_sources: threat_sources.to_vec(),
+                                acl_action: Some("deny".to_string()),
+                                session_id: String::new(),
+                                parent_event_id: None,
+                                redirect_url: None,
+                                dlp_violation: Some(err_msg.clone()),
+                                casb_alert: if is_casb {
+                                    Some("GenAI Leak Prevented".to_string())
+                                } else {
+                                    None
+                                },
+                                event_id: new_event_id(),
+                            };
+                            if !event.session_id.is_empty() {
+                                self.sessions.begin_request(
+                                    &client_ip,
+                                    username.as_deref(),
+                                    user_agent.as_deref(),
+                                    &url,
+                                );
+                            }
+                            self.send_cache_event(event);
+                        }
+
+                        return resp;
+                    }
+
                     let mut resp = Response::new(full(Bytes::from_static(b"400 Bad Request")));
                     *resp.status_mut() = StatusCode::BAD_REQUEST;
                     Self::finish_request_metrics(&mut guard, &mut fast_scope, 400, 0, 15);
