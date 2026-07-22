@@ -41,7 +41,13 @@ jobs:
         run: |
           # Запускаем облегченный стек без Kafka/ClickHouse, чтобы не ловить OOM на воркере
           # (mock-upstream делит network namespace с proxy — см. docker-compose.lite.yml)
-          docker compose -f docker-compose.lite.yml up -d mock-upstream
+          docker compose -f docker-compose.lite.yml up -d mock-upstream || {
+            echo "❌ Failed to start mock-upstream. Proxy logs:"
+            docker compose -f docker-compose.lite.yml logs proxy
+            echo "❌ Cache Indexer logs:"
+            docker compose -f docker-compose.lite.yml logs cache-indexer
+            exit 1
+          }
 
       - name: Wait for Proxy Readiness
         run: |
