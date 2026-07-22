@@ -184,7 +184,8 @@ impl Default for CategorizationConfig {
             custom_db_enabled: false,
             custom_db_path: None,
             rkn_sync_enabled: false,
-            rkn_sync_url: "https://raw.githubusercontent.com/zapret-info/z-i/master/dump.csv".to_string(),
+            rkn_sync_url: "https://raw.githubusercontent.com/zapret-info/z-i/master/dump.csv"
+                .to_string(),
             rkn_sync_interval_secs: 86400,
         }
     }
@@ -294,7 +295,9 @@ impl CategorizationEngine {
 
         if self.config.rkn_sync_enabled {
             let is_rkn = if let Ok(rkn_lock) = self.rkn_domains.read() {
-                domain_suffixes(&domain).iter().any(|d| rkn_lock.contains(d))
+                domain_suffixes(&domain)
+                    .iter()
+                    .any(|d| rkn_lock.contains(d))
             } else {
                 false
             };

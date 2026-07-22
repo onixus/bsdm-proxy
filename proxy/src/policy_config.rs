@@ -68,8 +68,9 @@ fn load_categorization_config() -> CategorizationConfig {
         custom_db_enabled: env_flag("CUSTOM_DB_ENABLED"),
         custom_db_path: std::env::var("CUSTOM_DB_PATH").ok(),
         rkn_sync_enabled: env_flag("RKN_SYNC_ENABLED"),
-        rkn_sync_url: std::env::var("RKN_SYNC_URL")
-            .unwrap_or_else(|_| "https://raw.githubusercontent.com/zapret-info/z-i/master/dump.csv".to_string()),
+        rkn_sync_url: std::env::var("RKN_SYNC_URL").unwrap_or_else(|_| {
+            "https://raw.githubusercontent.com/zapret-info/z-i/master/dump.csv".to_string()
+        }),
         rkn_sync_interval_secs: std::env::var("RKN_SYNC_INTERVAL_SECS")
             .ok()
             .and_then(|s| s.parse().ok())
