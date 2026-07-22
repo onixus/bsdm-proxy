@@ -132,7 +132,9 @@ RUN apk add --no-cache \
     dumb-init \
     wget && \
     addgroup -g 1000 bsdm && \
-    adduser -D -u 1000 -G bsdm bsdm
+    adduser -D -u 1000 -G bsdm bsdm && \
+    mkdir -p /var/lib/cache-indexer /var/cache/bsdm-spill && \
+    chown -R bsdm:bsdm /var/lib/cache-indexer /var/cache/bsdm-spill
 
 USER bsdm
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
