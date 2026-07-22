@@ -144,15 +144,16 @@ gantt
 
 | Документ | Тема |
 |----------|------|
-| [architecture.md](architecture.md) | Компоненты ядра и поток данных |
-| [control-plane.md](control-plane.md) | REST и gRPC Control Plane API |
-| [wasm-plugins.md](wasm-plugins.md) | Инструкция по созданию Wasm-плагинов |
-| [ml-security.md](ml-security.md) | Feature Store, ML models и скоринг |
-| [clickhouse-analytics.md](clickhouse-analytics.md) | ClickHouse DDL и аналитика |
-| [dns-sinkhole.md](dns-sinkhole.md) | UDP / DoH / DoT DNS Sinkhole |
-| [icap.md](icap.md) | Взаимодействие с внешними ICAP/AV сканерами |
-| [lite.md](lite.md) | Автономный запуск в режиме Lite |
-| [capacity-planning.md](capacity-planning.md) | Расчет аппаратных ресурсов |
+| [README.md](README.md) | Главный навигационный портал и карта Wiki |
+| [architecture/overview.md](architecture/overview.md) | Компоненты ядра и поток данных |
+| [features/control-plane.md](features/control-plane.md) | REST и gRPC Control Plane API |
+| [features/wasm-plugins.md](features/wasm-plugins.md) | Инструкция по созданию Wasm-плагинов |
+| [analytics/ml-security.md](analytics/ml-security.md) | Feature Store, ML models и скоринг |
+| [analytics/clickhouse-retrosearch.md](analytics/clickhouse-retrosearch.md) | ClickHouse DDL, ретропоиск и Search API |
+| [features/dns-sinkhole.md](features/dns-sinkhole.md) | UDP / DoH / DoT DNS Sinkhole |
+| [features/icap-inspection.md](features/icap-inspection.md) | Взаимодействие с внешними ICAP/AV сканерами |
+| [getting-started/lite-mode.md](getting-started/lite-mode.md) | Автономный запуск в режиме Lite |
+| [architecture/capacity-planning.md](architecture/capacity-planning.md) | Расчет аппаратных ресурсов |
 
 ---
 

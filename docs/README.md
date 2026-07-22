@@ -1,63 +1,120 @@
-# Документация BSDM-Proxy (Wiki)
+# Wiki & Портал Документации BSDM-Proxy
 
-Центральное оглавление. Страницы wiki — в каталоге `docs/`.
+Добро пожаловать в единый центр документации и база знаний **BSDM-Proxy** — корпоративного высокопроизводительного HTTPS-прокси на Rust с ClickHouse аналитикой и ML-безопасностью.
 
-**Текущая версия:** 0.5.07.033 (Cargo `0.5.7+033`) · M1–M5 + DX/Wasm/AI/P3 · Analytics: Kafka → ClickHouse (или Lite: HTTP → SQLite) · [roadmap](roadmap.md)
+---
 
-## Начало работы
+## 🗺️ Карта Wiki Документации
 
-| Документ | Описание |
-|----------|----------|
-| [README.md](../README.md) | Обзор, быстрый старт, конфигурация |
-| [deployment.md](deployment.md) | Docker, native package, Kubernetes |
-| [docker.md](docker.md) | Docker Compose, сборка образов |
-| [kubernetes.md](kubernetes.md) | Манифесты, probes, managed services |
-| [k8s-architecture.md](k8s-architecture.md) | HA топология, CHI Operator, Helm analytics |
-| [packaging/README.md](../packaging/README.md) | Release-пакет (systemd) |
-| [development.md](development.md) | Сборка, тесты, CI, релиз |
-| [structure.md](structure.md) | Структура репозитория |
-| [licensing.md](licensing.md) | Лицензии и third-party |
-| [CHANGELOG.md](../CHANGELOG.md) | История изменений |
-| [releases/v0.5.7+033.md](releases/v0.5.7+033.md) | **Release notes 0.5.07.033** |
-| [releases/v0.5.0.md](releases/v0.5.0.md) | Release notes 0.5.0 (M4) |
-| [releases/v0.3.2.md](releases/v0.3.2.md) | Release notes 0.3.2 |
-| [releases/v0.3.1.md](releases/v0.3.1.md) | Release notes 0.3.1 (ClickHouse migration) |
-| [releases/v0.3.0.md](releases/v0.3.0.md) | Release notes 0.3.0 (M2) |
-| [capacity-planning.md](capacity-planning.md) | Планирование ёмкости |
+```
+docs/
+├── 🚀 getting-started/       # Быстрый старт, способы развертывания и автономные режимы
+├── 🏗️ architecture/          # Устройство ядра, кэширование, производительность и расчет ресурсов
+├── 🛡️ features/              # Функциональные модули (ACL, Auth, Wasm, DNS, ICAP, AI Cache)
+├── 📊 analytics/             # Аналитика трафика ClickHouse, ретропоиск, алерты и ML
+├── 🛠️ ops-and-dev/           # Инструкция разработчика, Kubernetes, бенчмарки и логгирование
+├── 📜 adr/                   # Принятые архитектурные решения (ADR 0001–0004)
+└── 📦 releases/              # История релизов и списки изменений
+```
 
-## Функциональность
+---
+
+## 🚀 1. Быстрый старт и Развертывание (`getting-started/`)
 
 | Документ | Описание |
 |----------|----------|
-| [authentication.md](authentication.md) | Basic, LDAP, NTLM, Kerberos |
-| [logging.md](logging.md) | `RUST_LOG`, уровни |
-| [performance.md](performance.md) | Тюнинг RPS, bench |
-| [semantic-cache.md](semantic-cache.md) | LLM / semantic cache prep |
-| [acl.md](acl.md) | ACL + REST API |
-| [control-plane.md](control-plane.md) | DX: stats, purge, hierarchy/TLS reload, ACL CRUD |
-| [wasm-plugins.md](wasm-plugins.md) | Wasmtime request hooks (feature `wasm`) |
-| [icap.md](icap.md) | Optional ICAP REQMOD/RESPMOD adapter |
-| [dns-sinkhole.md](dns-sinkhole.md) | Optional DNS RPZ-lite sidecar |
-| [adr/0004-dns-sinkhole-sidecar.md](adr/0004-dns-sinkhole-sidecar.md) | ADR: DNS as sidecar, not in proxy |
-| [categorization.md](categorization.md) | UT1 Blacklists, metrics, OTX |
-| [hierarchical-caching.md](hierarchical-caching.md) | ICP/HTCP hierarchy |
-| [clickhouse-analytics.md](clickhouse-analytics.md) | ClickHouse analytics |
-| [alerting.md](alerting.md) | Alert worker + Grafana/AM (M4) |
-| [ml-security.md](ml-security.md) | ML worker + feature store (M5) |
-| [adr/0003-ml-worker-feature-store.md](adr/0003-ml-worker-feature-store.md) | ADR: CH feature store |
-| [search-api.md](search-api.md) | REST Search API |
-| [benchmarks-httparchive.md](benchmarks-httparchive.md) | HTTP Archive CDN URL workload |
-| [../admin-console/README.md](../admin-console/README.md) | Admin Console (Vite UI) |
+| [deployment.md](getting-started/deployment.md) | Все способы установки: Zero-compilation installer (`install-binaries.sh`), Docker Compose, Systemd native |
+| [lite-mode.md](getting-started/lite-mode.md) | Автономный запуск в Lite-режиме (Proxy + SQLite Search API без Kafka/ClickHouse) |
+| [../README.md](../README.md) | Главное руководство проекта и минимальный старт |
 
-## Архитектура и roadmap
+---
+
+## 🏗️ 2. Архитектура и Устройство ядра (`architecture/`)
 
 | Документ | Описание |
 |----------|----------|
-| [architecture.md](architecture.md) | Архитектура, потоки данных |
-| [roadmap.md](roadmap.md) | Единый Roadmap, вехи M1–M5, фазы и план работ Q3 2026 – Q2 2027 (SSE/SASE) |
-| [lite.md](lite.md) | Lite: proxy + SQLite (`docker-compose.lite.yml`) |
-| [capacity-planning.md](capacity-planning.md) | Расчёт аппаратных ресурсов |
-| [adr/0001-tiered-sharded-l1-cache.md](adr/0001-tiered-sharded-l1-cache.md) | ADR tiered L1 |
-| [adr/0002-clickhouse-analytics.md](adr/0002-clickhouse-analytics.md) | ADR ClickHouse |
+| [overview.md](architecture/overview.md) | Архитектура системы, поток обработки запросов, блокеры и безопасность |
+| [hierarchical-caching.md](architecture/hierarchical-caching.md) | Многоуровневое кэширование L1/L2, Redis, протоколы ICP, HTCP и Cache Digest |
+| [capacity-planning.md](architecture/capacity-planning.md) | Расчет аппаратных ресурсов (RAM, CPU, диск) под различный объем трафика |
+| [performance.md](architecture/performance.md) | Оптимизация производительности, zero-copy I/O и сетевые буферы |
+| [structure.md](architecture/structure.md) | Структура репозитория, воркспейса Cargo и описание модулей |
 
-*Удалённые документы:* `OPTIMIZATIONS.md` → см. [performance.md](performance.md); `HIERARCHICAL_CACHING_README.md` → [hierarchical-caching.md](hierarchical-caching.md).*
+---
+
+## 🛡️ 3. Функциональные Модули Прокси (`features/`)
+
+| Документ | Описание |
+|----------|----------|
+| [acl-policy.md](features/acl-policy.md) | Движок правил ACL, временные окна TimeWindow, IP/domain правила |
+| [authentication.md](features/authentication.md) | Аутентификация пользователей: Basic, LDAP, NTLM, Kerberos |
+| [control-plane.md](features/control-plane.md) | REST и gRPC Control Plane API (горячая перезагрузка ACL, TLS сертификатов и иерархии) |
+| [categorization.md](features/categorization.md) | Категориальная фильтрация веб-ресурсов (списки UT1) и метрики |
+| [wasm-plugins.md](features/wasm-plugins.md) | Рантайм Wasmtime, SDK `bsdm-wasm-sdk`, написание и hot-reload плагинов |
+| [dns-sinkhole.md](features/dns-sinkhole.md) | Защищенный шифрованный DNS-шлюз (UDP, DoH RFC 8484, DoT RFC 7858) |
+| [icap-inspection.md](features/icap-inspection.md) | Интеграция с антивирусными сканерами по протоколу ICAP (RFC 3507) |
+| [semantic-cache.md](features/semantic-cache.md) | Семантическое кэширование AI & LLM запросов с интеграцией Qdrant Vector DB |
+
+---
+
+## 📊 4. Аналитика, Поиск и ML-безопасность (`analytics/`)
+
+| Документ | Описание |
+|----------|----------|
+| [clickhouse-retrosearch.md](analytics/clickhouse-retrosearch.md) | Схема ClickHouse DDL, ретропоиск, индексатор `cache-indexer` и REST `/api/search` API |
+| [alerting.md](analytics/alerting.md) | Движок алертов `alert-worker`, C&C беконы, энтропия Шеннона и SIEM webhooks |
+| [ml-security.md](analytics/ml-security.md) | Feature Store, модели UEBA z-score, Lexical Phishing, C&C ML, Flight Risk и Threat Score Write-Back |
+
+---
+
+## 🛠️ 5. Эксплуатация и Разработка (`ops-and-dev/`)
+
+| Документ | Описание |
+|----------|----------|
+| [development.md](ops-and-dev/development.md) | Инструкция для разработчиков, сборка, юнит-тесты и E2E тестовый каркас |
+| [k8s-architecture.md](ops-and-dev/k8s-architecture.md) | Развертывание в Kubernetes, Helm-чарт `charts/bsdm` и ClickHouse Operator (CHI) |
+| [benchmarks.md](ops-and-dev/benchmarks.md) | Нагрузочные тесты и профили бенчмарков HTTP Archive |
+| [logging.md](ops-and-dev/logging.md) | Формат структурированных логов (JSON) и Prometheus-метрики |
+| [licensing.md](ops-and-dev/licensing.md) | Лицензирование и проверка совместимости сторонних библиотек |
+
+---
+
+## 📜 6. Архитектурные Решения (ADR) (`adr/`)
+
+* [ADR 0001: Tiered Sharded L1 Cache](adr/0001-tiered-sharded-l1-cache.md)
+* [ADR 0002: ClickHouse Analytics Store](adr/0002-clickhouse-analytics.md)
+* [ADR 0003: ML Worker & Feature Store](adr/0003-ml-worker-feature-store.md)
+* [ADR 0004: DNS Sinkhole Sidecar](adr/0004-dns-sinkhole-sidecar.md)
+
+---
+
+## 📦 7. История Релизов (`releases/`)
+
+* [v0.6.0 (Wasm SDK, DoH/DoT, eBPF, Flight Risk ML)](roadmap.md)
+* [v0.5.7+033 (Admin Console Overhaul, Capacity Planning)](releases/v0.5.7+033.md)
+* [v0.5.0 (Threat Analytics, M4, Alert Worker)](releases/v0.5.0.md)
+* [v0.3.2 (Data Plane Throughput, P1 Hot Path)](releases/v0.3.2.md)
+* [v0.3.1 (ClickHouse Cutover, Search API)](releases/v0.3.1.md)
+* [v0.3.0 (Squid Parity, HTCP, Redis L2)](releases/v0.3.0.md)
+* [v0.2.3-test (M1 Foundation Release)](releases/v0.2.3-test.md)
+
+---
+
+## 🧭 Навигация по Ролям
+
+* 🔧 **Инженеры эксплуатации (DevOps / System Administrators):**
+  1. [Быстрый старт и деплой](getting-started/deployment.md)
+  2. [Lite-режим](getting-started/lite-mode.md)
+  3. [Планирование ресурсов](architecture/capacity-planning.md)
+  4. [Kubernetes и Helm](ops-and-dev/k8s-architecture.md)
+
+* 🛡️ **ИБ-специалисты (SOC / Threat Hunters):**
+  1. [Ретропоиск в ClickHouse и Search API](analytics/clickhouse-retrosearch.md)
+  2. [Алерты и интеграция с SIEM](analytics/alerting.md)
+  3. [ML-модели выявления угроз и аномалий](analytics/ml-security.md)
+  4. [Правила доступа ACL](features/acl-policy.md)
+
+* 💻 **Разработчики (Core & Wasm Contributors):**
+  1. [Руководство по разработке](ops-and-dev/development.md)
+  2. [Обзор архитектуры](architecture/overview.md)
+  3. [Разработка Wasm-плагинов](features/wasm-plugins.md)
+  4. [Контроль качества и бенчмарки](ops-and-dev/benchmarks.md)
