@@ -48,6 +48,12 @@ pub struct CacheEvent {
     /// Absolute `Location` when this response was an HTTP redirect.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub redirect_url: Option<String>,
+    /// Data Loss Prevention violation string (e.g., "credit_card", "ssn").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dlp_violation: Option<String>,
+    /// Cloud Access Security Broker (CASB) alert for GenAI leaks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub casb_alert: Option<String>,
     #[serde(default)]
     pub event_id: String,
 }
@@ -92,6 +98,8 @@ mod tests {
             session_id: String::new(),
             parent_event_id: None,
             redirect_url: None,
+            dlp_violation: None,
+            casb_alert: None,
             event_id: "evt-1".to_string(),
         };
         assert_eq!(document_id(&event), "evt-1");
@@ -143,6 +151,8 @@ mod tests {
             session_id: "sess-1".to_string(),
             parent_event_id: Some("evt-redir".to_string()),
             redirect_url: None,
+            dlp_violation: None,
+            casb_alert: None,
             event_id: "evt-block".to_string(),
         };
         let json = serde_json::to_string(&event).unwrap();

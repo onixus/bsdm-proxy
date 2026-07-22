@@ -427,6 +427,7 @@ dependencies = [
 name = "bsdm-proxy"
 version = "0.6.1-1"
 dependencies = [
+ "aho-corasick",
  "arc-swap",
  "base64",
  "brotli",
@@ -443,6 +444,7 @@ dependencies = [
  "kerberos_keytab",
  "ldap3",
  "memmap2",
+ "pin-project-lite",
  "prometheus",
  "prost",
  "quick_cache",

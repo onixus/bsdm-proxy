@@ -29,6 +29,8 @@ mod tests {
             session_id: String::new(),
             parent_event_id: None,
             redirect_url: None,
+            dlp_violation: None,
+            casb_alert: None,
             event_id: "evt-1".to_string(),
         };
 
@@ -66,6 +68,8 @@ mod tests {
             session_id: String::new(),
             parent_event_id: None,
             redirect_url: None,
+            dlp_violation: None,
+            casb_alert: None,
             event_id: "evt-1".to_string(),
         };
 
@@ -122,6 +126,8 @@ mod tests {
             session_id: String::new(),
             parent_event_id: None,
             redirect_url: None,
+            dlp_violation: None,
+            casb_alert: None,
             event_id: "evt-block".to_string(),
         };
 
@@ -157,6 +163,8 @@ mod tests {
                 session_id: String::new(),
                 parent_event_id: None,
                 redirect_url: None,
+                dlp_violation: None,
+                casb_alert: None,
                 event_id: format!("evt-{i}"),
             });
         }
@@ -194,6 +202,8 @@ mod tests {
             session_id: String::new(),
             parent_event_id: None,
             redirect_url: None,
+            dlp_violation: None,
+            casb_alert: None,
             event_id: "evt-block".to_string(),
         };
 
