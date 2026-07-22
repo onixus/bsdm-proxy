@@ -61,6 +61,7 @@ services:
         hard: 262144
 
   proxy:
+    image: ghcr.io/onixus/bsdm-proxy:latest
     build:
       context: .
       dockerfile: Dockerfile

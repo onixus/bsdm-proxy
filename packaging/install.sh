@@ -88,6 +88,9 @@ install -m 0755 "${SCRIPT_DIR}/bin/alert-worker" "${PREFIX}/bin/alert-worker"
 if [[ -x "${SCRIPT_DIR}/bin/ml-worker" ]]; then
   install -m 0755 "${SCRIPT_DIR}/bin/ml-worker" "${PREFIX}/bin/ml-worker"
 fi
+if [[ -x "${SCRIPT_DIR}/bin/dns-sinkhole" ]]; then
+  install -m 0755 "${SCRIPT_DIR}/bin/dns-sinkhole" "${PREFIX}/bin/dns-sinkhole"
+fi
 
 install -d -m 0755 "${ETC_DIR}"
 if [[ ! -f "${ETC_DIR}/bsdm-proxy.env" ]]; then
@@ -118,7 +121,7 @@ if $CREATE_USER; then
 fi
 
 if $INSTALL_SYSTEMD; then
-  for unit in bsdm-proxy bsdm-cache-indexer bsdm-alert-worker bsdm-ml-worker; do
+  for unit in bsdm-proxy bsdm-cache-indexer bsdm-alert-worker bsdm-ml-worker bsdm-dns-sinkhole; do
     if [[ -f "${SCRIPT_DIR}/systemd/${unit}.service" ]]; then
       sed "s|/opt/bsdm-proxy|${PREFIX}|g" \
         "${SCRIPT_DIR}/systemd/${unit}.service" \
@@ -131,6 +134,7 @@ if $INSTALL_SYSTEMD; then
   echo "  systemctl enable --now bsdm-cache-indexer  # optional"
   echo "  systemctl enable --now bsdm-alert-worker   # optional; set ALERT_WEBHOOK_URL first"
   echo "  systemctl enable --now bsdm-ml-worker      # optional; M5 feature store"
+  echo "  systemctl enable --now bsdm-dns-sinkhole   # optional; DoH/DoT DNS gateway"
 fi
 
 cat <<EOF

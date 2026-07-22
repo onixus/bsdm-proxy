@@ -40,6 +40,7 @@ services:
       start_period: 5s
 
   proxy:
+    image: ghcr.io/onixus/bsdm-proxy:latest
     build:
       context: .
       dockerfile: Dockerfile
