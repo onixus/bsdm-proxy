@@ -401,11 +401,15 @@ async fn handle_connect_mitm(
                 }
             };
 
-            let method = req.method().as_str().to_string();
-            let url = req.uri().to_string();
-            let req_headers = req.headers().clone();
-            let username = proxy_user.as_deref().map(|u| u.username.clone());
+            #[cfg(feature = "wasm")]
+            let (method, url, req_headers, username) = (
+                req.method().as_str().to_string(),
+                req.uri().to_string(),
+                req.headers().clone(),
+                proxy_user.as_deref().map(|u| u.username.clone()),
+            );
 
+            #[allow(unused_mut)]
             let mut resp = service
                 .handle_request(req, client_ip.clone(), proxy_user)
                 .await;
@@ -566,11 +570,15 @@ pub async fn handle_connection(
                 Err(resp) => return Ok(resp),
             };
 
-            let method = req.method().as_str().to_string();
-            let url = req.uri().to_string();
-            let req_headers = req.headers().clone();
-            let username = proxy_user.as_deref().map(|u| u.username.clone());
+            #[cfg(feature = "wasm")]
+            let (method, url, req_headers, username) = (
+                req.method().as_str().to_string(),
+                req.uri().to_string(),
+                req.headers().clone(),
+                proxy_user.as_deref().map(|u| u.username.clone()),
+            );
 
+            #[allow(unused_mut)]
             let mut resp = service
                 .handle_request(req, client_ip.clone(), proxy_user)
                 .await;

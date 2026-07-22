@@ -34,7 +34,7 @@ pub struct ControlApiState {
 }
 
 impl ControlApiState {
-    #[allow(clippy::too_many_arguments)]
+    #[cfg_attr(feature = "wasm", allow(clippy::too_many_arguments))]
     pub fn new(
         metrics: Arc<Metrics>,
         http_cache: Arc<HttpL1Cache>,
