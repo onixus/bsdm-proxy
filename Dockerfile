@@ -3,7 +3,7 @@
 # ============================================================
 # Unified builder stage - собирает все бинарники
 # ============================================================
-FROM rust:1-alpine AS builder
+FROM rust:alpine AS builder
 ARG TARGETARCH
 ARG LITE_BUILD=0
 WORKDIR /build
@@ -38,11 +38,15 @@ RUN case "$TARGETARCH" in \
 # Добавляем musl target
 RUN rustup target add $(cat /rust_target.txt)
 
-# Настройка окружения для статической линковки
+# Настройка окружения для статической линковки. `strip=symbols` убирает
+# debug-символы прямо во время линковки — бинарники получаются меньше и
+# не нужен отдельный шаг `strip`.
 ENV OPENSSL_STATIC=1 \
     OPENSSL_LIB_DIR=/usr/lib \
     OPENSSL_INCLUDE_DIR=/usr/include \
-    RUSTFLAGS="-C target-feature=+crt-static"
+    RUSTFLAGS="-C target-feature=+crt-static -C strip=symbols" \
+    CARGO_NET_RETRY=3 \
+    CARGO_INCREMENTAL=0
 
 # ---- Dependency cache layer ----
 # Копируем только манифесты и lock-файл, создаём заглушки src,
@@ -71,11 +75,16 @@ RUN mkdir -p bsdm-events/src proxy/src cache-indexer/src \
     echo "pub fn _stub() {}" > e2e/src/lib.rs && \
     echo "pub fn _stub() {}" > bsdm-wasm-sdk/src/lib.rs
 
-# Fetch + compile dependencies only (stubs will fail to link but deps get cached)
-RUN cargo build --release --target $(cat /rust_target.txt) \
-      -p bsdm-events 2>/dev/null || true && \
+# Fetch + compile dependencies only (stubs will fail to link but deps get
+# cached). BuildKit cache mounts persist the cargo registry/git checkouts
+# and the incremental target dir across builds so only changed deps are
+# rebuilt instead of the whole dependency graph every time.
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,target=/build/target,sharing=locked \
     cargo build --release --target $(cat /rust_target.txt) \
-      -p bsdm-proxy 2>/dev/null || true
+      -p bsdm-events -p bsdm-proxy -p cache-indexer \
+      -p alert-worker -p ml-worker -p dns-sinkhole 2>/dev/null || true
 
 # ---- Source copy (invalidates cache only when source changes) ----
 COPY bsdm-events ./bsdm-events
@@ -88,127 +97,107 @@ COPY e2e ./e2e
 COPY bsdm-wasm-sdk ./bsdm-wasm-sdk
 COPY examples ./examples
 
-# Собираем бинарники workspace в release режиме
-RUN if [ "$LITE_BUILD" = "1" ]; then \
-      cargo build --release --target $(cat /rust_target.txt) \
-        --no-default-features --features auth-basic -p bsdm-proxy && \
-      cargo build --release --target $(cat /rust_target.txt) \
+# Собираем бинарники workspace в release режиме. --locked гарантирует, что
+# сборка использует именно зафиксированные версии из Cargo.lock (без
+# неожиданного дрейфа зависимостей в CI/CD). Копируем результат в /dist
+# внутри того же RUN, пока кэш-том /build/target ещё смонтирован.
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,target=/build/target,sharing=locked \
+    set -eux; \
+    if [ "$LITE_BUILD" = "1" ]; then \
+      cargo build --release --locked --target $(cat /rust_target.txt) \
+        --no-default-features --features auth-basic -p bsdm-proxy; \
+      cargo build --release --locked --target $(cat /rust_target.txt) \
         --no-default-features -p cache-indexer; \
     else \
-      cargo build --release --target $(cat /rust_target.txt) \
+      cargo build --release --locked --target $(cat /rust_target.txt) \
         -p bsdm-proxy -p cache-indexer -p alert-worker -p ml-worker -p dns-sinkhole; \
-    fi
-
-# Копируем результаты в общую директорию
-RUN mkdir -p /dist && \
-    cp /build/target/$(cat /rust_target.txt)/release/proxy /dist/ || true && \
-    cp /build/target/$(cat /rust_target.txt)/release/cache-indexer /dist/ || true && \
-    cp /build/target/$(cat /rust_target.txt)/release/alert-worker /dist/ || true && \
-    cp /build/target/$(cat /rust_target.txt)/release/ml-worker /dist/ || true && \
-    cp /build/target/$(cat /rust_target.txt)/release/dns-sinkhole /dist/ || true
+    fi; \
+    mkdir -p /dist; \
+    for bin in proxy cache-indexer alert-worker ml-worker dns-sinkhole; do \
+      cp "/build/target/$(cat /rust_target.txt)/release/$bin" /dist/ 2>/dev/null || true; \
+    done
 
 # ============================================================
-# Proxy runtime
+# Common runtime base - общие пакеты и non-root пользователь
+# собираются один раз и переиспользуются всеми runtime-стадиями,
+# вместо повторной установки apk-пакетов в каждой из 5 стадий.
 # ============================================================
-FROM alpine:3.21 AS proxy
+FROM alpine:3.21 AS runtime-base
 
 RUN apk add --no-cache \
     ca-certificates \
     libgcc \
-    dumb-init
-
-# Non-root user for security
-RUN addgroup -g 1000 bsdm && adduser -D -u 1000 -G bsdm bsdm
-
-COPY --from=builder /dist/proxy /usr/local/bin/proxy
-RUN chmod +x /usr/local/bin/proxy
+    dumb-init \
+    wget && \
+    addgroup -g 1000 bsdm && \
+    adduser -D -u 1000 -G bsdm bsdm
 
 USER bsdm
+ENTRYPOINT ["/usr/bin/dumb-init", "--"]
+
+# ============================================================
+# Proxy runtime
+# ============================================================
+FROM runtime-base AS proxy
+
+COPY --from=builder --chmod=755 /dist/proxy /usr/local/bin/proxy
+
 EXPOSE 1488
-ENTRYPOINT ["/usr/sbin/dumb-init", "--"]
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget -q -O- --spider http://127.0.0.1:1488/health || exit 1
 CMD ["proxy"]
 
 # ============================================================
 # Cache-indexer runtime
 # ============================================================
-FROM alpine:3.21 AS cache-indexer
+FROM runtime-base AS cache-indexer
 
-RUN apk add --no-cache \
-    ca-certificates \
-    libgcc \
-    dumb-init
+COPY --from=builder --chmod=755 /dist/cache-indexer /usr/local/bin/cache-indexer
 
-RUN addgroup -g 1000 bsdm && adduser -D -u 1000 -G bsdm bsdm
-
-COPY --from=builder /dist/cache-indexer /usr/local/bin/cache-indexer
-RUN chmod +x /usr/local/bin/cache-indexer
-
-USER bsdm
 EXPOSE 8080
-ENTRYPOINT ["/usr/sbin/dumb-init", "--"]
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget -q -O- --spider http://127.0.0.1:8080/health || exit 1
 CMD ["cache-indexer"]
 
 # ============================================================
 # Alert-worker runtime (ClickHouse → webhook / SIEM)
 # ============================================================
-FROM alpine:3.21 AS alert-worker
+FROM runtime-base AS alert-worker
 
-RUN apk add --no-cache \
-    ca-certificates \
-    libgcc \
-    dumb-init
+COPY --from=builder --chmod=755 /dist/alert-worker /usr/local/bin/alert-worker
 
-RUN addgroup -g 1000 bsdm && adduser -D -u 1000 -G bsdm bsdm
-
-COPY --from=builder /dist/alert-worker /usr/local/bin/alert-worker
-RUN chmod +x /usr/local/bin/alert-worker
-
-USER bsdm
 EXPOSE 8090
-ENTRYPOINT ["/usr/sbin/dumb-init", "--"]
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget -q -O- --spider http://127.0.0.1:8090/health || exit 1
 CMD ["alert-worker"]
 
 # ============================================================
 # ML-worker runtime (ClickHouse features + scores, M5)
 # ============================================================
-FROM alpine:3.21 AS ml-worker
+FROM runtime-base AS ml-worker
 
-RUN apk add --no-cache \
-    ca-certificates \
-    libgcc \
-    dumb-init
+COPY --from=builder --chmod=755 /dist/ml-worker /usr/local/bin/ml-worker
 
-RUN addgroup -g 1000 bsdm && adduser -D -u 1000 -G bsdm bsdm
-
-COPY --from=builder /dist/ml-worker /usr/local/bin/ml-worker
-RUN chmod +x /usr/local/bin/ml-worker
-
-USER bsdm
 EXPOSE 8091
-ENTRYPOINT ["/usr/sbin/dumb-init", "--"]
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget -q -O- --spider http://127.0.0.1:8091/health || exit 1
 CMD ["ml-worker"]
 
 # ============================================================
 # DNS sinkhole sidecar (RPZ-lite UDP proxy, P3 / #108)
 # ============================================================
-FROM alpine:3.21 AS dns-sinkhole
+FROM runtime-base AS dns-sinkhole
 
-RUN apk add --no-cache \
-    ca-certificates \
-    libgcc \
-    dumb-init
-
-RUN addgroup -g 1000 bsdm && adduser -D -u 1000 -G bsdm bsdm
-
-COPY --from=builder /dist/dns-sinkhole /usr/local/bin/dns-sinkhole
-RUN chmod +x /usr/local/bin/dns-sinkhole
-COPY examples/dns/blocklist.rpz /etc/bsdm-proxy/blocklist.rpz
+COPY --from=builder --chmod=755 /dist/dns-sinkhole /usr/local/bin/dns-sinkhole
+COPY --chmod=644 examples/dns/blocklist.rpz /etc/bsdm-proxy/blocklist.rpz
 
 ENV DNS_SINKHOLE_ZONE_PATH=/etc/bsdm-proxy/blocklist.rpz \
     DNS_SINKHOLE_BIND=0.0.0.0:53 \
     METRICS_PORT=8092
 
-USER bsdm
 EXPOSE 53/udp 8092
-ENTRYPOINT ["/usr/sbin/dumb-init", "--"]
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget -q -O- --spider http://127.0.0.1:8092/health || exit 1
 CMD ["dns-sinkhole"]
