@@ -4,6 +4,7 @@
 # Unified builder stage - собирает оба бинарника
 # ============================================================
 FROM rust:1-alpine AS builder
+ARG TARGETARCH
 WORKDIR /build
 
 # Установка зависимостей для сборки (включая bash для rdkafka)
@@ -26,8 +27,15 @@ RUN apk add --no-cache \
     zlib-static \
     zstd-dev
 
+# Определение Rust target на основе архитектуры
+RUN case "$TARGETARCH" in \
+      "amd64") echo "x86_64-unknown-linux-musl" > /rust_target.txt ;; \
+      "arm64") echo "aarch64-unknown-linux-musl" > /rust_target.txt ;; \
+      *) echo "Unsupported architecture: $TARGETARCH"; exit 1 ;; \
+    esac
+
 # Добавляем musl target
-RUN rustup target add x86_64-unknown-linux-musl
+RUN rustup target add $(cat /rust_target.txt)
 
 # Копируем весь workspace
 COPY Cargo.toml Cargo.lock ./
@@ -49,14 +57,22 @@ ENV OPENSSL_STATIC=1 \
 
 # Собираем бинарники workspace в release режиме
 RUN if [ "$LITE_BUILD" = "1" ]; then \
-      cargo build --release --target x86_64-unknown-linux-musl \
+      cargo build --release --target $(cat /rust_target.txt) \
         --no-default-features --features auth-basic -p bsdm-proxy && \
-      cargo build --release --target x86_64-unknown-linux-musl \
+      cargo build --release --target $(cat /rust_target.txt) \
         --no-default-features -p cache-indexer; \
     else \
-      cargo build --release --target x86_64-unknown-linux-musl \
+      cargo build --release --target $(cat /rust_target.txt) \
         -p bsdm-proxy -p cache-indexer -p alert-worker -p ml-worker -p dns-sinkhole; \
     fi
+
+# Копируем результаты в общую директорию
+RUN mkdir -p /dist && \
+    cp /build/target/$(cat /rust_target.txt)/release/proxy /dist/ || true && \
+    cp /build/target/$(cat /rust_target.txt)/release/cache-indexer /dist/ || true && \
+    cp /build/target/$(cat /rust_target.txt)/release/alert-worker /dist/ || true && \
+    cp /build/target/$(cat /rust_target.txt)/release/ml-worker /dist/ || true && \
+    cp /build/target/$(cat /rust_target.txt)/release/dns-sinkhole /dist/ || true
 
 # ============================================================
 # Proxy runtime
@@ -69,7 +85,7 @@ RUN apk add --no-cache \
     wget
 
 # Копируем скомпилированный бинарник
-COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/proxy /usr/local/bin/proxy
+COPY --from=builder /dist/proxy /usr/local/bin/proxy
 
 EXPOSE 1488
 CMD ["proxy"]
@@ -84,7 +100,7 @@ RUN apk add --no-cache \
     wget
 
 # Копируем скомпилированный бинарник
-COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/cache-indexer /usr/local/bin/cache-indexer
+COPY --from=builder /dist/cache-indexer /usr/local/bin/cache-indexer
 
 EXPOSE 8080
 CMD ["cache-indexer"]
@@ -98,7 +114,7 @@ RUN apk add --no-cache \
     libgcc \
     wget
 
-COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/alert-worker /usr/local/bin/alert-worker
+COPY --from=builder /dist/alert-worker /usr/local/bin/alert-worker
 
 EXPOSE 8090
 CMD ["alert-worker"]
@@ -112,7 +128,7 @@ RUN apk add --no-cache \
     libgcc \
     wget
 
-COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/ml-worker /usr/local/bin/ml-worker
+COPY --from=builder /dist/ml-worker /usr/local/bin/ml-worker
 
 EXPOSE 8091
 CMD ["ml-worker"]
@@ -126,7 +142,7 @@ RUN apk add --no-cache \
     libgcc \
     wget
 
-COPY --from=builder /build/target/x86_64-unknown-linux-musl/release/dns-sinkhole /usr/local/bin/dns-sinkhole
+COPY --from=builder /dist/dns-sinkhole /usr/local/bin/dns-sinkhole
 COPY examples/dns/blocklist.rpz /etc/bsdm-proxy/blocklist.rpz
 
 ENV DNS_SINKHOLE_ZONE_PATH=/etc/bsdm-proxy/blocklist.rpz \
