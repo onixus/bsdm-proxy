@@ -1,6 +1,10 @@
-# Use legacy builder instead of Bake
-x-bake:
-  no-cache: false
+version: '3.9'
+
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
 
 services:
   zookeeper:
@@ -11,6 +15,13 @@ services:
     networks:
       - bsdm-net
     restart: unless-stopped
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
 
   kafka:
     image: confluentinc/cp-kafka:7.9.8
@@ -24,15 +35,23 @@ services:
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_HEAP_OPTS: "-Xmx512M -Xms256M"
     networks:
       - bsdm-net
     restart: unless-stopped
+    logging: *default-logging
     healthcheck:
       test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 >/dev/null 2>&1"]
       interval: 10s
       timeout: 10s
       retries: 12
       start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
 
   clickhouse:
     image: clickhouse/clickhouse-server:24.12
@@ -42,6 +61,7 @@ services:
     environment:
       CLICKHOUSE_DB: bsdm
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+      CLICKHOUSE_MAX_MEMORY_USAGE: 1073741824
     volumes:
       - clickhouse-data:/var/lib/clickhouse
       - ./scripts/clickhouse/http_cache.sql:/docker-entrypoint-initdb.d/01-http_cache.sql:ro
@@ -49,6 +69,7 @@ services:
     networks:
       - bsdm-net
     restart: unless-stopped
+    logging: *default-logging
     healthcheck:
       test: ["CMD-SHELL", "clickhouse-client --query 'SELECT 1' || exit 1"]
       interval: 10s
@@ -59,6 +80,12 @@ services:
       nofile:
         soft: 262144
         hard: 262144
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
 
   proxy:
     image: ghcr.io/onixus/bsdm-proxy:latest
@@ -66,9 +93,11 @@ services:
       context: .
       dockerfile: Dockerfile
       target: proxy
+      cache_from:
+        - type=registry,ref=ghcr.io/onixus/bsdm-proxy:latest
     ports:
       - "1488:1488"
-      - "9090:9090"  # Metrics endpoint
+      - "9090:9090"
     environment:
       - KAFKA_BROKERS=kafka:9092
       - KAFKA_TOPIC=cache-events
@@ -103,17 +132,26 @@ services:
     tty: true
     stdin_open: true
     restart: unless-stopped
+    logging: *default-logging
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:9090/health | grep -q ok"]
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
 
   cache-indexer:
     build:
       context: .
       dockerfile: Dockerfile
       target: cache-indexer
+      cache_from:
+        - type=registry,ref=ghcr.io/onixus/bsdm-proxy:cache-indexer
     ports:
       - "8080:8080"
     environment:
@@ -135,15 +173,27 @@ services:
     networks:
       - bsdm-net
     restart: unless-stopped
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8080/health | grep -q ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
 
-  # Optional SIEM/webhook alerts (B19 / #50). Requires ALERT_WEBHOOK_URL.
-  #   ALERT_WEBHOOK_URL=https://hooks.example/siem docker compose --profile alerts up -d alert-worker
   alert-worker:
     profiles: ["alerts"]
     build:
       context: .
       dockerfile: Dockerfile
       target: alert-worker
+      cache_from:
+        - type=registry,ref=ghcr.io/onixus/bsdm-proxy:alert-worker
     ports:
       - "8090:8090"
     environment:
@@ -166,21 +216,27 @@ services:
     networks:
       - bsdm-net
     restart: unless-stopped
+    logging: *default-logging
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8090/health | grep -q ok"]
       interval: 15s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
 
-  # Optional M5 feature store / scoring (ADR 0003).
-  #   docker compose --profile ml up -d --build ml-worker
-  # Optional SIEM: ML_WEBHOOK_URL=https://hooks.example/siem
   ml-worker:
     profiles: ["ml"]
     build:
       context: .
       dockerfile: Dockerfile
       target: ml-worker
+      cache_from:
+        - type=registry,ref=ghcr.io/onixus/bsdm-proxy:ml-worker
     ports:
       - "8091:8091"
     environment:
@@ -214,11 +270,18 @@ services:
     networks:
       - bsdm-net
     restart: unless-stopped
+    logging: *default-logging
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8091/health | grep -q ok"]
       interval: 15s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
 
   alertmanager:
     image: prom/alertmanager:v0.28.1
@@ -233,11 +296,18 @@ services:
     networks:
       - bsdm-net
     restart: unless-stopped
+    logging: *default-logging
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:9093/-/healthy || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
 
   prometheus:
     image: prom/prometheus:v3.12.0
@@ -257,6 +327,7 @@ services:
     networks:
       - bsdm-net
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       - proxy
       - alertmanager
@@ -265,13 +336,18 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
 
   grafana:
     image: grafana/grafana:12.3.8
     ports:
       - "3000:3000"
     environment:
-      # Change in production: export GRAFANA_ADMIN_PASSWORD before `docker compose up`.
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
       - GF_SECURITY_ADMIN_USER=admin
       - GF_USERS_ALLOW_SIGN_UP=false
@@ -286,6 +362,7 @@ services:
     networks:
       - bsdm-net
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       - prometheus
       - clickhouse
@@ -295,11 +372,13 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
 
-  # Optional ICAP AV sidecar (P3 / #99). Open-source c-icap + ClamAV.
-  #   docker compose --profile icap up -d icap
-  # Proxy: ICAP_ENABLED=true ICAP_URL=icap://icap:1344/srv_clamav
-  # Docs: docs/icap.md
   icap:
     profiles: ["icap"]
     image: toolarium/toolarium-icap-clamav-docker:latest
@@ -308,16 +387,22 @@ services:
     networks:
       - bsdm-net
     restart: unless-stopped
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
 
-  # Optional DNS sinkhole sidecar (P3 / #108). RPZ-lite UDP proxy — not in proxy core.
-  #   docker compose --profile dns-sinkhole up -d --build dns-sinkhole
-  # Docs: docs/dns-sinkhole.md · ADR 0004
   dns-sinkhole:
     profiles: ["dns-sinkhole"]
     build:
       context: .
       dockerfile: Dockerfile
       target: dns-sinkhole
+      cache_from:
+        - type=registry,ref=ghcr.io/onixus/bsdm-proxy:dns-sinkhole
     ports:
       - "5353:53/udp"
       - "8092:8092"
@@ -332,15 +417,25 @@ services:
     networks:
       - bsdm-net
     restart: unless-stopped
+    logging: *default-logging
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8092/health | grep -q ok"]
       interval: 15s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
 
 networks:
   bsdm-net:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
 
 volumes:
   clickhouse-data:
