@@ -656,6 +656,8 @@ mod tests {
             test_upstream(),
             #[cfg(feature = "wasm")]
             None,
+            Arc::new(crate::casb::CasbEngine::new()),
+            Arc::new(crate::dlp::DlpEngine::new()),
         )
     }
 
@@ -793,6 +795,8 @@ mod tests {
             test_upstream(),
             #[cfg(feature = "wasm")]
             None,
+            Arc::new(crate::casb::CasbEngine::new()),
+            Arc::new(crate::dlp::DlpEngine::new()),
         );
         let resp = state
             .dispatch(
