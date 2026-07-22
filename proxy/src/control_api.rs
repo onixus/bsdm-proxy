@@ -84,7 +84,7 @@ pub struct ControlApiState {
 }
 
 impl ControlApiState {
-    #[cfg_attr(feature = "wasm", allow(clippy::too_many_arguments))]
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         metrics: Arc<Metrics>,
         http_cache: Arc<HttpL1Cache>,
@@ -115,6 +115,7 @@ impl ControlApiState {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn from_env(
         metrics: Arc<Metrics>,
         http_cache: Arc<HttpL1Cache>,
