@@ -14,6 +14,16 @@
 | **Native package** | Bare metal / VM без Docker | systemd, минимум зависимостей | Ручная настройка Kafka/CH |
 | **Kubernetes + Helm** | Прод, HA, масштабирование | Оркестрация, probes, chart `charts/bsdm/` | Сложнее, образы всё равно нужны |
 
+## Быстрый старт: Установка готовых бинарников (Zero-Compilation)
+
+Для мгновенной установки на Linux/macOS без компиляции исходного кода и без установки Rust toolchain:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/onixus/bsdm-proxy/main/scripts/install-binaries.sh | sudo bash
+```
+
+Скрипт автоматически скачивает предскомпилированные бинарники последнего релиза с GitHub Releases (`x86_64` / `aarch64`), настраивает `/opt/bsdm-proxy`, `/etc/bsdm-proxy` и регистрирует systemd-сервисы.
+
 ---
 
 ## Docker Compose (рекомендуется для dev/lab)

@@ -20,14 +20,16 @@ cargo build --release \
   -p bsdm-proxy --bin proxy \
   -p cache-indexer --bin cache-indexer \
   -p alert-worker --bin alert-worker \
-  -p ml-worker --bin ml-worker
+  -p ml-worker --bin ml-worker \
+  -p dns-sinkhole --bin dns-sinkhole
 
 echo "==> Assembling package ${PACKAGE_NAME}"
 rm -rf "$STAGING"
 mkdir -p "$STAGING"/{bin,config,systemd}
 
 cp target/release/proxy target/release/cache-indexer \
-  target/release/alert-worker target/release/ml-worker "$STAGING/bin/"
+  target/release/alert-worker target/release/ml-worker \
+  target/release/dns-sinkhole "$STAGING/bin/"
 cp packaging/config/*.example "$STAGING/config/"
 cp config/acl-rules.example.json "$STAGING/config/"
 cp packaging/systemd/*.service "$STAGING/systemd/"

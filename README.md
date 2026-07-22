@@ -73,9 +73,14 @@
 
 Для максимального удобства используйте `Makefile` (на Linux/macOS) или `setup.ps1` (на Windows).
 
-### Установка в одну команду (Linux / macOS)
+### Установка готовых бинарников без компиляции (Рекомендуется)
 
-Запустите интерактивный скрипт установки из корня репозитория:
+```bash
+curl -fsSL https://raw.githubusercontent.com/onixus/bsdm-proxy/main/scripts/install-binaries.sh | sudo bash
+```
+
+### Интерактивная установка из исходников (Linux / macOS)
+
 ```bash
 sudo ./install.sh
 ```
