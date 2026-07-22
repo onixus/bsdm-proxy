@@ -7,7 +7,7 @@
 #   curl --cacert certs/ca.crt -x http://127.0.0.1:1488 https://httpbin.org/get
 #   curl 'http://127.0.0.1:8080/api/search?limit=5'
 #
-# Docs: docs/lite.md · docs/strategic-roadmap.md (Phase 1)
+# Docs: docs/lite.md · docs/roadmap.md (Lite Mode)
 
 services:
   cache-indexer:

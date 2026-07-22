@@ -2,7 +2,7 @@
 
 Standalone caching HTTPS proxy with optional SQLite Search API — **no Kafka or ClickHouse**.
 
-See [strategic-roadmap.md](strategic-roadmap.md) Phase 1.
+See [roadmap.md](roadmap.md) (Lite Mode).
 
 ## One-command start
 

@@ -2,7 +2,7 @@
 
 Рекомендуемая архитектура развёртывания BSDM на Kubernetes: data plane (proxy + Redis L2) и analytics plane (Kafka → indexer → ClickHouse).
 
-См. также: [capacity-planning.md](capacity-planning.md) · [swg-backlog-mapping.md](swg-backlog-mapping.md) · [helm chart](../charts/bsdm/README.md)
+См. также: [capacity-planning.md](capacity-planning.md) · [roadmap.md](roadmap.md) · [helm chart](../charts/bsdm/README.md)
 
 ---
 

@@ -2,7 +2,7 @@
 
 REST endpoints on the proxy metrics port (`METRICS_PORT`, default `9090`). No Grafana required for Lite ops.
 
-See also: [strategic-roadmap.md](strategic-roadmap.md) Phase 2 · [acl.md](acl.md).
+See also: [roadmap.md](roadmap.md) (Control Plane Phase) · [acl.md](acl.md).
 
 ## Auth
 
