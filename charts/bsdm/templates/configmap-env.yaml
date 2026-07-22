@@ -27,8 +27,24 @@ data:
   ACL_ENABLED: {{ .Values.proxy.aclEnabled | quote }}
   ACL_DEFAULT_ACTION: {{ .Values.acl.defaultAction | quote }}
   ACL_RULES_PATH: {{ printf "%s/acl-rules.json" .Values.acl.mountPath | quote }}
+  ACL_AUTO_RELOAD: {{ .Values.acl.autoReload | quote }}
+  ACL_RELOAD_INTERVAL: {{ .Values.acl.reloadInterval | quote }}
   CATEGORIZATION_ENABLED: {{ .Values.proxy.categorizationEnabled | quote }}
   HIERARCHY_ENABLED: {{ .Values.proxy.hierarchyEnabled | quote }}
+  # Categorization sources
+  URLHAUS_ENABLED: {{ .Values.proxy.urlhausEnabled | quote }}
+  PHISHTANK_ENABLED: {{ .Values.proxy.phishtankEnabled | quote }}
+  {{- if .Values.proxy.phishtankApiKey }}
+  PHISHTANK_API_KEY: {{ .Values.proxy.phishtankApiKey | quote }}
+  {{- end }}
+  CUSTOM_DB_ENABLED: {{ .Values.proxy.customDbEnabled | quote }}
+  {{- if .Values.proxy.customDbPath }}
+  CUSTOM_DB_PATH: {{ .Values.proxy.customDbPath | quote }}
+  {{- end }}
+  # RKN category sync
+  RKN_SYNC_ENABLED: {{ .Values.proxy.rknSyncEnabled | quote }}
+  RKN_SYNC_URL: {{ .Values.proxy.rknSyncUrl | quote }}
+  RKN_SYNC_INTERVAL_SECS: {{ .Values.proxy.rknSyncIntervalSecs | quote }}
   RUST_LOG: {{ .Values.proxy.rustLog | quote }}
   SHUTDOWN_TIMEOUT_SECONDS: {{ .Values.proxy.shutdownTimeoutSeconds | quote }}
   {{- if .Values.proxy.kafkaBrokers }}

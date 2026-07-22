@@ -1,0 +1,53 @@
+{{- if and .Values.mlWorker .Values.mlWorker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "bsdm.fullname" . }}-ml-worker
+  labels:
+    {{- include "bsdm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ml-worker
+spec:
+  replicas: {{ .Values.mlWorker.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "bsdm.mlWorkerSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "bsdm.mlWorkerSelectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "bsdm.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: ml-worker
+          image: "{{ .Values.mlWorker.image.repository }}:{{ .Values.mlWorker.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.mlWorker.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: admin
+              containerPort: {{ .Values.mlWorker.service.port }}
+              protocol: TCP
+          env:
+            - name: CLICKHOUSE_URL
+              value: {{ .Values.mlWorker.clickhouseUrl | quote }}
+            - name: RUST_LOG
+              value: {{ .Values.mlWorker.rustLog | quote }}
+            - name: METRICS_PORT
+              value: {{ .Values.mlWorker.service.port | quote }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: admin
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: admin
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.mlWorker.resources | nindent 12 }}
+{{- end }}

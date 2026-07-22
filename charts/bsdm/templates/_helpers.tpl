@@ -52,3 +52,22 @@ app.kubernetes.io/name: {{ include "bsdm.name" . }}-indexer
 app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/component: cache-indexer
 {{- end }}
+
+{{- define "bsdm.alertWorkerSelectorLabels" -}}
+app.kubernetes.io/name: {{ include "bsdm.name" . }}-alert-worker
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: alert-worker
+{{- end }}
+
+{{- define "bsdm.mlWorkerSelectorLabels" -}}
+app.kubernetes.io/name: {{ include "bsdm.name" . }}-ml-worker
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: ml-worker
+{{- end }}
+
+{{- define "bsdm.dnsSinkholeSelectorLabels" -}}
+app.kubernetes.io/name: {{ include "bsdm.name" . }}-dns-sinkhole
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: dns-sinkhole
+{{- end }}
+

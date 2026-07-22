@@ -1,0 +1,59 @@
+{{- if and .Values.alertWorker .Values.alertWorker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "bsdm.fullname" . }}-alert-worker
+  labels:
+    {{- include "bsdm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: alert-worker
+spec:
+  replicas: {{ .Values.alertWorker.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "bsdm.alertWorkerSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "bsdm.alertWorkerSelectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "bsdm.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: alert-worker
+          image: "{{ .Values.alertWorker.image.repository }}:{{ .Values.alertWorker.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.alertWorker.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: admin
+              containerPort: {{ .Values.alertWorker.service.port }}
+              protocol: TCP
+          env:
+            - name: CLICKHOUSE_URL
+              value: {{ .Values.alertWorker.clickhouseUrl | quote }}
+            {{- if .Values.alertWorker.webhookUrl }}
+            - name: WEBHOOK_URL
+              value: {{ .Values.alertWorker.webhookUrl | quote }}
+            {{- end }}
+            - name: POLL_INTERVAL_SECS
+              value: {{ .Values.alertWorker.pollIntervalSecs | quote }}
+            - name: RUST_LOG
+              value: {{ .Values.alertWorker.rustLog | quote }}
+            - name: METRICS_PORT
+              value: {{ .Values.alertWorker.service.port | quote }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: admin
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: admin
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.alertWorker.resources | nindent 12 }}
+{{- end }}

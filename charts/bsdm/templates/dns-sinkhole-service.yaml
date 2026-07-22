@@ -1,0 +1,22 @@
+{{- if and .Values.dnsSinkhole .Values.dnsSinkhole.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "bsdm.fullname" . }}-dns-sinkhole
+  labels:
+    {{- include "bsdm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dns-sinkhole
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.dnsSinkhole.service.dnsPort }}
+      targetPort: dns
+      protocol: UDP
+      name: dns
+    - port: {{ .Values.dnsSinkhole.service.metricsPort }}
+      targetPort: metrics
+      protocol: TCP
+      name: metrics
+  selector:
+    {{- include "bsdm.dnsSinkholeSelectorLabels" . | nindent 4 }}
+{{- end }}

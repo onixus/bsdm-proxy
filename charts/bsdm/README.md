@@ -1,4 +1,4 @@
-# Helm chart skeleton for BSDM-Proxy on Kubernetes.
+# Helm chart for BSDM-Proxy on Kubernetes
 #
 # Install (data plane):
 #   helm install bsdm ./charts/bsdm -n bsdm-proxy --create-namespace
@@ -33,13 +33,20 @@ Set `mitm.existingSecret: bsdm-mitm-ca` in values.
 ## Values
 
 | Key | Default | Prod (`values-prod.yaml`) |
-|-----|---------|-------------------------|
+|-----|---------|--------------------------|
 | `replicaCount` | 2 | 4 |
 | `proxy.workerCount` | 1 | 1 |
 | `proxy.cacheCapacity` | 10000 | 25000 per pod |
 | `proxy.redisL2Enabled` | false | true |
+| `proxy.rknSyncEnabled` | false | — |
+| `proxy.urlhausEnabled` | false | — |
+| `proxy.phishtankEnabled` | false | — |
+| `acl.autoReload` | false | — |
 | `spill.sizeLimit` | 20Gi | 30Gi |
 | `indexer.enabled` | false | see `values-analytics.yaml` |
+| `alertWorker.enabled` | false | — |
+| `mlWorker.enabled` | false | — |
+| `dnsSinkhole.enabled` | false | — |
 
 ## Templates
 
@@ -49,6 +56,9 @@ Set `mitm.existingSecret: bsdm-mitm-ca` in values.
 | `service.yaml` | ClusterIP :1488, :9090 |
 | `configmap-env.yaml` | proxy non-secret env |
 | `indexer-*.yaml` | cache-indexer when `indexer.enabled` |
+| `alert-worker-*.yaml` | alert-worker when `alertWorker.enabled` |
+| `ml-worker-*.yaml` | ml-worker when `mlWorker.enabled` |
+| `dns-sinkhole-*.yaml` | dns-sinkhole when `dnsSinkhole.enabled` |
 | `hpa.yaml` | optional HPA |
 | `pdb.yaml` | PodDisruptionBudget |
 | `networkpolicy.yaml` | optional NetworkPolicy |
@@ -61,7 +71,14 @@ Set `mitm.existingSecret: bsdm-mitm-ca` in values.
 | `examples/clickhouse-installation.yaml` | Altinity `ClickHouseInstallation` CR |
 | `values-analytics.yaml` | Indexer-only release (`replicaCount: 0`) |
 
-Build indexer image: `docker build --target cache-indexer -t ghcr.io/onixus/bsdm-cache-indexer:0.5.0 .`
+Build images:
+```bash
+docker build --target proxy         -t ghcr.io/onixus/bsdm-proxy:0.6.1-1 .
+docker build --target cache-indexer -t ghcr.io/onixus/bsdm-cache-indexer:0.6.1-1 .
+docker build --target alert-worker  -t ghcr.io/onixus/bsdm-alert-worker:0.6.1-1 .
+docker build --target ml-worker     -t ghcr.io/onixus/bsdm-ml-worker:0.6.1-1 .
+docker build --target dns-sinkhole  -t ghcr.io/onixus/bsdm-dns-sinkhole:0.6.1-1 .
+```
 
 ## Not included (deploy separately)
 

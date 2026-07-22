@@ -1,0 +1,71 @@
+{{- if and .Values.dnsSinkhole .Values.dnsSinkhole.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "bsdm.fullname" . }}-dns-sinkhole
+  labels:
+    {{- include "bsdm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dns-sinkhole
+spec:
+  replicas: {{ .Values.dnsSinkhole.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "bsdm.dnsSinkholeSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "bsdm.dnsSinkholeSelectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "bsdm.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: dns-sinkhole
+          image: "{{ .Values.dnsSinkhole.image.repository }}:{{ .Values.dnsSinkhole.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.dnsSinkhole.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: dns
+              containerPort: 53
+              protocol: UDP
+            - name: metrics
+              containerPort: {{ .Values.dnsSinkhole.service.metricsPort }}
+              protocol: TCP
+          env:
+            - name: DNS_SINKHOLE_ZONE_PATH
+              value: {{ .Values.dnsSinkhole.zonePath | quote }}
+            - name: DNS_SINKHOLE_BIND
+              value: {{ .Values.dnsSinkhole.bind | quote }}
+            - name: METRICS_PORT
+              value: {{ .Values.dnsSinkhole.service.metricsPort | quote }}
+            - name: RUST_LOG
+              value: {{ .Values.dnsSinkhole.rustLog | quote }}
+          {{- if .Values.dnsSinkhole.existingConfigMap }}
+          volumeMounts:
+            - name: rpz-zone
+              mountPath: {{ .Values.dnsSinkhole.zonePath }}
+              subPath: {{ base .Values.dnsSinkhole.zonePath }}
+              readOnly: true
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: metrics
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.dnsSinkhole.resources | nindent 12 }}
+      {{- if .Values.dnsSinkhole.existingConfigMap }}
+      volumes:
+        - name: rpz-zone
+          configMap:
+            name: {{ .Values.dnsSinkhole.existingConfigMap }}
+      {{- end }}
+{{- end }}

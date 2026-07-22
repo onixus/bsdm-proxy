@@ -5,7 +5,7 @@ replicaCount: 2
 
 image:
   repository: ghcr.io/onixus/bsdm-proxy
-  tag: "0.5.0"
+  tag: "0.6.1-1"
   pullPolicy: IfNotPresent
 
 nameOverride: ""
@@ -61,6 +61,8 @@ acl:
   existingConfigMap: ""       # if set, mount acl-rules.json
   mountPath: /etc/bsdm-proxy
   defaultAction: allow
+  autoReload: false
+  reloadInterval: 60          # seconds between hot-reload checks
 
 # Proxy environment — maps to packaging/config/bsdm-proxy.env.example
 proxy:
@@ -83,6 +85,16 @@ proxy:
   aclEnabled: false
   categorizationEnabled: false
   hierarchyEnabled: false
+  # Categorization sources
+  urlhausEnabled: false
+  phishtankEnabled: false
+  phishtankApiKey: ""
+  customDbEnabled: false
+  customDbPath: ""
+  # RKN category sync (daily by default)
+  rknSyncEnabled: false
+  rknSyncUrl: "https://raw.githubusercontent.com/zapret-info/z-i/master/dump.csv"
+  rknSyncIntervalSecs: 86400
   rustLog: "info,bsdm_proxy=info"
   shutdownTimeoutSeconds: 30
   extraEnv: []
@@ -134,7 +146,7 @@ indexer:
   replicaCount: 2
   image:
     repository: ghcr.io/onixus/bsdm-cache-indexer
-    tag: "0.5.0"
+    tag: "0.6.1-1"
     pullPolicy: IfNotPresent
   resources:
     requests:
@@ -162,6 +174,71 @@ indexer:
     maxLimit: 10000
     defaultDays: 30
   rustLog: "info,cache_indexer=info"
+
+# Optional alert-worker (ClickHouse → webhook / SIEM)
+alertWorker:
+  enabled: false
+  replicaCount: 1
+  image:
+    repository: ghcr.io/onixus/bsdm-alert-worker
+    tag: "0.6.1-1"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: "100m"
+      memory: 128Mi
+    limits:
+      cpu: "500m"
+      memory: 512Mi
+  service:
+    port: 8090
+  clickhouseUrl: "http://clickhouse-bsdm.bsdm-analytics.svc.cluster.local:8123"
+  webhookUrl: ""
+  pollIntervalSecs: 60
+  rustLog: "info,alert_worker=info"
+
+# Optional ml-worker (ClickHouse features + scores)
+mlWorker:
+  enabled: false
+  replicaCount: 1
+  image:
+    repository: ghcr.io/onixus/bsdm-ml-worker
+    tag: "0.6.1-1"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: "250m"
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  service:
+    port: 8091
+  clickhouseUrl: "http://clickhouse-bsdm.bsdm-analytics.svc.cluster.local:8123"
+  rustLog: "info,ml_worker=info"
+
+# Optional DNS sinkhole sidecar (RPZ-lite UDP proxy)
+dnsSinkhole:
+  enabled: false
+  replicaCount: 1
+  image:
+    repository: ghcr.io/onixus/bsdm-dns-sinkhole
+    tag: "0.6.1-1"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: "50m"
+      memory: 64Mi
+    limits:
+      cpu: "200m"
+      memory: 256Mi
+  service:
+    dnsPort: 53
+    metricsPort: 8092
+  zonePath: /etc/bsdm-proxy/blocklist.rpz
+  bind: "0.0.0.0:53"
+  existingConfigMap: ""       # mount custom RPZ zone file
+  rustLog: "info,dns_sinkhole=info"
 
 nodeSelector: {}
 tolerations: []
