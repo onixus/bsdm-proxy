@@ -513,7 +513,7 @@ cargo test -p bsdm-proxy-e2e --test httparchive
 
 CI: [rust.yml](.github/workflows/rust.yml) (fmt, clippy, build, test, cargo-audit) и [e2e.yml](.github/workflows/e2e.yml).
 
-→ [docs/development.md](docs/development.md)
+→ [docs/ops-and-dev/development.md](docs/ops-and-dev/development.md)
 
 ## Документация (Wiki)
 
