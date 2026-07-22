@@ -3,7 +3,7 @@
 # ============================================================
 # Unified builder stage - собирает все бинарники
 # ============================================================
-FROM rust:1.87-alpine3.21 AS builder
+FROM rust:1-alpine AS builder
 ARG TARGETARCH
 ARG LITE_BUILD=0
 WORKDIR /build
