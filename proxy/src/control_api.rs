@@ -30,7 +30,10 @@ impl ControlApiState {
         let domains = self.casb_engine.get_domains();
         match serde_json::to_string(&domains) {
             Ok(json) => json_response(StatusCode::OK, &json),
-            Err(e) => json_response(StatusCode::INTERNAL_SERVER_ERROR, &format!(r#"{{"error":"{}"}}"#, e)),
+            Err(e) => json_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!(r#"{{"error":"{}"}}"#, e),
+            ),
         }
     }
 
@@ -45,20 +48,31 @@ impl ControlApiState {
     }
 
     fn dlp_patterns(&self) -> Response<Body> {
-        let patterns: Vec<DlpPatternDto> = self.dlp_engine.get_patterns().into_iter().map(|(p, d)| DlpPatternDto {
-            pattern: p,
-            description: d,
-        }).collect();
+        let patterns: Vec<DlpPatternDto> = self
+            .dlp_engine
+            .get_patterns()
+            .into_iter()
+            .map(|(p, d)| DlpPatternDto {
+                pattern: p,
+                description: d,
+            })
+            .collect();
         match serde_json::to_string(&patterns) {
             Ok(json) => json_response(StatusCode::OK, &json),
-            Err(e) => json_response(StatusCode::INTERNAL_SERVER_ERROR, &format!(r#"{{"error":"{}"}}"#, e)),
+            Err(e) => json_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!(r#"{{"error":"{}"}}"#, e),
+            ),
         }
     }
 
     async fn dlp_update(&self, body: Bytes) -> Response<Body> {
         match serde_json::from_slice::<Vec<DlpPatternDto>>(&body) {
             Ok(dtos) => {
-                let patterns = dtos.into_iter().map(|dto| (dto.pattern, dto.description)).collect();
+                let patterns = dtos
+                    .into_iter()
+                    .map(|dto| (dto.pattern, dto.description))
+                    .collect();
                 self.dlp_engine.set_patterns(patterns);
                 json_response(StatusCode::OK, r#"{"status":"ok"}"#)
             }

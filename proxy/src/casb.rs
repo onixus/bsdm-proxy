@@ -51,7 +51,6 @@ impl CasbEngine {
     /// Returns true if the domain matches a monitored LLM provider.
     pub fn is_llm_provider(&self, domain: &str) -> bool {
         let lock = self.llm_domains.read().unwrap();
-        lock.iter()
-            .any(|d| domain == d || domain.ends_with(d))
+        lock.iter().any(|d| domain == d || domain.ends_with(d))
     }
 }
