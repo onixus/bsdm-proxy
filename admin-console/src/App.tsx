@@ -10,6 +10,7 @@ import { RpzManagementPage } from './pages/RpzManagement'
 import { SettingsPage } from './pages/Settings'
 import { ThreatScoresPage } from './pages/ThreatScores'
 import { WasmPluginsPage } from './pages/WasmPlugins'
+import { DataSecurityPage } from './pages/DataSecurity'
 
 export function App() {
   return (
@@ -20,6 +21,7 @@ export function App() {
           <Route path="/logs" element={<LogsPage />} />
           <Route path="/analytics" element={<AnalyticsPage />} />
           <Route path="/threat-scores" element={<ThreatScoresPage />} />
+          <Route path="/security" element={<DataSecurityPage />} />
           <Route path="/policies" element={<PoliciesPage />} />
           <Route path="/rpz" element={<RpzManagementPage />} />
           <Route path="/wasm" element={<WasmPluginsPage />} />

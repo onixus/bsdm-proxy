@@ -263,6 +263,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         service.upstream_client(),
         #[cfg(feature = "wasm")]
         service.wasm_hook.clone(),
+        service.casb_engine(),
+        service.dlp_engine(),
     ));
     info!(
         "Control plane API on :{}/api/stats · :{}/api/cache/purge · :{}/api/hierarchy/* · :{}/api/upstream/tls",

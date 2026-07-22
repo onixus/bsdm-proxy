@@ -19,6 +19,54 @@ use crate::peers::PeerRegistry;
 use crate::sharded_cache::HttpL1Cache;
 use crate::upstream::UpstreamClientHandle;
 
+#[derive(Serialize, Deserialize)]
+struct DlpPatternDto {
+    pub pattern: String,
+    pub description: String,
+}
+
+impl ControlApiState {
+    fn casb_domains(&self) -> Response<Body> {
+        let domains = self.casb_engine.get_domains();
+        match serde_json::to_string(&domains) {
+            Ok(json) => json_response(StatusCode::OK, &json),
+            Err(e) => json_response(StatusCode::INTERNAL_SERVER_ERROR, &format!(r#"{{"error":"{}"}}"#, e)),
+        }
+    }
+
+    async fn casb_update(&self, body: Bytes) -> Response<Body> {
+        match serde_json::from_slice::<Vec<String>>(&body) {
+            Ok(domains) => {
+                self.casb_engine.set_domains(domains);
+                json_response(StatusCode::OK, r#"{"status":"ok"}"#)
+            }
+            Err(e) => json_response(StatusCode::BAD_REQUEST, &format!(r#"{{"error":"{}"}}"#, e)),
+        }
+    }
+
+    fn dlp_patterns(&self) -> Response<Body> {
+        let patterns: Vec<DlpPatternDto> = self.dlp_engine.get_patterns().into_iter().map(|(p, d)| DlpPatternDto {
+            pattern: p,
+            description: d,
+        }).collect();
+        match serde_json::to_string(&patterns) {
+            Ok(json) => json_response(StatusCode::OK, &json),
+            Err(e) => json_response(StatusCode::INTERNAL_SERVER_ERROR, &format!(r#"{{"error":"{}"}}"#, e)),
+        }
+    }
+
+    async fn dlp_update(&self, body: Bytes) -> Response<Body> {
+        match serde_json::from_slice::<Vec<DlpPatternDto>>(&body) {
+            Ok(dtos) => {
+                let patterns = dtos.into_iter().map(|dto| (dto.pattern, dto.description)).collect();
+                self.dlp_engine.set_patterns(patterns);
+                json_response(StatusCode::OK, r#"{"status":"ok"}"#)
+            }
+            Err(e) => json_response(StatusCode::BAD_REQUEST, &format!(r#"{{"error":"{}"}}"#, e)),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct ControlApiState {
     metrics: Arc<Metrics>,
@@ -31,6 +79,8 @@ pub struct ControlApiState {
     upstream_client: UpstreamClientHandle,
     #[cfg(feature = "wasm")]
     wasm_hook: Option<Arc<std::sync::RwLock<crate::wasm_host::WasmHookEngine>>>,
+    casb_engine: Arc<crate::casb::CasbEngine>,
+    dlp_engine: Arc<crate::dlp::DlpEngine>,
 }
 
 impl ControlApiState {
@@ -46,6 +96,8 @@ impl ControlApiState {
         #[cfg(feature = "wasm")] wasm_hook: Option<
             Arc<std::sync::RwLock<crate::wasm_host::WasmHookEngine>>,
         >,
+        casb_engine: Arc<crate::casb::CasbEngine>,
+        dlp_engine: Arc<crate::dlp::DlpEngine>,
     ) -> Self {
         Self {
             metrics,
@@ -58,6 +110,8 @@ impl ControlApiState {
             upstream_client,
             #[cfg(feature = "wasm")]
             wasm_hook,
+            casb_engine,
+            dlp_engine,
         }
     }
 
@@ -71,6 +125,8 @@ impl ControlApiState {
         #[cfg(feature = "wasm")] wasm_hook: Option<
             Arc<std::sync::RwLock<crate::wasm_host::WasmHookEngine>>,
         >,
+        casb_engine: Arc<crate::casb::CasbEngine>,
+        dlp_engine: Arc<crate::dlp::DlpEngine>,
     ) -> Self {
         let api_token = std::env::var("CONTROL_API_TOKEN")
             .ok()
@@ -90,6 +146,8 @@ impl ControlApiState {
             upstream_client,
             #[cfg(feature = "wasm")]
             wasm_hook,
+            casb_engine,
+            dlp_engine,
         )
     }
 
@@ -131,6 +189,10 @@ impl ControlApiState {
             (&Method::POST, "/api/hierarchy/reload") => self.hierarchy_reload().await,
             (&Method::GET, "/api/upstream/tls") => self.upstream_tls_status(),
             (&Method::POST, "/api/upstream/tls/reload") => self.upstream_tls_reload(),
+            (&Method::GET, "/api/security/casb") => self.casb_domains(),
+            (&Method::POST, "/api/security/casb") => self.casb_update(body).await,
+            (&Method::GET, "/api/security/dlp") => self.dlp_patterns(),
+            (&Method::POST, "/api/security/dlp") => self.dlp_update(body).await,
             #[cfg(feature = "wasm")]
             (&Method::POST, "/api/wasm/reload") => self.wasm_reload(),
             _ => json_response(StatusCode::NOT_FOUND, r#"{"error":"not found"}"#),
