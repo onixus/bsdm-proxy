@@ -3,7 +3,7 @@
 # ============================================================
 # Unified builder stage - собирает все бинарники
 # ============================================================
-FROM rust:1-alpine AS builder
+FROM rust:1.87-alpine3.21 AS builder
 ARG TARGETARCH
 ARG LITE_BUILD=0
 WORKDIR /build
@@ -111,76 +111,104 @@ RUN mkdir -p /dist && \
 # Proxy runtime
 # ============================================================
 FROM alpine:3.21 AS proxy
-# wget: used by docker-compose healthchecks (Alpine has no curl by default)
+
 RUN apk add --no-cache \
     ca-certificates \
     libgcc \
-    wget
+    dumb-init
 
-# Копируем скомпилированный бинарник
+# Non-root user for security
+RUN addgroup -g 1000 bsdm && adduser -D -u 1000 -G bsdm bsdm
+
 COPY --from=builder /dist/proxy /usr/local/bin/proxy
+RUN chmod +x /usr/local/bin/proxy
 
+USER bsdm
 EXPOSE 1488
+ENTRYPOINT ["/usr/sbin/dumb-init", "--"]
 CMD ["proxy"]
 
 # ============================================================
 # Cache-indexer runtime
 # ============================================================
 FROM alpine:3.21 AS cache-indexer
+
 RUN apk add --no-cache \
     ca-certificates \
     libgcc \
-    wget
+    dumb-init
 
-# Копируем скомпилированный бинарник
+RUN addgroup -g 1000 bsdm && adduser -D -u 1000 -G bsdm bsdm
+
 COPY --from=builder /dist/cache-indexer /usr/local/bin/cache-indexer
+RUN chmod +x /usr/local/bin/cache-indexer
 
+USER bsdm
 EXPOSE 8080
+ENTRYPOINT ["/usr/sbin/dumb-init", "--"]
 CMD ["cache-indexer"]
 
 # ============================================================
 # Alert-worker runtime (ClickHouse → webhook / SIEM)
 # ============================================================
 FROM alpine:3.21 AS alert-worker
+
 RUN apk add --no-cache \
     ca-certificates \
     libgcc \
-    wget
+    dumb-init
+
+RUN addgroup -g 1000 bsdm && adduser -D -u 1000 -G bsdm bsdm
 
 COPY --from=builder /dist/alert-worker /usr/local/bin/alert-worker
+RUN chmod +x /usr/local/bin/alert-worker
 
+USER bsdm
 EXPOSE 8090
+ENTRYPOINT ["/usr/sbin/dumb-init", "--"]
 CMD ["alert-worker"]
 
 # ============================================================
 # ML-worker runtime (ClickHouse features + scores, M5)
 # ============================================================
 FROM alpine:3.21 AS ml-worker
+
 RUN apk add --no-cache \
     ca-certificates \
     libgcc \
-    wget
+    dumb-init
+
+RUN addgroup -g 1000 bsdm && adduser -D -u 1000 -G bsdm bsdm
 
 COPY --from=builder /dist/ml-worker /usr/local/bin/ml-worker
+RUN chmod +x /usr/local/bin/ml-worker
 
+USER bsdm
 EXPOSE 8091
+ENTRYPOINT ["/usr/sbin/dumb-init", "--"]
 CMD ["ml-worker"]
 
 # ============================================================
 # DNS sinkhole sidecar (RPZ-lite UDP proxy, P3 / #108)
 # ============================================================
 FROM alpine:3.21 AS dns-sinkhole
+
 RUN apk add --no-cache \
     ca-certificates \
     libgcc \
-    wget
+    dumb-init
+
+RUN addgroup -g 1000 bsdm && adduser -D -u 1000 -G bsdm bsdm
 
 COPY --from=builder /dist/dns-sinkhole /usr/local/bin/dns-sinkhole
+RUN chmod +x /usr/local/bin/dns-sinkhole
 COPY examples/dns/blocklist.rpz /etc/bsdm-proxy/blocklist.rpz
 
 ENV DNS_SINKHOLE_ZONE_PATH=/etc/bsdm-proxy/blocklist.rpz \
     DNS_SINKHOLE_BIND=0.0.0.0:53 \
     METRICS_PORT=8092
 
+USER bsdm
 EXPOSE 53/udp 8092
+ENTRYPOINT ["/usr/sbin/dumb-init", "--"]
 CMD ["dns-sinkhole"]
