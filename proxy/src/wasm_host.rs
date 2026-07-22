@@ -226,7 +226,7 @@ impl WasmHookEngine {
         let instance = linker
             .instantiate(&mut store, &self.module)
             .map_err(|e| format!("instantiate: {e}"))?;
-            
+
         // If the module doesn't export on_response, just return
         if let Ok(on_response) = instance.get_typed_func::<(), ()>(&mut store, "on_response") {
             on_response
@@ -250,7 +250,9 @@ impl WasmHookEngine {
                 config.consume_fuel(true);
                 config.cranelift_opt_level(wasmtime::OptLevel::Speed);
                 let engine = Engine::new(&config).map_err(|e| format!("wasm engine: {e}"))?;
-                let module = if Path::new(path).extension().and_then(|e| e.to_str()) == Some("wat") || looks_like_wat(&bytes) {
+                let module = if Path::new(path).extension().and_then(|e| e.to_str()) == Some("wat")
+                    || looks_like_wat(&bytes)
+                {
                     Module::new(&engine, &bytes).map_err(|e| format!("compile wat: {e}"))?
                 } else {
                     Module::new(&engine, &bytes).map_err(|e| format!("compile wasm: {e}"))?
@@ -293,12 +295,7 @@ fn read_guest_str(
     String::from_utf8(data.to_vec()).map_err(|e| format!("utf8: {e}"))
 }
 
-fn write_guest_str(
-    caller: &mut Caller<'_, HostState>,
-    ptr: i32,
-    max_len: i32,
-    val: &str,
-) -> i32 {
+fn write_guest_str(caller: &mut Caller<'_, HostState>, ptr: i32, max_len: i32, val: &str) -> i32 {
     if ptr < 0 || max_len < 0 {
         return -1;
     }
@@ -308,7 +305,10 @@ fn write_guest_str(
     };
     let bytes = val.as_bytes();
     let to_write = bytes.len().min(max_len as usize);
-    let data = match mem.data_mut(caller).get_mut(ptr as usize..(ptr as usize + to_write)) {
+    let data = match mem
+        .data_mut(caller)
+        .get_mut(ptr as usize..(ptr as usize + to_write))
+    {
         Some(d) => d,
         None => return -1,
     };

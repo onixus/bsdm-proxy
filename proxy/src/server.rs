@@ -406,7 +406,9 @@ async fn handle_connect_mitm(
             let req_headers = req.headers().clone();
             let username = proxy_user.as_deref().map(|u| u.username.clone());
 
-            let mut resp = service.handle_request(req, client_ip.clone(), proxy_user).await;
+            let mut resp = service
+                .handle_request(req, client_ip.clone(), proxy_user)
+                .await;
 
             #[cfg(feature = "wasm")]
             service.run_wasm_hook_response(
@@ -569,7 +571,9 @@ pub async fn handle_connection(
             let req_headers = req.headers().clone();
             let username = proxy_user.as_deref().map(|u| u.username.clone());
 
-            let mut resp = service.handle_request(req, client_ip.clone(), proxy_user).await;
+            let mut resp = service
+                .handle_request(req, client_ip.clone(), proxy_user)
+                .await;
 
             #[cfg(feature = "wasm")]
             service.run_wasm_hook_response(

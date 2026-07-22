@@ -42,8 +42,9 @@ impl ControlApiState {
         peer_registry: Option<PeerRegistry>,
         hierarchy_use_htcp: bool,
         upstream_client: UpstreamClientHandle,
-        #[cfg(feature = "wasm")]
-        wasm_hook: Option<Arc<std::sync::RwLock<crate::wasm_host::WasmHookEngine>>>,
+        #[cfg(feature = "wasm")] wasm_hook: Option<
+            Arc<std::sync::RwLock<crate::wasm_host::WasmHookEngine>>,
+        >,
     ) -> Self {
         Self {
             metrics,
@@ -66,8 +67,9 @@ impl ControlApiState {
         peer_registry: Option<PeerRegistry>,
         hierarchy_use_htcp: bool,
         upstream_client: UpstreamClientHandle,
-        #[cfg(feature = "wasm")]
-        wasm_hook: Option<Arc<std::sync::RwLock<crate::wasm_host::WasmHookEngine>>>,
+        #[cfg(feature = "wasm")] wasm_hook: Option<
+            Arc<std::sync::RwLock<crate::wasm_host::WasmHookEngine>>,
+        >,
     ) -> Self {
         let api_token = std::env::var("CONTROL_API_TOKEN")
             .ok()
@@ -444,10 +446,7 @@ impl ControlApiState {
                     "error": "reload failed",
                     "details": e
                 });
-                json_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    &error_json.to_string(),
-                )
+                json_response(StatusCode::INTERNAL_SERVER_ERROR, &error_json.to_string())
             }
         }
     }
