@@ -1,10 +1,10 @@
 use aho_corasick::{AhoCorasick, MatchKind};
+use arc_swap::ArcSwap;
 use bytes::Bytes;
 use http_body::{Body, Frame};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use arc_swap::ArcSwap;
 
 #[derive(Debug, Clone)]
 pub struct DlpViolation {
@@ -39,9 +39,12 @@ impl DlpEngine {
             ("ghp_".into(), "GitHub Personal Access Token".into()),
             ("xoxb-".into(), "Slack Bot Token".into()),
             ("BEGIN RSA PRIVATE KEY".into(), "RSA Private Key".into()),
-            ("BEGIN OPENSSH PRIVATE KEY".into(), "OpenSSH Private Key".into()),
+            (
+                "BEGIN OPENSSH PRIVATE KEY".into(),
+                "OpenSSH Private Key".into(),
+            ),
         ];
-        
+
         let ac = AhoCorasick::builder()
             .match_kind(MatchKind::Standard)
             .build(patterns.iter().map(|(k, _)| k))
@@ -59,14 +62,20 @@ impl DlpEngine {
     pub fn set_patterns(&self, new_patterns: Vec<(String, String)>) {
         if new_patterns.is_empty() {
             let ac = AhoCorasick::builder().build(Vec::<&str>::new()).unwrap();
-            self.state.store(Arc::new(DlpState { ac, patterns: vec![] }));
+            self.state.store(Arc::new(DlpState {
+                ac,
+                patterns: vec![],
+            }));
             return;
         }
         let ac = AhoCorasick::builder()
             .match_kind(MatchKind::Standard)
             .build(new_patterns.iter().map(|(k, _)| k))
             .expect("Failed to build DLP AhoCorasick automaton");
-        self.state.store(Arc::new(DlpState { ac, patterns: new_patterns }));
+        self.state.store(Arc::new(DlpState {
+            ac,
+            patterns: new_patterns,
+        }));
     }
 
     /// Scans a byte chunk for DLP violations.
