@@ -317,6 +317,14 @@ impl ProxyService {
         self.http_cache.clone()
     }
 
+    pub fn casb_engine(&self) -> Arc<crate::casb::CasbEngine> {
+        self.casb_engine.clone()
+    }
+
+    pub fn dlp_engine(&self) -> Arc<crate::dlp::DlpEngine> {
+        self.dlp_engine.clone()
+    }
+
     pub fn auth(&self) -> Option<Arc<AuthManager>> {
         self.auth.clone()
     }

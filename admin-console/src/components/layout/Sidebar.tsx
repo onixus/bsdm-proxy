@@ -25,6 +25,7 @@ const navItems = [
   { to: '/logs', label: 'Logs', icon: ScrollText },
   { to: '/analytics', label: 'Analytics', icon: BarChart3 },
   { to: '/threat-scores', label: 'Threat scores', icon: Brain },
+  { to: '/security', label: 'Data Security', icon: Shield },
   { to: '/policies', label: 'Policies', icon: Shield },
   { to: '/rpz', label: 'RPZ Sinkhole', icon: Radio },
   { to: '/wasm', label: 'Wasm Plugins', icon: Cpu },
