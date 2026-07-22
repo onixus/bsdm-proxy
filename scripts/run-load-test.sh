@@ -16,7 +16,7 @@ WRK_DURATION="${WRK_DURATION:-30s}"
 RUN_WRK="${RUN_WRK:-1}"
 
 metric() {
-  curl -fsS "${METRICS_URL}/metrics" 2>/dev/null | awk -v n="$1" '$1 == n {print $2; exit}'
+  curl -fsS "${METRICS_URL}/metrics" 2>/dev/null | awk -v n="$1" '$1 == n {print $2}'
 }
 
 run_curl_scenario() {
