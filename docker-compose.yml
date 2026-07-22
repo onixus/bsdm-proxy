@@ -61,7 +61,6 @@ services:
     environment:
       CLICKHOUSE_DB: bsdm
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
-      CLICKHOUSE_MAX_MEMORY_USAGE: 1073741824
     volumes:
       - clickhouse-data:/var/lib/clickhouse
       - ./scripts/clickhouse/http_cache.sql:/docker-entrypoint-initdb.d/01-http_cache.sql:ro
