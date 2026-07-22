@@ -1,6 +1,6 @@
 [package]
 name = "bsdm-proxy"
-version = "0.5.7+033"
+version = "0.6.1-1"
 edition = "2021"
 license = "MIT"
 
