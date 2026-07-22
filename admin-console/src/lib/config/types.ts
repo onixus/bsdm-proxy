@@ -48,6 +48,22 @@ export interface ProxyConfig {
   CLICKHOUSE_TABLE: string
   PROMETHEUS_ENABLED: string
   GRAFANA_ENABLED: string
+  ICAP_ENABLED: string
+  ICAP_URL: string
+  ICAP_FAIL_OPEN: string
+  ICAP_REQMOD: string
+  ICAP_RESPMOD: string
+  ALERT_WORKER_ENABLED: string
+  ALERT_WEBHOOK_URL: string
+  AI_CACHE_ENABLED: string
+  OLLAMA_URL: string
+  QDRANT_URL: string
+  RKN_SYNC_ENABLED: string
+  RKN_SYNC_URL: string
+  DOH_ENABLED: string
+  DOH_BIND: string
+  DOT_ENABLED: string
+  DOT_BIND: string
   [key: string]: string
 }
 
@@ -101,6 +117,7 @@ export interface ConfigFormState {
   aclBlockGambling: boolean
   aclBlockMalware: boolean
   aclBlockPhishing: boolean
+  aclBlockRkn: boolean
   categorizationEnabled: boolean
   categorizationCacheTtl: string
   ut1Enabled: boolean
@@ -152,6 +169,27 @@ export interface ConfigFormState {
   controlGrpcEnabled: boolean
   controlGrpcBind: string
   controlApiToken: string
+  // ICAP Inspection
+  icapEnabled: boolean
+  icapUrl: string
+  icapFailOpen: boolean
+  icapReqmod: boolean
+  icapRespmod: boolean
+  // Alert Worker
+  alertWorkerEnabled: boolean
+  alertWebhookUrl: string
+  // AI Cache
+  aiCacheEnabled: boolean
+  ollamaUrl: string
+  qdrantUrl: string
+  // RKN Sync
+  rknSyncEnabled: boolean
+  rknSyncUrl: string
+  // DNS Sinkhole (Encrypted)
+  dohEnabled: boolean
+  dohBind: string
+  dotEnabled: boolean
+  dotBind: string
 }
 
 export const defaultFormState: ConfigFormState = {
@@ -204,6 +242,7 @@ export const defaultFormState: ConfigFormState = {
   aclBlockGambling: false,
   aclBlockMalware: true,
   aclBlockPhishing: true,
+  aclBlockRkn: false,
   categorizationEnabled: false,
   categorizationCacheTtl: '3600',
   ut1Enabled: true,
@@ -248,4 +287,20 @@ export const defaultFormState: ConfigFormState = {
   controlGrpcEnabled: false,
   controlGrpcBind: '127.0.0.1:50051',
   controlApiToken: '',
+  icapEnabled: false,
+  icapUrl: 'icap://127.0.0.1:1344/echo',
+  icapFailOpen: true,
+  icapReqmod: true,
+  icapRespmod: true,
+  alertWorkerEnabled: false,
+  alertWebhookUrl: '',
+  aiCacheEnabled: false,
+  ollamaUrl: 'http://127.0.0.1:11434',
+  qdrantUrl: 'http://127.0.0.1:6333',
+  rknSyncEnabled: false,
+  rknSyncUrl: 'https://raw.githubusercontent.com/zapret-info/z-i/master/dump.csv',
+  dohEnabled: false,
+  dohBind: '0.0.0.0:8443',
+  dotEnabled: false,
+  dotBind: '0.0.0.0:853',
 }

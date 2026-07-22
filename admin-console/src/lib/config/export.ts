@@ -19,6 +19,11 @@ const ENV_ORDER = [
   'CATEGORIZATION_ENABLED', 'CATEGORIZATION_CACHE_TTL',
   'UT1_ENABLED', 'UT1_PATH', 'URLHAUS_ENABLED', 'URLHAUS_API',
   'PHISHTANK_ENABLED', 'PHISHTANK_API', 'PHISHTANK_API_KEY', 'CUSTOM_DB_ENABLED', 'CUSTOM_DB_PATH',
+  'ICAP_ENABLED', 'ICAP_URL', 'ICAP_FAIL_OPEN', 'ICAP_REQMOD', 'ICAP_RESPMOD',
+  'ALERT_WORKER_ENABLED', 'ALERT_WEBHOOK_URL',
+  'AI_CACHE_ENABLED', 'OLLAMA_URL', 'QDRANT_URL',
+  'RKN_SYNC_ENABLED', 'RKN_SYNC_URL',
+  'DOH_ENABLED', 'DOH_BIND', 'DOT_ENABLED', 'DOT_BIND',
 ] as const
 
 export function formatEnv(form: ConfigFormState): string {
@@ -62,6 +67,11 @@ function proxyEnvBlock(config: ReturnType<typeof collectConfig>): string {
     'CATEGORIZATION_ENABLED', 'CATEGORIZATION_CACHE_TTL', 'UT1_ENABLED', 'UT1_PATH',
     'URLHAUS_ENABLED', 'URLHAUS_API', 'PHISHTANK_ENABLED', 'PHISHTANK_API', 'PHISHTANK_API_KEY',
     'CUSTOM_DB_ENABLED', 'CUSTOM_DB_PATH',
+    'ICAP_ENABLED', 'ICAP_URL', 'ICAP_FAIL_OPEN', 'ICAP_REQMOD', 'ICAP_RESPMOD',
+    'ALERT_WORKER_ENABLED', 'ALERT_WEBHOOK_URL',
+    'AI_CACHE_ENABLED', 'OLLAMA_URL', 'QDRANT_URL',
+    'RKN_SYNC_ENABLED', 'RKN_SYNC_URL',
+    'DOH_ENABLED', 'DOH_BIND', 'DOT_ENABLED', 'DOT_BIND',
   ]
   return keys
     .filter((k) => config[k] !== undefined && config[k] !== '')
@@ -203,6 +213,7 @@ export function generateAclRules(form: ConfigFormState): { default_action: strin
   addCategory('block-phishing', 'Block phishing URLs', 'phishing', form.aclBlockPhishing)
   addCategory('block-adult', 'Block adult content', 'adult', form.aclBlockAdult)
   addCategory('block-gambling', 'Block gambling sites', 'gambling', form.aclBlockGambling)
+  addCategory('block-rkn', 'Block RKN Registry sites', 'rkn', form.aclBlockRkn)
 
   return { default_action: form.aclDefaultAction, rules }
 }

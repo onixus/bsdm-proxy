@@ -291,6 +291,15 @@ function CacheTab({ form, update }: TabProps) {
           </FormGrid>
         )}
       </FormSection>
+      <FormSection title="AI Semantic Cache (L0)">
+        <Checkbox label="AI_CACHE_ENABLED" checked={form.aiCacheEnabled} onChange={(v) => update('aiCacheEnabled', v)} hint="Cache LLM POST requests using vector similarity" />
+        {form.aiCacheEnabled && (
+          <FormGrid>
+            <Input label="OLLAMA_URL (Embeddings)" value={form.ollamaUrl} onChange={(e) => update('ollamaUrl', e.target.value)} />
+            <Input label="QDRANT_URL (Vector DB)" value={form.qdrantUrl} onChange={(e) => update('qdrantUrl', e.target.value)} />
+          </FormGrid>
+        )}
+      </FormSection>
     </div>
   )
 }
@@ -367,10 +376,11 @@ function FilteringTab({ form, update }: TabProps) {
             <Checkbox label="ACL_AUTO_RELOAD" checked={form.aclAutoReload} onChange={(v) => update('aclAutoReload', v)} />
             <div className="space-y-2">
               <p className="text-sm font-medium text-text-primary">Quick category rules</p>
-              <Checkbox label="Block malware" checked={form.aclBlockMalware} onChange={(v) => update('aclBlockMalware', v)} />
-              <Checkbox label="Block phishing" checked={form.aclBlockPhishing} onChange={(v) => update('aclBlockPhishing', v)} />
-              <Checkbox label="Block gambling" checked={form.aclBlockGambling} onChange={(v) => update('aclBlockGambling', v)} />
-              <Checkbox label="Block adult" checked={form.aclBlockAdult} onChange={(v) => update('aclBlockAdult', v)} />
+              <Checkbox label="Block Malware" checked={form.aclBlockMalware} onChange={(v) => update('aclBlockMalware', v)} />
+              <Checkbox label="Block Phishing" checked={form.aclBlockPhishing} onChange={(v) => update('aclBlockPhishing', v)} />
+              <Checkbox label="Block Adult" checked={form.aclBlockAdult} onChange={(v) => update('aclBlockAdult', v)} />
+              <Checkbox label="Block Gambling" checked={form.aclBlockGambling} onChange={(v) => update('aclBlockGambling', v)} />
+              <Checkbox label="Block RKN Registry (Zapret-info)" checked={form.aclBlockRkn} onChange={(v) => update('aclBlockRkn', v)} />
             </div>
           </>
         )}
@@ -387,8 +397,11 @@ function FilteringTab({ form, update }: TabProps) {
             {form.phishtankEnabled && (
               <Input label="PHISHTANK_API_KEY" type="password" value={form.phishtankApiKey} onChange={(e) => update('phishtankApiKey', e.target.value)} hint="Session-only, never persisted" />
             )}
-            <Checkbox label="Custom category DB" checked={form.customDbEnabled} onChange={(v) => update('customDbEnabled', v)} />
+            <Checkbox label="CUSTOM_DB_ENABLED" checked={form.customDbEnabled} onChange={(v) => update('customDbEnabled', v)} />
             {form.customDbEnabled && <Input label="CUSTOM_DB_PATH" value={form.customDbPath} onChange={(e) => update('customDbPath', e.target.value)} />}
+
+            <Checkbox label="RKN_SYNC_ENABLED (Roskomnadzor daily dump)" checked={form.rknSyncEnabled} onChange={(v) => update('rknSyncEnabled', v)} />
+            {form.rknSyncEnabled && <Input label="RKN_SYNC_URL" value={form.rknSyncUrl} onChange={(e) => update('rknSyncUrl', e.target.value)} hint="URL to the Zapret-info CSV dump" />}
           </>
         )}
       </FormSection>
@@ -437,6 +450,12 @@ function NetworkTab({ form, update }: TabProps) {
         <Input label="UPSTREAM_CA_CERT" value={form.upstreamCaCert} onChange={(e) => update('upstreamCaCert', e.target.value)} hint="Path to an extra CA bundle for upstream verification (corporate MITM chains)" />
         <Checkbox label="UPSTREAM_HTTP2_ENABLED" checked={form.upstreamHttp2Enabled} onChange={(v) => update('upstreamHttp2Enabled', v)} />
         <Checkbox label="HTTP_PRESERVE_HEADER_CASE" checked={form.preserveHeaderCase} onChange={(v) => update('preserveHeaderCase', v)} />
+      </FormSection>
+      <FormSection title="Encrypted DNS Gateways (Sinkhole)">
+        <Checkbox label="DOH_ENABLED (DNS-over-HTTPS)" checked={form.dohEnabled} onChange={(v) => update('dohEnabled', v)} />
+        {form.dohEnabled && <Input label="DOH_BIND" value={form.dohBind} onChange={(e) => update('dohBind', e.target.value)} />}
+        <Checkbox label="DOT_ENABLED (DNS-over-TLS)" checked={form.dotEnabled} onChange={(v) => update('dotEnabled', v)} />
+        {form.dotEnabled && <Input label="DOT_BIND" value={form.dotBind} onChange={(e) => update('dotBind', e.target.value)} />}
       </FormSection>
     </div>
   )
@@ -490,6 +509,21 @@ function SecurityTab({ form, update }: TabProps) {
         )}
         <Input label="CONTROL_API_TOKEN" type="password" value={form.controlApiToken} onChange={(e) => update('controlApiToken', e.target.value)} hint="Protects /api/stats, /api/cache/purge, hierarchy and TLS endpoints. Session-only." />
       </FormSection>
+      <FormSection title="ICAP Content Adaptation (AV scanning)">
+        <Checkbox label="ICAP_ENABLED" checked={form.icapEnabled} onChange={(v) => update('icapEnabled', v)} />
+        {form.icapEnabled && (
+          <>
+            <Input label="ICAP_URL" value={form.icapUrl} onChange={(e) => update('icapUrl', e.target.value)} hint="e.g. icap://127.0.0.1:1344/srv_clamav" />
+            <FormGrid>
+              <div className="space-y-2">
+                <Checkbox label="ICAP_REQMOD (Request modification)" checked={form.icapReqmod} onChange={(v) => update('icapReqmod', v)} />
+                <Checkbox label="ICAP_RESPMOD (Response modification)" checked={form.icapRespmod} onChange={(v) => update('icapRespmod', v)} />
+                <Checkbox label="ICAP_FAIL_OPEN (Allow on error)" checked={form.icapFailOpen} onChange={(v) => update('icapFailOpen', v)} />
+              </div>
+            </FormGrid>
+          </>
+        )}
+      </FormSection>
     </div>
   )
 }
@@ -522,6 +556,12 @@ function EventsTab({ form, update }: TabProps) {
       <FormSection title="Observability stack (compose export)">
         <Checkbox label="Include Prometheus" checked={form.prometheusEnabled} onChange={(v) => update('prometheusEnabled', v)} />
         <Checkbox label="Include Grafana" checked={form.grafanaEnabled} onChange={(v) => update('grafanaEnabled', v)} />
+      </FormSection>
+      <FormSection title="Alert Worker (SIEM Webhooks)">
+        <Checkbox label="ALERT_WORKER_ENABLED" checked={form.alertWorkerEnabled} onChange={(v) => update('alertWorkerEnabled', v)} hint="Enable sending analytical alerts to SIEM or external webhooks" />
+        {form.alertWorkerEnabled && (
+          <Input label="ALERT_WEBHOOK_URL" value={form.alertWebhookUrl} onChange={(e) => update('alertWebhookUrl', e.target.value)} hint="e.g. https://hooks.slack.com/services/... or http://siem:8080/events" />
+        )}
       </FormSection>
     </div>
   )
