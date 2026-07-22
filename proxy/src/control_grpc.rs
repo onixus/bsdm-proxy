@@ -199,7 +199,17 @@ mod tests {
         let upstream =
             UpstreamClientHandle::new(UpstreamTlsConfig::default()).expect("upstream client");
         Arc::new(ControlApiState::new(
-            metrics, cache, None, None, None, false, upstream,
+            metrics,
+            cache,
+            None,
+            None,
+            None,
+            false,
+            upstream,
+            #[cfg(feature = "wasm")]
+            None,
+            Arc::new(crate::casb::CasbEngine::new()),
+            Arc::new(crate::dlp::DlpEngine::new()),
         ))
     }
 
@@ -256,6 +266,10 @@ mod tests {
             None,
             false,
             upstream,
+            #[cfg(feature = "wasm")]
+            None,
+            Arc::new(crate::casb::CasbEngine::new()),
+            Arc::new(crate::dlp::DlpEngine::new()),
         ));
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
