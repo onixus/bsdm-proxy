@@ -50,7 +50,7 @@ use crate::threat_score_cache::ThreatScoreCache;
 use crate::tls::CertCache;
 use crate::upstream::{UpstreamClientHandle, UpstreamTlsConfig};
 #[cfg(feature = "wasm")]
-use crate::wasm_host::{try_load_from_env, WasmHookDecision, WasmHookEngine, WasmHookRequest};
+use crate::wasm_host::{try_load_from_env, WasmHookDecision, WasmHookRequest};
 
 pub struct ProxyPolicy {
     pub acl_engine: Option<Arc<AclEngineHandle>>,
@@ -983,6 +983,7 @@ impl ProxyService {
     }
 
     #[cfg(feature = "wasm")]
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn run_wasm_hook_response(
         &self,
         method: &str,

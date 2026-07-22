@@ -242,7 +242,7 @@ impl WasmHookEngine {
 
     pub fn reload(&mut self) -> Result<(), String> {
         // Read the module bytes again if there's a path
-        if let Some(cfg_path) = std::env::var("WASM_MODULE_PATH").ok() {
+        if let Ok(cfg_path) = std::env::var("WASM_MODULE_PATH") {
             let path = cfg_path.trim();
             if !path.is_empty() {
                 let bytes = std::fs::read(path).map_err(|e| format!("read {path}: {e}"))?;

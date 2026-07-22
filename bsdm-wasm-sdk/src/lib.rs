@@ -2,8 +2,7 @@
 //!
 //! Provides ergonomic Rust wrappers around the `bsdm` host ABI.
 
-use std::ffi::{CStr, c_char};
-use std::slice;
+
 
 // -----------------------------------------------------------------------------
 // Raw Host ABI
