@@ -82,7 +82,7 @@ RUN mkdir -p bsdm-events/src proxy/src cache-indexer/src \
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,target=/build/target,sharing=locked \
-    cargo build --release --target $(cat /rust_target.txt) \
+    cargo build --release --locked --target $(cat /rust_target.txt) \
       -p bsdm-events -p bsdm-proxy -p cache-indexer \
       -p alert-worker -p ml-worker -p dns-sinkhole 2>/dev/null || true
 
