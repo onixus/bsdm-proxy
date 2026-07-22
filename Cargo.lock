@@ -433,6 +433,7 @@ dependencies = [
  "bsdm-events",
  "bytes",
  "chrono",
+ "encoding_rs",
  "hex",
  "http-body",
  "http-body-util",

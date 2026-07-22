@@ -46,6 +46,8 @@ pub enum Category {
     // Custom
     Custom(String),
     Unknown,
+    // RKN
+    Rkn,
 }
 
 impl std::fmt::Display for Category {
@@ -101,6 +103,7 @@ impl Category {
                 Category::Custom(s.to_string())
             }
             "fakenews" => Category::Custom("fakenews".to_string()),
+            "rkn" => Category::Rkn,
             _ => Category::Custom(s.to_string()),
         }
     }
@@ -161,6 +164,9 @@ pub struct CategorizationConfig {
     pub phishtank_api_key: Option<String>,
     pub custom_db_enabled: bool,
     pub custom_db_path: Option<String>,
+    pub rkn_sync_enabled: bool,
+    pub rkn_sync_url: String,
+    pub rkn_sync_interval_secs: u64,
 }
 
 impl Default for CategorizationConfig {
@@ -177,6 +183,9 @@ impl Default for CategorizationConfig {
             phishtank_api_key: None,
             custom_db_enabled: false,
             custom_db_path: None,
+            rkn_sync_enabled: false,
+            rkn_sync_url: "https://raw.githubusercontent.com/zapret-info/z-i/master/dump.csv".to_string(),
+            rkn_sync_interval_secs: 86400,
         }
     }
 }
@@ -189,6 +198,7 @@ pub struct CategorizationEngine {
     local_db: Option<HashMap<String, HashSet<Category>>>,
     custom_db: Option<HashMap<String, HashSet<Category>>>,
     http_client: Client,
+    rkn_domains: Arc<std::sync::RwLock<HashSet<String>>>,
 }
 
 impl CategorizationEngine {
@@ -205,6 +215,7 @@ impl CategorizationEngine {
                 .user_agent("bsdm-proxy/0.3.2 (+https://github.com/onixus/bsdm-proxy)")
                 .build()
                 .expect("Failed to create HTTP client"),
+            rkn_domains: Arc::new(std::sync::RwLock::new(HashSet::new())),
         };
 
         // Load UT1 blacklists if enabled
@@ -225,6 +236,14 @@ impl CategorizationEngine {
                     Err(e) => error!("Failed to load custom DB: {}", e),
                 }
             }
+        }
+        // Start RKN sync if enabled
+        if engine.config.rkn_sync_enabled {
+            CategorizationEngine::schedule_rkn_sync(
+                engine.rkn_domains.clone(),
+                engine.config.rkn_sync_url.clone(),
+                engine.config.rkn_sync_interval_secs,
+            );
         }
 
         engine
@@ -273,6 +292,22 @@ impl CategorizationEngine {
             }
         }
 
+        if self.config.rkn_sync_enabled {
+            let is_rkn = if let Ok(rkn_lock) = self.rkn_domains.read() {
+                domain_suffixes(&domain).iter().any(|d| rkn_lock.contains(d))
+            } else {
+                false
+            };
+            if is_rkn {
+                categories.insert(Category::Rkn);
+                source = if source == "unknown" {
+                    "rkn"
+                } else {
+                    "multiple"
+                };
+            }
+        }
+
         if !categories.is_empty() {
             self.cache_categories(&domain, categories.clone(), source);
         }
@@ -297,6 +332,64 @@ impl CategorizationEngine {
     /// Categorize URL (compat wrapper — local only; online enrichment is async).
     pub async fn categorize(&self, url: &str) -> CategorizationResult {
         self.categorize_local(url)
+    }
+
+    fn schedule_rkn_sync(
+        rkn_domains: Arc<std::sync::RwLock<HashSet<String>>>,
+        url: String,
+        interval: u64,
+    ) {
+        tokio::spawn(async move {
+            let client = Client::builder()
+                .timeout(Duration::from_secs(60))
+                .user_agent("bsdm-proxy/RKN-Sync")
+                .build()
+                .unwrap_or_default();
+
+            loop {
+                info!("Starting RKN registry sync from {}", url);
+                match client.get(&url).send().await {
+                    Ok(response) if response.status().is_success() => {
+                        match response.bytes().await {
+                            Ok(bytes) => {
+                                let (decoded, _, _) = encoding_rs::WINDOWS_1251.decode(&bytes);
+                                let mut new_domains = HashSet::new();
+
+                                for line in decoded.lines() {
+                                    let mut parts = line.split(';');
+                                    // Zapret-info dump format: IPs;domain;url;...
+                                    if parts.next().is_some() {
+                                        if let Some(domain) = parts.next() {
+                                            let mut d = domain.trim().to_ascii_lowercase();
+                                            if d.starts_with("*.") {
+                                                d = d[2..].to_string();
+                                            }
+                                            if !d.is_empty() && d != "domain" {
+                                                new_domains.insert(d);
+                                            }
+                                        }
+                                    }
+                                }
+
+                                let count = new_domains.len();
+                                if let Ok(mut lock) = rkn_domains.write() {
+                                    *lock = new_domains;
+                                }
+                                info!("Successfully synced RKN registry: {} domains loaded", count);
+                            }
+                            Err(e) => error!("Failed to read RKN registry response bytes: {}", e),
+                        }
+                    }
+                    Ok(response) => {
+                        error!("Failed to fetch RKN registry: HTTP {}", response.status());
+                    }
+                    Err(e) => {
+                        error!("Failed to fetch RKN registry: {}", e);
+                    }
+                }
+                tokio::time::sleep(Duration::from_secs(interval)).await;
+            }
+        });
     }
 
     async fn enrich_online(&self, url: &str) -> Result<(), String> {

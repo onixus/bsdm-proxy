@@ -54,6 +54,22 @@ export function collectConfig(form: ConfigFormState): ProxyConfig {
     CLICKHOUSE_TABLE: form.clickhouseTable,
     PROMETHEUS_ENABLED: String(form.prometheusEnabled),
     GRAFANA_ENABLED: String(form.grafanaEnabled),
+    ICAP_ENABLED: String(form.icapEnabled),
+    ICAP_URL: form.icapUrl,
+    ICAP_FAIL_OPEN: String(form.icapFailOpen),
+    ICAP_REQMOD: String(form.icapReqmod),
+    ICAP_RESPMOD: String(form.icapRespmod),
+    ALERT_WORKER_ENABLED: String(form.alertWorkerEnabled),
+    ALERT_WEBHOOK_URL: form.alertWebhookUrl,
+    AI_CACHE_ENABLED: String(form.aiCacheEnabled),
+    OLLAMA_URL: form.ollamaUrl,
+    QDRANT_URL: form.qdrantUrl,
+    RKN_SYNC_ENABLED: String(form.rknSyncEnabled),
+    RKN_SYNC_URL: form.rknSyncUrl,
+    DOH_ENABLED: String(form.dohEnabled),
+    DOH_BIND: form.dohBind,
+    DOT_ENABLED: String(form.dotEnabled),
+    DOT_BIND: form.dotBind,
   }
 
   if (form.authEnabled && form.authBackend === 'ldap') {
