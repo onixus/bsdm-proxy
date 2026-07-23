@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
+
 import { Download, Play, Pause, RefreshCw, Search } from 'lucide-react'
 import {
   applyLogFilters,
@@ -526,10 +527,11 @@ function Field({
   breakAll,
 }: {
   label: string
-  children: React.ReactNode
+  children: ReactNode
   mono?: boolean
   breakAll?: boolean
 }) {
+
   return (
     <div>
       <dt className="text-text-secondary">{label}</dt>
