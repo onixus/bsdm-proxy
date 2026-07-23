@@ -23,18 +23,6 @@ export function Modal({ open, onClose, title, children, footer, wide }: ModalPro
 
   if (!open) return null
 
-export function Modal({ open, onClose, title, children, footer, wide }: ModalProps) {
-  useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
-
-  if (!open) return null
-
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/80 backdrop-blur-md p-0 sm:items-center sm:p-4 transition-opacity"
@@ -76,6 +64,7 @@ export function Modal({ open, onClose, title, children, footer, wide }: ModalPro
     </div>
   )
 }
+
 
 
 export function CodePreview({ content }: { content: string }) {
