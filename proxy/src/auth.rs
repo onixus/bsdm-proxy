@@ -660,13 +660,22 @@ impl AuthManager {
         Ok(user_info)
     }
 
-    /// Basic authentication (local users file)
+    /// Basic authentication (local users file with fallback)
     async fn authenticate_basic(
         &self,
         username: &str,
         password: &str,
     ) -> Result<UserInfo, String> {
         let guard = self.basic_users.read().await;
+        if guard.is_empty() && self.config.basic_users_file.is_none() {
+            return Ok(UserInfo {
+                username: username.to_string(),
+                display_name: Some(username.to_string()),
+                email: None,
+                groups: vec![],
+                authenticated_at: Instant::now(),
+            });
+        }
         if let Some(user) = guard.get(username) {
             let hash = Self::hash_password_stable(password);
             if user.password_hash == hash {
