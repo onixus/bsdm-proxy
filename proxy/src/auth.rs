@@ -372,8 +372,16 @@ impl AuthManager {
     }
 
     /// Extract credentials from request
-    pub fn extract_credentials<T>(&self, req: &Request<T>, reverse_proxy: bool) -> Option<(String, String)> {
-        let header_name = if reverse_proxy { hyper::header::AUTHORIZATION } else { hyper::header::PROXY_AUTHORIZATION };
+    pub fn extract_credentials<T>(
+        &self,
+        req: &Request<T>,
+        reverse_proxy: bool,
+    ) -> Option<(String, String)> {
+        let header_name = if reverse_proxy {
+            hyper::header::AUTHORIZATION
+        } else {
+            hyper::header::PROXY_AUTHORIZATION
+        };
         let auth_header = req.headers().get(header_name)?;
         let auth_str = auth_header.to_str().ok()?;
 
@@ -402,8 +410,16 @@ impl AuthManager {
     }
 
     /// Parse scheme and base64 payload for SSPI backends.
-    pub fn extract_proxy_token<T>(&self, req: &Request<T>, reverse_proxy: bool) -> Option<(String, Vec<u8>)> {
-        let header_name = if reverse_proxy { hyper::header::AUTHORIZATION } else { hyper::header::PROXY_AUTHORIZATION };
+    pub fn extract_proxy_token<T>(
+        &self,
+        req: &Request<T>,
+        reverse_proxy: bool,
+    ) -> Option<(String, Vec<u8>)> {
+        let header_name = if reverse_proxy {
+            hyper::header::AUTHORIZATION
+        } else {
+            hyper::header::PROXY_AUTHORIZATION
+        };
         let auth_header = req.headers().get(header_name)?;
         let auth_str = auth_header.to_str().ok()?;
         let (scheme, encoded) = auth_str.split_once(' ')?;
@@ -425,7 +441,9 @@ impl AuthManager {
     ) -> ProxyAuthOutcome {
         #[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]
         if self.uses_sspi_handshake() {
-            return self.handle_sspi_auth(client_key, req, conn_auth, reverse_proxy).await;
+            return self
+                .handle_sspi_auth(client_key, req, conn_auth, reverse_proxy)
+                .await;
         }
 
         let cred_fp = proxy_auth_fingerprint(req, &self.salt);
@@ -782,7 +800,11 @@ impl AuthManager {
     }
 
     fn initial_auth_header(&self, reverse_proxy: bool) -> String {
-        let auth_type = if reverse_proxy { "WWW-Authenticate" } else { "Proxy-Authenticate" };
+        let auth_type = if reverse_proxy {
+            "WWW-Authenticate"
+        } else {
+            "Proxy-Authenticate"
+        };
         match self.config.backend {
             AuthBackend::Basic => format!("{}: Basic realm=\"{}\"", auth_type, self.config.realm),
             #[cfg(feature = "auth-ldap")]
@@ -803,14 +825,21 @@ impl AuthManager {
     }
 
     /// Create 407 with a specific `Proxy-Authenticate` value (may include challenge token).
-    pub fn create_auth_challenge_response<T>(&self, authenticate_header: String, reverse_proxy: bool) -> Response<T>
+    pub fn create_auth_challenge_response<T>(
+        &self,
+        authenticate_header: String,
+        reverse_proxy: bool,
+    ) -> Response<T>
     where
         T: Default,
     {
         let (status, header_name) = if reverse_proxy {
             (StatusCode::UNAUTHORIZED, hyper::header::WWW_AUTHENTICATE)
         } else {
-            (StatusCode::PROXY_AUTHENTICATION_REQUIRED, hyper::header::PROXY_AUTHENTICATE)
+            (
+                StatusCode::PROXY_AUTHENTICATION_REQUIRED,
+                hyper::header::PROXY_AUTHENTICATE,
+            )
         };
         // The authenticate_header string itself starts with "Proxy-Authenticate: Basic ..."
         // Wait, we modified initial_auth_header to prefix the header name!
@@ -1151,7 +1180,12 @@ mod tests {
         assert!(matches!(first, ProxyAuthOutcome::Authenticated(_)));
 
         let changed = manager
-            .handle_proxy_auth("conn-1", &basic_proxy_request("bob", &secret), Some(&conn), false)
+            .handle_proxy_auth(
+                "conn-1",
+                &basic_proxy_request("bob", &secret),
+                Some(&conn),
+                false,
+            )
             .await;
         match changed {
             ProxyAuthOutcome::Authenticated(user) => assert_eq!(user.username, "bob"),

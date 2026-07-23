@@ -1,12 +1,12 @@
+use crate::http_types::{empty, full, Body};
+use base64::Engine;
+use bytes::Bytes;
 use hyper::header::{HeaderValue, LOCATION, SET_COOKIE};
 use hyper::{Request, Response, StatusCode};
 use rand::RngCore;
 use std::collections::HashMap;
 use std::env;
 use std::sync::RwLock;
-use bytes::Bytes;
-use base64::Engine;
-use crate::http_types::{empty, full, Body};
 use tracing::error;
 
 #[derive(Debug, Clone)]
@@ -43,9 +43,13 @@ pub struct ReverseProxyConfig {
 
 impl ReverseProxyConfig {
     pub fn from_env() -> Option<Self> {
-        let upstream_url = env::var("REVERSE_PROXY_UPSTREAM").ok().filter(|s| !s.is_empty())?;
+        let upstream_url = env::var("REVERSE_PROXY_UPSTREAM")
+            .ok()
+            .filter(|s| !s.is_empty())?;
         let oidc = OidcConfig::from_env();
-        let admin_group = env::var("REVERSE_PROXY_ADMIN_GROUP").ok().filter(|s| !s.is_empty());
+        let admin_group = env::var("REVERSE_PROXY_ADMIN_GROUP")
+            .ok()
+            .filter(|s| !s.is_empty());
 
         Some(Self {
             upstream_url,
@@ -77,7 +81,10 @@ impl ReverseProxyConfig {
         let mut bytes = [0u8; 32];
         rng.fill_bytes(&mut bytes);
         let session_id = hex::encode(bytes);
-        self.sessions.write().unwrap().insert(session_id.clone(), username);
+        self.sessions
+            .write()
+            .unwrap()
+            .insert(session_id.clone(), username);
         session_id
     }
 
@@ -104,7 +111,10 @@ impl ReverseProxyConfig {
         }
     }
 
-    pub async fn handle_oidc_callback(&self, req: Request<hyper::body::Incoming>) -> Response<Body> {
+    pub async fn handle_oidc_callback(
+        &self,
+        req: Request<hyper::body::Incoming>,
+    ) -> Response<Body> {
         let Some(oidc) = &self.oidc else {
             return Response::builder()
                 .status(StatusCode::NOT_FOUND)
@@ -195,10 +205,12 @@ impl ReverseProxyConfig {
 
         let decoded = match base64::engine::general_purpose::STANDARD.decode(&payload_b64) {
             Ok(d) => d,
-            Err(_) => return Response::builder()
-                .status(StatusCode::BAD_GATEWAY)
-                .body(full(Bytes::from("Invalid JWT base64")))
-                .unwrap(),
+            Err(_) => {
+                return Response::builder()
+                    .status(StatusCode::BAD_GATEWAY)
+                    .body(full(Bytes::from("Invalid JWT base64")))
+                    .unwrap()
+            }
         };
 
         #[derive(serde::Deserialize)]
@@ -209,15 +221,20 @@ impl ReverseProxyConfig {
 
         let jwt: JwtPayload = match serde_json::from_slice(&decoded) {
             Ok(j) => j,
-            Err(_) => return Response::builder()
-                .status(StatusCode::BAD_GATEWAY)
-                .body(full(Bytes::from("Invalid JWT JSON")))
-                .unwrap(),
+            Err(_) => {
+                return Response::builder()
+                    .status(StatusCode::BAD_GATEWAY)
+                    .body(full(Bytes::from("Invalid JWT JSON")))
+                    .unwrap()
+            }
         };
 
         let username = jwt.email.unwrap_or(jwt.sub);
         let session_id = self.create_session(username);
-        let cookie_val = format!("bsdm_session={}; HttpOnly; Path=/; SameSite=Lax", session_id);
+        let cookie_val = format!(
+            "bsdm_session={}; HttpOnly; Path=/; SameSite=Lax",
+            session_id
+        );
 
         Response::builder()
             .status(StatusCode::FOUND)
