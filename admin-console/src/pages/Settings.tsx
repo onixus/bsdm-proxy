@@ -346,6 +346,23 @@ function AuthTab({ form, update }: TabProps) {
           )}
         </>
       )}
+      
+      <FormSection title="ZTNA / IAP Reverse Proxy">
+        <Checkbox label="REVERSE_PROXY_ENABLED" checked={form.reverseProxyEnabled} onChange={(v) => update('reverseProxyEnabled', v)} hint="Enable reverse proxy mode" />
+        {form.reverseProxyEnabled && (
+          <>
+            <Input label="REVERSE_PROXY_UPSTREAM" value={form.reverseProxyUpstream} onChange={(e) => update('reverseProxyUpstream', e.target.value)} hint="Internal backend URL (e.g. http://internal-app:8080)" />
+            <FormGrid>
+              <Input label="OIDC_CLIENT_ID" value={form.oidcClientId} onChange={(e) => update('oidcClientId', e.target.value)} />
+              <Input label="OIDC_CLIENT_SECRET" type="password" value={form.oidcClientSecret} onChange={(e) => update('oidcClientSecret', e.target.value)} />
+            </FormGrid>
+            <FormGrid>
+              <Input label="OIDC_ISSUER_URL" value={form.oidcIssuerUrl} onChange={(e) => update('oidcIssuerUrl', e.target.value)} />
+              <Input label="OIDC_REDIRECT_URI" value={form.oidcRedirectUri} onChange={(e) => update('oidcRedirectUri', e.target.value)} />
+            </FormGrid>
+          </>
+        )}
+      </FormSection>
     </div>
   )
 }

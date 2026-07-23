@@ -157,6 +157,16 @@ export function collectConfig(form: ConfigFormState): ProxyConfig {
   }
   if (form.controlApiToken) config.CONTROL_API_TOKEN = form.controlApiToken
 
+  if (form.reverseProxyEnabled) {
+    Object.assign(config, {
+      REVERSE_PROXY_UPSTREAM: form.reverseProxyUpstream,
+      OIDC_CLIENT_ID: form.oidcClientId,
+      OIDC_CLIENT_SECRET: form.oidcClientSecret,
+      OIDC_ISSUER_URL: form.oidcIssuerUrl,
+      OIDC_REDIRECT_URI: form.oidcRedirectUri,
+    })
+  }
+
   return config
 }
 

@@ -36,6 +36,7 @@ pub mod pipeline;
 pub mod policy_cache;
 pub mod proxy_service;
 pub mod rate_limit;
+pub mod reverse_proxy;
 pub mod security_util;
 pub mod selection;
 pub mod semantic_cache;
@@ -88,6 +89,7 @@ pub use pipeline::{flush_kafka, KafkaEventPipeline};
 pub use policy_cache::{PolicyCacheConfig, PolicyDecisionCache};
 pub use proxy_service::{ProxyPolicy, ProxyService};
 pub use rate_limit::{extract_api_key, RateLimitConfig, RateLimitViolation, RateLimiter};
+pub use reverse_proxy::{OidcConfig, ReverseProxyConfig};
 pub use selection::{parse_strategy, SelectionStrategy};
 pub use semantic_cache::{
     content_cache_key, normalize_llm_body, SemanticCacheConfig, SemanticIndex,

@@ -251,6 +251,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         perf.clone(),
         policy_cache.clone(),
         threat_score_cache,
+        bsdm_proxy::reverse_proxy::ReverseProxyConfig::from_env(),
     ));
 
     let hierarchy_peers = hierarchy.as_ref().map(|m| m.peer_registry());

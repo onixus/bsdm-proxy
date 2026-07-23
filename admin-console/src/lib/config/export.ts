@@ -24,6 +24,7 @@ const ENV_ORDER = [
   'AI_CACHE_ENABLED', 'OLLAMA_URL', 'QDRANT_URL',
   'RKN_SYNC_ENABLED', 'RKN_SYNC_URL',
   'DOH_ENABLED', 'DOH_BIND', 'DOT_ENABLED', 'DOT_BIND',
+  'REVERSE_PROXY_UPSTREAM', 'OIDC_CLIENT_ID', 'OIDC_CLIENT_SECRET', 'OIDC_ISSUER_URL', 'OIDC_REDIRECT_URI',
 ] as const
 
 export function formatEnv(form: ConfigFormState): string {
@@ -72,6 +73,7 @@ function proxyEnvBlock(config: ReturnType<typeof collectConfig>): string {
     'AI_CACHE_ENABLED', 'OLLAMA_URL', 'QDRANT_URL',
     'RKN_SYNC_ENABLED', 'RKN_SYNC_URL',
     'DOH_ENABLED', 'DOH_BIND', 'DOT_ENABLED', 'DOT_BIND',
+    'REVERSE_PROXY_UPSTREAM', 'OIDC_CLIENT_ID', 'OIDC_CLIENT_SECRET', 'OIDC_ISSUER_URL', 'OIDC_REDIRECT_URI',
   ]
   return keys
     .filter((k) => config[k] !== undefined && config[k] !== '')
