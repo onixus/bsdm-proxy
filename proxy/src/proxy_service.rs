@@ -310,6 +310,7 @@ pub struct ProxyService {
     icap: Option<Arc<IcapClient>>,
     dlp_engine: Arc<crate::dlp::DlpEngine>,
     casb_engine: Arc<crate::casb::CasbEngine>,
+    reverse_proxy_config: Option<crate::reverse_proxy::ReverseProxyConfig>,
 }
 
 impl ProxyService {
@@ -396,6 +397,7 @@ impl ProxyService {
         perf: PerfConfig,
         policy_cache: Arc<PolicyDecisionCache>,
         threat_score_cache: Arc<ThreatScoreCache>,
+        reverse_proxy_config: Option<crate::reverse_proxy::ReverseProxyConfig>,
     ) -> Self {
         let http_cache = Arc::new(HttpL1Cache::new(
             cache_config.capacity,
@@ -444,6 +446,7 @@ impl ProxyService {
             icap,
             dlp_engine: Arc::new(crate::dlp::DlpEngine::new()),
             casb_engine: Arc::new(crate::casb::CasbEngine::new()),
+            reverse_proxy_config,
         }
     }
 
@@ -1199,7 +1202,7 @@ impl ProxyService {
             return Ok(None);
         }
 
-        match auth.handle_proxy_auth(client_ip, req, conn_auth).await {
+        match auth.handle_proxy_auth(client_ip, req, conn_auth, false).await {
             ProxyAuthOutcome::Anonymous => Ok(None),
             ProxyAuthOutcome::Authenticated(user) => Ok(Some(Arc::new(user))),
             ProxyAuthOutcome::Challenge {
@@ -1209,7 +1212,7 @@ impl ProxyService {
                     cache.invalidate().await;
                 }
                 tracing::debug!("Proxy authentication challenge issued");
-                Err(auth.create_auth_challenge_response(authenticate_header))
+                Err(auth.create_auth_challenge_response(authenticate_header, false))
             }
         }
     }
@@ -1609,10 +1612,82 @@ impl ProxyService {
 
     pub(crate) async fn handle_request(
         &self,
-        req: Request<Incoming>,
+        mut req: Request<Incoming>,
         client_ip: String,
-        proxy_user: Option<Arc<UserInfo>>,
+        mut proxy_user: Option<Arc<UserInfo>>,
     ) -> Response<Body> {
+        let mut rp_username = None;
+        if let Some(rp_config) = &self.reverse_proxy_config {
+            if req.uri().path() == "/-/callback" {
+                return rp_config.handle_oidc_callback(req).await;
+            }
+
+            let session_id = crate::reverse_proxy::ReverseProxyConfig::extract_session_cookie(&req);
+            rp_username = session_id.and_then(|id| rp_config.get_session(&id));
+
+            if rp_username.is_none() {
+                // Try AuthManager for AD / HTTP Basic / Negotiate
+                if let Some(auth) = &self.auth {
+                    if auth.is_enabled() {
+                        match auth.handle_proxy_auth(&client_ip, &req, None, true).await {
+                            crate::auth::ProxyAuthOutcome::Authenticated(user) => {
+                                let mut allowed = true;
+                                if let Some(admin_group) = &rp_config.admin_group {
+                                    if !user.groups.contains(admin_group) {
+                                        allowed = false;
+                                    }
+                                }
+
+                                if allowed {
+                                    let session_id = rp_config.create_session(user.username.clone());
+                                    let path_query = req.uri().path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
+                                    return hyper::Response::builder()
+                                        .status(hyper::StatusCode::FOUND)
+                                        .header(hyper::header::LOCATION, path_query)
+                                        .header(hyper::header::SET_COOKIE, format!("bsdm_session={}; Path=/; HttpOnly", session_id))
+                                        .body(crate::http_types::empty())
+                                        .unwrap();
+                                } else {
+                                    return hyper::Response::builder()
+                                        .status(hyper::StatusCode::FORBIDDEN)
+                                        .body(crate::http_types::full(bytes::Bytes::from("403 Forbidden: User not in required AD group")))
+                                        .unwrap();
+                                }
+                            }
+                            crate::auth::ProxyAuthOutcome::Challenge { authenticate_header } => {
+                                return auth.create_auth_challenge_response(authenticate_header, true);
+                            }
+                            crate::auth::ProxyAuthOutcome::Anonymous => {}
+                        }
+                    }
+                }
+
+                return rp_config.handle_unauthenticated(&req);
+            }
+
+            let upstream_base = &rp_config.upstream_url;
+            let path_and_query = req.uri().path_and_query().map(|pq| pq.as_str()).unwrap_or("");
+            let new_uri_str = format!("{}{}", upstream_base.trim_end_matches('/'), path_and_query);
+            if let Ok(new_uri) = new_uri_str.parse::<hyper::Uri>() {
+                *req.uri_mut() = new_uri;
+            }
+
+            if let Some(user) = &rp_username {
+                if let Ok(val) = hyper::header::HeaderValue::from_str(user) {
+                    req.headers_mut().insert("x-forwarded-user", val);
+                }
+            }
+        }
+
+        if let Some(user) = &rp_username {
+            proxy_user = Some(Arc::new(crate::auth::UserInfo {
+                username: user.clone(),
+                display_name: None,
+                email: None,
+                groups: vec!["reverse_proxy_users".to_string()],
+                authenticated_at: std::time::Instant::now(),
+            }));
+        }
         let detailed_metrics = self.perf.record_detailed_metrics();
         let http_method = req.method().clone();
         let method = http_method.as_str();

@@ -190,6 +190,13 @@ export interface ConfigFormState {
   dohBind: string
   dotEnabled: boolean
   dotBind: string
+  // ZTNA / IAP Reverse Proxy
+  reverseProxyEnabled: boolean
+  reverseProxyUpstream: string
+  oidcClientId: string
+  oidcClientSecret: string
+  oidcIssuerUrl: string
+  oidcRedirectUri: string
 }
 
 export const defaultFormState: ConfigFormState = {
@@ -303,4 +310,10 @@ export const defaultFormState: ConfigFormState = {
   dohBind: '0.0.0.0:8443',
   dotEnabled: false,
   dotBind: '0.0.0.0:853',
+  reverseProxyEnabled: false,
+  reverseProxyUpstream: 'http://internal-app:8080',
+  oidcClientId: '',
+  oidcClientSecret: '',
+  oidcIssuerUrl: '',
+  oidcRedirectUri: 'http://localhost:1488/-/callback',
 }

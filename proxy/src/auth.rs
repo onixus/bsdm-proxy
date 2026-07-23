@@ -9,7 +9,7 @@
 use base64::engine::general_purpose;
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
-use hyper::header::{PROXY_AUTHENTICATE, PROXY_AUTHORIZATION};
+use hyper::header::PROXY_AUTHORIZATION;
 use hyper::{Request, Response, StatusCode};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -372,8 +372,9 @@ impl AuthManager {
     }
 
     /// Extract credentials from request
-    pub fn extract_credentials<T>(&self, req: &Request<T>) -> Option<(String, String)> {
-        let auth_header = req.headers().get(PROXY_AUTHORIZATION)?;
+    pub fn extract_credentials<T>(&self, req: &Request<T>, reverse_proxy: bool) -> Option<(String, String)> {
+        let header_name = if reverse_proxy { hyper::header::AUTHORIZATION } else { hyper::header::PROXY_AUTHORIZATION };
+        let auth_header = req.headers().get(header_name)?;
         let auth_str = auth_header.to_str().ok()?;
 
         match self.config.backend {
@@ -400,9 +401,10 @@ impl AuthManager {
         }
     }
 
-    /// Parse `Proxy-Authorization` scheme and base64 payload for SSPI backends.
-    pub fn extract_proxy_token<T>(&self, req: &Request<T>) -> Option<(String, Vec<u8>)> {
-        let auth_header = req.headers().get(PROXY_AUTHORIZATION)?;
+    /// Parse scheme and base64 payload for SSPI backends.
+    pub fn extract_proxy_token<T>(&self, req: &Request<T>, reverse_proxy: bool) -> Option<(String, Vec<u8>)> {
+        let header_name = if reverse_proxy { hyper::header::AUTHORIZATION } else { hyper::header::PROXY_AUTHORIZATION };
+        let auth_header = req.headers().get(header_name)?;
         let auth_str = auth_header.to_str().ok()?;
         let (scheme, encoded) = auth_str.split_once(' ')?;
         let decoded = B64.decode(encoded.trim()).ok()?;
@@ -419,10 +421,11 @@ impl AuthManager {
         client_key: &str,
         req: &Request<T>,
         conn_auth: Option<&ConnAuthCache>,
+        reverse_proxy: bool,
     ) -> ProxyAuthOutcome {
         #[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]
         if self.uses_sspi_handshake() {
-            return self.handle_sspi_auth(client_key, req, conn_auth).await;
+            return self.handle_sspi_auth(client_key, req, conn_auth, reverse_proxy).await;
         }
 
         let cred_fp = proxy_auth_fingerprint(req, &self.salt);
@@ -433,9 +436,9 @@ impl AuthManager {
             }
         }
 
-        let Some((username, password)) = self.extract_credentials(req) else {
+        let Some((username, password)) = self.extract_credentials(req, reverse_proxy) else {
             return ProxyAuthOutcome::Challenge {
-                authenticate_header: self.initial_auth_header(),
+                authenticate_header: self.initial_auth_header(reverse_proxy),
             };
         };
 
@@ -452,7 +455,7 @@ impl AuthManager {
                 }
                 warn!("Proxy authentication failed for {}: {}", username, e);
                 ProxyAuthOutcome::Challenge {
-                    authenticate_header: self.initial_auth_header(),
+                    authenticate_header: self.initial_auth_header(reverse_proxy),
                 }
             }
         }
@@ -464,17 +467,19 @@ impl AuthManager {
         client_key: &str,
         req: &Request<T>,
         conn_auth: Option<&ConnAuthCache>,
+        reverse_proxy: bool,
     ) -> ProxyAuthOutcome {
         let Some(engine) = &self.sspi_engine else {
             return ProxyAuthOutcome::Challenge {
-                authenticate_header: self.initial_auth_header(),
+                authenticate_header: self.initial_auth_header(reverse_proxy),
             };
         };
 
-        let token = self
-            .extract_proxy_token(req)
+        let token_opt = self.extract_proxy_token(req, reverse_proxy);
+        let token = token_opt
+            .as_ref()
             .filter(|(scheme, _)| scheme.eq_ignore_ascii_case(engine.scheme()))
-            .map(|(_, bytes)| bytes);
+            .map(|(_, bytes)| bytes.as_slice());
 
         if token.is_none() {
             if let Some(cache) = conn_auth {
@@ -490,7 +495,7 @@ impl AuthManager {
             }
         }
 
-        let token_slice = token.as_deref();
+        let token_slice = token;
         let step_result = {
             let mut sessions = self.handshake_sessions.write().await;
             if !sessions.contains_key(client_key) {
@@ -507,7 +512,7 @@ impl AuthManager {
                     Err(e) => {
                         warn!("Failed to start SSPI session: {}", e);
                         return ProxyAuthOutcome::Challenge {
-                            authenticate_header: self.initial_auth_header(),
+                            authenticate_header: self.initial_auth_header(reverse_proxy),
                         };
                     }
                 }
@@ -515,7 +520,7 @@ impl AuthManager {
 
             let Some(entry) = sessions.get_mut(client_key) else {
                 return ProxyAuthOutcome::Challenge {
-                    authenticate_header: self.initial_auth_header(),
+                    authenticate_header: self.initial_auth_header(reverse_proxy),
                 };
             };
 
@@ -556,14 +561,14 @@ impl AuthManager {
                 }
                 warn!("SSPI authentication failed for {}: {}", client_key, reason);
                 ProxyAuthOutcome::Challenge {
-                    authenticate_header: self.initial_auth_header(),
+                    authenticate_header: self.initial_auth_header(reverse_proxy),
                 }
             }
             Err(e) => {
                 self.handshake_sessions.write().await.remove(client_key);
                 warn!("SSPI error for {}: {}", client_key, e);
                 ProxyAuthOutcome::Challenge {
-                    authenticate_header: self.initial_auth_header(),
+                    authenticate_header: self.initial_auth_header(reverse_proxy),
                 }
             }
         }
@@ -776,34 +781,50 @@ impl AuthManager {
             .insert(username.to_string(), cached);
     }
 
-    fn initial_auth_header(&self) -> String {
+    fn initial_auth_header(&self, reverse_proxy: bool) -> String {
+        let auth_type = if reverse_proxy { "WWW-Authenticate" } else { "Proxy-Authenticate" };
         match self.config.backend {
-            AuthBackend::Basic => format!("Basic realm=\"{}\"", self.config.realm),
+            AuthBackend::Basic => format!("{}: Basic realm=\"{}\"", auth_type, self.config.realm),
             #[cfg(feature = "auth-ldap")]
-            AuthBackend::Ldap => format!("Basic realm=\"{}\"", self.config.realm),
+            AuthBackend::Ldap => format!("{}: Basic realm=\"{}\"", auth_type, self.config.realm),
             #[cfg(feature = "auth-ntlm")]
-            AuthBackend::Ntlm => "NTLM".to_string(),
+            AuthBackend::Ntlm => format!("{}: NTLM", auth_type),
             #[cfg(feature = "auth-kerberos")]
-            AuthBackend::Kerberos => "Negotiate".to_string(),
+            AuthBackend::Kerberos => format!("{}: Negotiate", auth_type),
         }
     }
 
     /// Create 407 Proxy Authentication Required response
-    pub fn create_auth_required_response<T>(&self) -> Response<T>
+    pub fn create_auth_required_response<T>(&self, reverse_proxy: bool) -> Response<T>
     where
         T: Default,
     {
-        self.create_auth_challenge_response(self.initial_auth_header())
+        self.create_auth_challenge_response(self.initial_auth_header(reverse_proxy), reverse_proxy)
     }
 
     /// Create 407 with a specific `Proxy-Authenticate` value (may include challenge token).
-    pub fn create_auth_challenge_response<T>(&self, authenticate_header: String) -> Response<T>
+    pub fn create_auth_challenge_response<T>(&self, authenticate_header: String, reverse_proxy: bool) -> Response<T>
     where
         T: Default,
     {
+        let (status, header_name) = if reverse_proxy {
+            (StatusCode::UNAUTHORIZED, hyper::header::WWW_AUTHENTICATE)
+        } else {
+            (StatusCode::PROXY_AUTHENTICATION_REQUIRED, hyper::header::PROXY_AUTHENTICATE)
+        };
+        // The authenticate_header string itself starts with "Proxy-Authenticate: Basic ..."
+        // Wait, we modified initial_auth_header to prefix the header name!
+        // e.g. "WWW-Authenticate: Basic realm=..."
+        // hyper's insert() takes the header value. So we need to strip the prefix!
+        let val_str = if let Some(stripped) = authenticate_header.split_once(": ") {
+            stripped.1
+        } else {
+            &authenticate_header
+        };
+
         Response::builder()
-            .status(StatusCode::PROXY_AUTHENTICATION_REQUIRED)
-            .header(PROXY_AUTHENTICATE, authenticate_header)
+            .status(status)
+            .header(header_name, val_str)
             .body(T::default())
             .unwrap()
     }
@@ -1094,12 +1115,13 @@ mod tests {
                 "conn-1",
                 &basic_proxy_request("alice", &secret),
                 Some(&conn),
+                false,
             )
             .await;
         assert!(matches!(first, ProxyAuthOutcome::Authenticated(_)));
 
         let second = manager
-            .handle_proxy_auth("conn-1", &bare_proxy_request(), Some(&conn))
+            .handle_proxy_auth("conn-1", &bare_proxy_request(), Some(&conn), false)
             .await;
         match second {
             ProxyAuthOutcome::Authenticated(user) => assert_eq!(user.username, "alice"),
@@ -1123,12 +1145,13 @@ mod tests {
                 "conn-1",
                 &basic_proxy_request("alice", &secret),
                 Some(&conn),
+                false,
             )
             .await;
         assert!(matches!(first, ProxyAuthOutcome::Authenticated(_)));
 
         let changed = manager
-            .handle_proxy_auth("conn-1", &basic_proxy_request("bob", &secret), Some(&conn))
+            .handle_proxy_auth("conn-1", &basic_proxy_request("bob", &secret), Some(&conn), false)
             .await;
         match changed {
             ProxyAuthOutcome::Authenticated(user) => assert_eq!(user.username, "bob"),
@@ -1152,13 +1175,14 @@ mod tests {
                 "conn-1",
                 &basic_proxy_request("alice", &secret),
                 Some(&conn),
+                false,
             )
             .await;
 
         conn.invalidate().await;
 
         let follow_up = manager
-            .handle_proxy_auth("conn-1", &bare_proxy_request(), Some(&conn))
+            .handle_proxy_auth("conn-1", &bare_proxy_request(), Some(&conn), false)
             .await;
         assert!(matches!(follow_up, ProxyAuthOutcome::Challenge { .. }));
     }
