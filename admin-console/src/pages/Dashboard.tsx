@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, Zap, AlertTriangle, Database, Clock, Activity, ShieldCheck, Flame, Brain, Network, BarChart3, Shield } from 'lucide-react'
+
 import { fetchTelemetry, formatUptime, type Telemetry } from '../api/metrics'
 import { fetchThreatScores } from '../api/threatScores'
 import { fetchHierarchyPeers } from '../api/node'
@@ -29,26 +30,28 @@ export function DashboardPage() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border/80 bg-surface-1/70 p-5 backdrop-blur-md">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold text-text-primary">{tr.dashboard.title}</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-text-primary">{tr.dashboard.title}</h1>
             {telemetry.data && <SourceBadge source={telemetry.data.source} />}
           </div>
-          <p className="text-sm text-text-secondary">
+          <p className="mt-1 text-sm text-text-secondary">
             {tr.dashboard.subtitle} · авто-обновление каждые {POLL_MS / 1000} сек
           </p>
         </div>
-        <Button variant="secondary" onClick={() => telemetry.refetch()} disabled={telemetry.isFetching}>
-          <RefreshCw className={`size-4 ${telemetry.isFetching ? 'animate-spin' : ''}`} />
-          {tr.common.refresh}
-        </Button>
+        <div className="flex items-center gap-3">
+          <Button variant="secondary" onClick={() => telemetry.refetch()} disabled={telemetry.isFetching}>
+            <RefreshCw className={`size-4 ${telemetry.isFetching ? 'animate-spin' : ''}`} />
+            {tr.common.refresh}
+          </Button>
+        </div>
       </div>
 
       {telemetry.isPending && (
         <WidgetGrid>
           {Array.from({ length: 6 }, (_, i) => (
-            <Skeleton key={i} className="h-24" />
+            <Skeleton key={i} className="h-24 rounded-xl" />
           ))}
         </WidgetGrid>
       )}
@@ -65,7 +68,7 @@ export function DashboardPage() {
 
       {t && (
         <div className="grid gap-6 lg:grid-cols-2">
-          <Panel title="Интенсивность запросов (запросов/сек / Request Rate)">
+          <Panel title="Интенсивность запросов (запросов/сек / Request Rate)" icon={Activity}>
             <LineChart
               series={[
                 { name: 'Запросы (Requests)', points: t.reqRate, slot: 0 },
@@ -75,7 +78,7 @@ export function DashboardPage() {
               area={false}
             />
           </Panel>
-          <Panel title="Эффективность попаданий в кэш (% Cache Hit Ratio)">
+          <Panel title="Эффективность попаданий в кэш (% Cache Hit Ratio)" icon={Database}>
             <LineChart series={[{ name: 'Hit ratio', points: t.hitRatio, slot: 2 }]} area yMax={100} unit="%" />
           </Panel>
         </div>
@@ -83,13 +86,13 @@ export function DashboardPage() {
 
       {t && (
         <div className="grid gap-6 lg:grid-cols-3">
-          <Panel title="Распределение HTTP статусов">
+          <Panel title="Распределение HTTP статусов" icon={BarChart3}>
             <SegmentBar segments={statusSegments(t.statusClasses)} />
           </Panel>
-          <Panel title="Статусы обработки кэша">
+          <Panel title="Статусы обработки кэша" icon={Database}>
             <SegmentBar segments={cacheSegments(t.cacheStatus)} />
           </Panel>
-          <Panel title="Решения системы фильтрации (ACL)">
+          <Panel title="Решения системы фильтрации (ACL)" icon={Shield}>
             <SegmentBar
               segments={[
                 { label: 'Разрешено (allow)', value: t.aclDecisions.allow ?? 0, color: STATUS_VARS.good },
@@ -107,7 +110,7 @@ export function DashboardPage() {
 
       <div className="grid gap-6 lg:grid-cols-3">
         {t && (
-          <Panel title="Топ целевых серверов (Upstream Hosts)">
+          <Panel title="Топ целевых серверов (Upstream Hosts)" icon={Flame}>
             {t.topUpstreams.length === 0 ? (
               <EmptyState message="Метрики upstream отсутствуют — данные появятся при поступлении трафика." />
             ) : (
@@ -124,6 +127,7 @@ export function DashboardPage() {
 
         <Panel
           title="Обнаруженные аномалии ML (UEBA)"
+          icon={Brain}
           action={threats.data && <SourceBadge source={threats.data.source} />}
         >
           {threats.isError && <EmptyState message="Модуль ml-worker недоступен — оценки аномалий отсутствуют." />}
@@ -136,16 +140,16 @@ export function DashboardPage() {
                 .sort((a, b) => b.score - a.score)
                 .slice(0, 5)
                 .map((row) => (
-                  <li key={`${row.entity_type}-${row.entity_id}-${row.model}`} className="space-y-1.5">
+                  <li key={`${row.entity_type}-${row.entity_id}-${row.model}`} className="space-y-1.5 rounded-lg border border-border/60 bg-surface-0/50 p-2.5 hover:border-accent/30 transition-all">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <Link
                         to={`/logs?q=${encodeURIComponent(entityQuery(row.entity_id))}`}
-                        className="font-mono text-sm text-text-primary underline-offset-2 hover:underline"
+                        className="font-mono text-xs font-bold text-text-primary underline-offset-2 hover:underline hover:text-accent"
                         title="Просмотреть логи данного объекта"
                       >
                         {row.entity_id}
                       </Link>
-                      <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${severityBadge(row.severity)}`}>
+                      <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${severityBadge(row.severity)}`}>
                         {row.severity}
                       </span>
                     </div>
@@ -158,6 +162,7 @@ export function DashboardPage() {
 
         <Panel
           title="Ноды иерархии кэша (ICP/HTCP)"
+          icon={Network}
           action={peers.data && <SourceBadge source={peers.data.source} />}
         >
           {peers.isError && <EmptyState message="API иерархии недоступно или отключено." />}
@@ -165,14 +170,15 @@ export function DashboardPage() {
           {peers.data && peers.data.data.length > 0 && (
             <ul className="divide-y divide-border/50 text-sm">
               {peers.data.data.map((p, i) => (
-                <li key={`${p.name ?? p.host ?? i}`} className="flex items-center justify-between gap-2 py-2">
+                <li key={`${p.name ?? p.host ?? i}`} className="flex items-center justify-between gap-2 py-2.5">
                   <div className="min-w-0">
-                    <p className="truncate font-mono text-xs text-text-primary">{String(p.name ?? p.host ?? '—')}</p>
+                    <p className="truncate font-mono text-xs font-semibold text-text-primary">{String(p.name ?? p.host ?? '—')}</p>
                     <p className="text-xs text-text-secondary">
                       {String(p.peer_type ?? 'peer')} · {String(p.host ?? '')}:{String(p.http_port ?? '')}
                     </p>
                   </div>
-                  <span className={`text-xs font-semibold ${p.state === 'dead' ? 'text-danger' : 'text-success'}`}>
+                  <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-0.5 rounded-full border ${p.state === 'dead' ? 'border-danger/40 bg-danger/10 text-danger' : 'border-success/40 bg-success/10 text-success'}`}>
+                    <span className={`size-1.5 rounded-full ${p.state === 'dead' ? 'bg-danger' : 'bg-success animate-pulse'}`} />
                     {String(p.state ?? 'alive') === 'alive' ? 'Активен' : 'Недоступен'}
                   </span>
                 </li>
@@ -198,6 +204,7 @@ function HealthRow({ t, lang }: { t: Telemetry; lang: 'ru' | 'en' }) {
         trend={t.reqRate}
         trendColor={seriesColor(0)}
         hint={`Всего обработано: ${t.totalRequests.toLocaleString()}`}
+        icon={Zap}
       />
       <StatTile
         label="Доля ошибок (5xx)"
@@ -206,6 +213,7 @@ function HealthRow({ t, lang }: { t: Telemetry; lang: 'ru' | 'en' }) {
         trend={t.errRate}
         trendColor={seriesColor(7)}
         status={errShare !== null && errShare > 0.05 ? 'error' : errShare !== null && errShare > 0.01 ? 'warn' : 'ok'}
+        icon={AlertTriangle}
       />
       <StatTile
         label={tr.dashboard.cacheHitRatio}
@@ -213,7 +221,8 @@ function HealthRow({ t, lang }: { t: Telemetry; lang: 'ru' | 'en' }) {
         unit="%"
         trend={t.hitRatio}
         trendColor={seriesColor(2)}
-        hint={t.stats ? `${t.stats.cache.entries}/${t.stats.cache.capacity} L1 записей · ${formatNumber(t.cacheEvictions)} вытеснено` : undefined}
+        hint={t.stats ? `${t.stats.cache.entries}/${t.stats.cache.capacity} L1 записей` : undefined}
+        icon={Database}
       />
       <StatTile
         label="Задержка (Latency p95)"
@@ -223,17 +232,20 @@ function HealthRow({ t, lang }: { t: Telemetry; lang: 'ru' | 'en' }) {
         trendColor={seriesColor(3)}
         hint={t.latency ? `p50 ${(t.latency.p50 * 1000).toFixed(1)}мс · p99 ${(t.latency.p99 * 1000).toFixed(0)}мс` : 'Гистограмма недоступна'}
         status={latP95Ms !== null && latP95Ms > 500 ? 'warn' : 'ok'}
+        icon={Clock}
       />
       <StatTile
         label={tr.dashboard.activeConnections}
         value={t.stats ? String(t.stats.requests_in_flight) : '—'}
         trend={t.inFlight}
         trendColor={seriesColor(4)}
+        icon={Activity}
       />
       <StatTile
-        label="Время непрерывной работы"
+        label="Непрерывная работа"
         value={t.stats ? formatUptime(t.stats.uptime_secs) : '—'}
         hint={t.stats?.service}
+        icon={ShieldCheck}
       />
     </WidgetGrid>
   )
@@ -269,3 +281,4 @@ function entityQuery(entityId: string): string {
   const parts = entityId.split('|')
   return parts[parts.length - 1]
 }
+

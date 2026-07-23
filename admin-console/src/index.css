@@ -12,99 +12,104 @@
   --color-surface-3: var(--t-surface-3);
   --color-accent: var(--t-accent);
   --color-accent-hover: var(--t-accent-hover);
+  --color-accent-glow: var(--t-accent-glow);
   --color-success: var(--t-success);
   --color-warning: var(--t-warning);
   --color-danger: var(--t-danger);
   --color-text-primary: var(--t-text-primary);
   --color-text-secondary: var(--t-text-secondary);
   --color-border: var(--t-border);
-  --font-sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-mono: ui-monospace, 'SFMono-Regular', 'Cascadia Mono', monospace;
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Inter, Roboto, sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', 'Cascadia Code', 'Fira Code', monospace;
   --radius-sm: 0.375rem;
   --radius-md: 0.5rem;
   --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
   --touch-min: 2.75rem;
 }
 
 :root,
 :root[data-theme='dark'] {
   color-scheme: dark;
-  --t-surface-0: #0f1419;
-  --t-surface-1: #1a1f2e;
-  --t-surface-2: #242b3d;
-  --t-surface-3: #2f384f;
+  --t-surface-0: #0b0f14;
+  --t-surface-1: #151a26;
+  --t-surface-2: #1e2638;
+  --t-surface-3: #2a354d;
   --t-accent: #e94560;
-  --t-accent-hover: #d63851;
-  --t-success: #4ecca3;
-  --t-warning: #ff9800;
+  --t-accent-hover: #ff5270;
+  --t-accent-glow: rgba(233, 69, 96, 0.35);
+  --t-success: #10b981;
+  --t-warning: #f59e0b;
   --t-danger: #ef4444;
-  --t-text-primary: #eaeaea;
-  --t-text-secondary: #a0a0a0;
-  --t-border: #2a3040;
+  --t-text-primary: #f3f4f6;
+  --t-text-secondary: #9ca3af;
+  --t-border: #263044;
 
-  /* Data-viz series palette (validated for the dark card surface #1a1f2e) */
-  --viz-1: #3987e5;
-  --viz-2: #d95926;
-  --viz-3: #199e70;
-  --viz-4: #c98500;
-  --viz-5: #d55181;
-  --viz-6: #008300;
-  --viz-7: #9085e9;
-  --viz-8: #e66767;
-  --viz-grid: #262c3b;
-  --viz-axis: #3a4155;
-  --viz-muted: #898781;
-  /* Status palette (reserved for state, never a series) */
-  --viz-good: #0ca30c;
-  --viz-warning: #fab219;
-  --viz-serious: #ec835a;
-  --viz-critical: #d03b3b;
+  /* Data-viz series palette */
+  --viz-1: #3b82f6;
+  --viz-2: #f97316;
+  --viz-3: #10b981;
+  --viz-4: #eab308;
+  --viz-5: #ec4899;
+  --viz-6: #22c55e;
+  --viz-7: #a855f7;
+  --viz-8: #f43f5e;
+  --viz-grid: #1f293d;
+  --viz-axis: #374151;
+  --viz-muted: #6b7280;
+
+  /* Status palette */
+  --viz-good: #10b981;
+  --viz-warning: #f59e0b;
+  --viz-serious: #f97316;
+  --viz-critical: #ef4444;
 }
 
 :root[data-theme='light'] {
   color-scheme: light;
-  --t-surface-0: #f4f4f1;
-  --t-surface-1: #fcfcfb;
-  --t-surface-2: #efeeea;
-  --t-surface-3: #e3e2dc;
-  --t-accent: #c92d47;
-  --t-accent-hover: #b02540;
-  --t-success: #0a7d5e;
-  --t-warning: #a35f00;
-  --t-danger: #c22f2f;
-  --t-text-primary: #0b0b0b;
-  --t-text-secondary: #52514e;
-  --t-border: #dcdbd4;
+  --t-surface-0: #f8fafc;
+  --t-surface-1: #ffffff;
+  --t-surface-2: #f1f5f9;
+  --t-surface-3: #e2e8f0;
+  --t-accent: #dc2626;
+  --t-accent-hover: #b91c1c;
+  --t-accent-glow: rgba(220, 38, 38, 0.25);
+  --t-success: #059669;
+  --t-warning: #d97706;
+  --t-danger: #dc2626;
+  --t-text-primary: #0f172a;
+  --t-text-secondary: #64748b;
+  --t-border: #e2e8f0;
 
-  /* Series palette stepped for the light card surface #fcfcfb */
-  --viz-1: #2a78d6;
-  --viz-2: #eb6834;
-  --viz-3: #1baf7a;
-  --viz-4: #eda100;
-  --viz-5: #e87ba4;
-  --viz-6: #008300;
-  --viz-7: #4a3aa7;
-  --viz-8: #e34948;
-  --viz-grid: #e7e6e0;
-  --viz-axis: #c3c2b7;
-  --viz-muted: #898781;
-  --viz-good: #0ca30c;
-  --viz-warning: #fab219;
-  --viz-serious: #ec835a;
-  --viz-critical: #d03b3b;
+  /* Series palette stepped for light mode */
+  --viz-1: #2563eb;
+  --viz-2: #ea580c;
+  --viz-3: #059669;
+  --viz-4: #ca8a04;
+  --viz-5: #db2777;
+  --viz-6: #16a34a;
+  --viz-7: #9333ea;
+  --viz-8: #e11d48;
+  --viz-grid: #f1f5f9;
+  --viz-axis: #cbd5e1;
+  --viz-muted: #94a3b8;
+  --viz-good: #059669;
+  --viz-warning: #d97706;
+  --viz-serious: #ea580c;
+  --viz-critical: #dc2626;
 }
 
 @layer base {
   html {
-    @apply antialiased;
+    @apply antialiased scroll-smooth;
   }
 
   body {
-    @apply bg-surface-0 text-text-primary font-sans min-h-screen;
+    @apply bg-surface-0 text-text-primary font-sans min-h-screen selection:bg-accent/30 selection:text-text-primary;
   }
 
   * {
-    @apply border-border;
+    @apply border-border transition-colors duration-150;
   }
 }
 
@@ -113,4 +118,85 @@
     min-height: var(--touch-min);
     min-width: var(--touch-min);
   }
+
+  .glass-card {
+    background: linear-gradient(135deg, rgba(var(--color-surface-1), 0.85) 0%, rgba(var(--color-surface-1), 0.65) 100%);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .glass-panel {
+    background: rgba(var(--color-surface-1), 0.75);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+
+  .shadow-glow-accent {
+    box-shadow: 0 0 20px -3px var(--color-accent-glow);
+  }
+
+  .shadow-glow-success {
+    box-shadow: 0 0 20px -3px rgba(16, 185, 129, 0.3);
+  }
+
+  .shadow-glow-danger {
+    box-shadow: 0 0 20px -3px rgba(239, 68, 68, 0.3);
+  }
 }
+
+@keyframes modalPop {
+  0% {
+    opacity: 0;
+    transform: scale(0.95) translateY(6px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes pulseGlow {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.08);
+  }
+}
+
+.animate-modal-pop {
+  animation: modalPop 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-pulse-glow {
+  animation: pulseGlow 2.5s ease-in-out infinite;
+}
+
+/* Custom scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-surface-3);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-secondary);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+
