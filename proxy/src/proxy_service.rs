@@ -1202,7 +1202,10 @@ impl ProxyService {
             return Ok(None);
         }
 
-        match auth.handle_proxy_auth(client_ip, req, conn_auth, false).await {
+        match auth
+            .handle_proxy_auth(client_ip, req, conn_auth, false)
+            .await
+        {
             ProxyAuthOutcome::Anonymous => Ok(None),
             ProxyAuthOutcome::Authenticated(user) => Ok(Some(Arc::new(user))),
             ProxyAuthOutcome::Challenge {
@@ -1639,23 +1642,39 @@ impl ProxyService {
                                 }
 
                                 if allowed {
-                                    let session_id = rp_config.create_session(user.username.clone());
-                                    let path_query = req.uri().path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
+                                    let session_id =
+                                        rp_config.create_session(user.username.clone());
+                                    let path_query = req
+                                        .uri()
+                                        .path_and_query()
+                                        .map(|pq| pq.as_str())
+                                        .unwrap_or("/");
                                     return hyper::Response::builder()
                                         .status(hyper::StatusCode::FOUND)
                                         .header(hyper::header::LOCATION, path_query)
-                                        .header(hyper::header::SET_COOKIE, format!("bsdm_session={}; Path=/; HttpOnly", session_id))
+                                        .header(
+                                            hyper::header::SET_COOKIE,
+                                            format!(
+                                                "bsdm_session={}; Path=/; HttpOnly",
+                                                session_id
+                                            ),
+                                        )
                                         .body(crate::http_types::empty())
                                         .unwrap();
                                 } else {
                                     return hyper::Response::builder()
                                         .status(hyper::StatusCode::FORBIDDEN)
-                                        .body(crate::http_types::full(bytes::Bytes::from("403 Forbidden: User not in required AD group")))
+                                        .body(crate::http_types::full(bytes::Bytes::from(
+                                            "403 Forbidden: User not in required AD group",
+                                        )))
                                         .unwrap();
                                 }
                             }
-                            crate::auth::ProxyAuthOutcome::Challenge { authenticate_header } => {
-                                return auth.create_auth_challenge_response(authenticate_header, true);
+                            crate::auth::ProxyAuthOutcome::Challenge {
+                                authenticate_header,
+                            } => {
+                                return auth
+                                    .create_auth_challenge_response(authenticate_header, true);
                             }
                             crate::auth::ProxyAuthOutcome::Anonymous => {}
                         }
@@ -1666,7 +1685,11 @@ impl ProxyService {
             }
 
             let upstream_base = &rp_config.upstream_url;
-            let path_and_query = req.uri().path_and_query().map(|pq| pq.as_str()).unwrap_or("");
+            let path_and_query = req
+                .uri()
+                .path_and_query()
+                .map(|pq| pq.as_str())
+                .unwrap_or("");
             let new_uri_str = format!("{}{}", upstream_base.trim_end_matches('/'), path_and_query);
             if let Ok(new_uri) = new_uri_str.parse::<hyper::Uri>() {
                 *req.uri_mut() = new_uri;
