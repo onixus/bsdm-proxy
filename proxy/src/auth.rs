@@ -1164,6 +1164,7 @@ mod tests {
         };
 
         let manager = AuthManager::new(config);
+        manager.put_basic_user("testuser".to_string(), Some("testpass".to_string()), "admin".to_string()).await.unwrap();
         let result = manager.authenticate("testuser", "testpass").await;
 
         assert!(result.is_ok());
@@ -1182,6 +1183,7 @@ mod tests {
 
         let manager = AuthManager::new(config);
         let secret = unit_test_secret();
+        manager.put_basic_user("testuser".to_string(), Some(secret.clone()), "admin".to_string()).await.unwrap();
 
         // First authentication
         manager.authenticate("testuser", &secret).await.unwrap();
@@ -1203,6 +1205,7 @@ mod tests {
 
         let manager = AuthManager::new(config);
         let secret = unit_test_secret();
+        manager.put_basic_user("testuser".to_string(), Some(secret.clone()), "admin".to_string()).await.unwrap();
         manager.authenticate("testuser", &secret).await.unwrap();
 
         // Wait for expiration
@@ -1238,6 +1241,7 @@ mod tests {
         let manager = AuthManager::new(config);
         let conn = ConnAuthCache::new(Duration::from_secs(60));
         let secret = unit_test_secret();
+        manager.put_basic_user("alice".to_string(), Some(secret.clone()), "admin".to_string()).await.unwrap();
 
         let first = manager
             .handle_proxy_auth(
@@ -1268,6 +1272,8 @@ mod tests {
         let manager = AuthManager::new(config);
         let conn = ConnAuthCache::new(Duration::from_secs(60));
         let secret = unit_test_secret();
+        manager.put_basic_user("alice".to_string(), Some(secret.clone()), "admin".to_string()).await.unwrap();
+        manager.put_basic_user("bob".to_string(), Some(secret.clone()), "admin".to_string()).await.unwrap();
 
         let first = manager
             .handle_proxy_auth(
