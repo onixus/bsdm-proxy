@@ -100,9 +100,69 @@ export function LogsPage() {
         </div>
       </div>
 
+      {/* Quick Filter Chips Bar */}
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border/80 bg-surface-1/60 p-3">
+        <span className="text-xs font-bold uppercase tracking-wider text-text-secondary mr-1">Быстрый фильтр:</span>
+        <button
+          type="button"
+          onClick={() => setFilters(emptyLogFilters)}
+          className={`rounded-lg px-3 py-1 text-xs font-semibold border transition-all cursor-pointer ${
+            filters.statusClass === 'all' && filters.blockReason === 'all' && filters.cacheStatus === 'all'
+              ? 'bg-accent/20 border-accent text-accent shadow-glow-accent'
+              : 'border-border bg-surface-0 text-text-secondary hover:bg-surface-2 hover:text-text-primary'
+          }`}
+        >
+          Все события
+        </button>
+        <button
+          type="button"
+          onClick={() => updateFilter('statusClass', '5xx')}
+          className={`rounded-lg px-3 py-1 text-xs font-semibold border transition-all cursor-pointer ${
+            filters.statusClass === '5xx'
+              ? 'bg-danger/20 border-danger text-danger shadow-glow-danger'
+              : 'border-border bg-surface-0 text-text-secondary hover:bg-surface-2 hover:text-text-primary'
+          }`}
+        >
+          🔥 5xx Ошибки сервера
+        </button>
+        <button
+          type="button"
+          onClick={() => updateFilter('blockReason', 'acl')}
+          className={`rounded-lg px-3 py-1 text-xs font-semibold border transition-all cursor-pointer ${
+            filters.blockReason === 'acl'
+              ? 'bg-warning/20 border-warning text-warning'
+              : 'border-border bg-surface-0 text-text-secondary hover:bg-surface-2 hover:text-text-primary'
+          }`}
+        >
+          🛡️ Блок ACL
+        </button>
+        <button
+          type="button"
+          onClick={() => updateFilter('blockReason', 'ml')}
+          className={`rounded-lg px-3 py-1 text-xs font-semibold border transition-all cursor-pointer ${
+            filters.blockReason === 'ml'
+              ? 'bg-purple-500/20 border-purple-500 text-purple-400'
+              : 'border-border bg-surface-0 text-text-secondary hover:bg-surface-2 hover:text-text-primary'
+          }`}
+        >
+          🧠 Блок ML / UEBA
+        </button>
+        <button
+          type="button"
+          onClick={() => updateFilter('cacheStatus', 'MISS')}
+          className={`rounded-lg px-3 py-1 text-xs font-semibold border transition-all cursor-pointer ${
+            filters.cacheStatus === 'MISS'
+              ? 'bg-blue-500/20 border-blue-500 text-blue-400'
+              : 'border-border bg-surface-0 text-text-secondary hover:bg-surface-2 hover:text-text-primary'
+          }`}
+        >
+          ⚡ Cache MISS
+        </button>
+      </div>
+
       {/* Server-side query row */}
       <form
-        className="grid gap-3 rounded-lg border border-border bg-surface-1 p-4 sm:grid-cols-2 lg:grid-cols-5"
+        className="grid gap-3 rounded-xl border border-border/80 bg-surface-1/90 p-4 sm:grid-cols-2 lg:grid-cols-5 backdrop-blur-sm"
         onSubmit={(e) => {
           e.preventDefault()
           submit()
@@ -204,9 +264,9 @@ export function LogsPage() {
 
       {filtered.length > 0 && (
         <>
-          <div className="hidden overflow-x-auto rounded-lg border border-border md:block">
+          <div className="hidden overflow-x-auto rounded-xl border border-border/80 bg-surface-1/90 md:block">
             <table className="w-full min-w-[760px] text-left text-sm">
-              <thead className="border-b border-border bg-surface-2 text-xs uppercase text-text-secondary">
+              <thead className="border-b border-border bg-surface-2/70 text-xs uppercase text-text-secondary font-bold">
                 <tr>
                   <th className="px-4 py-3">{tr.logs.time}</th>
                   <th className="px-4 py-3">{tr.logs.client}</th>
@@ -223,19 +283,23 @@ export function LogsPage() {
                 {pageRows.map((log) => (
                   <tr
                     key={log.event_id ?? `${log.ts}-${log.url}`}
-                    className="cursor-pointer border-b border-border/50 hover:bg-surface-2/50"
+                    className="cursor-pointer border-b border-border/40 hover:bg-surface-2/60 transition-colors"
                     onClick={() => setSelected(log)}
                   >
                     <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-text-secondary">
                       {new Date(log.ts * 1000).toLocaleString()}
                     </td>
-                    <td className="px-4 py-2.5 font-mono text-xs">{log.client_ip ?? '—'}</td>
+                    <td className="px-4 py-2.5 font-mono text-xs font-medium text-text-primary">{log.client_ip ?? '—'}</td>
                     <td className="px-4 py-2.5 text-xs">{log.username ?? '—'}</td>
-                    <td className="px-4 py-2.5 font-mono text-xs">{log.method ?? '—'}</td>
-                    <td className="max-w-[220px] truncate px-4 py-2.5" title={log.url}>
+                    <td className="px-4 py-2.5 font-mono text-xs font-semibold text-text-primary">{log.method ?? '—'}</td>
+                    <td className="max-w-[220px] truncate px-4 py-2.5 font-medium" title={log.url}>
                       {log.domain}
                     </td>
-                    <td className="px-4 py-2.5 tabular-nums">{log.status ?? '—'}</td>
+                    <td className="px-4 py-2.5">
+                      <span className={`inline-flex items-center rounded-md px-2 py-0.5 font-mono text-xs font-bold border ${getStatusBadgeStyle(log.status)}`}>
+                        {log.status ?? '—'}
+                      </span>
+                    </td>
                     <td className="px-4 py-2.5 font-mono text-xs text-text-secondary">{log.cache_status ?? '—'}</td>
                     <td className="px-4 py-2.5">
                       <BlockReasonBadge reason={log.blockReason} />
@@ -263,6 +327,7 @@ export function LogsPage() {
               </tbody>
             </table>
           </div>
+
 
           <div className="space-y-3 md:hidden">
             {pageRows.map((log) => (
@@ -316,11 +381,20 @@ export function LogsPage() {
       />
     </div>
   )
+function getStatusBadgeStyle(status?: number | string): string {
+  if (!status) return 'border-border bg-surface-2 text-text-secondary'
+  const code = Number(status)
+  if (code >= 200 && code < 300) return 'border-success/30 bg-success/15 text-success'
+  if (code >= 300 && code < 400) return 'border-blue-500/30 bg-blue-500/15 text-blue-400'
+  if (code >= 400 && code < 500) return 'border-warning/30 bg-warning/15 text-warning'
+  if (code >= 500) return 'border-danger/30 bg-danger/15 text-danger shadow-glow-danger'
+  return 'border-border bg-surface-2 text-text-secondary'
 }
 
 function distinct(values: (string | undefined)[]): string[] {
   return [...new Set(values.filter((v): v is string => !!v))].sort()
 }
+
 
 function exportCsv(rows: EnrichedLog[]): void {
   const header = ['ts', 'time', 'client_ip', 'username', 'method', 'domain', 'url', 'status', 'cache_status', 'decision', 'session_id', 'event_id']

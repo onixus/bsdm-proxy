@@ -79,14 +79,27 @@ export function PoliciesPage() {
     setBusy(false)
   }
 
+  const [ruleFilter, setRuleFilter] = useState('')
+
+  const filteredRules = (data?.rules ?? []).filter((rule) => {
+    if (!ruleFilter.trim()) return true
+    const query = ruleFilter.toLowerCase()
+    return (
+      rule.name.toLowerCase().includes(query) ||
+      rule.id.toLowerCase().includes(query) ||
+      rule.action.toLowerCase().includes(query) ||
+      formatRuleType(rule).toLowerCase().includes(query)
+    )
+  })
+
   return (
     <div className="mx-auto max-w-7xl space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border/80 bg-surface-1/70 p-5 backdrop-blur-md">
         <div>
-          <h1 className="text-2xl font-bold text-text-primary">{tr.policies.title}</h1>
-          <p className="text-sm text-text-secondary">
+          <h1 className="text-2xl font-bold tracking-tight text-text-primary">{tr.policies.title}</h1>
+          <p className="mt-1 text-sm text-text-secondary">
             {tr.policies.subtitle}{' '}
-            <span className="font-mono text-text-primary">{data?.default_action ?? '—'}</span>
+            <span className="font-mono font-bold text-text-primary px-2 py-0.5 rounded border border-border bg-surface-0">{data?.default_action ?? '—'}</span>
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -98,17 +111,30 @@ export function PoliciesPage() {
             <Save className="size-4" />
             {tr.policies.persist}
           </Button>
-          <Button variant="primary" onClick={handleReload} disabled={busy}>
+          <Button variant="primary-glow" onClick={handleReload} disabled={busy}>
             <RotateCcw className={`size-4 ${busy ? 'animate-spin' : ''}`} />
             {tr.policies.reload}
           </Button>
         </div>
       </div>
 
-      <Panel title={`${tr.policies.activeRules} (${data?.rules.length ?? 0})`}>
+      <Panel
+        title={`${tr.policies.activeRules} (${filteredRules.length})`}
+        action={
+          <div className="w-64">
+            <input
+              type="text"
+              placeholder="Поиск правил..."
+              value={ruleFilter}
+              onChange={(e) => setRuleFilter(e.target.value)}
+              className="w-full rounded-lg border border-border bg-surface-0 px-3 py-1.5 text-xs text-text-primary placeholder:text-text-secondary focus:border-accent focus:outline-none"
+            />
+          </div>
+        }
+      >
         <div className="hidden overflow-x-auto md:block">
           <table className="w-full min-w-[640px] text-left text-sm">
-            <thead className="text-xs uppercase text-text-secondary">
+            <thead className="border-b border-border text-xs uppercase text-text-secondary font-bold">
               <tr>
                 <th className="pb-3 pr-4">{tr.policies.priority}</th>
                 <th className="pb-3 pr-4">{tr.policies.name}</th>
@@ -119,7 +145,7 @@ export function PoliciesPage() {
               </tr>
             </thead>
             <tbody>
-              {data?.rules.map((rule) => (
+              {filteredRules.map((rule) => (
                 <RuleRow key={rule.id} rule={rule} onDelete={handleDelete} disabled={busy} />
               ))}
             </tbody>
@@ -127,13 +153,13 @@ export function PoliciesPage() {
         </div>
 
         <div className="space-y-3 md:hidden">
-          {data?.rules.map((rule) => (
-            <div key={rule.id} className="rounded-md border border-border bg-surface-0 p-4">
+          {filteredRules.map((rule) => (
+            <div key={rule.id} className="rounded-xl border border-border/80 bg-surface-0/60 p-4">
               <div className="flex items-start justify-between gap-2">
-                <span className="font-medium text-text-primary">{rule.name}</span>
+                <span className="font-semibold text-text-primary">{rule.name}</span>
                 <button
                   type="button"
-                  className="text-danger"
+                  className="text-danger hover:text-danger/80 cursor-pointer"
                   disabled={busy}
                   onClick={() => handleDelete(rule.id)}
                   aria-label={`Delete ${rule.id}`}
@@ -141,13 +167,14 @@ export function PoliciesPage() {
                   <Trash2 className="size-4" />
                 </button>
               </div>
-              <p className="mt-1 font-mono text-xs text-text-secondary">
+              <p className="mt-1.5 font-mono text-xs text-text-secondary">
                 P{rule.priority} · {rule.action} · {formatRuleType(rule)}
               </p>
             </div>
           ))}
         </div>
       </Panel>
+
 
       {/* eBPF XDP Kernel Bypass Panel */}
       <Panel title={tr.policies.ebpfTitle}>

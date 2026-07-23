@@ -50,20 +50,20 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className="pointer-events-none fixed inset-x-0 bottom-4 z-[60] flex flex-col items-center gap-2 px-4 sm:items-end sm:pr-6">
+      <div className="pointer-events-none fixed inset-x-0 bottom-4 z-[60] flex flex-col items-center gap-2.5 px-4 sm:items-end sm:pr-6">
         {items.map(({ id, kind, message }) => {
           const { box, Icon } = kindStyles[kind]
           return (
             <div
               key={id}
               role="status"
-              className={`pointer-events-auto flex w-full max-w-md items-start gap-3 rounded-lg border bg-surface-1 p-3 shadow-xl ${box}`}
+              className={`animate-modal-pop pointer-events-auto flex w-full max-w-md items-start gap-3 rounded-xl border bg-surface-1/95 p-3.5 shadow-2xl backdrop-blur-xl transition-all ${box}`}
             >
               <Icon className="mt-0.5 size-5 shrink-0" />
-              <p className="flex-1 text-sm text-text-primary">{message}</p>
+              <p className="flex-1 text-sm font-medium text-text-primary leading-snug">{message}</p>
               <button
                 type="button"
-                className="rounded p-1 text-text-secondary hover:bg-surface-2"
+                className="rounded-lg p-1 text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-colors cursor-pointer"
                 onClick={() => dismiss(id)}
                 aria-label="Dismiss"
               >
@@ -76,3 +76,4 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     </ToastContext.Provider>
   )
 }
+
