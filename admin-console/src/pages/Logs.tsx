@@ -382,6 +382,8 @@ export function LogsPage() {
       />
     </div>
   )
+}
+
 function getStatusBadgeStyle(status?: number | string): string {
   if (!status) return 'border-border bg-surface-2 text-text-secondary'
   const code = Number(status)
