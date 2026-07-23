@@ -20,7 +20,6 @@ import {
   ChevronRight,
   Languages,
   ShieldAlert,
-  SlidersHorizontal,
 } from 'lucide-react'
 import { isDemoMode } from '../../api/source'
 import { applyTheme, loadTheme, type Theme } from '../../lib/theme'
