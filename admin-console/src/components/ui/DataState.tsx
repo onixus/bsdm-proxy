@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { ComponentType, ReactNode } from 'react'
 import { AlertTriangle, FlaskConical, RefreshCw, WifiOff, Inbox } from 'lucide-react'
 import type { DataSource } from '../../api/source'
 import { Button } from './Button'
@@ -57,7 +57,8 @@ export function ErrorState({
   )
 }
 
-export function EmptyState({ message, icon: Icon = Inbox }: { message: string; icon?: React.ComponentType<{ className?: string }> }) {
+export function EmptyState({ message, icon: Icon = Inbox }: { message: string; icon?: ComponentType<{ className?: string }> }) {
+
   return (
     <div className="flex flex-col items-center justify-center py-10 px-4 text-center">
       <div className="flex size-12 items-center justify-center rounded-full bg-surface-2 text-text-secondary mb-3 border border-border">
