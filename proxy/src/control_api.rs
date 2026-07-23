@@ -539,18 +539,27 @@ impl ControlApiState {
 
     async fn basic_users_list(&self) -> Response<Body> {
         let Some(auth) = &self.auth_manager else {
-            return json_response(StatusCode::SERVICE_UNAVAILABLE, r#"{"error":"Auth backend not enabled"}"#);
+            return json_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                r#"{"error":"Auth backend not enabled"}"#,
+            );
         };
         let users = auth.get_basic_users().await;
         match serde_json::to_string(&users) {
             Ok(body) => json_response(StatusCode::OK, &body),
-            Err(_) => json_response(StatusCode::INTERNAL_SERVER_ERROR, r#"{"error":"serialization failed"}"#),
+            Err(_) => json_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                r#"{"error":"serialization failed"}"#,
+            ),
         }
     }
 
     async fn basic_users_put(&self, body: Bytes) -> Response<Body> {
         let Some(auth) = &self.auth_manager else {
-            return json_response(StatusCode::SERVICE_UNAVAILABLE, r#"{"error":"Auth backend not enabled"}"#);
+            return json_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                r#"{"error":"Auth backend not enabled"}"#,
+            );
         };
         #[derive(Deserialize)]
         struct PutReq {
@@ -563,9 +572,15 @@ impl ControlApiState {
             Err(_) => return json_response(StatusCode::BAD_REQUEST, r#"{"error":"invalid json"}"#),
         };
         if req.username.is_empty() || req.role.is_empty() {
-            return json_response(StatusCode::BAD_REQUEST, r#"{"error":"username and role cannot be empty"}"#);
+            return json_response(
+                StatusCode::BAD_REQUEST,
+                r#"{"error":"username and role cannot be empty"}"#,
+            );
         }
-        match auth.put_basic_user(req.username.clone(), req.password, req.role).await {
+        match auth
+            .put_basic_user(req.username.clone(), req.password, req.role)
+            .await
+        {
             Ok(_) => json_response(StatusCode::OK, r#"{"status":"ok"}"#),
             Err(e) => {
                 let error_json = serde_json::json!({ "error": e });
@@ -576,7 +591,10 @@ impl ControlApiState {
 
     async fn basic_users_delete(&self, body: Bytes) -> Response<Body> {
         let Some(auth) = &self.auth_manager else {
-            return json_response(StatusCode::SERVICE_UNAVAILABLE, r#"{"error":"Auth backend not enabled"}"#);
+            return json_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                r#"{"error":"Auth backend not enabled"}"#,
+            );
         };
         #[derive(Deserialize)]
         struct DelReq {
