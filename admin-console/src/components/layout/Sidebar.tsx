@@ -16,23 +16,14 @@ import {
   Network,
   Sparkles,
   Sun,
+  User,
+  ChevronRight,
+  Languages,
 } from 'lucide-react'
 import { isDemoMode } from '../../api/source'
 import { applyTheme, loadTheme, type Theme } from '../../lib/theme'
-
-const navItems = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
-  { to: '/logs', label: 'Logs', icon: ScrollText },
-  { to: '/analytics', label: 'Analytics', icon: BarChart3 },
-  { to: '/threat-scores', label: 'Threat scores', icon: Brain },
-  { to: '/security', label: 'Data Security', icon: Shield },
-  { to: '/policies', label: 'Policies', icon: Shield },
-  { to: '/rpz', label: 'RPZ Sinkhole', icon: Radio },
-  { to: '/wasm', label: 'Wasm Plugins', icon: Cpu },
-  { to: '/cluster', label: 'Cluster Mesh', icon: Network },
-  { to: '/ai-cache', label: 'AI Cache', icon: Sparkles },
-  { to: '/settings', label: 'Settings', icon: Settings },
-] as const
+import { useLanguage, translations } from '../../lib/i18n'
+import { UserProfileModal } from './UserProfileModal'
 
 interface SidebarProps {
   open: boolean
@@ -42,6 +33,25 @@ interface SidebarProps {
 export function Sidebar({ open, onClose }: SidebarProps) {
   const [theme, setTheme] = useState<Theme>(loadTheme)
   const [demoOn, setDemoOn] = useState(isDemoMode)
+  const [profileOpen, setProfileOpen] = useState(false)
+  const [lang, setLang] = useLanguage()
+
+  const t = translations[lang]
+
+  const navItems = [
+    { to: '/', label: t.nav.dashboard, icon: LayoutDashboard, end: true },
+    { to: '/logs', label: t.nav.logs, icon: ScrollText },
+    { to: '/analytics', label: t.nav.analytics, icon: BarChart3 },
+    { to: '/threat-scores', label: t.nav.threatScores, icon: Brain },
+    { to: '/security', label: t.nav.security, icon: Shield },
+    { to: '/policies', label: t.nav.policies, icon: Shield },
+    { to: '/rpz', label: t.nav.rpz, icon: Radio },
+    { to: '/wasm', label: t.nav.wasm, icon: Cpu },
+    { to: '/cluster', label: t.nav.cluster, icon: Network },
+    { to: '/ai-cache', label: t.nav.aiCache, icon: Sparkles },
+    { to: '/users', label: t.nav.users, icon: User },
+    { to: '/settings', label: t.nav.settings, icon: Settings },
+  ] as const
 
   useEffect(() => {
     const onDemo = (e: Event) => setDemoOn(Boolean((e as CustomEvent).detail))
@@ -53,6 +63,10 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     const next = theme === 'dark' ? 'light' : 'dark'
     setTheme(next)
     applyTheme(next)
+  }
+
+  const toggleLanguage = () => {
+    setLang(lang === 'ru' ? 'en' : 'ru')
   }
 
   return (
@@ -74,6 +88,18 @@ export function Sidebar({ open, onClose }: SidebarProps) {
             <span className="font-bold text-text-primary">BSDM Console</span>
           </div>
           <div className="flex items-center gap-1">
+            {/* Language Switcher */}
+            <button
+              type="button"
+              className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-bold border border-border bg-surface-0 text-accent hover:bg-surface-2 transition-colors"
+              onClick={toggleLanguage}
+              title={t.header.switchLang}
+            >
+              <Languages className="size-3.5" />
+              <span>{lang.toUpperCase()}</span>
+            </button>
+
+            {/* Theme Toggle */}
             <button
               type="button"
               className="flex items-center justify-center rounded-md p-2 text-text-secondary hover:bg-surface-2 hover:text-text-primary"
@@ -115,16 +141,36 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           ))}
         </nav>
 
-        <div className="space-y-2 border-t border-border p-4">
+        {/* User Profile Widget */}
+        <div className="border-t border-border p-3 space-y-2">
+          <button
+            type="button"
+            onClick={() => setProfileOpen(true)}
+            className="w-full flex items-center justify-between gap-3 rounded-lg border border-border/80 bg-surface-0/60 p-2.5 hover:bg-surface-2 hover:border-accent/40 transition-colors text-left group"
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="flex size-8 items-center justify-center rounded-full bg-accent/20 text-accent font-bold text-xs shrink-0 border border-accent/30">
+                <User className="size-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-bold text-text-primary truncate">admin.user</p>
+                <p className="text-[10px] text-text-secondary truncate">{t.header.activeDirectory}</p>
+              </div>
+            </div>
+            <ChevronRight className="size-4 text-text-secondary group-hover:text-accent shrink-0 transition-transform group-hover:translate-x-0.5" />
+          </button>
+
           {demoOn && (
             <div className="flex items-center gap-2 rounded-md border border-warning/40 bg-warning/10 px-2.5 py-1.5 text-xs font-semibold text-warning">
               <FlaskConical className="size-3.5" />
-              Demo mode — sample data may render
+              {t.header.demoMode}
             </div>
           )}
-          <p className="text-xs text-text-secondary">Single pane of glass · v0.6</p>
+          <p className="text-[11px] text-text-secondary text-center">{t.header.version}</p>
         </div>
       </aside>
+
+      <UserProfileModal open={profileOpen} onClose={() => setProfileOpen(false)} />
     </>
   )
 }

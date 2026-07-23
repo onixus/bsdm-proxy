@@ -95,6 +95,7 @@ pub struct ControlApiState {
     wasm_hook: Option<Arc<std::sync::RwLock<crate::wasm_host::WasmHookEngine>>>,
     casb_engine: Arc<crate::casb::CasbEngine>,
     dlp_engine: Arc<crate::dlp::DlpEngine>,
+    auth_manager: Option<Arc<crate::auth::AuthManager>>,
 }
 
 impl ControlApiState {
@@ -112,6 +113,7 @@ impl ControlApiState {
         >,
         casb_engine: Arc<crate::casb::CasbEngine>,
         dlp_engine: Arc<crate::dlp::DlpEngine>,
+        auth_manager: Option<Arc<crate::auth::AuthManager>>,
     ) -> Self {
         Self {
             metrics,
@@ -126,6 +128,7 @@ impl ControlApiState {
             wasm_hook,
             casb_engine,
             dlp_engine,
+            auth_manager,
         }
     }
 
@@ -142,6 +145,7 @@ impl ControlApiState {
         >,
         casb_engine: Arc<crate::casb::CasbEngine>,
         dlp_engine: Arc<crate::dlp::DlpEngine>,
+        auth_manager: Option<Arc<crate::auth::AuthManager>>,
     ) -> Self {
         let api_token = std::env::var("CONTROL_API_TOKEN")
             .ok()
@@ -163,6 +167,7 @@ impl ControlApiState {
             wasm_hook,
             casb_engine,
             dlp_engine,
+            auth_manager,
         )
     }
 
@@ -208,6 +213,9 @@ impl ControlApiState {
             (&Method::POST, "/api/security/casb") => self.casb_update(body).await,
             (&Method::GET, "/api/security/dlp") => self.dlp_patterns(),
             (&Method::POST, "/api/security/dlp") => self.dlp_update(body).await,
+            (&Method::GET, "/api/auth/basic/users") => self.basic_users_list().await,
+            (&Method::POST, "/api/auth/basic/users") => self.basic_users_put(body).await,
+            (&Method::DELETE, "/api/auth/basic/users") => self.basic_users_delete(body).await,
             #[cfg(feature = "wasm")]
             (&Method::POST, "/api/wasm/reload") => self.wasm_reload(),
             _ => json_response(StatusCode::NOT_FOUND, r#"{"error":"not found"}"#),
@@ -528,6 +536,65 @@ impl ControlApiState {
             }
         }
     }
+
+    async fn basic_users_list(&self) -> Response<Body> {
+        let Some(auth) = &self.auth_manager else {
+            return json_response(StatusCode::SERVICE_UNAVAILABLE, r#"{"error":"Auth backend not enabled"}"#);
+        };
+        let users = auth.get_basic_users().await;
+        match serde_json::to_string(&users) {
+            Ok(body) => json_response(StatusCode::OK, &body),
+            Err(_) => json_response(StatusCode::INTERNAL_SERVER_ERROR, r#"{"error":"serialization failed"}"#),
+        }
+    }
+
+    async fn basic_users_put(&self, body: Bytes) -> Response<Body> {
+        let Some(auth) = &self.auth_manager else {
+            return json_response(StatusCode::SERVICE_UNAVAILABLE, r#"{"error":"Auth backend not enabled"}"#);
+        };
+        #[derive(Deserialize)]
+        struct PutReq {
+            username: String,
+            password: Option<String>,
+            role: String,
+        }
+        let req: PutReq = match serde_json::from_slice(&body) {
+            Ok(req) => req,
+            Err(_) => return json_response(StatusCode::BAD_REQUEST, r#"{"error":"invalid json"}"#),
+        };
+        if req.username.is_empty() || req.role.is_empty() {
+            return json_response(StatusCode::BAD_REQUEST, r#"{"error":"username and role cannot be empty"}"#);
+        }
+        match auth.put_basic_user(req.username.clone(), req.password, req.role).await {
+            Ok(_) => json_response(StatusCode::OK, r#"{"status":"ok"}"#),
+            Err(e) => {
+                let error_json = serde_json::json!({ "error": e });
+                json_response(StatusCode::BAD_REQUEST, &error_json.to_string())
+            }
+        }
+    }
+
+    async fn basic_users_delete(&self, body: Bytes) -> Response<Body> {
+        let Some(auth) = &self.auth_manager else {
+            return json_response(StatusCode::SERVICE_UNAVAILABLE, r#"{"error":"Auth backend not enabled"}"#);
+        };
+        #[derive(Deserialize)]
+        struct DelReq {
+            username: String,
+        }
+        let req: DelReq = match serde_json::from_slice(&body) {
+            Ok(req) => req,
+            Err(_) => return json_response(StatusCode::BAD_REQUEST, r#"{"error":"invalid json"}"#),
+        };
+        match auth.remove_basic_user(&req.username).await {
+            Ok(true) => json_response(StatusCode::OK, r#"{"status":"ok"}"#),
+            Ok(false) => json_response(StatusCode::NOT_FOUND, r#"{"error":"user not found"}"#),
+            Err(e) => {
+                let error_json = serde_json::json!({ "error": e });
+                json_response(StatusCode::INTERNAL_SERVER_ERROR, &error_json.to_string())
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -658,6 +725,7 @@ mod tests {
             None,
             Arc::new(crate::casb::CasbEngine::new()),
             Arc::new(crate::dlp::DlpEngine::new()),
+            None,
         )
     }
 
@@ -797,6 +865,7 @@ mod tests {
             None,
             Arc::new(crate::casb::CasbEngine::new()),
             Arc::new(crate::dlp::DlpEngine::new()),
+            None,
         );
         let resp = state
             .dispatch(

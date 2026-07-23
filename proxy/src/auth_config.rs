@@ -146,6 +146,7 @@ pub fn load_auth_config() -> AuthConfig {
         realm,
         cache_ttl: Duration::from_secs(cache_ttl_secs),
         conn_cache_ttl: Duration::from_secs(conn_cache_ttl_secs),
+        basic_users_file: std::env::var("BASIC_AUTH_USERS_FILE").ok(),
         #[cfg(feature = "auth-ldap")]
         ldap: load_ldap_config(enabled, backend),
         #[cfg(feature = "auth-ntlm")]

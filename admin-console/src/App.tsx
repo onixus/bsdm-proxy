@@ -11,6 +11,7 @@ import { SettingsPage } from './pages/Settings'
 import { ThreatScoresPage } from './pages/ThreatScores'
 import { WasmPluginsPage } from './pages/WasmPlugins'
 import { DataSecurityPage } from './pages/DataSecurity'
+import { Users } from './pages/Users'
 
 export function App() {
   return (
@@ -27,6 +28,7 @@ export function App() {
           <Route path="/wasm" element={<WasmPluginsPage />} />
           <Route path="/cluster" element={<ClusterMeshPage />} />
           <Route path="/ai-cache" element={<AiSemanticCachePage />} />
+          <Route path="/users" element={<Users />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

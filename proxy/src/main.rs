@@ -198,11 +198,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let auth_config = load_auth_config();
-    let auth = if auth_config.enabled {
-        Some(Arc::new(AuthManager::new(auth_config.clone())))
-    } else {
-        None
-    };
+    let auth = Some(Arc::new(AuthManager::new(auth_config.clone())));
 
     let proxy_policy = ProxyPolicy {
         acl_engine: policy_config.acl_engine.clone(),
@@ -242,7 +238,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         http_pipeline,
         metrics.clone(),
         mitm_enabled,
-        auth,
+        auth.clone(),
         &proxy_policy,
         hierarchy.clone(),
         digest_registry.clone(),
@@ -266,6 +262,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         service.wasm_hook.clone(),
         service.casb_engine(),
         service.dlp_engine(),
+        auth.clone(),
     ));
     info!(
         "Control plane API on :{}/api/stats · :{}/api/cache/purge · :{}/api/hierarchy/* · :{}/api/upstream/tls",
