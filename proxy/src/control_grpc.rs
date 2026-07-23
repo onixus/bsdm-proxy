@@ -210,6 +210,7 @@ mod tests {
             None,
             Arc::new(crate::casb::CasbEngine::new()),
             Arc::new(crate::dlp::DlpEngine::new()),
+            None,
         ))
     }
 
@@ -270,6 +271,7 @@ mod tests {
             None,
             Arc::new(crate::casb::CasbEngine::new()),
             Arc::new(crate::dlp::DlpEngine::new()),
+            None,
         ));
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

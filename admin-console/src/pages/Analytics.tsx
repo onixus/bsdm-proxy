@@ -3,6 +3,7 @@ import { Download, RefreshCw } from 'lucide-react'
 import { enrichLog, searchLogs, type EnrichedLog } from '../api/search'
 import { fetchThreatScores } from '../api/threatScores'
 import { useSourcedQuery } from '../hooks/useSourced'
+import { useLanguage, translations } from '../lib/i18n'
 import { Panel } from '../components/dashboard/MetricWidget'
 import { LineChart } from '../components/charts/LineChart'
 import { SegmentBar, type Segment } from '../components/charts/SegmentBar'
@@ -14,6 +15,9 @@ import { cacheStatusColor, seriesColor, STATUS_VARS } from '../components/charts
 import type { TsPoint } from '../lib/timeseries'
 
 export function AnalyticsPage() {
+  const [lang] = useLanguage()
+  const tr = translations[lang]
+
   const [days, setDays] = useState('7')
   const [limit, setLimit] = useState('1000')
 
@@ -23,98 +27,97 @@ export function AnalyticsPage() {
   const threats = useSourcedQuery(['threat-scores'], fetchThreatScores)
 
   const logs = useMemo(() => (logsQuery.data?.data ?? []).map(enrichLog), [logsQuery.data])
-  const agg = useMemo(() => aggregate(logs), [logs])
+  const agg = useMemo(() => aggregate(logs, tr), [logs, tr])
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold text-text-primary">Analytics</h1>
+            <h1 className="text-2xl font-bold text-text-primary">{tr.analytics.title}</h1>
             {logsQuery.data && <SourceBadge source={logsQuery.data.source} />}
           </div>
           <p className="text-sm text-text-secondary">
-            Aggregations over the retro-search sample — traffic mix, blocking activity, top talkers
+            {tr.analytics.subtitle}
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
           <Select
-            label="Window"
+            label={tr.analytics.window}
             value={days}
             onChange={(e) => setDays(e.target.value)}
             options={[
-              { value: '1', label: 'Last 24h' },
-              { value: '7', label: 'Last 7 days' },
-              { value: '30', label: 'Last 30 days' },
+              { value: '1', label: tr.analytics.last24h },
+              { value: '7', label: tr.analytics.last7d },
+              { value: '30', label: tr.analytics.last30d },
             ]}
           />
           <Select
-            label="Sample"
+            label={tr.analytics.sample}
             value={limit}
             onChange={(e) => setLimit(e.target.value)}
             options={[
-              { value: '500', label: '500 events' },
-              { value: '1000', label: '1000 events' },
-              { value: '5000', label: '5000 events' },
+              { value: '500', label: tr.analytics.events500 },
+              { value: '1000', label: tr.analytics.events1000 },
+              { value: '5000', label: tr.analytics.events5000 },
             ]}
           />
           <Button variant="secondary" onClick={() => logsQuery.refetch()} disabled={logsQuery.isFetching}>
             <RefreshCw className={`size-4 ${logsQuery.isFetching ? 'animate-spin' : ''}`} />
           </Button>
           <Button variant="secondary" onClick={() => exportSummary(agg)} disabled={logs.length === 0}>
-            <Download className="size-4" /> Summary CSV
+            <Download className="size-4" /> {tr.analytics.summaryCsv}
           </Button>
         </div>
       </div>
 
       {logsQuery.isPending && <SkeletonRows rows={6} />}
       {logsQuery.isError && (
-        <ErrorState title="Search API unreachable" detail={logsQuery.error.message} onRetry={() => logsQuery.refetch()} />
+        <ErrorState title={tr.analytics.apiError} detail={logsQuery.error.message} onRetry={() => logsQuery.refetch()} />
       )}
       {logsQuery.data && logs.length === 0 && (
-        <EmptyState message="No events in the selected window — analytics needs traffic in the Search index." />
+        <EmptyState message={tr.analytics.emptyIndex} />
       )}
 
       {logs.length > 0 && (
         <>
           <p className="text-xs text-text-secondary">
-            Sample: <span className="tabular-nums text-text-primary">{logs.length.toLocaleString()}</span> events,{' '}
-            {new Date(agg.tMin * 1000).toLocaleString()} → {new Date(agg.tMax * 1000).toLocaleString()}. Counts below
-            describe this sample, not total traffic.
+            {tr.analytics.samplePrefix} <span className="tabular-nums text-text-primary">{logs.length.toLocaleString()}</span> {tr.analytics.eventsSuffix}{' '}
+            {new Date(agg.tMin * 1000).toLocaleString()} → {new Date(agg.tMax * 1000).toLocaleString()}. {tr.analytics.countsNotice}
           </p>
 
-          <Panel title="Events over time">
+          <Panel title={tr.analytics.eventsOverTime}>
             <LineChart
               series={[
-                { name: 'All events', points: agg.overTime.all, slot: 0 },
-                { name: 'Blocked', points: agg.overTime.blocked, slot: 7 },
+                { name: tr.analytics.allEvents, points: agg.overTime.all, slot: 0 },
+                { name: tr.analytics.blocked, points: agg.overTime.blocked, slot: 7 },
               ]}
               height={220}
             />
           </Panel>
 
           <div className="grid gap-6 lg:grid-cols-3">
-            <Panel title="HTTP status mix">
+            <Panel title={tr.analytics.httpMix}>
               <SegmentBar segments={agg.statusSegments} />
             </Panel>
-            <Panel title="Cache disposition">
+            <Panel title={tr.analytics.cacheMix}>
               <SegmentBar segments={agg.cacheSegments} />
             </Panel>
-            <Panel title="Decision mix">
+            <Panel title={tr.analytics.decisionMix}>
               <SegmentBar segments={agg.decisionSegments} />
             </Panel>
           </div>
 
           <div className="grid gap-6 lg:grid-cols-3">
-            <Panel title="Top domains">
+            <Panel title={tr.analytics.topDomains}>
               <BarList items={agg.topDomains.map(([label, value]) => ({ label, value }))} />
             </Panel>
-            <Panel title="Top clients">
+            <Panel title={tr.analytics.topClients}>
               <BarList items={agg.topClients.map(([label, value]) => ({ label, value, color: seriesColor(1) }))} />
             </Panel>
-            <Panel title="Top blocked domains">
+            <Panel title={tr.analytics.topBlockedDomains}>
               {agg.topBlocked.length === 0 ? (
-                <EmptyState message="No blocked requests in this sample." />
+                <EmptyState message={tr.analytics.noBlockedRequests} />
               ) : (
                 <BarList items={agg.topBlocked.map(([label, value]) => ({ label, value, color: STATUS_VARS.critical }))} />
               )}
@@ -124,11 +127,11 @@ export function AnalyticsPage() {
       )}
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Panel title="Threat score severity" action={threats.data && <SourceBadge source={threats.data.source} />}>
-          {threats.isError && <EmptyState message="ML worker unreachable." />}
+        <Panel title={tr.analytics.threatSeverity} action={threats.data && <SourceBadge source={threats.data.source} />}>
+          {threats.isError && <EmptyState message={tr.analytics.mlUnreachable} />}
           {threats.data && <SegmentBar segments={severitySegments(threats.data.data.scores.map((s) => s.severity))} />}
         </Panel>
-        <Panel title="Threat scores by model">
+        <Panel title={tr.analytics.threatByModel}>
           {threats.data && threats.data.data.scores.length > 0 ? (
             <BarList
               items={countBy(threats.data.data.scores.map((s) => s.model))
@@ -136,7 +139,7 @@ export function AnalyticsPage() {
                 .map(([label, value], i) => ({ label, value, color: seriesColor(i) }))}
             />
           ) : (
-            <EmptyState message="No active scores." />
+            <EmptyState message={tr.analytics.noActiveScores} />
           )}
         </Panel>
       </div>
@@ -156,7 +159,7 @@ interface Aggregates {
   topBlocked: [string, number][]
 }
 
-function aggregate(logs: EnrichedLog[]): Aggregates {
+function aggregate(logs: EnrichedLog[], tr: any): Aggregates {
   const ts = logs.map((l) => l.ts)
   const tMin = ts.length ? Math.min(...ts) : 0
   const tMax = ts.length ? Math.max(...ts) : 1
@@ -181,10 +184,10 @@ function aggregate(logs: EnrichedLog[]): Aggregates {
     '5xx': STATUS_VARS.critical,
   }
   const decisions: Record<string, { label: string; color: string }> = {
-    none: { label: 'Allowed', color: STATUS_VARS.good },
-    acl: { label: 'ACL blocked', color: seriesColor(1) },
-    ml: { label: 'ML blocked', color: STATUS_VARS.critical },
-    threat: { label: 'Threat intel', color: STATUS_VARS.serious },
+    none: { label: tr.analytics.allowed, color: STATUS_VARS.good },
+    acl: { label: tr.analytics.aclBlocked, color: seriesColor(1) },
+    ml: { label: tr.analytics.mlBlocked, color: STATUS_VARS.critical },
+    threat: { label: tr.analytics.threatIntel, color: STATUS_VARS.serious },
   }
 
   return {

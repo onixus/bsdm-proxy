@@ -248,6 +248,10 @@ ICAP_URL=icap://127.0.0.1:1344/avscan
 
 # DNS Sinkhole Sidecar
 DNS_SINKHOLE_ENABLED=${ENABLE_DNS_SINKHOLE}
+
+# Security and API Control
+CONTROL_API_TOKEN=$(openssl rand -hex 16)
+ACL_API_TOKEN=$(openssl rand -hex 16)
 EOF
   chmod 0640 "${ENV_FILE}"
   echo -e "${GREEN}✓ Configured ${ENV_FILE}${NC}"

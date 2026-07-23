@@ -13,8 +13,12 @@ import { Button } from '../components/ui/Button'
 import { Panel } from '../components/dashboard/MetricWidget'
 import { PreviewBanner } from '../components/ui/DataState'
 import { useToast } from '../components/ui/Toast'
+import { useLanguage, translations } from '../lib/i18n'
 
 export function PoliciesPage() {
+  const [lang] = useLanguage()
+  const tr = translations[lang]
+
   const { toast } = useToast()
   const [data, setData] = useState<AclRulesResponse | null>(null)
   const [ebpfStats, setEbpfStats] = useState<EbpfStats | null>(null)
@@ -79,38 +83,38 @@ export function PoliciesPage() {
     <div className="mx-auto max-w-7xl space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-text-primary">Policies</h1>
+          <h1 className="text-2xl font-bold text-text-primary">{tr.policies.title}</h1>
           <p className="text-sm text-text-secondary">
-            Runtime ACL rules · default action:{' '}
+            {tr.policies.subtitle}{' '}
             <span className="font-mono text-text-primary">{data?.default_action ?? '—'}</span>
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="secondary" onClick={load} disabled={loading || busy}>
             <RefreshCw className={`size-4 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
+            {tr.policies.refresh}
           </Button>
           <Button variant="secondary" onClick={handlePersist} disabled={busy}>
             <Save className="size-4" />
-            Persist
+            {tr.policies.persist}
           </Button>
           <Button variant="primary" onClick={handleReload} disabled={busy}>
             <RotateCcw className={`size-4 ${busy ? 'animate-spin' : ''}`} />
-            Reload from file
+            {tr.policies.reload}
           </Button>
         </div>
       </div>
 
-      <Panel title={`Active rules (${data?.rules.length ?? 0})`}>
+      <Panel title={`${tr.policies.activeRules} (${data?.rules.length ?? 0})`}>
         <div className="hidden overflow-x-auto md:block">
           <table className="w-full min-w-[640px] text-left text-sm">
             <thead className="text-xs uppercase text-text-secondary">
               <tr>
-                <th className="pb-3 pr-4">Priority</th>
-                <th className="pb-3 pr-4">Name</th>
-                <th className="pb-3 pr-4">Type</th>
-                <th className="pb-3 pr-4">Action</th>
-                <th className="pb-3 pr-4">Status</th>
+                <th className="pb-3 pr-4">{tr.policies.priority}</th>
+                <th className="pb-3 pr-4">{tr.policies.name}</th>
+                <th className="pb-3 pr-4">{tr.policies.type}</th>
+                <th className="pb-3 pr-4">{tr.policies.action}</th>
+                <th className="pb-3 pr-4">{tr.policies.status}</th>
                 <th className="pb-3"> </th>
               </tr>
             </thead>
@@ -146,13 +150,13 @@ export function PoliciesPage() {
       </Panel>
 
       {/* eBPF XDP Kernel Bypass Panel */}
-      <Panel title="eBPF / XDP Kernel Packet Drop Bypass (L4 Hardware Layer)">
+      <Panel title={tr.policies.ebpfTitle}>
         <div className="space-y-4">
           <PreviewBanner feature="The eBPF/XDP stats view" />
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div className="rounded-md border border-border bg-surface-0 p-3">
               <div className="flex items-center justify-between text-xs text-text-secondary">
-                <span>Kernel XDP Mode</span>
+                <span>{tr.policies.xdpMode}</span>
                 <span className="rounded bg-success/20 px-2 py-0.5 font-mono text-[10px] font-bold text-success">
                   {ebpfStats?.enabled ? 'ACTIVE' : 'STUB / OFF'}
                 </span>
@@ -164,7 +168,7 @@ export function PoliciesPage() {
 
             <div className="rounded-md border border-border bg-surface-0 p-3">
               <div className="flex items-center justify-between text-xs text-text-secondary">
-                <span>Zero-CPU Packets Dropped</span>
+                <span>{tr.policies.zeroCpuDrops}</span>
                 <Zap className="size-4 text-accent" />
               </div>
               <div className="mt-2 text-lg font-bold font-mono text-text-primary">
@@ -174,7 +178,7 @@ export function PoliciesPage() {
 
             <div className="rounded-md border border-border bg-surface-0 p-3">
               <div className="flex items-center justify-between text-xs text-text-secondary">
-                <span>Kernel Drop Latency</span>
+                <span>{tr.policies.dropLatency}</span>
                 <Cpu className="size-4 text-success" />
               </div>
               <div className="mt-2 text-lg font-bold font-mono text-success">
@@ -187,10 +191,10 @@ export function PoliciesPage() {
             <table className="w-full text-left text-xs">
               <thead className="border-b border-border text-text-secondary uppercase">
                 <tr>
-                  <th className="py-2 pr-4">Blocked IP Address</th>
-                  <th className="py-2 pr-4">Reason / Rule</th>
-                  <th className="py-2 pr-4">Packets Dropped</th>
-                  <th className="py-2">Added Date</th>
+                  <th className="py-2 pr-4">{tr.policies.blockedIp}</th>
+                  <th className="py-2 pr-4">{tr.policies.reason}</th>
+                  <th className="py-2 pr-4">{tr.policies.packetsDropped}</th>
+                  <th className="py-2">{tr.policies.addedDate}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/50 text-text-primary font-mono">
@@ -209,7 +213,7 @@ export function PoliciesPage() {
       </Panel>
 
       <div className="rounded-lg border border-border bg-surface-0 p-4 text-sm text-text-secondary">
-        Live CRUD on metrics port:{' '}
+        {tr.policies.liveCrud}{' '}
         <code className="rounded bg-surface-2 px-1 font-mono text-xs">PUT/DELETE /api/acl/rules/:id</code>
         {' · '}
         <code className="rounded bg-surface-2 px-1 font-mono text-xs">POST /api/acl/persist</code>

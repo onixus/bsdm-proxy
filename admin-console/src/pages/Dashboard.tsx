@@ -13,10 +13,14 @@ import { Button } from '../components/ui/Button'
 import { ErrorState, EmptyState, Skeleton, SourceBadge } from '../components/ui/DataState'
 import { severityBadge } from '../theme/tokens'
 import { cacheStatusColor, formatNumber, seriesColor, STATUS_VARS } from '../components/charts/common'
+import { useLanguage, translations } from '../lib/i18n'
 
 const POLL_MS = 10_000
 
 export function DashboardPage() {
+  const [lang] = useLanguage()
+  const tr = translations[lang]
+
   const telemetry = useSourcedQuery(['telemetry'], fetchTelemetry, { refetchInterval: POLL_MS })
   const threats = useSourcedQuery(['threat-scores'], fetchThreatScores, { refetchInterval: 60_000 })
   const peers = useSourcedQuery(['hierarchy-peers'], fetchHierarchyPeers, { refetchInterval: 60_000 })
@@ -28,16 +32,16 @@ export function DashboardPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold text-text-primary">Dashboard</h1>
+            <h1 className="text-2xl font-bold text-text-primary">{tr.dashboard.title}</h1>
             {telemetry.data && <SourceBadge source={telemetry.data.source} />}
           </div>
           <p className="text-sm text-text-secondary">
-            Proxy health, traffic, cache and threat overview · auto-refresh {POLL_MS / 1000}s
+            {tr.dashboard.subtitle} · авто-обновление каждые {POLL_MS / 1000} сек
           </p>
         </div>
         <Button variant="secondary" onClick={() => telemetry.refetch()} disabled={telemetry.isFetching}>
           <RefreshCw className={`size-4 ${telemetry.isFetching ? 'animate-spin' : ''}`} />
-          Refresh
+          {tr.common.refresh}
         </Button>
       </div>
 
@@ -51,27 +55,27 @@ export function DashboardPage() {
 
       {telemetry.isError && (
         <ErrorState
-          title="Proxy control API unreachable"
+          title="API управления прокси недоступен (Control API Unreachable)"
           detail={telemetry.error.message}
           onRetry={() => telemetry.refetch()}
         />
       )}
 
-      {t && <HealthRow t={t} />}
+      {t && <HealthRow t={t} lang={lang} />}
 
       {t && (
         <div className="grid gap-6 lg:grid-cols-2">
-          <Panel title="Request rate (req/s)">
+          <Panel title="Интенсивность запросов (запросов/сек / Request Rate)">
             <LineChart
               series={[
-                { name: 'Requests', points: t.reqRate, slot: 0 },
-                { name: 'ACL denies', points: t.denyRate, slot: 1 },
-                { name: '5xx errors', points: t.errRate, slot: 7 },
+                { name: 'Запросы (Requests)', points: t.reqRate, slot: 0 },
+                { name: 'Блокировки ACL', points: t.denyRate, slot: 1 },
+                { name: 'Ошибки 5xx', points: t.errRate, slot: 7 },
               ]}
               area={false}
             />
           </Panel>
-          <Panel title="Cache hit ratio (%)">
+          <Panel title="Эффективность попаданий в кэш (% Cache Hit Ratio)">
             <LineChart series={[{ name: 'Hit ratio', points: t.hitRatio, slot: 2 }]} area yMax={100} unit="%" />
           </Panel>
         </div>
@@ -79,22 +83,22 @@ export function DashboardPage() {
 
       {t && (
         <div className="grid gap-6 lg:grid-cols-3">
-          <Panel title="HTTP status mix (cumulative)">
+          <Panel title="Распределение HTTP статусов">
             <SegmentBar segments={statusSegments(t.statusClasses)} />
           </Panel>
-          <Panel title="Cache disposition (cumulative)">
+          <Panel title="Статусы обработки кэша">
             <SegmentBar segments={cacheSegments(t.cacheStatus)} />
           </Panel>
-          <Panel title="ACL decisions (cumulative)">
+          <Panel title="Решения системы фильтрации (ACL)">
             <SegmentBar
               segments={[
-                { label: 'allow', value: t.aclDecisions.allow ?? 0, color: STATUS_VARS.good },
-                { label: 'deny', value: (t.aclDecisions.deny ?? 0) + (t.aclDecisions.block ?? 0), color: STATUS_VARS.critical },
+                { label: 'Разрешено (allow)', value: t.aclDecisions.allow ?? 0, color: STATUS_VARS.good },
+                { label: 'Заблокировано (deny)', value: (t.aclDecisions.deny ?? 0) + (t.aclDecisions.block ?? 0), color: STATUS_VARS.critical },
               ]}
             />
             {t.rateLimitRejected > 0 && (
               <p className="mt-3 text-xs text-text-secondary">
-                Rate-limit rejections: <span className="tabular-nums text-warning">{formatNumber(t.rateLimitRejected)}</span>
+                Отклонено по лимиту (Rate-limit): <span className="tabular-nums text-warning">{formatNumber(t.rateLimitRejected)}</span>
               </p>
             )}
           </Panel>
@@ -103,15 +107,15 @@ export function DashboardPage() {
 
       <div className="grid gap-6 lg:grid-cols-3">
         {t && (
-          <Panel title="Top upstream hosts">
+          <Panel title="Топ целевых серверов (Upstream Hosts)">
             {t.topUpstreams.length === 0 ? (
-              <EmptyState message="No upstream metrics yet — traffic will populate this panel." />
+              <EmptyState message="Метрики upstream отсутствуют — данные появятся при поступлении трафика." />
             ) : (
               <BarList
                 items={t.topUpstreams.map((u) => ({
                   label: u.host,
                   value: u.requests,
-                  extra: u.errors > 0 ? `${formatNumber(u.errors)} err` : undefined,
+                  extra: u.errors > 0 ? `${formatNumber(u.errors)} ошиб.` : undefined,
                 }))}
               />
             )}
@@ -119,12 +123,12 @@ export function DashboardPage() {
         )}
 
         <Panel
-          title="Top ML anomalies (UEBA)"
+          title="Обнаруженные аномалии ML (UEBA)"
           action={threats.data && <SourceBadge source={threats.data.source} />}
         >
-          {threats.isError && <EmptyState message="ML worker unreachable — no scores." />}
+          {threats.isError && <EmptyState message="Модуль ml-worker недоступен — оценки аномалий отсутствуют." />}
           {threats.data && threats.data.data.scores.length === 0 && (
-            <EmptyState message="No active threat scores in the write-back snapshot." />
+            <EmptyState message="Активные угрозы в текущем снапшоте не обнаружены." />
           )}
           {threats.data && threats.data.data.scores.length > 0 && (
             <ul className="space-y-3">
@@ -137,7 +141,7 @@ export function DashboardPage() {
                       <Link
                         to={`/logs?q=${encodeURIComponent(entityQuery(row.entity_id))}`}
                         className="font-mono text-sm text-text-primary underline-offset-2 hover:underline"
-                        title="Investigate related traffic"
+                        title="Просмотреть логи данного объекта"
                       >
                         {row.entity_id}
                       </Link>
@@ -153,11 +157,11 @@ export function DashboardPage() {
         </Panel>
 
         <Panel
-          title="Hierarchy peers (ICP/HTCP)"
+          title="Ноды иерархии кэша (ICP/HTCP)"
           action={peers.data && <SourceBadge source={peers.data.source} />}
         >
-          {peers.isError && <EmptyState message="Hierarchy API unreachable or hierarchy disabled." />}
-          {peers.data && peers.data.data.length === 0 && <EmptyState message="No cache hierarchy peers configured." />}
+          {peers.isError && <EmptyState message="API иерархии недоступно или отключено." />}
+          {peers.data && peers.data.data.length === 0 && <EmptyState message="Соседние ноды кэширования не настроены." />}
           {peers.data && peers.data.data.length > 0 && (
             <ul className="divide-y divide-border/50 text-sm">
               {peers.data.data.map((p, i) => (
@@ -169,7 +173,7 @@ export function DashboardPage() {
                     </p>
                   </div>
                   <span className={`text-xs font-semibold ${p.state === 'dead' ? 'text-danger' : 'text-success'}`}>
-                    {String(p.state ?? 'alive')}
+                    {String(p.state ?? 'alive') === 'alive' ? 'Активен' : 'Недоступен'}
                   </span>
                 </li>
               ))}
@@ -181,20 +185,22 @@ export function DashboardPage() {
   )
 }
 
-function HealthRow({ t }: { t: Telemetry }) {
+function HealthRow({ t, lang }: { t: Telemetry; lang: 'ru' | 'en' }) {
+  const tr = translations[lang]
   const errShare = shareOf(t.statusClasses, '5xx')
   const latP95Ms = t.latency ? t.latency.p95 * 1000 : null
+
   return (
     <WidgetGrid>
       <StatTile
-        label="Requests / s"
+        label="Интенсивность (Запросы/сек)"
         value={t.reqRate.length ? formatNumber(t.reqRate[t.reqRate.length - 1].v) : '—'}
         trend={t.reqRate}
         trendColor={seriesColor(0)}
-        hint={`Total since start: ${t.totalRequests.toLocaleString()}`}
+        hint={`Всего обработано: ${t.totalRequests.toLocaleString()}`}
       />
       <StatTile
-        label="Error share (5xx)"
+        label="Доля ошибок (5xx)"
         value={errShare === null ? '—' : (errShare * 100).toFixed(2)}
         unit="%"
         trend={t.errRate}
@@ -202,30 +208,30 @@ function HealthRow({ t }: { t: Telemetry }) {
         status={errShare !== null && errShare > 0.05 ? 'error' : errShare !== null && errShare > 0.01 ? 'warn' : 'ok'}
       />
       <StatTile
-        label="Cache hit rate"
+        label={tr.dashboard.cacheHitRatio}
         value={t.stats ? (t.stats.cache.hit_ratio * 100).toFixed(1) : '—'}
         unit="%"
         trend={t.hitRatio}
         trendColor={seriesColor(2)}
-        hint={t.stats ? `${t.stats.cache.entries}/${t.stats.cache.capacity} L1 entries · ${formatNumber(t.cacheEvictions)} evictions` : undefined}
+        hint={t.stats ? `${t.stats.cache.entries}/${t.stats.cache.capacity} L1 записей · ${formatNumber(t.cacheEvictions)} вытеснено` : undefined}
       />
       <StatTile
-        label="Latency p95"
+        label="Задержка (Latency p95)"
         value={latP95Ms === null ? '—' : formatNumber(latP95Ms)}
-        unit="ms"
+        unit="мс"
         trend={t.latP95}
         trendColor={seriesColor(3)}
-        hint={t.latency ? `p50 ${(t.latency.p50 * 1000).toFixed(1)}ms · p99 ${(t.latency.p99 * 1000).toFixed(0)}ms` : 'Histogram not available'}
+        hint={t.latency ? `p50 ${(t.latency.p50 * 1000).toFixed(1)}мс · p99 ${(t.latency.p99 * 1000).toFixed(0)}мс` : 'Гистограмма недоступна'}
         status={latP95Ms !== null && latP95Ms > 500 ? 'warn' : 'ok'}
       />
       <StatTile
-        label="In flight"
+        label={tr.dashboard.activeConnections}
         value={t.stats ? String(t.stats.requests_in_flight) : '—'}
         trend={t.inFlight}
         trendColor={seriesColor(4)}
       />
       <StatTile
-        label="Uptime"
+        label="Время непрерывной работы"
         value={t.stats ? formatUptime(t.stats.uptime_secs) : '—'}
         hint={t.stats?.service}
       />
@@ -259,7 +265,6 @@ function cacheSegments(cache: Record<string, number>): Segment[] {
   return entries.map(([label, value]) => ({ label, value, color: cacheStatusColor(label) }))
 }
 
-/** client_ip|domain composite ids → search the domain part. */
 function entityQuery(entityId: string): string {
   const parts = entityId.split('|')
   return parts[parts.length - 1]

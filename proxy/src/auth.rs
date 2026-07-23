@@ -202,8 +202,9 @@ pub struct AuthConfig {
     pub backend: AuthBackend,
     pub realm: String,
     pub cache_ttl: Duration,
-    /// Per-TCP-connection auth cache TTL (`AUTH_CONN_CACHE_TTL_SECONDS`; `0` = disabled).
     pub conn_cache_ttl: Duration,
+    /// JSON file containing local basic auth users
+    pub basic_users_file: Option<String>,
     #[cfg(feature = "auth-ldap")]
     pub ldap: Option<LdapConfig>,
     #[cfg(feature = "auth-ntlm")]
@@ -220,6 +221,7 @@ impl Default for AuthConfig {
             realm: "BSDM-Proxy".to_string(),
             cache_ttl: Duration::from_secs(300),
             conn_cache_ttl: Duration::from_secs(300),
+            basic_users_file: None,
             #[cfg(feature = "auth-ldap")]
             ldap: None,
             #[cfg(feature = "auth-ntlm")]
@@ -297,6 +299,14 @@ impl ConnAuthCache {
     }
 }
 
+/// A user stored in the local basic authentication database.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BasicUser {
+    pub username: String,
+    pub password_hash: String,
+    pub role: String,
+}
+
 fn proxy_auth_fingerprint<T>(req: &Request<T>, salt: &[u8]) -> Option<String> {
     let value = req.headers().get(PROXY_AUTHORIZATION)?.to_str().ok()?;
     Some(CachedUser::hash_password(value, salt))
@@ -306,6 +316,8 @@ fn proxy_auth_fingerprint<T>(req: &Request<T>, salt: &[u8]) -> Option<String> {
 pub struct AuthManager {
     config: AuthConfig,
     user_cache: Arc<RwLock<HashMap<String, CachedUser>>>,
+    /// Local basic auth users database, loaded from JSON.
+    pub basic_users: Arc<RwLock<HashMap<String, BasicUser>>>,
     /// Per-process random salt mixed into cached password hashes so they can't be
     /// matched against precomputed dictionaries if process memory is ever exposed.
     salt: [u8; 16],
@@ -344,9 +356,26 @@ impl AuthManager {
         #[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]
         let sspi_engine = build_sspi_engine(&config).map(Arc::new);
 
+        let mut initial_basic_users = HashMap::new();
+        if let Some(path) = &config.basic_users_file {
+            if let Ok(data) = std::fs::read_to_string(path) {
+                if let Ok(users) = serde_json::from_str::<Vec<BasicUser>>(&data) {
+                    for user in users {
+                        initial_basic_users.insert(user.username.clone(), user);
+                    }
+                    info!("Loaded {} basic auth users from {}", initial_basic_users.len(), path);
+                } else {
+                    warn!("Failed to parse basic users file: {}", path);
+                }
+            } else {
+                warn!("Basic users file not found or unreadable, starting empty: {}", path);
+            }
+        }
+
         Self {
             config,
             user_cache: Arc::new(RwLock::new(HashMap::new())),
+            basic_users: Arc::new(RwLock::new(initial_basic_users)),
             salt: rand::random(),
             #[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]
             handshake_sessions: Arc::new(RwLock::new(HashMap::new())),
@@ -631,19 +660,90 @@ impl AuthManager {
         Ok(user_info)
     }
 
-    /// Basic authentication (no external validation)
+    /// Basic authentication (local users file)
     async fn authenticate_basic(
         &self,
         username: &str,
-        _password: &str,
+        password: &str,
     ) -> Result<UserInfo, String> {
-        Ok(UserInfo {
-            username: username.to_string(),
-            display_name: Some(username.to_string()),
-            email: None,
-            groups: vec![],
-            authenticated_at: Instant::now(),
-        })
+        let guard = self.basic_users.read().await;
+        if let Some(user) = guard.get(username) {
+            let hash = Self::hash_password_stable(password);
+            if user.password_hash == hash {
+                return Ok(UserInfo {
+                    username: username.to_string(),
+                    display_name: Some(username.to_string()),
+                    email: None,
+                    groups: vec![user.role.clone()],
+                    authenticated_at: Instant::now(),
+                });
+            }
+        }
+        Err("Invalid username or password".to_string())
+    }
+
+    /// Sync basic users to disk if a file is configured
+    pub async fn sync_basic_users_to_disk(&self) -> Result<(), String> {
+        if let Some(path) = &self.config.basic_users_file {
+            let guard = self.basic_users.read().await;
+            let users: Vec<BasicUser> = guard.values().cloned().collect();
+            let json = serde_json::to_string_pretty(&users)
+                .map_err(|e| format!("Failed to serialize basic users: {}", e))?;
+            tokio::fs::write(path, json)
+                .await
+                .map_err(|e| format!("Failed to write basic users to disk: {}", e))?;
+        }
+        Ok(())
+    }
+
+    pub fn hash_password_stable(password: &str) -> String {
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(password.as_bytes());
+        hex::encode(hasher.finalize())
+    }
+
+    /// Add or update a basic user
+    pub async fn put_basic_user(&self, username: String, password: Option<String>, role: String) -> Result<(), String> {
+        {
+            let mut guard = self.basic_users.write().await;
+            let password_hash = if let Some(p) = password {
+                Self::hash_password_stable(&p)
+            } else if let Some(existing) = guard.get(&username) {
+                existing.password_hash.clone()
+            } else {
+                return Err("Password is required for new users".to_string());
+            };
+            guard.insert(
+                username.clone(),
+                BasicUser {
+                    username,
+                    password_hash,
+                    role,
+                },
+            );
+        }
+        self.sync_basic_users_to_disk().await
+    }
+
+    /// Remove a basic user
+    pub async fn remove_basic_user(&self, username: &str) -> Result<bool, String> {
+        let removed = {
+            let mut guard = self.basic_users.write().await;
+            guard.remove(username).is_some()
+        };
+        if removed {
+            self.sync_basic_users_to_disk().await?;
+        }
+        Ok(removed)
+    }
+
+    /// List all basic users (without password hashes)
+    pub async fn get_basic_users(&self) -> Vec<BasicUser> {
+        let guard = self.basic_users.read().await;
+        guard.values().cloned().map(|mut u| {
+            u.password_hash = "".to_string(); // Redact password hashes
+            u
+        }).collect()
     }
 
     /// LDAP authentication

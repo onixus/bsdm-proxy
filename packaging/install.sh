@@ -95,6 +95,10 @@ fi
 install -d -m 0755 "${ETC_DIR}"
 if [[ ! -f "${ETC_DIR}/bsdm-proxy.env" ]]; then
   install -m 0640 "${SCRIPT_DIR}/config/bsdm-proxy.env.example" "${ETC_DIR}/bsdm-proxy.env"
+  echo "" >> "${ETC_DIR}/bsdm-proxy.env"
+  echo "# Security and API Control" >> "${ETC_DIR}/bsdm-proxy.env"
+  echo "CONTROL_API_TOKEN=$(openssl rand -hex 16)" >> "${ETC_DIR}/bsdm-proxy.env"
+  echo "ACL_API_TOKEN=$(openssl rand -hex 16)" >> "${ETC_DIR}/bsdm-proxy.env"
   echo "Installed ${ETC_DIR}/bsdm-proxy.env"
 fi
 if [[ ! -f "${ETC_DIR}/cache-indexer.env" ]]; then

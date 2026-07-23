@@ -10,6 +10,7 @@ import {
   type LogFilters,
 } from '../api/search'
 import { useSourcedQuery } from '../hooks/useSourced'
+import { useLanguage, translations } from '../lib/i18n'
 import { Button } from '../components/ui/Button'
 import { Input, Select } from '../components/ui/Form'
 import { Modal } from '../components/ui/Modal'
@@ -20,6 +21,9 @@ const PAGE_SIZE = 25
 const TAIL_MS = 5_000
 
 export function LogsPage() {
+  const [lang] = useLanguage()
+  const tr = translations[lang]
+
   const [searchParams, setSearchParams] = useSearchParams()
 
   // Server-side query (submitted on Search).
@@ -78,17 +82,17 @@ export function LogsPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold text-text-primary">Traffic logs</h1>
+            <h1 className="text-2xl font-bold text-text-primary">{tr.logs.title}</h1>
             {result.data && <SourceBadge source={result.data.source} />}
           </div>
           <p className="text-sm text-text-secondary">
-            Retro-search with client-side drill-down · click a row for decision details and session timeline
+            {tr.logs.subtitle}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant={tail ? 'primary' : 'secondary'} onClick={() => setTail((v) => !v)}>
             {tail ? <Pause className="size-4" /> : <Play className="size-4" />}
-            {tail ? 'Tailing 5s' : 'Live tail'}
+            {tail ? tr.logs.tailing : tr.logs.liveTail}
           </Button>
           <Button variant="secondary" onClick={() => exportCsv(filtered)} disabled={filtered.length === 0}>
             <Download className="size-4" /> CSV
@@ -104,33 +108,33 @@ export function LogsPage() {
           submit()
         }}
       >
-        <Input label="Domain" placeholder="example.com" value={domain} onChange={(e) => setDomain(e.target.value)} />
-        <Input label="Username" placeholder="jdoe" value={username} onChange={(e) => setUsername(e.target.value)} />
+        <Input label={tr.logs.domain} placeholder="example.com" value={domain} onChange={(e) => setDomain(e.target.value)} />
+        <Input label={tr.logs.username} placeholder="jdoe" value={username} onChange={(e) => setUsername(e.target.value)} />
         <Select
-          label="Window"
+          label={tr.logs.window}
           value={days}
           onChange={(e) => setDays(e.target.value)}
           options={[
-            { value: '1', label: 'Last 24h' },
-            { value: '7', label: 'Last 7 days' },
-            { value: '30', label: 'Last 30 days' },
-            { value: '90', label: 'Last 90 days' },
+            { value: '1', label: tr.logs.last24h },
+            { value: '7', label: tr.logs.last7d },
+            { value: '30', label: tr.logs.last30d },
+            { value: '90', label: tr.logs.last90d },
           ]}
         />
         <Select
-          label="Fetch limit"
+          label={tr.logs.fetchLimit}
           value={limit}
           onChange={(e) => setLimit(e.target.value)}
           options={[
-            { value: '100', label: '100 rows' },
-            { value: '200', label: '200 rows' },
-            { value: '500', label: '500 rows' },
-            { value: '1000', label: '1000 rows' },
+            { value: '100', label: tr.logs.rows100 },
+            { value: '200', label: tr.logs.rows200 },
+            { value: '500', label: tr.logs.rows500 },
+            { value: '1000', label: tr.logs.rows1000 },
           ]}
         />
         <div className="flex items-end">
           <Button type="submit" disabled={result.isFetching} className="w-full">
-            <Search className="size-4" /> Search
+            <Search className="size-4" /> {tr.common.search.replace("...", "")}
           </Button>
         </div>
       </form>
@@ -138,45 +142,45 @@ export function LogsPage() {
       {/* Client-side filter row */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <Input
-          label="Client IP contains"
+          label={tr.logs.clientIp}
           placeholder="10.0.1."
           value={filters.clientIp}
           onChange={(e) => updateFilter('clientIp', e.target.value)}
         />
         <Select
-          label="Status class"
+          label={tr.logs.statusClass}
           value={filters.statusClass}
           onChange={(e) => updateFilter('statusClass', e.target.value)}
           options={[
-            { value: 'all', label: 'All statuses' },
-            { value: '2xx', label: '2xx success' },
-            { value: '3xx', label: '3xx redirect' },
-            { value: '4xx', label: '4xx client error' },
-            { value: '5xx', label: '5xx server error' },
+            { value: 'all', label: tr.logs.allStatuses },
+            { value: '2xx', label: tr.logs.success2xx },
+            { value: '3xx', label: tr.logs.redirect3xx },
+            { value: '4xx', label: tr.logs.clientErr4xx },
+            { value: '5xx', label: tr.logs.serverErr5xx },
           ]}
         />
         <Select
-          label="Method"
+          label={tr.logs.method}
           value={filters.method}
           onChange={(e) => updateFilter('method', e.target.value)}
-          options={[{ value: 'all', label: 'All methods' }, ...methods.map((m) => ({ value: m, label: m }))]}
+          options={[{ value: 'all', label: tr.logs.allMethods }, ...methods.map((m) => ({ value: m, label: m }))]}
         />
         <Select
-          label="Cache status"
+          label={tr.logs.cacheStatus}
           value={filters.cacheStatus}
           onChange={(e) => updateFilter('cacheStatus', e.target.value)}
-          options={[{ value: 'all', label: 'All' }, ...cacheStatuses.map((c) => ({ value: c, label: c }))]}
+          options={[{ value: 'all', label: tr.logs.all }, ...cacheStatuses.map((c) => ({ value: c, label: c }))]}
         />
         <Select
-          label="Decision"
+          label={tr.logs.decision}
           value={filters.blockReason}
           onChange={(e) => updateFilter('blockReason', e.target.value)}
           options={[
-            { value: 'all', label: 'All decisions' },
-            { value: 'none', label: 'Allowed' },
-            { value: 'acl', label: 'ACL blocked' },
-            { value: 'ml', label: 'ML / UEBA blocked' },
-            { value: 'threat', label: 'Threat intel blocked' },
+            { value: 'all', label: tr.logs.allDecisions },
+            { value: 'none', label: tr.logs.allowed },
+            { value: 'acl', label: tr.logs.aclBlocked },
+            { value: 'ml', label: tr.logs.mlBlocked },
+            { value: 'threat', label: tr.logs.threatBlocked },
           ]}
         />
       </div>
@@ -184,19 +188,19 @@ export function LogsPage() {
       {sessionFilter && (
         <div className="flex items-center gap-3 rounded-md border border-accent/40 bg-accent/10 px-4 py-2 text-sm">
           <span className="text-text-primary">
-            Session <code className="font-mono text-accent">{sessionFilter}</code>
+            {tr.logs.session} <code className="font-mono text-accent">{sessionFilter}</code>
           </span>
           <button type="button" className="text-xs text-text-secondary underline" onClick={() => setSessionFilter(null)}>
-            clear
+            {tr.logs.clear}
           </button>
         </div>
       )}
 
       {result.isPending && <SkeletonRows rows={8} />}
       {result.isError && (
-        <ErrorState title="Search API unreachable" detail={result.error.message} onRetry={() => result.refetch()} />
+        <ErrorState title={tr.logs.apiErrorTitle} detail={result.error.message} onRetry={() => result.refetch()} />
       )}
-      {result.data && filtered.length === 0 && <EmptyState message="No log rows match the current query and filters." />}
+      {result.data && filtered.length === 0 && <EmptyState message={tr.logs.emptyMessage} />}
 
       {filtered.length > 0 && (
         <>
@@ -204,15 +208,15 @@ export function LogsPage() {
             <table className="w-full min-w-[760px] text-left text-sm">
               <thead className="border-b border-border bg-surface-2 text-xs uppercase text-text-secondary">
                 <tr>
-                  <th className="px-4 py-3">Time</th>
-                  <th className="px-4 py-3">Client</th>
-                  <th className="px-4 py-3">User</th>
-                  <th className="px-4 py-3">Method</th>
-                  <th className="px-4 py-3">Domain</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3">Cache</th>
-                  <th className="px-4 py-3">Decision</th>
-                  <th className="px-4 py-3">Session</th>
+                  <th className="px-4 py-3">{tr.logs.time}</th>
+                  <th className="px-4 py-3">{tr.logs.client}</th>
+                  <th className="px-4 py-3">{tr.logs.user}</th>
+                  <th className="px-4 py-3">{tr.logs.method}</th>
+                  <th className="px-4 py-3">{tr.logs.domain}</th>
+                  <th className="px-4 py-3">{tr.logs.status}</th>
+                  <th className="px-4 py-3">{tr.logs.cacheStatus}</th>
+                  <th className="px-4 py-3">{tr.logs.decision}</th>
+                  <th className="px-4 py-3">{tr.logs.session}</th>
                 </tr>
               </thead>
               <tbody>

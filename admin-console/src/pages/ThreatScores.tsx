@@ -7,6 +7,7 @@ import {
   type ThreatScoreEntry,
 } from '../api/threatScores'
 import { useSourcedQuery } from '../hooks/useSourced'
+import { useLanguage, translations } from '../lib/i18n'
 import { Button } from '../components/ui/Button'
 import { Panel } from '../components/dashboard/MetricWidget'
 import { ErrorState, SourceBadge } from '../components/ui/DataState'
@@ -15,6 +16,9 @@ import { Modal } from '../components/ui/Modal'
 import { severityBadge } from '../theme/tokens'
 
 export function ThreatScoresPage() {
+  const [lang] = useLanguage()
+  const tr = translations[lang]
+
   const result = useSourcedQuery(['threat-scores'], fetchThreatScores, { refetchInterval: 60_000 })
   const snapshot = result.data?.data ?? { scores: [] as ThreatScoreEntry[] }
   const loading = result.isFetching
@@ -39,27 +43,27 @@ export function ThreatScoresPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold text-text-primary">Threat scores</h1>
+            <h1 className="text-2xl font-bold text-text-primary">{tr.threatScores.title}</h1>
             {result.data && <SourceBadge source={result.data.source} />}
           </div>
           <p className="text-sm text-text-secondary">
-            M5.5 write-back snapshot from ml-worker — proxy polls this async (O(1) hot path)
+            {tr.threatScores.subtitle}
           </p>
           {'generated_at' in snapshot && snapshot.generated_at && (
             <p className="mt-1 font-mono text-xs text-text-secondary">
-              Generated {new Date(snapshot.generated_at).toLocaleString()}
+              {tr.threatScores.generated} {new Date(snapshot.generated_at).toLocaleString()}
             </p>
           )}
         </div>
         <Button variant="secondary" onClick={() => result.refetch()} disabled={loading}>
           <RefreshCw className={`size-4 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
+          {tr.threatScores.refresh}
         </Button>
       </div>
 
       {result.isError && (
         <ErrorState
-          title="ML worker unreachable"
+          title={tr.threatScores.mlUnreachable}
           detail={result.error.message}
           onRetry={() => result.refetch()}
         />
@@ -77,15 +81,15 @@ export function ThreatScoresPage() {
                 : 'border-border text-text-secondary hover:bg-surface-2'
             }`}
           >
-            {m === 'all' ? 'All models' : m}
+            {m === 'all' ? tr.threatScores.allModels : m}
           </button>
         ))}
       </div>
 
-      <Panel title={`Active scores (${rows.length})`}>
+      <Panel title={`${tr.threatScores.activeScores} (${rows.length})`}>
         {rows.length === 0 ? (
           <p className="text-sm text-text-secondary">
-            No scores in snapshot. Configure ml-worker with write-back enabled and ensure scoring cycles run.
+            {tr.threatScores.noScores}
           </p>
         ) : (
           <>
@@ -93,12 +97,12 @@ export function ThreatScoresPage() {
               <table className="w-full min-w-[720px] text-left text-sm">
                 <thead className="border-b border-border text-xs uppercase text-text-secondary">
                   <tr>
-                    <th className="px-3 py-2">Entity</th>
-                    <th className="px-3 py-2">Type</th>
-                    <th className="px-3 py-2">Score</th>
-                    <th className="px-3 py-2">Severity</th>
-                    <th className="px-3 py-2">Model</th>
-                    <th className="px-3 py-2">Expires</th>
+                    <th className="px-3 py-2">{tr.threatScores.entity}</th>
+                    <th className="px-3 py-2">{tr.threatScores.type}</th>
+                    <th className="px-3 py-2">{tr.threatScores.score}</th>
+                    <th className="px-3 py-2">{tr.threatScores.severity}</th>
+                    <th className="px-3 py-2">{tr.threatScores.model}</th>
+                    <th className="px-3 py-2">{tr.threatScores.expires}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -153,15 +157,18 @@ export function ThreatScoresPage() {
         )}
       </Panel>
 
-      <ScoreDetailModal entry={selected} onClose={() => setSelected(null)} />
+      <ScoreDetailModal tr={tr} entry={selected} onClose={() => setSelected(null)} />
     </div>
   )
 }
 
 function ScoreDetailModal({
+  tr,
+
   entry,
   onClose,
 }: {
+  tr: any
   entry: ThreatScoreEntry | null
   onClose: () => void
 }) {
@@ -169,15 +176,15 @@ function ScoreDetailModal({
   const factors = factorsForThreatScore(entry)
 
   return (
-    <Modal open onClose={onClose} title="Threat score explainability" wide>
+    <Modal open onClose={onClose} title={tr.threatScores.explainabilityTitle} wide>
       <div className="space-y-4">
         <div className="grid gap-2 text-sm sm:grid-cols-2">
           <div>
-            <span className="text-text-secondary">Entity</span>
+            <span className="text-text-secondary">{tr.threatScores.entity}</span>
             <p className="font-mono font-medium text-text-primary">{entry.entity_id}</p>
           </div>
           <div>
-            <span className="text-text-secondary">Type</span>
+            <span className="text-text-secondary">{tr.threatScores.type}</span>
             <p className="font-medium text-text-primary">{entry.entity_type}</p>
           </div>
         </div>
@@ -187,10 +194,10 @@ function ScoreDetailModal({
           to={`/logs?q=${encodeURIComponent(entry.entity_id.split('|').pop() ?? entry.entity_id)}`}
           className="inline-flex items-center gap-2 rounded-md border border-accent/40 bg-accent/10 px-3 py-2 text-sm font-medium text-accent hover:bg-accent/20"
         >
-          <Search className="size-4" /> Investigate related traffic
+          <Search className="size-4" /> {tr.threatScores.investigateTraffic}
         </Link>
         <p className="text-xs text-text-secondary">
-          Scored {entry.scored_at} · expires {entry.expires_at}. Proxy enriches{' '}
+          {tr.threatScores.scoredAt} {entry.scored_at} · {tr.threatScores.expiresAt} {entry.expires_at}. Proxy enriches{' '}
           <code className="rounded bg-surface-0 px-1 font-mono">threat_sources</code> when{' '}
           <code className="rounded bg-surface-0 px-1 font-mono">THREAT_SCORE_ENABLED=true</code>.
         </p>

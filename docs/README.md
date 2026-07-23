@@ -75,6 +75,7 @@ docs/
 | [benchmarks.md](ops-and-dev/benchmarks.md) | Нагрузочные тесты и профили бенчмарков HTTP Archive |
 | [logging.md](ops-and-dev/logging.md) | Формат структурированных логов (JSON) и Prometheus-метрики |
 | [licensing.md](ops-and-dev/licensing.md) | Лицензирование и проверка совместимости сторонних библиотек |
+| [configuration.md](ops-and-dev/configuration.md) | Полный справочник всех настроек и переменных окружения |
 
 ---
 

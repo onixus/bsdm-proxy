@@ -16,6 +16,7 @@ import { Checkbox, FormGrid, FormSection, Input, Select } from '../components/ui
 import { CodePreview, CopyButton, Modal } from '../components/ui/Modal'
 import { Panel } from '../components/dashboard/MetricWidget'
 import { useToast } from '../components/ui/Toast'
+import { useLanguage, translations } from '../lib/i18n'
 
 type SettingsTab =
   | 'general'
@@ -41,6 +42,8 @@ const tabs: { id: SettingsTab; label: string }[] = [
 ]
 
 export function SettingsPage() {
+  const [lang] = useLanguage()
+  const tr = translations[lang]
   const { toast } = useToast()
   const [form, setForm] = useState<ConfigFormState>(() => loadSavedForm())
   const [apiSettings, setApiSettings] = useState<ApiSettings>(() => loadApiSettings())
@@ -81,13 +84,13 @@ export function SettingsPage() {
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-text-primary">Settings</h1>
+        <h1 className="text-2xl font-bold text-text-primary">{tr.settings.title}</h1>
         <p className="text-sm text-text-secondary">
-          Configuration generator (.env / compose / ACL) and console API endpoints
+          {tr.settings.subtitle}
         </p>
       </div>
 
-      <LiveNodePanel />
+      <LiveNodePanel tr={tr} />
 
       <div className="flex gap-1 overflow-x-auto border-b border-border pb-px">
         {tabs.map((t) => (
@@ -101,20 +104,20 @@ export function SettingsPage() {
                 : 'text-text-secondary hover:text-text-primary'
             }`}
           >
-            {t.label}
+            {tr.settings[`tab${t.id.charAt(0).toUpperCase() + t.id.slice(1)}` as keyof typeof tr.settings] || t.label}
           </button>
         ))}
       </div>
 
-      <div className="rounded-lg border border-border bg-surface-1 p-4 sm:p-6">
-        {tab === 'general' && <GeneralTab form={form} update={update} />}
-        {tab === 'cache' && <CacheTab form={form} update={update} />}
-        {tab === 'auth' && <AuthTab form={form} update={update} />}
-        {tab === 'filtering' && <FilteringTab form={form} update={update} />}
-        {tab === 'threat' && <ThreatTab form={form} update={update} />}
-        {tab === 'network' && <NetworkTab form={form} update={update} />}
-        {tab === 'security' && <SecurityTab form={form} update={update} />}
-        {tab === 'events' && <EventsTab form={form} update={update} />}
+      <div className="rounded-b-md rounded-tr-md border border-border bg-surface-1 p-6">
+        {tab === 'general' && <GeneralTab form={form} update={update} tr={tr} />}
+        {tab === 'cache' && <CacheTab form={form} update={update} tr={tr} />}
+        {tab === 'auth' && <AuthTab form={form} update={update} tr={tr} />}
+        {tab === 'filtering' && <FilteringTab form={form} update={update} tr={tr} />}
+        {tab === 'threat' && <ThreatTab form={form} update={update} tr={tr} />}
+        {tab === 'network' && <NetworkTab form={form} update={update} tr={tr} />}
+        {tab === 'security' && <SecurityTab form={form} update={update} tr={tr} />}
+        {tab === 'events' && <EventsTab form={form} update={update} tr={tr} />}
         {tab === 'api' && (
           <ApiTab
             settings={apiSettings}
@@ -125,19 +128,20 @@ export function SettingsPage() {
               setDemoMode(v)
               toast('info', v ? 'Demo mode ON — unreachable APIs now render sample data marked “Demo”.' : 'Demo mode OFF — failures show real error states.')
             }}
+            tr={tr}
           />
         )}
       </div>
 
       <div className="flex flex-wrap gap-2">
         <Button onClick={() => setPreview({ title: 'bsdm-proxy.env', content: formatEnv(form) })}>
-          <Eye className="size-4" /> Preview .env
+          <Eye className="size-4" /> {tr.settings.previewEnv}
         </Button>
         <Button variant="secondary" onClick={() => downloadFile('bsdm-proxy.env', formatEnv(form))}>
-          <Download className="size-4" /> Export .env
+          <Download className="size-4" /> {tr.settings.exportEnv}
         </Button>
         <Button variant="secondary" onClick={() => downloadFile('docker-compose.yml', generateDockerCompose(form))}>
-          <Download className="size-4" /> Export compose
+          <Download className="size-4" /> {tr.settings.exportCompose}
         </Button>
         <Button
           variant="secondary"
@@ -150,10 +154,10 @@ export function SettingsPage() {
             downloadFile('acl-rules.json', JSON.stringify(rules, null, 2) + '\n')
           }}
         >
-          <Download className="size-4" /> Export ACL
+          <Download className="size-4" /> {tr.settings.exportAcl}
         </Button>
         <label className="touch-target inline-flex cursor-pointer items-center justify-center gap-2 rounded-md border border-border bg-surface-2 px-4 py-2 text-sm font-semibold hover:bg-surface-3">
-          <Upload className="size-4" /> Import .env
+          <Upload className="size-4" /> {tr.settings.importEnv}
           <input type="file" accept=".env,text/plain" className="hidden" onChange={handleImport} />
         </label>
         <Button
@@ -164,7 +168,7 @@ export function SettingsPage() {
             toast('info', 'Form reset to defaults')
           }}
         >
-          Reset defaults
+          {tr.settings.resetSettings}
         </Button>
       </div>
 
@@ -181,14 +185,14 @@ export function SettingsPage() {
   )
 }
 
-/** What this node is actually running with right now (real control-plane endpoints). */
-function LiveNodePanel() {
+function LiveNodePanel({ tr }: { tr: any }) {
+  const [lang] = useLanguage()
   const stats = useQuery({ queryKey: ['settings-stats'], queryFn: fetchProxyStats, refetchInterval: 30_000 })
   const tls = useSourcedQuery(['upstream-tls'], fetchUpstreamTls)
   const s = stats.data
 
   return (
-    <Panel title="Live node state (read from the running proxy)">
+    <Panel title={tr.settings.liveNodePanel}>
       {!s && (
         <p className="text-sm text-text-secondary">
           Control API unreachable — the generator below still works offline, but values shown here would confirm what
@@ -198,21 +202,21 @@ function LiveNodePanel() {
       {s && (
         <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
           <div>
-            <dt className="text-xs text-text-secondary">Service</dt>
+            <dt className="text-xs text-text-secondary">{tr.settings.service}</dt>
             <dd className="font-mono text-xs text-text-primary">{s.service}</dd>
           </div>
           <div>
-            <dt className="text-xs text-text-secondary">Uptime</dt>
+            <dt className="text-xs text-text-secondary">{lang === 'ru' ? 'Аптайм' : 'Uptime'}</dt>
             <dd className="text-text-primary">{formatUptime(s.uptime_secs)}</dd>
           </div>
           <div>
-            <dt className="text-xs text-text-secondary">L1 cache</dt>
+            <dt className="text-xs text-text-secondary">{lang === 'ru' ? 'L1 кэш' : 'L1 cache'}</dt>
             <dd className="tabular-nums text-text-primary">
-              {s.cache.entries.toLocaleString()}/{s.cache.capacity.toLocaleString()} · {s.cache.shards} shards
+              {s.cache.entries.toLocaleString()}/{s.cache.capacity.toLocaleString()} · {s.cache.shards} {lang === 'ru' ? 'шардов' : 'shards'}
             </dd>
           </div>
           <div>
-            <dt className="text-xs text-text-secondary">Upstream TLS</dt>
+            <dt className="text-xs text-text-secondary">{lang === 'ru' ? 'Upstream TLS' : 'Upstream TLS'}</dt>
             <dd className="truncate font-mono text-xs text-text-primary" title={tls.data ? JSON.stringify(tls.data.data) : ''}>
               {tls.data ? summarizeTls(tls.data.data) : tls.isError ? 'unavailable' : '…'}
             </dd>
@@ -233,11 +237,12 @@ type UpdateFn = <K extends keyof ConfigFormState>(key: K, value: ConfigFormState
 interface TabProps {
   form: ConfigFormState
   update: UpdateFn
+  tr: any
 }
 
-function GeneralTab({ form, update }: TabProps) {
+function GeneralTab({ form, update, tr }: TabProps) {
   return (
-    <FormSection title="General">
+    <FormSection title={tr.settings.tabGeneral}>
       <FormGrid>
         <Input label="HTTP proxy port" type="number" value={form.httpPort} onChange={(e) => update('httpPort', e.target.value)} />
         <Input label="Metrics / ACL API port" type="number" value={form.metricsPort} onChange={(e) => update('metricsPort', e.target.value)} />
@@ -263,10 +268,10 @@ function GeneralTab({ form, update }: TabProps) {
   )
 }
 
-function CacheTab({ form, update }: TabProps) {
+function CacheTab({ form, update, tr }: TabProps) {
   return (
     <div className="space-y-6">
-      <FormSection title="L1 cache">
+      <FormSection title={tr.settings.tabCache}>
         <Input label="CACHE_CAPACITY" type="number" value={form.cacheCapacity} onChange={(e) => update('cacheCapacity', e.target.value)} hint={cacheMetadataEstimate(form.cacheCapacity)} />
         <FormGrid>
           <Input label="CACHE_TTL_SECONDS" type="number" value={form.cacheTtl} onChange={(e) => update('cacheTtl', e.target.value)} />
@@ -304,48 +309,50 @@ function CacheTab({ form, update }: TabProps) {
   )
 }
 
-function AuthTab({ form, update }: TabProps) {
+function AuthTab({ form, update, tr }: TabProps) {
   return (
     <div className="space-y-4">
-      <Checkbox label="AUTH_ENABLED" checked={form.authEnabled} onChange={(v) => update('authEnabled', v)} />
-      {form.authEnabled && (
-        <>
-          <FormGrid>
-            <Select
-              label="AUTH_BACKEND"
-              value={form.authBackend}
-              onChange={(e) => update('authBackend', e.target.value)}
-              options={[
-                { value: 'basic', label: 'basic' },
-                { value: 'ldap', label: 'ldap' },
-                { value: 'ntlm', label: 'ntlm' },
-              ]}
-            />
-            <Input label="AUTH_CACHE_TTL" type="number" value={form.authCacheTtl} onChange={(e) => update('authCacheTtl', e.target.value)} />
-          </FormGrid>
-          <Input label="AUTH_REALM" value={form.authRealm} onChange={(e) => update('authRealm', e.target.value)} />
-          {form.authBackend === 'ldap' && (
-            <>
-              <FormGrid>
-                <Input label="LDAP_SERVERS" value={form.ldapServers} onChange={(e) => update('ldapServers', e.target.value)} />
-                <Input label="LDAP_BASE_DN" value={form.ldapBaseDn} onChange={(e) => update('ldapBaseDn', e.target.value)} />
-              </FormGrid>
-              <FormGrid>
-                <Input label="LDAP_BIND_DN" value={form.ldapBindDn} onChange={(e) => update('ldapBindDn', e.target.value)} />
-                <Input label="LDAP_BIND_PASSWORD" type="password" value={form.ldapBindPassword} onChange={(e) => update('ldapBindPassword', e.target.value)} hint="Session-only, never persisted" />
-              </FormGrid>
-              <Input label="LDAP_USER_FILTER" value={form.ldapUserFilter} onChange={(e) => update('ldapUserFilter', e.target.value)} />
-              <Checkbox label="LDAP_USE_TLS" checked={form.ldapUseTls} onChange={(v) => update('ldapUseTls', v)} />
-            </>
-          )}
-          {form.authBackend === 'ntlm' && (
+      <FormSection title={tr.settings.tabAuth}>
+        <Checkbox label="AUTH_ENABLED" checked={form.authEnabled} onChange={(v) => update('authEnabled', v)} />
+        {form.authEnabled && (
+          <>
             <FormGrid>
-              <Input label="NTLM_DOMAIN" value={form.ntlmDomain} onChange={(e) => update('ntlmDomain', e.target.value)} />
-              <Input label="NTLM_WORKSTATION" value={form.ntlmWorkstation} onChange={(e) => update('ntlmWorkstation', e.target.value)} />
+              <Select
+                label="AUTH_BACKEND"
+                value={form.authBackend}
+                onChange={(e) => update('authBackend', e.target.value)}
+                options={[
+                  { value: 'basic', label: 'basic' },
+                  { value: 'ldap', label: 'ldap' },
+                  { value: 'ntlm', label: 'ntlm' },
+                ]}
+              />
+              <Input label="AUTH_CACHE_TTL" type="number" value={form.authCacheTtl} onChange={(e) => update('authCacheTtl', e.target.value)} />
             </FormGrid>
-          )}
-        </>
-      )}
+            <Input label="AUTH_REALM" value={form.authRealm} onChange={(e) => update('authRealm', e.target.value)} />
+            {form.authBackend === 'ldap' && (
+              <>
+                <FormGrid>
+                  <Input label="LDAP_SERVERS" value={form.ldapServers} onChange={(e) => update('ldapServers', e.target.value)} />
+                  <Input label="LDAP_BASE_DN" value={form.ldapBaseDn} onChange={(e) => update('ldapBaseDn', e.target.value)} />
+                </FormGrid>
+                <FormGrid>
+                  <Input label="LDAP_BIND_DN" value={form.ldapBindDn} onChange={(e) => update('ldapBindDn', e.target.value)} />
+                  <Input label="LDAP_BIND_PASSWORD" type="password" value={form.ldapBindPassword} onChange={(e) => update('ldapBindPassword', e.target.value)} hint="Session-only, never persisted" />
+                </FormGrid>
+                <Input label="LDAP_USER_FILTER" value={form.ldapUserFilter} onChange={(e) => update('ldapUserFilter', e.target.value)} />
+                <Checkbox label="LDAP_USE_TLS" checked={form.ldapUseTls} onChange={(v) => update('ldapUseTls', v)} />
+              </>
+            )}
+            {form.authBackend === 'ntlm' && (
+              <FormGrid>
+                <Input label="NTLM_DOMAIN" value={form.ntlmDomain} onChange={(e) => update('ntlmDomain', e.target.value)} />
+                <Input label="NTLM_WORKSTATION" value={form.ntlmWorkstation} onChange={(e) => update('ntlmWorkstation', e.target.value)} />
+              </FormGrid>
+            )}
+          </>
+        )}
+      </FormSection>
       
       <FormSection title="ZTNA / IAP Reverse Proxy">
         <Checkbox label="REVERSE_PROXY_ENABLED" checked={form.reverseProxyEnabled} onChange={(v) => update('reverseProxyEnabled', v)} hint="Enable reverse proxy mode" />
@@ -367,10 +374,10 @@ function AuthTab({ form, update }: TabProps) {
   )
 }
 
-function FilteringTab({ form, update }: TabProps) {
+function FilteringTab({ form, update, tr }: TabProps) {
   return (
     <div className="space-y-6">
-      <FormSection title="ACL">
+      <FormSection title={tr.settings.tabFiltering}>
         <Checkbox label="ACL_ENABLED" checked={form.aclEnabled} onChange={(v) => update('aclEnabled', v)} />
         {form.aclEnabled && (
           <>
@@ -426,9 +433,9 @@ function FilteringTab({ form, update }: TabProps) {
   )
 }
 
-function ThreatTab({ form, update }: TabProps) {
+function ThreatTab({ form, update, tr }: TabProps) {
   return (
-    <FormSection title="Threat score enforcement (ml-worker write-back)">
+    <FormSection title={tr.settings.tabThreat}>
       <Checkbox
         label="THREAT_SCORE_ENABLED"
         checked={form.threatScoreEnabled}
@@ -449,10 +456,10 @@ function ThreatTab({ form, update }: TabProps) {
   )
 }
 
-function NetworkTab({ form, update }: TabProps) {
+function NetworkTab({ form, update, tr }: TabProps) {
   return (
     <div className="space-y-6">
-      <FormSection title="Cache hierarchy (ICP / HTCP)">
+      <FormSection title={tr.settings.tabNetwork}>
         <Input label="HIERARCHY_PEERS_PATH" value={form.hierarchyPeersPath} onChange={(e) => update('hierarchyPeersPath', e.target.value)} hint="JSON file with parent/sibling peers; empty disables the hierarchy" />
         <Checkbox label="ICP_SERVER_ENABLED" checked={form.icpServerEnabled} onChange={(v) => update('icpServerEnabled', v)} />
         {form.icpServerEnabled && <Input label="ICP_BIND" value={form.icpBind} onChange={(e) => update('icpBind', e.target.value)} />}
@@ -478,10 +485,10 @@ function NetworkTab({ form, update }: TabProps) {
   )
 }
 
-function SecurityTab({ form, update }: TabProps) {
+function SecurityTab({ form, update, tr }: TabProps) {
   return (
     <div className="space-y-6">
-      <FormSection title="Rate limiting">
+      <FormSection title={tr.settings.tabSecurity}>
         <Checkbox label="RATE_LIMIT_ENABLED" checked={form.rateLimitEnabled} onChange={(v) => update('rateLimitEnabled', v)} />
         {form.rateLimitEnabled && (
           <Input label="RATE_LIMIT_MAX_KEYS" type="number" value={form.rateLimitMaxKeys} onChange={(e) => update('rateLimitMaxKeys', e.target.value)} />
@@ -545,10 +552,10 @@ function SecurityTab({ form, update }: TabProps) {
   )
 }
 
-function EventsTab({ form, update }: TabProps) {
+function EventsTab({ form, update, tr }: TabProps) {
   return (
     <div className="space-y-6">
-      <FormSection title="Kafka event pipeline">
+      <FormSection title={tr.settings.tabEvents}>
         <FormGrid>
           <Input label="KAFKA_BROKERS" value={form.kafkaBrokers} onChange={(e) => update('kafkaBrokers', e.target.value)} />
           <Input label="KAFKA_TOPIC" value={form.kafkaTopic} onChange={(e) => update('kafkaTopic', e.target.value)} />
@@ -589,15 +596,17 @@ function ApiTab({
   update,
   demoEnabled,
   onDemoChange,
+  tr,
 }: {
   settings: ApiSettings
   update: <K extends keyof ApiSettings>(key: K, value: ApiSettings[K]) => void
   demoEnabled: boolean
   onDemoChange: (v: boolean) => void
+  tr: any
 }) {
   return (
     <div className="space-y-6">
-      <FormSection title="API endpoints">
+      <FormSection title={tr.settings.tabApi}>
         <p className="text-sm text-text-secondary">
           Leave blank to use Vite dev proxy paths. Set full base URLs in production.
         </p>
