@@ -363,12 +363,19 @@ impl AuthManager {
                     for user in users {
                         initial_basic_users.insert(user.username.clone(), user);
                     }
-                    info!("Loaded {} basic auth users from {}", initial_basic_users.len(), path);
+                    info!(
+                        "Loaded {} basic auth users from {}",
+                        initial_basic_users.len(),
+                        path
+                    );
                 } else {
                     warn!("Failed to parse basic users file: {}", path);
                 }
             } else {
-                warn!("Basic users file not found or unreadable, starting empty: {}", path);
+                warn!(
+                    "Basic users file not found or unreadable, starting empty: {}",
+                    path
+                );
             }
         }
 
@@ -661,11 +668,7 @@ impl AuthManager {
     }
 
     /// Basic authentication (local users file with fallback)
-    async fn authenticate_basic(
-        &self,
-        username: &str,
-        password: &str,
-    ) -> Result<UserInfo, String> {
+    async fn authenticate_basic(&self, username: &str, password: &str) -> Result<UserInfo, String> {
         let guard = self.basic_users.read().await;
         if guard.is_empty() && self.config.basic_users_file.is_none() {
             return Ok(UserInfo {
@@ -712,7 +715,12 @@ impl AuthManager {
     }
 
     /// Add or update a basic user
-    pub async fn put_basic_user(&self, username: String, password: Option<String>, role: String) -> Result<(), String> {
+    pub async fn put_basic_user(
+        &self,
+        username: String,
+        password: Option<String>,
+        role: String,
+    ) -> Result<(), String> {
         {
             let mut guard = self.basic_users.write().await;
             let password_hash = if let Some(p) = password {
@@ -749,10 +757,14 @@ impl AuthManager {
     /// List all basic users (without password hashes)
     pub async fn get_basic_users(&self) -> Vec<BasicUser> {
         let guard = self.basic_users.read().await;
-        guard.values().cloned().map(|mut u| {
-            u.password_hash = "".to_string(); // Redact password hashes
-            u
-        }).collect()
+        guard
+            .values()
+            .cloned()
+            .map(|mut u| {
+                u.password_hash = "".to_string(); // Redact password hashes
+                u
+            })
+            .collect()
     }
 
     /// LDAP authentication
@@ -1173,7 +1185,14 @@ mod tests {
         };
 
         let manager = AuthManager::new(config);
-        manager.put_basic_user("testuser".to_string(), Some("testpass".to_string()), "admin".to_string()).await.unwrap();
+        manager
+            .put_basic_user(
+                "testuser".to_string(),
+                Some("testpass".to_string()),
+                "admin".to_string(),
+            )
+            .await
+            .unwrap();
         let result = manager.authenticate("testuser", "testpass").await;
 
         assert!(result.is_ok());
@@ -1192,7 +1211,14 @@ mod tests {
 
         let manager = AuthManager::new(config);
         let secret = unit_test_secret();
-        manager.put_basic_user("testuser".to_string(), Some(secret.clone()), "admin".to_string()).await.unwrap();
+        manager
+            .put_basic_user(
+                "testuser".to_string(),
+                Some(secret.clone()),
+                "admin".to_string(),
+            )
+            .await
+            .unwrap();
 
         // First authentication
         manager.authenticate("testuser", &secret).await.unwrap();
@@ -1214,7 +1240,14 @@ mod tests {
 
         let manager = AuthManager::new(config);
         let secret = unit_test_secret();
-        manager.put_basic_user("testuser".to_string(), Some(secret.clone()), "admin".to_string()).await.unwrap();
+        manager
+            .put_basic_user(
+                "testuser".to_string(),
+                Some(secret.clone()),
+                "admin".to_string(),
+            )
+            .await
+            .unwrap();
         manager.authenticate("testuser", &secret).await.unwrap();
 
         // Wait for expiration
@@ -1250,7 +1283,14 @@ mod tests {
         let manager = AuthManager::new(config);
         let conn = ConnAuthCache::new(Duration::from_secs(60));
         let secret = unit_test_secret();
-        manager.put_basic_user("alice".to_string(), Some(secret.clone()), "admin".to_string()).await.unwrap();
+        manager
+            .put_basic_user(
+                "alice".to_string(),
+                Some(secret.clone()),
+                "admin".to_string(),
+            )
+            .await
+            .unwrap();
 
         let first = manager
             .handle_proxy_auth(
@@ -1281,8 +1321,18 @@ mod tests {
         let manager = AuthManager::new(config);
         let conn = ConnAuthCache::new(Duration::from_secs(60));
         let secret = unit_test_secret();
-        manager.put_basic_user("alice".to_string(), Some(secret.clone()), "admin".to_string()).await.unwrap();
-        manager.put_basic_user("bob".to_string(), Some(secret.clone()), "admin".to_string()).await.unwrap();
+        manager
+            .put_basic_user(
+                "alice".to_string(),
+                Some(secret.clone()),
+                "admin".to_string(),
+            )
+            .await
+            .unwrap();
+        manager
+            .put_basic_user("bob".to_string(), Some(secret.clone()), "admin".to_string())
+            .await
+            .unwrap();
 
         let first = manager
             .handle_proxy_auth(
