@@ -38,6 +38,9 @@ export function ThreatScoresPage() {
     return [...filtered].sort((a, b) => b.score - a.score)
   }, [snapshot.scores, modelFilter])
 
+  const syncResult = useSourcedQuery(['threat-sync-peers'], () => import('../api/cluster').then(m => m.fetchThreatSyncPeers()), { refetchInterval: 15_000 })
+  const syncData = syncResult.data?.data
+
   return (
     <div className="mx-auto max-w-7xl space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -55,11 +58,60 @@ export function ThreatScoresPage() {
             </p>
           )}
         </div>
-        <Button variant="secondary" onClick={() => result.refetch()} disabled={loading}>
+        <Button variant="secondary" onClick={() => { result.refetch(); syncResult.refetch(); }} disabled={loading}>
           <RefreshCw className={`size-4 ${loading ? 'animate-spin' : ''}`} />
           {tr.threatScores.refresh}
         </Button>
       </div>
+
+      <Panel title="Real-Time Threat Sync (P2P Cluster)">
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+            <div>
+              <span className="text-text-secondary">Node ID: </span>
+              <span className="font-mono font-semibold text-text-primary">{syncData?.node_id ?? 'local'}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-text-secondary">Sync Bus: </span>
+              <span className={`px-2 py-0.5 rounded text-xs font-semibold ${syncData?.sync_enabled ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'}`}>
+                {syncData?.sync_enabled ? 'Redis Pub/Sub Active' : 'Standalone / Local'}
+              </span>
+            </div>
+          </div>
+
+          <div>
+            <p className="text-xs font-medium text-text-secondary uppercase mb-2">Connected Cluster Peers</p>
+            <div className="flex flex-wrap gap-2">
+              {syncData?.peers.map((peer) => (
+                <span key={peer} className="rounded border border-border-default bg-surface-hover/50 px-2.5 py-1 font-mono text-xs text-text-primary">
+                  {peer}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {syncData?.recent_events && syncData.recent_events.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-text-secondary uppercase mb-2">Recent Synchronized IoCs</p>
+              <div className="space-y-2">
+                {syncData.recent_events.map((evt) => (
+                  <div key={evt.id} className="flex items-center justify-between p-2 rounded bg-surface-hover/30 border border-border-default/50 text-xs">
+                    <div className="flex items-center gap-2 font-mono">
+                      <span className="px-1.5 py-0.5 rounded bg-accent/10 text-accent font-semibold uppercase">{evt.ioc_type}</span>
+                      <span className="text-text-primary">{evt.value}</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-text-secondary">Action: <strong className="text-rose-400 font-mono">{evt.action}</strong></span>
+                      <span className="text-text-secondary font-mono">Score: {(evt.threat_score * 100).toFixed(0)}%</span>
+                      <span className="text-text-secondary font-mono text-[10px]">{evt.origin_node}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </Panel>
 
       {result.isError && (
         <ErrorState

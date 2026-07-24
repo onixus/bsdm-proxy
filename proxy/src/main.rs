@@ -9,10 +9,10 @@ use bsdm_proxy::{
     htcp_peer_port, htcp_server_bind_addr, http_cache_key, icp_server_bind_addr,
     load_hierarchy_config, metrics_server, run_peer_discovery, should_start_htcp_server,
     should_start_icp_server, wait_shutdown_signal, AclAction, AuthManager, CacheConfig, CertCache,
-    ControlApiState, HtcpServer, HttpEventPipeline, IcpServer, L2CacheConfig, Metrics,
-    PeerDiscoveryConfig, PerfConfig, PolicyCacheConfig, PolicyDecisionCache, ProxyPolicy,
+    ControlApiState, GlobalSessionStore, HtcpServer, HttpEventPipeline, IcpServer, L2CacheConfig,
+    Metrics, PeerDiscoveryConfig, PerfConfig, PolicyCacheConfig, PolicyDecisionCache, ProxyPolicy,
     ProxyService, RateLimitConfig, RedisL2Cache, ThreatScoreCache, ThreatScoreConfig,
-    UpstreamTlsConfig,
+    ThreatSyncEngine, UpstreamTlsConfig,
 };
 use policy_config::{load_policy_config, reload_acl_engine};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -250,6 +250,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         bsdm_proxy::reverse_proxy::ReverseProxyConfig::from_env(),
     ));
 
+    let session_store = GlobalSessionStore::new(None);
+    let node_id = std::env::var("NODE_ID").unwrap_or_else(|_| "node-1".to_string());
+    let threat_sync = ThreatSyncEngine::new(node_id, None);
+
     let hierarchy_peers = hierarchy.as_ref().map(|m| m.peer_registry());
     let control_api = Arc::new(ControlApiState::from_env(
         metrics.clone(),
@@ -263,6 +267,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         service.casb_engine(),
         service.dlp_engine(),
         auth.clone(),
+        session_store,
+        threat_sync,
     ));
     info!(
         "Control plane API on :{}/api/stats · :{}/api/cache/purge · :{}/api/hierarchy/* · :{}/api/upstream/tls",

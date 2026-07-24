@@ -324,3 +324,102 @@ function getMockNodes(): ClusterNode[] {
     },
   ]
 }
+
+import { demo, isDemoMode, live, type Sourced } from './source'
+
+export interface ClusterSessionState {
+  status: string
+  redis_connected: boolean
+  session_count: number
+  distributed_rate_limit_enabled: boolean
+}
+
+export interface ThreatSyncEvent {
+  id: string
+  ioc_type: string
+  value: string
+  threat_score: number
+  action: string
+  ttl_secs: number
+  origin_node: string
+  timestamp: number
+}
+
+export interface ThreatSyncPeersReport {
+  node_id: string
+  sync_enabled: boolean
+  peers: string[]
+  recent_events: ThreatSyncEvent[]
+}
+
+const mockClusterSessionState: ClusterSessionState = {
+  status: 'redis_connected',
+  redis_connected: true,
+  session_count: 142,
+  distributed_rate_limit_enabled: true,
+}
+
+const mockThreatSyncReport: ThreatSyncPeersReport = {
+  node_id: 'bsdm-proxy-node-alpha',
+  sync_enabled: true,
+  peers: ['bsdm-proxy-node-alpha (local)', 'bsdm-proxy-node-beta', 'bsdm-proxy-node-gamma'],
+  recent_events: [
+    {
+      id: 'ioc-node-beta-1721812900',
+      ioc_type: 'domain',
+      value: 'phishing-credential-trap.com',
+      threat_score: 0.98,
+      action: 'block',
+      ttl_secs: 86400,
+      origin_node: 'bsdm-proxy-node-beta',
+      timestamp: Math.floor(Date.now() / 1000) - 300,
+    },
+    {
+      id: 'ioc-node-gamma-1721812000',
+      ioc_type: 'ip',
+      value: '198.51.100.44',
+      threat_score: 0.85,
+      action: 'flag',
+      ttl_secs: 3600,
+      origin_node: 'bsdm-proxy-node-gamma',
+      timestamp: Math.floor(Date.now() / 1000) - 1200,
+    },
+  ],
+}
+
+export async function fetchClusterSessionState(): Promise<Sourced<ClusterSessionState>> {
+  if (isDemoMode()) return demo(mockClusterSessionState)
+  try {
+    const res = await fetch('/api/cluster/session-state')
+    if (!res.ok) throw new Error('HTTP ' + res.status)
+    const json = await res.json()
+    return live(json)
+  } catch {
+    return demo(mockClusterSessionState)
+  }
+}
+
+export async function fetchThreatSyncPeers(): Promise<Sourced<ThreatSyncPeersReport>> {
+  if (isDemoMode()) return demo(mockThreatSyncReport)
+  try {
+    const res = await fetch('/api/threats/sync/peers')
+    if (!res.ok) throw new Error('HTTP ' + res.status)
+    const json = await res.json()
+    return live(json)
+  } catch {
+    return demo(mockThreatSyncReport)
+  }
+}
+
+export async function broadcastThreatSync(
+  event: Partial<ThreatSyncEvent>
+): Promise<{ status: string }> {
+  if (isDemoMode()) return { status: 'broadcasted' }
+  const res = await fetch('/api/threats/sync/broadcast', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(event),
+  })
+  if (!res.ok) throw new Error('HTTP ' + res.status)
+  return res.json()
+}

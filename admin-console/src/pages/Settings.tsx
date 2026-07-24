@@ -9,6 +9,7 @@ import { loadApiSettings, saveApiSettings, type ApiSettings } from '../api/setti
 import { isDemoMode, setDemoMode } from '../api/source'
 import { fetchProxyStats, formatUptime } from '../api/metrics'
 import { fetchUpstreamTls } from '../api/node'
+import { fetchClusterSessionState } from '../api/cluster'
 import { useSourcedQuery } from '../hooks/useSourced'
 import { useQuery } from '@tanstack/react-query'
 import { Button } from '../components/ui/Button'
@@ -486,8 +487,31 @@ function NetworkTab({ form, update, tr }: TabProps) {
 }
 
 function SecurityTab({ form, update, tr }: TabProps) {
+  const { data: sessionState } = useSourcedQuery(
+    ['cluster-session-state'],
+    fetchClusterSessionState
+  )
+
   return (
     <div className="space-y-6">
+      <FormSection title="Global Session State (Redis Cluster)">
+        <div className="p-4 rounded-lg bg-surface-hover/50 border border-border-default space-y-2">
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-text-secondary">Session Store Mode:</span>
+            <span className={`px-2 py-0.5 rounded font-mono text-xs font-semibold ${sessionState?.data?.redis_connected ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'}`}>
+              {sessionState?.data?.status ?? 'standalone_memory'}
+            </span>
+          </div>
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-text-secondary">Active Global Sessions:</span>
+            <span className="font-mono font-semibold text-text-primary">{sessionState?.data?.session_count ?? 0}</span>
+          </div>
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-text-secondary">Distributed Rate Limiting:</span>
+            <span className="font-mono text-xs text-text-secondary">{sessionState?.data?.distributed_rate_limit_enabled ? 'Active (Redis)' : 'Inactive (Local Buckets)'}</span>
+          </div>
+        </div>
+      </FormSection>
       <FormSection title={tr.settings.tabSecurity}>
         <Checkbox label="RATE_LIMIT_ENABLED" checked={form.rateLimitEnabled} onChange={(v) => update('rateLimitEnabled', v)} />
         {form.rateLimitEnabled && (
