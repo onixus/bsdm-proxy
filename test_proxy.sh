@@ -15,6 +15,9 @@ NORMAL_SITES=(
     "rust-lang.org"
     "ycombinator.com"
     "example.com"
+    "pornogub.org"
+    "nntt.org"
+    "facebook.com"
 )
 
 # ACL specific sites (e.g., from acl-rules.test.json or standard categories)
