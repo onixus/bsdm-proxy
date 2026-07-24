@@ -211,6 +211,8 @@ mod tests {
             Arc::new(crate::casb::CasbEngine::new()),
             Arc::new(crate::dlp::DlpEngine::new()),
             None,
+            crate::session_store::GlobalSessionStore::new(None),
+            crate::threat_sync::ThreatSyncEngine::new("test-node".to_string(), None),
         ))
     }
 
@@ -272,6 +274,8 @@ mod tests {
             Arc::new(crate::casb::CasbEngine::new()),
             Arc::new(crate::dlp::DlpEngine::new()),
             None,
+            crate::session_store::GlobalSessionStore::new(None),
+            crate::threat_sync::ThreatSyncEngine::new("test-node".to_string(), None),
         ));
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
