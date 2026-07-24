@@ -1,0 +1,109 @@
+services:
+  zookeeper:
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 512M
+
+  kafka:
+    environment:
+      KAFKA_LOG_RETENTION_HOURS: "48"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.25"
+          memory: 2560M
+
+  clickhouse:
+    volumes:
+      - ./scripts/clickhouse/pilot_retention.sql:/docker-entrypoint-initdb.d/03-pilot-retention.sql:ro
+    deploy:
+      resources:
+        limits:
+          cpus: "3.00"
+          memory: 6G
+
+  proxy:
+    environment:
+      WORKER_COUNT: "2"
+      CACHE_CAPACITY: "20000"
+      CACHE_SHARDS: "16"
+      CACHE_TTL_SECONDS: "3600"
+      CACHE_SPILL_THRESHOLD_BYTES: "262144"
+      CACHE_SPILL_DIR: /var/cache/bsdm-spill
+      CACHE_COMPRESSION: zstd
+      MAX_CACHE_BODY_SIZE: "4194304"
+      KAFKA_SAMPLE_RATE: "0"
+      METRICS_SAMPLE_RATE: "10"
+      PERF_FAST_CACHE_HIT: "false"
+      STREAMING_MISS_ENABLED: "true"
+      AUTH_ENABLED: "${AUTH_ENABLED:-false}"
+      ACL_ENABLED: "${ACL_ENABLED:-true}"
+      CATEGORIZATION_ENABLED: "${CATEGORIZATION_ENABLED:-false}"
+      UT1_ENABLED: "${UT1_ENABLED:-false}"
+      CONTROL_API_TOKEN: "${CONTROL_API_TOKEN}"
+      ACL_API_TOKEN: "${ACL_API_TOKEN}"
+    volumes:
+      - pilot-spill:/var/cache/bsdm-spill
+    deploy:
+      resources:
+        limits:
+          cpus: "4.00"
+          memory: 4G
+
+  cache-indexer:
+    environment:
+      SEARCH_API_DEFAULT_DAYS: "5"
+      SEARCH_API_TOKEN: "${SEARCH_API_TOKEN}"
+      INGEST_API_TOKEN: "${INGEST_API_TOKEN:-}"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+
+  alert-worker:
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+
+  ml-worker:
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 1G
+
+  alertmanager:
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 512M
+
+  prometheus:
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+      - "--storage.tsdb.retention.time=5d"
+      - "--web.enable-lifecycle"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 1536M
+
+  grafana:
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 1G
+
+volumes:
+  pilot-spill:

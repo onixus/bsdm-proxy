@@ -2,7 +2,7 @@
 
 REST endpoints on the proxy metrics port (`METRICS_PORT`, default `9090`). No Grafana required for Lite ops.
 
-See also: [roadmap.md](roadmap.md) (Control Plane Phase) · [acl.md](acl.md).
+See also: [roadmap.md](../roadmap.md) (Control Plane Phase) · [acl.md](acl-policy.md).
 
 ## Auth
 
@@ -11,7 +11,7 @@ See also: [roadmap.md](roadmap.md) (Control Plane Phase) · [acl.md](acl.md).
 | `CONTROL_API_TOKEN` | Preferred Bearer token for mutating control APIs |
 | `ACL_API_TOKEN` | Fallback token (also used for `/api/acl/*`) |
 
-`GET /api/stats`, `GET /api/hierarchy/peers`, and `GET /api/upstream/tls` are intentionally unauthenticated (local Lite monitoring).  
+`GET /api/stats`, `GET /api/hierarchy/peers`, and `GET /api/upstream/tls` are intentionally unauthenticated (local Lite monitoring).
 `POST /api/cache/purge`, `POST /api/hierarchy/reload`, `POST /api/upstream/tls/reload`, and all `/api/acl/*` require Bearer when a token is configured.
 
 ```bash
@@ -141,6 +141,22 @@ curl -X POST http://127.0.0.1:9090/api/upstream/tls/reload \
 
 On failure (missing/invalid CA file) the previous client is kept and the API returns `400`.
 
+## Cluster state and threat sync (experimental)
+
+| Method | Path | Current behavior |
+|---|---|---|
+| `GET` | `/api/cluster/session-state` | Показывает local session count и состояние Redis connection |
+| `GET` | `/api/threats/sync/peers` | Возвращает node ID, peers и до 50 local events |
+| `POST` | `/api/threats/sync/broadcast` | Записывает event локально; при наличии connection публикует в Redis channel |
+
+Эти endpoints требуют Bearer token, если настроен `CONTROL_API_TOKEN`.
+
+Текущий runtime создаёт `GlobalSessionStore` и `ThreatSyncEngine` с
+`redis_conn=None`; subscriber для входящих Pub/Sub events и применение IoC к
+policy отсутствуют. Distributed path `RateLimiter::check_async` также не
+подключён к request path. Это API/scaffolding для разработки, а не рабочая
+multi-cluster security boundary.
+
 ## gRPC control plane (optional)
 
 Feature-flagged (`--features grpc`), **off by default**. REST stays the Lite / admin-console path.
@@ -163,7 +179,7 @@ cargo run -p bsdm-proxy --features grpc --bin proxy
 
 Auth matches REST: mutating RPCs need `authorization: Bearer <CONTROL_API_TOKEN>` when the token is set. Public: `GetStats`, `ListHierarchyPeers`, `GetUpstreamTls`.
 
-Proto: [`proxy/proto/control_plane.proto`](../proxy/proto/control_plane.proto).
+Proto: [`proxy/proto/control_plane.proto`](../../proxy/proto/control_plane.proto).
 
 ```bash
 # Example (grpcurl)

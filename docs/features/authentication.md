@@ -1,6 +1,6 @@
 # Authentication
 
-> См. также: [оглавление документации](README.md) · [конфигурация в README](../README.md#конфигурация)
+> См. также: [оглавление документации](../README.md) · [конфигурация в README](../README.md#конфигурация)
 
 BSDM-Proxy supports proxy authentication backends for access control.
 

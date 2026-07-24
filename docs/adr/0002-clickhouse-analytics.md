@@ -20,7 +20,7 @@ Roadmap M3–M5 workloads:
 | M4 Threat analytics | windows, periodic patterns, GROUP BY | ClickHouse |
 | M5 ML | batch feature extraction | ClickHouse |
 
-Corporate medium (estimate): **~4M events/day**, 42-day retention ([capacity-planning.md](../capacity-planning.md)).
+Corporate medium (estimate): **~4M events/day**, 42-day retention ([capacity-planning.md](../architecture/capacity-planning.md)).
 
 OpenSearch was RAM-heavy and optimized for full-text search; BSDM queries are **structured analytics**. Migration completed in phases 0–4 ([#125](https://github.com/onixus/bsdm-proxy/issues/125)).
 
@@ -63,7 +63,7 @@ OpenSearch was RAM-heavy and optimized for full-text search; BSDM queries are **
 
 ## References
 
-- [clickhouse-analytics.md](../clickhouse-analytics.md)
-- [search-api.md](../search-api.md)
+- [clickhouse-analytics.md](../analytics/clickhouse-retrosearch.md)
+- [search-api.md](../analytics/clickhouse-retrosearch.md)
 - [roadmap.md](../roadmap.md) M3–M5
 - `bsdm-events::CacheEvent`

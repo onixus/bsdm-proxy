@@ -1,6 +1,6 @@
 # Production profile — corporate medium (~5k users).
 # 4 replicas × 25k L1 capacity ≈ 100k total; Redis L2 required.
-# See docs/k8s-architecture.md
+# See docs/ops-and-dev/k8s-architecture.md
 
 replicaCount: 4
 

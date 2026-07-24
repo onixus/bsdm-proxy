@@ -2,7 +2,7 @@
 
 Optional **Wasmtime** request hooks so policy/transform logic can ship as `.wasm` / `.wat` modules without rebuilding the proxy.
 
-Issue: [#188](https://github.com/onixus/bsdm-proxy/issues/188) · Roadmap: [roadmap.md](roadmap.md) (WASM Phase).
+Issue: [#188](https://github.com/onixus/bsdm-proxy/issues/188) · Roadmap: [roadmap.md](../roadmap.md) (WASM Phase).
 
 ## Status (PoC)
 

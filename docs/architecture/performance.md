@@ -2,6 +2,11 @@
 
 Цель — удвоить пропускную способность на том же железе за счёт оптимизации userspace hot path и multi-worker accept, без kernel bypass (DPDK).
 
+> Приведённые ниже результаты — лабораторные microbenchmarks старых версий,
+> а не подтверждённая производительность полного security/analytics path.
+> Для инфраструктурного сайзинга используйте
+> [capacity planning](capacity-planning.md) и собственный pilot load test.
+
 ## Baseline (0.3.1, 4 vCPU)
 
 | Сценарий | Инструмент | ~RPS | Примечание |
@@ -53,7 +58,7 @@ Sites bench (70 sites × 20 warm repeats) is **warm-heavy**. Multi-worker accept
 | `warm` (default) | `1` | HTTP Archive sites bench, warm goodput vs Squid |
 | `cold` | `4` | Cold/MISS-heavy, multi-accept parallelism |
 
-Пресеты заданы в [`scripts/bench-profile.sh`](../scripts/bench-profile.sh) и применяются в `run-httparchive-benchmark.sh` / `compare-squid-bsdm-httparchive.sh`.
+Пресеты заданы в [`scripts/bench-profile.sh`](../../scripts/bench-profile.sh) и применяются в `run-httparchive-benchmark.sh` / `compare-squid-bsdm-httparchive.sh`.
 
 ```bash
 # Warm profile (default) — рекомендуется для sites bench
@@ -69,7 +74,7 @@ BENCH_PROFILE=cold ./scripts/run-httparchive-benchmark.sh
 BENCH_PROFILE=warm ./scripts/compare-squid-bsdm-httparchive.sh
 ```
 
-См. результаты и методику: [benchmarks-httparchive.md](benchmarks-httparchive.md).
+См. результаты и методику: [benchmarks-httparchive.md](../ops-and-dev/benchmarks.md).
 
 ## Рекомендуемый bench-профиль (wrk/oha micro-bench)
 
@@ -113,7 +118,7 @@ export CURL_PROXY_USER='user:pass'           # альтернатива
 cargo test -p bsdm-proxy-e2e --test httparchive
 ```
 
-См. [benchmarks-httparchive.md](benchmarks-httparchive.md).
+См. [benchmarks-httparchive.md](../ops-and-dev/benchmarks.md).
 
 ## Профилирование
 
@@ -141,4 +146,4 @@ sudo perf report -i /tmp/bsdm-perf.data
 | `KAFKA_SAMPLE_RATE` | — | — | `10` |
 | `HTTP_PRESERVE_HEADER_CASE` | `false` | `false` | `true` (MITM) |
 
-См. также [architecture.md](architecture.md), [logging.md](logging.md).
+См. также [architecture.md](overview.md), [logging.md](../ops-and-dev/logging.md).

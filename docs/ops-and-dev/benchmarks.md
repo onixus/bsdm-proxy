@@ -2,6 +2,10 @@
 
 Тесты и бенчмарки, основанные на медианных метриках [HTTP Archive: Page Weight (Top 1,000)](https://httparchive.org/reports/page-weight?lens=top1k&start=2023_07_01&end=2024_07_01&view=grid) за период Jul 2023 – Jul 2024. Числа сверены с [Web Almanac 2024: Page Weight](https://almanac.httparchive.org/en/2024/page-weight).
 
+> Результаты ниже сохранены как исторический baseline версий `0.3.x–0.5.0`.
+> Они включают bench-only fast path и не являются сайзингом полного продукта.
+> Текущий расчёт ресурсов: [capacity planning](../architecture/capacity-planning.md).
+
 ## Профиль (медиана)
 
 | Метрика | Desktop | Mobile |
@@ -17,7 +21,7 @@
 
 Перцентили полного веса (desktop / mobile): P10 549 / 471 KB, P50 2 157 / 1 938 KB, P75 4 169 / 3 766 KB, P90 8 375 / 7 680 KB.
 
-Канонический профиль: [`scripts/httparchive-top1k-profile.json`](../scripts/httparchive-top1k-profile.json). Поле `other.bytes` — остаток до `total_bytes` (компоненты в Almanac округлены по KB).
+Канонический профиль: [`scripts/httparchive-top1k-profile.json`](../../scripts/httparchive-top1k-profile.json). Поле `other.bytes` — остаток до `total_bytes` (компоненты в Almanac округлены по KB).
 
 ## Компоненты
 
@@ -70,7 +74,7 @@ BENCH_PROFILE=cold ./scripts/compare-squid-bsdm-httparchive.sh
 | `warm` (default) | `1` | Warm goodput на sites bench (меньше contention на shared L1) |
 | `cold` | `4` | Cold/MISS parallelism, multi accept-loop |
 
-Пресеты: [`scripts/bench-profile.sh`](../scripts/bench-profile.sh). Переопределение: `BENCH_PROFILE=warm WORKER_COUNT=2 ...` (явный `WORKER_COUNT` сохраняется).
+Пресеты: [`scripts/bench-profile.sh`](../../scripts/bench-profile.sh). Переопределение: `BENCH_PROFILE=warm WORKER_COUNT=2 ...` (явный `WORKER_COUNT` сохраняется).
 
 Переменные:
 
@@ -81,7 +85,7 @@ BENCH_PROFILE=cold ./scripts/compare-squid-bsdm-httparchive.sh
 - `WORKER_COUNT` — задаётся профилем (`1` warm / `4` cold), можно переопределить
 - `BENCH_SITE_SEED` — seed выбора сайтов (default **42**)
 - `HTTPARCHIVE_DEVICE` — `desktop` или `mobile`
-- `PERF_FAST_CACHE_HIT`, `WORKER_COUNT` — как в [performance.md](performance.md)
+- `PERF_FAST_CACHE_HIT`, `WORKER_COUNT` — как в [performance.md](../architecture/performance.md)
 
 ### Legacy: одна страница (71 ресурс)
 
@@ -94,12 +98,12 @@ PAGE_CONCURRENCY=6 python3 scripts/httparchive-page-load.py \
 
 Сценарии `run-proxy-benchmark.sh` измеряют **один URL** (микро-запрос ~33 B). HTTP Archive-тесты моделируют **полную медианную страницу Top 1k**: десятки запросов и ~2.6 MB на cold load, что ближе к реальному корпоративному трафику и нагрузке на кэш/память.
 
-См. также [performance.md](performance.md), [capacity-planning.md](capacity-planning.md).
+См. также [performance.md](../architecture/performance.md), [capacity-planning.md](../architecture/capacity-planning.md).
 
 ## Результаты (lab, 4 vCPU, desktop profile)
 
-Методика: 70 сайтов, 12 conn, 20 warm repeats, `PERF_FAST_CACHE_HIT=true`, tiered L1 (PR #93).  
-Warm goodput — фаза **warm repeats** из вывода `httparchive-sites-bench.py`.  
+Методика: 70 сайтов, 12 conn, 20 warm repeats, `PERF_FAST_CACHE_HIT=true`, tiered L1 (PR #93).
+Warm goodput — фаза **warm repeats** из вывода `httparchive-sites-bench.py`.
 Перемеряйте на своём железе: `BENCH_PROFILE=warm ./scripts/compare-squid-bsdm-httparchive.sh`.
 
 | Дата | Версия | Профиль | `WORKER_COUNT` | BSDM warm Mbit/s | Squid warm Mbit/s | Примечание |
@@ -112,6 +116,6 @@ Warm goodput — фаза **warm repeats** из вывода `httparchive-sites-
 
 \*До введения `BENCH_PROFILE`; эквивалент сегодняшнего `cold` (`WORKER_COUNT=4`).
 
-Gap warm profile vs Squid: цель M2.5 — **≥ Squid −5%** на warm goodput ([roadmap](roadmap.md)).  
-Прогон 2026-07-16 warm: BSDM **477** vs Squid **527** → **−9.5%** (цель ≥560 / −5% не достигнута).  
+Gap warm profile vs Squid: цель M2.5 — **≥ Squid −5%** на warm goodput ([roadmap](../roadmap.md)).
+Прогон 2026-07-16 warm: BSDM **477** vs Squid **527** → **−9.5%** (цель ≥560 / −5% не достигнута).
 На том же хосте `cold` (WC=4) дал BSDM warm **516** (−3.4% к Squid rock×4 ~535 из 2026-07-01).

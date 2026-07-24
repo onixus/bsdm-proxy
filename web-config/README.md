@@ -4,7 +4,7 @@
 
 🌐 Web-based configuration interface for BSDM-Proxy.
 
-> Project wiki: [docs/README.md](../docs/README.md) · Deployment: [docs/deployment.md](../docs/deployment.md)
+> Project docs: [docs/README.md](../docs/README.md) · Deployment: [deployment.md](../docs/getting-started/deployment.md)
 
 ## Features
 
@@ -14,7 +14,7 @@
 - **ACL quick rules** — category blocks + REST API token / auto-reload
 - **Zero backend** — static HTML/CSS/JS; open locally or via `python3 -m http.server`
 
-> Live runtime ACL editing: use proxy REST API on `:METRICS_PORT/api/acl/*` (see [docs/acl.md](../docs/acl.md)).
+> Live runtime ACL editing: use proxy REST API on `:METRICS_PORT/api/acl/*` (see [docs/acl.md](../docs/features/acl-policy.md)).
 
 ## Quick Start
 
@@ -72,7 +72,7 @@ docker run -d -p 8080:80 -v $(pwd)/web-config:/usr/share/nginx/html:ro nginx:alp
   - Servers, Base DN, Bind DN
   - User filter, TLS
 
-> **NTLM:** not implemented — see [docs/authentication.md](../docs/authentication.md). Do not deploy `AUTH_BACKEND=ntlm`.
+> **NTLM:** not implemented — see [docs/authentication.md](../docs/features/authentication.md). Do not deploy `AUTH_BACKEND=ntlm`.
 
 **Monitoring Tab:**
 - Prometheus toggle
@@ -153,24 +153,16 @@ docker-compose ps
 
 ## Screenshots
 
-### General Settings
-![General](_screenshots/general.png)
-
-### Authentication (LDAP)
-![Auth](_screenshots/auth-ldap.png)
-
-### Export Modal
-![Export](_screenshots/export.png)
+Screenshots are not stored in the repository. Open `web-config/index.html` locally
+to inspect the current legacy UI.
 
 ## Advanced Features
 
 ### Memory Estimation
 
-Cache tab shows real-time memory estimates:
-```
-10,000 entries ≈ 1.2 MB memory
-100,000 entries ≈ 12 MB memory
-```
+The UI may show a rough entry count. It cannot derive cache RAM from entry count
+alone because body sizes and the inline/spill split dominate memory use. Use
+[capacity planning](../docs/architecture/capacity-planning.md) and measured RSS.
 
 ### Validation
 

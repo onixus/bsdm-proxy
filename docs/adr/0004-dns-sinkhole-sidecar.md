@@ -1,8 +1,8 @@
 # ADR 0004: DNS sinkhole as sidecar (not in proxy)
 
-**Status:** Accepted  
-**Date:** 2026-07-17  
-**Relates:** [#108](https://github.com/onixus/bsdm-proxy/issues/108), [dns-sinkhole.md](../dns-sinkhole.md), [swg-backlog-mapping.md](../swg-backlog-mapping.md) P3-4
+**Status:** Accepted
+**Date:** 2026-07-17
+**Relates:** [#108](https://github.com/onixus/bsdm-proxy/issues/108), [dns-sinkhole.md](../features/dns-sinkhole.md), [swg-backlog-mapping.md](../project-status.md) P3-4
 
 ## Context
 

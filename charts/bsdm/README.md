@@ -1,16 +1,22 @@
 # Helm chart for BSDM-Proxy on Kubernetes
-#
-# Install (data plane):
-#   helm install bsdm ./charts/bsdm -n bsdm-proxy --create-namespace
-#
-# Production profile:
-#   helm install bsdm ./charts/bsdm -f values-prod.yaml -n bsdm-proxy --create-namespace
-#
-# Analytics plane (cache-indexer → ClickHouse):
-#   helm upgrade --install bsdm-indexer ./charts/bsdm \
-#     -f values-analytics.yaml -n bsdm-analytics --create-namespace
-#
-# Full architecture: docs/k8s-architecture.md
+
+```bash
+# Data plane
+helm install bsdm ./charts/bsdm -n bsdm-proxy --create-namespace
+
+# Analytics plane: cache-indexer → external ClickHouse
+helm upgrade --install bsdm-indexer ./charts/bsdm \
+  -f charts/bsdm/values-analytics.yaml \
+  -n bsdm-analytics --create-namespace
+```
+
+`values-prod.yaml` — исторический HA-профиль примерно для 5 000
+пользователей, а не универсальные production defaults. Для пилота на
+100 пользователей используйте
+[пилотный runbook](../../docs/getting-started/pilot-deployment.md) и
+перенесите его лимиты в отдельный values-файл.
+
+Полная архитектура: [Kubernetes deployment](../../docs/ops-and-dev/k8s-architecture.md).
 
 ## Prerequisites
 
@@ -36,7 +42,7 @@ Set `mitm.existingSecret: bsdm-mitm-ca` in values.
 |-----|---------|--------------------------|
 | `replicaCount` | 2 | 4 |
 | `proxy.workerCount` | 1 | 1 |
-| `proxy.cacheCapacity` | 10000 | 25000 per pod |
+| `proxy.cacheCapacity` | 10000 | 25000 total entries per pod |
 | `proxy.redisL2Enabled` | false | true |
 | `proxy.rknSyncEnabled` | false | — |
 | `proxy.urlhausEnabled` | false | — |

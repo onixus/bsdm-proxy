@@ -1,14 +1,16 @@
 # Лицензирование и third-party компоненты
 
-Обзор лицензий переиспользуемого ПО в BSDM-Proxy v0.5.0.
+Обзор лицензий переиспользуемого ПО. Числа ниже получены для BSDM-Proxy
+`0.5.0` и являются историческим снимком, а не актуальным SBOM версии
+`0.6.1-1`.
 
-> См. также: [NOTICE](../NOTICE) · [LICENSE](../LICENSE)
+> См. также: [NOTICE](../../NOTICE) · [LICENSE](../../LICENSE)
 
 ---
 
 ## Лицензия проекта
 
-**BSDM-Proxy** распространяется под **MIT License** ([LICENSE](../LICENSE)).
+**BSDM-Proxy** распространяется под **MIT License** ([LICENSE](../../LICENSE)).
 
 Workspace-крейты:
 
@@ -51,7 +53,9 @@ cargo install cargo-license
 cargo license --avoid-dev-deps --avoid-build-deps
 ```
 
-На момент v0.5.0: **~282** runtime crate, все с permissive-лицензиями (MIT, Apache-2.0, BSD-3-Clause, ISC и dual Apache/MIT).
+На момент `0.5.0`: **~282** runtime crate, все с permissive-лицензиями
+(MIT, Apache-2.0, BSD-3-Clause, ISC и dual Apache/MIT). Перед релизом
+`0.6.1-1` аудит необходимо повторить.
 
 ### Прямые зависимости proxy
 
@@ -67,7 +71,7 @@ cargo license --avoid-dev-deps --avoid-build-deps
 | reqwest | Apache-2.0 OR MIT | HTTP client (categorization) |
 | serde, chrono, regex | Apache-2.0 OR MIT | Сериализация, время, ACL |
 
-Полный список прямых зависимостей — в [NOTICE](../NOTICE).
+Полный список прямых зависимостей — в [NOTICE](../../NOTICE).
 
 ### Опциональные auth-features
 
@@ -93,7 +97,7 @@ cd proxy && cargo license --features auth-kerberos --json \
 
 ### Нативные библиотеки
 
-При сборке Docker-образа ([Dockerfile](../Dockerfile)) статически линкуются:
+При сборке Docker-образа ([Dockerfile](../../Dockerfile)) статически линкуются:
 
 | Библиотека | Лицензия |
 |------------|----------|
@@ -164,8 +168,8 @@ cargo audit
 
 | Файл | Назначение |
 |------|------------|
-| [LICENSE](../LICENSE) | MIT — лицензия BSDM-Proxy |
-| [NOTICE](../NOTICE) | Краткий реестр third-party (прямые deps, Docker, native) |
+| [LICENSE](../../LICENSE) | MIT — лицензия BSDM-Proxy |
+| [NOTICE](../../NOTICE) | Краткий реестр third-party (прямые deps, Docker, native) |
 | `docs/licensing.md` | Этот документ — детали и рекомендации |
 
 ### Исторические компоненты (удалены)
@@ -181,10 +185,11 @@ cargo audit
 ## Рекомендации для release / enterprise
 
 1. Собирать release **без** `auth-kerberos`, если не проведена AGPL-оценка.
-2. Включать [NOTICE](../NOTICE) в release tarball (`packaging/`).
+2. Включать [NOTICE](../../NOTICE) в release tarball (`packaging/`).
 3. Для Docker-стека документировать AGPL Grafana для compliance-команды.
 4. Рассмотреть `cargo-deny` с license policy в CI (allow MIT/Apache/BSD; flag GPL/AGPL).
 
 ---
 
-*Последний аудит: 2026-07 · v0.5.0 · `cargo license` + compose manifest*
+*Последний зафиксированный аудит: 2026-07 · v0.5.0 · `cargo license` +
+compose manifest. Для v0.6.1-1 требуется повторный прогон.*

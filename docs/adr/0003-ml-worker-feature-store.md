@@ -1,13 +1,13 @@
 # ADR 0003: ML worker + ClickHouse feature store (M5)
 
-**Status:** Accepted  
-**Date:** 2026-07-16  
+**Status:** Accepted
+**Date:** 2026-07-16
 **Relates:** [#46](https://github.com/onixus/bsdm-proxy/issues/46) (B15), [roadmap M5](../roadmap.md), [ADR 0002](0002-clickhouse-analytics.md)
 
 ## Context
 
-M4 delivers **rule-based** threat analytics via `alert-worker` (ClickHouse SQL → webhook / Grafana).  
-M5 needs **ML / scoring** (anomaly, phishing, C&C) without putting inference on the proxy hot path ([architecture.md](../architecture.md)).
+M4 delivers **rule-based** threat analytics via `alert-worker` (ClickHouse SQL → webhook / Grafana).
+M5 needs **ML / scoring** (anomaly, phishing, C&C) without putting inference on the proxy hot path ([architecture.md](../architecture/overview.md)).
 
 B15 originally said “read OpenSearch/Kafka”. Analytics storage is now **ClickHouse-only** (ADR 0002). Alerting exists as `alert-worker`; scoring does not.
 

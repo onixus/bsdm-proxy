@@ -10,7 +10,8 @@ has seven crates: `proxy/` (bin `proxy`), `cache-indexer/` (bin `cache-indexer`)
 `alert-worker/` (bin `alert-worker`), `ml-worker/` (bin `ml-worker`),
 `dns-sinkhole/` (bin `dns-sinkhole`), `bsdm-events/` (shared event types), and
 `e2e/` (test harness). Standard build,
-lint, test, and run commands live in `README.md` and `docs/development.md` — use those
+lint, test, and run commands live in `README.md` and
+`docs/ops-and-dev/development.md` — use those
 as the source of truth.
 
 Environment notes (the update script already runs `cargo fetch`; system packages and the
@@ -19,7 +20,8 @@ Rust toolchain are baked into the VM image):
 - Requires Rust 1.85+. The image ships a newer stable toolchain (`rustup default stable`);
   the previously preinstalled 1.83 is too old and will fail to compile some deps.
 - Native build needs system packages `libssl-dev pkg-config cmake librdkafka-dev libclang-dev`
-  (see `docs/development.md`). `rdkafka` (Kafka client) links against `librdkafka-dev`.
+  (see `docs/ops-and-dev/development.md`). `rdkafka` (Kafka client) links against
+  `librdkafka-dev`.
 
 Running and testing:
 
@@ -30,7 +32,9 @@ Running and testing:
   `./certs/ca.key` and `./certs/ca.crt`. These are git-ignored and NOT in the repo, so
   generate them first (`./scripts/gen-ca.sh` or "Быстрый старт" in `README.md`), otherwise MITM startup fails.
   For plain forward-proxy testing you can set `MITM_ENABLED=false` and skip the certs.
-  Lite node (proxy + SQLite indexer, no Kafka/CH): `./scripts/gen-ca.sh && docker compose -f docker-compose.lite.yml up -d --build` (see `docs/lite.md`).
+  Lite node (proxy + SQLite indexer, no Kafka/CH):
+  `./scripts/gen-ca.sh && docker compose -f docker-compose.lite.yml up -d --build`
+  (see `docs/getting-started/lite-mode.md`).
 - Run locally: `HTTP_PORT=1488 METRICS_PORT=9090 cargo run -p bsdm-proxy --bin proxy`
   (or the built `./target/debug/proxy`). Verify with `curl http://127.0.0.1:9090/health`
   and `curl -x http://127.0.0.1:1488 http://httpbin.org/get`. HTTPS through MITM:

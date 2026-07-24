@@ -1,153 +1,188 @@
 # Развёртывание BSDM-Proxy
 
-Обзор способов запуска: Docker Compose, native package, Kubernetes.
+Текущая версия workspace: **`0.6.1-1`**.
 
-> См. также: [docker.md](docker.md) · [kubernetes.md](kubernetes.md) · [k8s-architecture.md](k8s-architecture.md) · [packaging/README.md](../packaging/README.md)
+Сначала выберите режим:
 
----
+| Режим | Состав | Назначение |
+|---|---|---|
+| Lite | proxy + SQLite indexer | Dev, lab, edge |
+| Analytics Compose | proxy + Kafka + ClickHouse + monitoring | Пилот |
+| Native | systemd binaries + external dependencies | VM/bare metal |
+| Kubernetes | Helm + external/in-cluster analytics | Масштабирование и HA |
 
-## Сравнение вариантов
+Фактическая зрелость модулей: [Project status](../project-status.md).
 
-| Вариант | Когда использовать | Плюсы | Минусы |
-|---------|-------------------|-------|--------|
-| **Docker Compose** | Dev, lab, небольшой прод | Быстрый старт, полный стек | Нужна сборка образов, один хост |
-| **Native package** | Bare metal / VM без Docker | systemd, минимум зависимостей | Ручная настройка Kafka/CH |
-| **Kubernetes + Helm** | Прод, HA, масштабирование | Оркестрация, probes, chart `charts/bsdm/` | Сложнее, образы всё равно нужны |
+## Подготовка CA
 
-## Быстрый старт: Установка готовых бинарников (Zero-Compilation)
-
-Для мгновенной установки на Linux/macOS без компиляции исходного кода и без установки Rust toolchain:
+MITM требует CA keypair:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/onixus/bsdm-proxy/main/scripts/install-binaries.sh | sudo bash
+./scripts/gen-ca.sh
 ```
 
-Скрипт автоматически скачивает предскомпилированные бинарники последнего релиза с GitHub Releases (`x86_64` / `aarch64`), настраивает `/opt/bsdm-proxy`, `/etc/bsdm-proxy` и регистрирует systemd-сервисы.
+Установите `certs/ca.crt` в trust store тестовых клиентов. `ca.key` должен быть
+доступен только proxy. Не коммитьте CA key в Git и не используйте lab CA в
+production.
 
----
+Без MITM:
 
-## Docker Compose (рекомендуется для dev/lab)
+```env
+MITM_ENABLED=false
+```
 
-### Lite — proxy + SQLite Search API
+HTTPS в этом режиме идёт как CONNECT tunnel и не проходит HTTP body/cache path.
+
+## Lite
 
 ```bash
 ./scripts/gen-ca.sh
 docker compose -f docker-compose.lite.yml up -d --build
+docker compose -f docker-compose.lite.yml ps
 ```
 
-Caching HTTPS proxy + SQLite indexer / Search API (MITM + L1), без Kafka/ClickHouse. Подробнее: [lite.md](lite.md).
-
-### Полный стек
+Проверка:
 
 ```bash
-# 1. CA для MITM (если MITM_ENABLED=true)
-./scripts/gen-ca.sh
+curl http://127.0.0.1:9090/health
+curl --cacert certs/ca.crt \
+  -x http://127.0.0.1:1488 \
+  https://httpbin.org/get
+curl 'http://127.0.0.1:8080/api/search?limit=5'
+```
 
-# 2. Запуск
+Подробнее: [Lite mode](lite-mode.md).
+
+## Analytics Compose
+
+Базовый стек:
+
+```bash
+./scripts/gen-ca.sh
 docker compose up -d --build
 docker compose ps
 ```
 
-**Сервисы:** proxy, cache-indexer, Kafka, Zookeeper, ClickHouse, Prometheus, Grafana.
+Состав: proxy, Kafka, Zookeeper, ClickHouse, cache-indexer, Prometheus,
+Alertmanager и Grafana.
 
-Дополнительные compose-файлы: [docker.md](docker.md#compose-файлы).
-
-### Минимальный тестовый стек
+Профили:
 
 ```bash
-docker compose -f docker-compose.test.yml up -d --build
-./scripts/run-smoke-tests.sh --external
+docker compose --profile alerts up -d --build
+docker compose --profile ml up -d --build
+docker compose --profile dns-sinkhole up -d --build
+docker compose --profile icap up -d
 ```
 
-В `docker-compose.test.yml`: `MITM_ENABLED=false` — HTTPS идёт через CONNECT-туннель **без кэширования**. Для проверки cache HIT используйте in-process E2E: `./scripts/run-e2e-tests.sh`.
+Профиль означает только запуск контейнера. Он не заменяет certificates, secrets,
+zone files, model selection и проверку external endpoints.
 
----
+Пилотный профиль на одном сервере:
+[100 пользователей / 5 дней](pilot-deployment.md).
 
-## Native package (systemd)
+## Дополнительные Compose-сценарии
+
+| Файл | Назначение |
+|---|---|
+| `docker-compose.lite.yml` | Proxy + SQLite |
+| `docker-compose.test.yml` | Smoke/E2E stack |
+| `docker-compose.pilot.yml` | Override ресурсов и retention для пилота на 100 пользователей |
+| `docker-compose.redis-l2.yml` | Redis L2 example |
+| `docker-compose.hierarchy.yml` | Multi-proxy hierarchy |
+| `docker-compose.ha.yml` | Лабораторный HA sketch |
+| `docker-compose.awg.yml` | Experimental AWG sidecar |
+
+Не объединяйте overlays автоматически: проверьте network names, ports, volumes и
+environment каждого файла.
+
+## Native package
+
+Сборка:
 
 ```bash
 ./scripts/build-package.sh
+```
 
-tar xzf dist/bsdm-proxy-0.5.7.033-linux-x86_64.tar.gz
-cd bsdm-proxy-0.5.7.033-linux-x86_64
+Имя архива зависит от версии workspace и архитектуры. Не копируйте историческое
+имя из release notes; проверьте `dist/`:
+
+```bash
+ls -1 dist/
+tar xzf dist/bsdm-proxy-<version>-linux-<arch>.tar.gz
+cd bsdm-proxy-<version>-linux-<arch>
 sudo ./install.sh --create-user --systemd
-sudo cp /path/to/ca.key /path/to/ca.crt /certs/
-sudo systemctl enable --now bsdm-proxy
 ```
 
-Порты: proxy `1488`, metrics `9090`, cache-indexer admin `8080`, ICP `3130/udp` (opt-in).
+Скопируйте CA и настройте `/etc/bsdm-proxy` до запуска service.
 
-Подробнее: [packaging/README.md](../packaging/README.md)
+Подробнее: [Packaging](../../packaging/README.md).
 
----
+## Kubernetes
 
-## Kubernetes (прод)
-
-k8s решает оркестрацию и сетевое взаимодействие между сервисами, но **не заменяет** сборку образов и настройку приложения.
+Default chart:
 
 ```bash
-helm install bsdm ./charts/bsdm -n bsdm-proxy --create-namespace
-# prod:
-helm install bsdm ./charts/bsdm -f charts/bsdm/values-prod.yaml -n bsdm-proxy --create-namespace
+helm upgrade --install bsdm ../../charts/bsdm \
+  --namespace bsdm-proxy \
+  --create-namespace
 ```
 
-| Ресурс | Компонент | Примечание |
-|--------|-----------|------------|
-| Helm chart `charts/bsdm/` | proxy Deployment | порты 1488, 9090 |
-| Deployment | cache-indexer | admin `:8080`, Search API |
-| StatefulSet / managed | Kafka, ClickHouse | часто проще managed вне кластера |
-| ServiceMonitor | metrics | scrape proxy + indexer |
+Проверьте values перед применением: default resources и `values-prod.yaml`
+являются примерами, а не универсальным сайзингом.
 
-Подробнее: [kubernetes.md](kubernetes.md) · [k8s-architecture.md](k8s-architecture.md)
+Analytics plane можно разместить отдельно:
 
----
+```bash
+helm upgrade --install bsdm-indexer ../../charts/bsdm \
+  --namespace bsdm-analytics \
+  --create-namespace \
+  -f ../../charts/bsdm/values-analytics.yaml
+```
 
-## Порты и endpoints
+Подробнее: [Kubernetes architecture](../ops-and-dev/k8s-architecture.md).
 
-| Сервис | Порт | Endpoint / протокол |
-|--------|------|---------------------|
-| Proxy HTTP/HTTPS | 1488 | HTTP proxy, CONNECT |
-| Proxy metrics / health | 9090 | `/health`, `/ready`, `/metrics` |
-| cache-indexer admin | 8080 | `/health`, `/metrics`, `/api/search` |
-| ICP | 3130/udp | межкешевые запросы (opt-in) |
+## Endpoints
+
+| Компонент | Порт | Endpoint |
+|---|---:|---|
+| proxy | 1488 | HTTP proxy / CONNECT |
+| proxy control | 9090 | `/health`, `/ready`, `/metrics` |
+| cache-indexer | 8080 | `/health`, `/metrics`, `/api/search` |
+| ICP | 3130/udp | hierarchy |
 | Kafka | 9092 | cache-events |
-| ClickHouse HTTP | 8123 | REST / SQL |
-| ClickHouse native | 9000 | Grafana datasource |
-| Prometheus | 9091 | UI (в compose) |
-| Grafana | 3000 | UI (`admin` / `admin`) |
+| ClickHouse | 8123 / 9000 | HTTP / native |
+| Prometheus | 9091 | Compose host port |
+| Grafana | 3000 | UI |
 
----
+В production не публикуйте Kafka, ClickHouse, Redis и unauthenticated control
+endpoints в client network.
 
-## Проверка после развёртывания
+## Проверка
 
 ```bash
-curl http://localhost:9090/health
-curl http://localhost:9090/ready
-curl -x http://localhost:1488 http://httpbin.org/get
-
-# Analytics (после трафика через proxy)
-curl 'http://localhost:8123/?query=SELECT+count()+FROM+bsdm.http_cache'
-curl 'http://localhost:8080/api/search?limit=5'
+curl http://127.0.0.1:9090/health
+curl http://127.0.0.1:9090/ready
+curl -x http://127.0.0.1:1488 http://httpbin.org/get
+curl 'http://127.0.0.1:8123/?query=SELECT+count()+FROM+bsdm.http_cache'
+curl 'http://127.0.0.1:8080/api/search?limit=5'
 ```
 
----
+Диагностика:
 
-## Зависимости между сервисами
-
-```
-proxy ──► Kafka ──► cache-indexer ──► ClickHouse (bsdm.http_cache)
-  │                                        ▲
-  └──► :9090/metrics ──► Prometheus ──► Grafana (CH + Prometheus)
+```bash
+docker compose ps
+docker compose logs --tail=200 proxy
+docker compose logs --tail=200 cache-indexer
 ```
 
----
+## Production checklist
 
-## Версии
-
-| Артефакт | Версия |
-|----------|--------|
-| Текущий release | **0.5.07.033** (`0.5.7+033`) |
-| Kafka (compose) | Confluent `7.9.8` |
-| ClickHouse (compose) | см. `docker-compose.yml` |
-| Rust (минимум) | `1.88+` |
-| Helm chart | `charts/bsdm/` |
+- CA key защищён и имеет rotation/backup procedure;
+- secrets не хранятся в Compose/values plaintext;
+- control/search/metrics endpoints ограничены;
+- Redis имеет `maxmemory`;
+- Kafka и ClickHouse retention заданы явно;
+- storage backup/restore проверен;
+- optional features соответствуют [Project status](../project-status.md);
+- full-path load test выполнен с production flags.

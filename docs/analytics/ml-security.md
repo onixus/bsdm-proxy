@@ -1,6 +1,6 @@
 # M5 — ML security
 
-Async threat scoring on ClickHouse. Design: [ADR 0003](adr/0003-ml-worker-feature-store.md) · Roadmap: [M5](roadmap.md#m5--ml-security-v10x).
+Async threat scoring on ClickHouse. Design: [ADR 0003](../adr/0003-ml-worker-feature-store.md) · Roadmap: [M5](../roadmap.md#m5--ml-security-v10x).
 
 > Proxy hot path stays free of ML inference. Rule alerts remain in [`alert-worker`](alerting.md).
 
@@ -124,7 +124,7 @@ THREAT_SCORE_ENABLED=true THREAT_SCORE_POLL_URL=http://127.0.0.1:8091/api/threat
   cargo run -p bsdm-proxy --bin proxy
 ```
 
-Ad-hoc SQL: [`scripts/clickhouse/m5_writeback_queries.sql`](../scripts/clickhouse/m5_writeback_queries.sql).
+Ad-hoc SQL: [`scripts/clickhouse/m5_writeback_queries.sql`](../../scripts/clickhouse/m5_writeback_queries.sql).
 
 ### UEBA scoring
 
@@ -207,11 +207,11 @@ Calculates the chance of an employee quitting based on visits to `JobSearch`, `C
 
 ## Grafana
 
-Panel **Top anomalous entities (UEBA z-score / ml-worker)** on [BSDM HTTP Traffic (ClickHouse)](../grafana/dashboards/bsdm-http-traffic-ch.json).  
-Panel **Top phishing-scored domains (lexical / ml-worker M5.3)** on the same dashboard.  
-Panel **Top C&C beacon pairs (cc_beacon_v0 / ml-worker M5.4)** on the same dashboard.  
-Panel **Active threat score cache (M5.5 write-back)** on the same dashboard.  
-Ad-hoc SQL: [`scripts/clickhouse/m5_ueba_queries.sql`](../scripts/clickhouse/m5_ueba_queries.sql), [`scripts/clickhouse/m5_phishing_queries.sql`](../scripts/clickhouse/m5_phishing_queries.sql), [`scripts/clickhouse/m5_beacon_queries.sql`](../scripts/clickhouse/m5_beacon_queries.sql), [`scripts/clickhouse/m5_writeback_queries.sql`](../scripts/clickhouse/m5_writeback_queries.sql).
+Panel **Top anomalous entities (UEBA z-score / ml-worker)** on [BSDM HTTP Traffic (ClickHouse)](../../grafana/dashboards/bsdm-http-traffic-ch.json).
+Panel **Top phishing-scored domains (lexical / ml-worker M5.3)** on the same dashboard.
+Panel **Top C&C beacon pairs (cc_beacon_v0 / ml-worker M5.4)** on the same dashboard.
+Panel **Active threat score cache (M5.5 write-back)** on the same dashboard.
+Ad-hoc SQL: [`scripts/clickhouse/m5_ueba_queries.sql`](../../scripts/clickhouse/m5_ueba_queries.sql), [`scripts/clickhouse/m5_phishing_queries.sql`](../../scripts/clickhouse/m5_phishing_queries.sql), [`scripts/clickhouse/m5_beacon_queries.sql`](../../scripts/clickhouse/m5_beacon_queries.sql), [`scripts/clickhouse/m5_writeback_queries.sql`](../../scripts/clickhouse/m5_writeback_queries.sql).
 
 ## Verify
 
@@ -224,7 +224,7 @@ clickhouse-client -q "SELECT entity_id, score, model, severity FROM bsdm.ml_scor
 
 ## Phases
 
-Epic: [#165](https://github.com/onixus/bsdm-proxy/issues/165) · [roadmap](roadmap.md#m5--ml-security-v10x)
+Epic: [#165](https://github.com/onixus/bsdm-proxy/issues/165) · [roadmap](../roadmap.md#m5--ml-security-v10x)
 
 | Phase | Issue |
 |-------|-------|

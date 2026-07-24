@@ -177,7 +177,7 @@ HIERARCHY_DIRECT_DOMAINS=localhost,127.0.0.1
 
 ### Peers JSON file
 
-When `CACHE_PEERS_PATH` (or `HIERARCHY_PEERS_PATH`) is set, static peers load from that file instead of `CACHE_PARENTS` / `CACHE_SIBLINGS`. Call `POST /api/hierarchy/reload` on the metrics port after editing the file (discovery siblings are preserved). See [control-plane.md](control-plane.md).
+When `CACHE_PEERS_PATH` (or `HIERARCHY_PEERS_PATH`) is set, static peers load from that file instead of `CACHE_PARENTS` / `CACHE_SIBLINGS`. Call `POST /api/hierarchy/reload` on the metrics port after editing the file (discovery siblings are preserved). See [control-plane.md](../features/control-plane.md).
 
 ### Configuration File (TOML)
 

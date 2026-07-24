@@ -1,5 +1,5 @@
 # Default values for bsdm-proxy on Kubernetes.
-# See docs/k8s-architecture.md and values-prod.yaml.
+# See docs/ops-and-dev/k8s-architecture.md and values-prod.yaml.
 
 replicaCount: 2
 

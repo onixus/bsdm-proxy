@@ -1,6 +1,10 @@
 # Ретропоиск и Аналитика на ClickHouse (ClickHouse Retro-Search & Search API)
 
-Платформа ретропоиска `bsdm-proxy` обеспечивает возможность исторического поиска по перехваченному HTTP-трафику за произвольные периоды времени (по умолчанию 30–42 дня).
+Платформа ретропоиска `bsdm-proxy` обеспечивает исторический поиск по
+метаданным HTTP-трафика, переданным proxy в analytics pipeline. Глубина
+поиска ограничена фактическим TTL таблиц. Репозиторный DDL содержит
+исторический default 42 дня; для пилота на 100 пользователей принят TTL
+до пяти дней.
 
 Документ описывает архитектуру ClickHouse, схему данных `bsdm.http_cache`, индексатор `cache-indexer` и REST-интерфейс `/api/search`.
 
@@ -32,7 +36,11 @@ curl 'http://127.0.0.1:8080/api/search?limit=5'
 
 ## 2. Схема Данных ClickHouse
 
-Файл DDL: `scripts/clickhouse/http_cache.sql` создаёт таблицу `bsdm.http_cache` с автоматическим TTL на 42 дня и дневным партиционированием (`ENGINE = MergeTree() PARTITION BY toYYYYMM(ts)`).
+Файл DDL: `scripts/clickhouse/http_cache.sql` создаёт таблицу
+`bsdm.http_cache` с TTL 42 дня и дневным партиционированием
+(`PARTITION BY toYYYYMMDD(ts)`). Перед эксплуатацией измените TTL под свой
+профиль; команда для пилотных пяти дней приведена в
+[pilot-deployment.md](../getting-started/pilot-deployment.md).
 
 ### Поля таблицы `bsdm.http_cache`:
 | Поле | Тип | Описание |
@@ -59,11 +67,11 @@ curl 'http://127.0.0.1:8080/api/search?limit=5'
 ## 3. Примеры полезных SQL-запросов для SOC
 
 ```sql
--- Кто ходил на конкретный домен за последние 30 дней:
+-- Кто ходил на конкретный домен за последние 5 дней:
 SELECT ts, username, client_ip, url, method, status, cache_status, session_id
 FROM bsdm.http_cache
 WHERE domain = 'example.com'
-  AND ts >= now() - INTERVAL 30 DAY
+  AND ts >= now() - INTERVAL 5 DAY
 ORDER BY ts DESC
 LIMIT 1000;
 

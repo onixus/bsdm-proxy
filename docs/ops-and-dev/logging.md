@@ -18,7 +18,7 @@ BSDM-Proxy и cache-indexer используют [tracing](https://docs.rs/traci
 | `proxy` | `info,bsdm_proxy=debug` | Удобно для локальной разработки (`cargo run`) |
 | `cache-indexer` | `info,cache_indexer=info` | Сообщения indexer на уровне `info` |
 
-В production задавайте `RUST_LOG` явно через env-файл или systemd — см. [packaging/config/bsdm-proxy.env.example](../packaging/config/bsdm-proxy.env.example).
+В production задавайте `RUST_LOG` явно через env-файл или systemd — см. [packaging/config/bsdm-proxy.env.example](../../packaging/config/bsdm-proxy.env.example).
 
 ### Рекомендуемые профили
 
@@ -62,15 +62,15 @@ RUST_LOG=info,bsdm_proxy::icp=debug,bsdm_proxy::hierarchy=debug
 
 | Файл | `RUST_LOG` |
 |------|------------|
-| [packaging/config/bsdm-proxy.env.example](../packaging/config/bsdm-proxy.env.example) | `info,bsdm_proxy=info` |
-| [packaging/config/cache-indexer.env.example](../packaging/config/cache-indexer.env.example) | `info,cache_indexer=info` |
-| [docker-compose.yml](../docker-compose.yml) | `info,bsdm_proxy=debug` / `info,cache_indexer=debug` |
-| [docker-compose.hierarchy.yml](../docker-compose.hierarchy.yml) | `info,bsdm_proxy=info` |
-| [docker-compose.test.yml](../docker-compose.test.yml) | `warn` |
-| [proxy/src/main.rs](../proxy/src/main.rs) | init + fallback |
-| [cache-indexer/src/main.rs](../cache-indexer/src/main.rs) | init + fallback |
+| [packaging/config/bsdm-proxy.env.example](../../packaging/config/bsdm-proxy.env.example) | `info,bsdm_proxy=info` |
+| [packaging/config/cache-indexer.env.example](../../packaging/config/cache-indexer.env.example) | `info,cache_indexer=info` |
+| [docker-compose.yml](../../docker-compose.yml) | `info,bsdm_proxy=debug` / `info,cache_indexer=debug` |
+| [docker-compose.hierarchy.yml](../../docker-compose.hierarchy.yml) | `info,bsdm_proxy=info` |
+| [docker-compose.test.yml](../../docker-compose.test.yml) | `warn` |
+| [proxy/src/main.rs](../../proxy/src/main.rs) | init + fallback |
+| [cache-indexer/src/main.rs](../../cache-indexer/src/main.rs) | init + fallback |
 
-systemd подхватывает env из `/etc/bsdm-proxy/bsdm-proxy.env` и `cache-indexer.env` ([packaging/systemd/](../packaging/systemd/)).
+systemd подхватывает env из `/etc/bsdm-proxy/bsdm-proxy.env` и `cache-indexer.env` ([packaging/systemd/](../../packaging/systemd/)).
 
 ## Что логируется
 
@@ -116,6 +116,6 @@ RUST_LOG=info,bsdm_proxy=debug cargo run -p bsdm-proxy --bin proxy
 ## Связанные документы
 
 - [development.md](development.md) — локальный запуск и отладка
-- [authentication.md](authentication.md) — логи LDAP/auth
-- [acl.md](acl.md) — логи ACL
-- [packaging/README.md](../packaging/README.md) — установка и env-файлы
+- [authentication.md](../features/authentication.md) — логи LDAP/auth
+- [acl.md](../features/acl-policy.md) — логи ACL
+- [packaging/README.md](../../packaging/README.md) — установка и env-файлы

@@ -2,7 +2,7 @@
 
 Optional **DNS-layer** filtering (Cisco Umbrella–style first hop). Separate on-ramp from the explicit forward proxy.
 
-Issue: [#108](https://github.com/onixus/bsdm-proxy/issues/108) · Roadmap: [roadmap.md](roadmap.md) · ADR: [adr/0004-dns-sinkhole-sidecar.md](adr/0004-dns-sinkhole-sidecar.md)
+Issue: [#108](https://github.com/onixus/bsdm-proxy/issues/108) · Roadmap: [roadmap.md](../roadmap.md) · ADR: [adr/0004-dns-sinkhole-sidecar.md](../adr/0004-dns-sinkhole-sidecar.md)
 
 ## Scope decision
 
@@ -14,7 +14,7 @@ Issue: [#108](https://github.com/onixus/bsdm-proxy/issues/108) · Roadmap: [road
 
 Clients point DHCP/DoH stub / container `dns:` at this service. The HTTPS proxy keeps ACL/UT1; DNS is an optional first hop.
 
-## Status (PoC)
+## Status (Beta)
 
 | Item | Status |
 |------|--------|
@@ -24,7 +24,8 @@ Clients point DHCP/DoH stub / container `dns:` at this service. The HTTPS proxy 
 | Sinkhole A/AAAA or NXDOMAIN | ✅ |
 | Forward to upstream resolver | ✅ |
 | Compose profile `dns-sinkhole` | ✅ |
-| DoH / DoT / DNSSEC validation | ❌ later |
+| DoH (`:8443`) / DoT (`:853`) with configured TLS certificate | ✅ |
+| DNSSEC validation | ❌ not implemented |
 | Full RFC RPZ (client-IP triggers, NSDNAME, …) | ❌ sketch only |
 
 ## Run
@@ -55,6 +56,13 @@ dig @127.0.0.1 -p 5353 blocked.test A +short
 | `DNS_SINKHOLE_TTL` | `300` | Answer TTL |
 | `METRICS_PORT` | `8092` | `/health` + `/metrics` |
 | `DNS_SINKHOLE_ENABLED` | `true` | Set `false` to no-op exit (compose convenience) |
+| `DNS_SINKHOLE_DOH_ENABLED` | `true` | Enable HTTPS listener |
+| `DNS_SINKHOLE_DOH_BIND` | `0.0.0.0:8443` | DoH listener |
+| `DNS_SINKHOLE_DOH_PATH` | `/dns-query` | DoH endpoint |
+| `DNS_SINKHOLE_DOT_ENABLED` | `true` | Enable TLS listener |
+| `DNS_SINKHOLE_DOT_BIND` | `0.0.0.0:853` | DoT listener |
+| `DNS_SINKHOLE_TLS_CERT` | — | PEM certificate required when DoH/DoT is enabled |
+| `DNS_SINKHOLE_TLS_KEY` | — | PEM private key required when DoH/DoT is enabled |
 
 ## Zone file (RPZ-lite sketch)
 
