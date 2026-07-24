@@ -20,6 +20,7 @@ import {
   ChevronRight,
   Languages,
   ShieldAlert,
+  Smartphone,
 } from 'lucide-react'
 import { isDemoMode } from '../../api/source'
 import { applyTheme, loadTheme, type Theme } from '../../lib/theme'
@@ -63,6 +64,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         { to: '/wasm', label: t.nav.wasm, icon: Cpu },
         { to: '/cluster', label: t.nav.cluster, icon: Network },
         { to: '/ai-cache', label: t.nav.aiCache, icon: Sparkles },
+        { to: '/amneziawg', label: 'AmneziaWG Connect', icon: Smartphone },
       ],
     },
     {

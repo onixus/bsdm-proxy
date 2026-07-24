@@ -79,6 +79,39 @@ impl ControlApiState {
             Err(e) => json_response(StatusCode::BAD_REQUEST, &format!(r#"{{"error":"{}"}}"#, e)),
         }
     }
+
+    async fn amneziawg_status(&self) -> Response<Body> {
+        let guard = self.awg_server.read().await;
+        match serde_json::to_string(&*guard) {
+            Ok(json) => json_response(StatusCode::OK, &json),
+            Err(e) => json_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!(r#"{{"error":"{}"}}"#, e),
+            ),
+        }
+    }
+
+    async fn amneziawg_update(&self, body: Bytes) -> Response<Body> {
+        match serde_json::from_slice::<crate::amneziawg::AwgServerConfig>(&body) {
+            Ok(config) => {
+                let mut guard = self.awg_server.write().await;
+                *guard = config;
+                json_response(StatusCode::OK, r#"{"status":"ok"}"#)
+            }
+            Err(e) => json_response(StatusCode::BAD_REQUEST, &format!(r#"{{"error":"{}"}}"#, e)),
+        }
+    }
+
+    async fn amneziawg_add_peer(&self, body: Bytes) -> Response<Body> {
+        match serde_json::from_slice::<crate::amneziawg::AwgPeerConfig>(&body) {
+            Ok(peer) => {
+                let mut guard = self.awg_server.write().await;
+                guard.peers.push(peer);
+                json_response(StatusCode::OK, r#"{"status":"ok"}"#)
+            }
+            Err(e) => json_response(StatusCode::BAD_REQUEST, &format!(r#"{{"error":"{}"}}"#, e)),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -96,6 +129,7 @@ pub struct ControlApiState {
     casb_engine: Arc<crate::casb::CasbEngine>,
     dlp_engine: Arc<crate::dlp::DlpEngine>,
     auth_manager: Option<Arc<crate::auth::AuthManager>>,
+    awg_server: Arc<tokio::sync::RwLock<crate::amneziawg::AwgServerConfig>>,
 }
 
 impl ControlApiState {
@@ -129,6 +163,9 @@ impl ControlApiState {
             casb_engine,
             dlp_engine,
             auth_manager,
+            awg_server: Arc::new(tokio::sync::RwLock::new(
+                crate::amneziawg::AwgServerConfig::default(),
+            )),
         }
     }
 
@@ -216,6 +253,9 @@ impl ControlApiState {
             (&Method::GET, "/api/auth/basic/users") => self.basic_users_list().await,
             (&Method::POST, "/api/auth/basic/users") => self.basic_users_put(body).await,
             (&Method::DELETE, "/api/auth/basic/users") => self.basic_users_delete(body).await,
+            (&Method::GET, "/api/amneziawg/status") => self.amneziawg_status().await,
+            (&Method::POST, "/api/amneziawg/config") => self.amneziawg_update(body).await,
+            (&Method::POST, "/api/amneziawg/peers") => self.amneziawg_add_peer(body).await,
             #[cfg(feature = "wasm")]
             (&Method::POST, "/api/wasm/reload") => self.wasm_reload(),
             _ => json_response(StatusCode::NOT_FOUND, r#"{"error":"not found"}"#),
