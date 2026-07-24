@@ -1,0 +1,39 @@
+# AmneziaWG (AWG) sidecar profile for BSDM-Proxy.
+# Runs an obfuscated AmneziaWG VPN server endpoint forwarding traffic to BSDM-Proxy.
+#
+# Usage:
+#   docker compose -f docker-compose.lite.yml -f docker-compose.awg.yml up -d
+#
+# Docs: docs/ops-and-dev/configuration.md · docs/roadmap.md
+
+services:
+  amneziawg:
+    image: amneziavpn/amneziawg-go:latest
+    container_name: bsdm-amneziawg
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    ports:
+      - "51820:51820/udp"
+    environment:
+      - AWG_INTERFACE=awg0
+      - AWG_ADDRESS=10.8.0.1/24
+      - AWG_LISTEN_PORT=51820
+      - AWG_JC=4
+      - AWG_JMIN=40
+      - AWG_JMAX=70
+      - AWG_S1=15
+      - AWG_S2=25
+      - AWG_H1=10000001
+      - AWG_H2=10000002
+      - AWG_H3=10000003
+      - AWG_H4=10000004
+      - PROXY_ENDPOINT=proxy:1488
+    volumes:
+      - awg-config:/etc/amnezia/amneziawg
+    networks:
+      - bsdm-lite
+    restart: unless-stopped
+
+volumes:
+  awg-config:
