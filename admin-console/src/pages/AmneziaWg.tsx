@@ -1,17 +1,35 @@
 import { useState } from 'react'
-import { ShieldCheck, ShieldAlert, Plus, Download, Key, RefreshCw, Cpu, Smartphone } from 'lucide-react'
+import { ShieldCheck, ShieldAlert, Plus, Download, Key, RefreshCw, Cpu, Smartphone, Trash2, Activity } from 'lucide-react'
 import { useQuery, useMutation } from '@tanstack/react-query'
-import { fetchAwgStatus, updateAwgConfig, addAwgPeer, type AwgServerConfig, type AwgPeerConfig } from '../api/amneziawg'
+import { fetchAwgStatus, updateAwgConfig, addAwgPeer, deleteAwgPeer, type AwgServerConfig, type AwgPeerConfig } from '../api/amneziawg'
 import { Panel } from '../components/dashboard/MetricWidget'
 import { Button } from '../components/ui/Button'
 import { FormGrid, FormSection, Input, Checkbox } from '../components/ui/Form'
 import { CodePreview, Modal } from '../components/ui/Modal'
 import { useToast } from '../components/ui/Toast'
 
+function formatBytes(bytes?: number): string {
+  if (!bytes || bytes === 0) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`
+}
+
+function formatHandshake(secs?: number): string {
+  if (!secs || secs === 0) return 'Never'
+  const now = Math.floor(Date.now() / 1000)
+  const diff = now - secs
+  if (diff < 60) return `${diff}s ago`
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+  return `${Math.floor(diff / 3600)}h ago`
+}
+
 export function AmneziaWgPage() {
   const { data: sourcedData, isLoading, refetch } = useQuery({ queryKey: ['amneziawgStatus'], queryFn: fetchAwgStatus })
   const mutation = useMutation({ mutationFn: updateAwgConfig, onSuccess: () => refetch() })
   const addPeerMutation = useMutation({ mutationFn: addAwgPeer, onSuccess: () => refetch() })
+  const deletePeerMutation = useMutation({ mutationFn: deleteAwgPeer, onSuccess: () => refetch() })
   
   const { toast } = useToast()
   
@@ -34,8 +52,8 @@ export function AmneziaWgPage() {
 
   const handleSaveObfuscation = async () => {
     try {
-      await mutation.mutateAsync(activeConfig)
-      toast('success', 'AmneziaWG obfuscation parameters updated successfully!')
+      const res = await mutation.mutateAsync(activeConfig)
+      toast('success', res.reload_status || 'AmneziaWG parameters saved and sidecar synced!')
       refetch()
     } catch {
       toast('error', 'Failed to save AmneziaWG configuration')
@@ -57,14 +75,25 @@ export function AmneziaWgPage() {
     }
 
     try {
-      await addPeerMutation.mutateAsync(newPeer)
-      toast('success', `Added peer ${newPeer.name}`)
+      const res = await addPeerMutation.mutateAsync(newPeer)
+      toast('success', `Added peer ${newPeer.name}. ${res.reload_status || ''}`)
       setShowAddModal(false)
       setNewPeerName('')
       setShowConfigModal(newPeer)
       refetch()
     } catch {
       toast('error', 'Failed to add AmneziaWG peer')
+    }
+  }
+
+  const handleDeletePeer = async (peer: AwgPeerConfig) => {
+    if (!confirm(`Are you sure you want to revoke peer "${peer.name}"?`)) return
+    try {
+      const res = await deletePeerMutation.mutateAsync(peer.id)
+      toast('info', `Revoked peer ${peer.name}. ${res.reload_status || ''}`)
+      refetch()
+    } catch {
+      toast('error', 'Failed to revoke peer')
     }
   }
 
@@ -104,6 +133,13 @@ PersistentKeepalive = 25`
           <p className="text-sm text-slate-400 mt-1">
             Obfuscated WireGuard tunnel endpoint providing anti-censorship access for remote BSDM Connect clients.
           </p>
+          {activeConfig.last_reload_status && (
+            <div className="mt-2 text-xs text-slate-400 flex items-center gap-1.5">
+              <Activity className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Sidecar Lifecycle Status: </span>
+              <span className="font-mono text-cyan-300">{activeConfig.last_reload_status}</span>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-3">
           <Button variant="secondary" onClick={() => refetch()}>
@@ -174,7 +210,7 @@ PersistentKeepalive = 25`
             </p>
           </div>
           <Button variant="primary" onClick={handleSaveObfuscation}>
-            Save Parameters
+            Save Parameters & Sync Sidecar
           </Button>
         </div>
 
@@ -347,8 +383,8 @@ PersistentKeepalive = 25`
               <tr>
                 <th className="px-4 py-3">Client Name</th>
                 <th className="px-4 py-3">Assigned IP</th>
-                <th className="px-4 py-3">Public Key</th>
-                <th className="px-4 py-3">Created</th>
+                <th className="px-4 py-3">Traffic (Rx / Tx)</th>
+                <th className="px-4 py-3">Latest Handshake</th>
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
@@ -357,11 +393,16 @@ PersistentKeepalive = 25`
                 <tr key={peer.id} className="hover:bg-slate-800/50">
                   <td className="px-4 py-3 font-medium text-slate-100 flex items-center gap-2">
                     <Smartphone className="w-4 h-4 text-slate-400" />
-                    {peer.name}
+                    <div>
+                      <div>{peer.name}</div>
+                      <div className="text-[10px] font-mono text-slate-500">{peer.public_key}</div>
+                    </div>
                   </td>
                   <td className="px-4 py-3 font-mono text-xs text-emerald-400">{peer.assigned_ip}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-slate-400">{peer.public_key}</td>
-                  <td className="px-4 py-3 text-xs text-slate-400">{peer.created_at}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-slate-300">
+                    <span className="text-cyan-400">↓ {formatBytes(peer.rx_bytes)}</span> / <span className="text-indigo-400">↑ {formatBytes(peer.tx_bytes)}</span>
+                  </td>
+                  <td className="px-4 py-3 text-xs font-mono text-slate-400">{formatHandshake(peer.latest_handshake_secs)}</td>
                   <td className="px-4 py-3 text-right space-x-2">
                     <Button
                       variant="secondary"
@@ -369,6 +410,12 @@ PersistentKeepalive = 25`
                     >
                       <Download className="w-3.5 h-3.5 mr-1" />
                       Get Config
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => handleDeletePeer(peer)}
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-rose-400" />
                     </Button>
                   </td>
                 </tr>

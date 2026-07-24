@@ -96,7 +96,19 @@ impl ControlApiState {
             Ok(config) => {
                 let mut guard = self.awg_server.write().await;
                 *guard = config;
-                json_response(StatusCode::OK, r#"{"status":"ok"}"#)
+                let conf_path = std::env::var("AWG_CONFIG_PATH")
+                    .unwrap_or_else(|_| "./certs/awg/awg0.conf".to_string());
+                let path = std::path::Path::new(&conf_path);
+                let reload_msg = match crate::amneziawg::sync_sidecar_interface(path, &mut guard) {
+                    Ok(msg) => msg,
+                    Err(err) => err,
+                };
+                let payload = serde_json::json!({
+                    "status": "ok",
+                    "reload_status": reload_msg,
+                    "config_path": conf_path,
+                });
+                json_response(StatusCode::OK, &payload.to_string())
             }
             Err(e) => json_response(StatusCode::BAD_REQUEST, &format!(r#"{{"error":"{}"}}"#, e)),
         }
@@ -107,7 +119,50 @@ impl ControlApiState {
             Ok(peer) => {
                 let mut guard = self.awg_server.write().await;
                 guard.peers.push(peer);
-                json_response(StatusCode::OK, r#"{"status":"ok"}"#)
+                let conf_path = std::env::var("AWG_CONFIG_PATH")
+                    .unwrap_or_else(|_| "./certs/awg/awg0.conf".to_string());
+                let path = std::path::Path::new(&conf_path);
+                let reload_msg = match crate::amneziawg::sync_sidecar_interface(path, &mut guard) {
+                    Ok(msg) => msg,
+                    Err(err) => err,
+                };
+                let payload = serde_json::json!({
+                    "status": "ok",
+                    "reload_status": reload_msg,
+                    "config_path": conf_path,
+                });
+                json_response(StatusCode::OK, &payload.to_string())
+            }
+            Err(e) => json_response(StatusCode::BAD_REQUEST, &format!(r#"{{"error":"{}"}}"#, e)),
+        }
+    }
+
+    async fn amneziawg_delete_peer(&self, body: Bytes) -> Response<Body> {
+        #[derive(serde::Deserialize)]
+        struct DeleteReq {
+            id: String,
+        }
+        match serde_json::from_slice::<DeleteReq>(&body) {
+            Ok(req) => {
+                let mut guard = self.awg_server.write().await;
+                let initial_len = guard.peers.len();
+                guard.peers.retain(|p| p.id != req.id);
+                if guard.peers.len() == initial_len {
+                    return json_response(StatusCode::NOT_FOUND, r#"{"error":"peer not found"}"#);
+                }
+                let conf_path = std::env::var("AWG_CONFIG_PATH")
+                    .unwrap_or_else(|_| "./certs/awg/awg0.conf".to_string());
+                let path = std::path::Path::new(&conf_path);
+                let reload_msg = match crate::amneziawg::sync_sidecar_interface(path, &mut guard) {
+                    Ok(msg) => msg,
+                    Err(err) => err,
+                };
+                let payload = serde_json::json!({
+                    "status": "deleted",
+                    "reload_status": reload_msg,
+                    "config_path": conf_path,
+                });
+                json_response(StatusCode::OK, &payload.to_string())
             }
             Err(e) => json_response(StatusCode::BAD_REQUEST, &format!(r#"{{"error":"{}"}}"#, e)),
         }
@@ -317,6 +372,7 @@ impl ControlApiState {
             (&Method::GET, "/api/amneziawg/status") => self.amneziawg_status().await,
             (&Method::POST, "/api/amneziawg/config") => self.amneziawg_update(body).await,
             (&Method::POST, "/api/amneziawg/peers") => self.amneziawg_add_peer(body).await,
+            (&Method::DELETE, "/api/amneziawg/peers") => self.amneziawg_delete_peer(body).await,
             (&Method::GET, "/api/cluster/session-state") => self.cluster_session_state(),
             (&Method::GET, "/api/threats/sync/peers") => self.threat_sync_peers(),
             (&Method::POST, "/api/threats/sync/broadcast") => {

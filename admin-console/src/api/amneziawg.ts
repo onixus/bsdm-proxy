@@ -20,6 +20,9 @@ export interface AwgPeerConfig {
   allowed_ips: string
   assigned_ip: string
   created_at: string
+  rx_bytes?: number
+  tx_bytes?: number
+  latest_handshake_secs?: number
 }
 
 export interface AwgServerConfig {
@@ -30,6 +33,8 @@ export interface AwgServerConfig {
   address: string
   obfuscation: AwgObfuscationConfig
   peers: AwgPeerConfig[]
+  last_reload_status?: string
+  last_reload_at?: number
 }
 
 const mockStatus: AwgServerConfig = {
@@ -38,6 +43,8 @@ const mockStatus: AwgServerConfig = {
   private_key: 'wP4k...placeholder...key=',
   public_key: 'pub...placeholder...key=',
   address: '10.8.0.1/24',
+  last_reload_status: 'Sidecar synced (awg0.conf updated)',
+  last_reload_at: 1721812900,
   obfuscation: {
     jc: 4,
     jmin: 40,
@@ -57,6 +64,9 @@ const mockStatus: AwgServerConfig = {
       assigned_ip: '10.8.0.2',
       allowed_ips: '10.8.0.2/32',
       created_at: '2026-07-24',
+      rx_bytes: 14258900,
+      tx_bytes: 84210000,
+      latest_handshake_secs: Math.floor(Date.now() / 1000) - 120,
     },
     {
       id: 'peer-2',
@@ -65,6 +75,9 @@ const mockStatus: AwgServerConfig = {
       assigned_ip: '10.8.0.3',
       allowed_ips: '10.8.0.3/32',
       created_at: '2026-07-24',
+      rx_bytes: 512000,
+      tx_bytes: 1024000,
+      latest_handshake_secs: Math.floor(Date.now() / 1000) - 3600,
     },
   ],
 }
@@ -81,8 +94,8 @@ export async function fetchAwgStatus(): Promise<Sourced<AwgServerConfig>> {
   }
 }
 
-export async function updateAwgConfig(config: AwgServerConfig): Promise<{ status: string }> {
-  if (isDemoMode()) return { status: 'ok' }
+export async function updateAwgConfig(config: AwgServerConfig): Promise<{ status: string; reload_status?: string }> {
+  if (isDemoMode()) return { status: 'ok', reload_status: 'Sidecar synced' }
   const res = await fetch('/api/amneziawg/config', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -92,12 +105,23 @@ export async function updateAwgConfig(config: AwgServerConfig): Promise<{ status
   return res.json()
 }
 
-export async function addAwgPeer(peer: AwgPeerConfig): Promise<{ status: string }> {
-  if (isDemoMode()) return { status: 'ok' }
+export async function addAwgPeer(peer: AwgPeerConfig): Promise<{ status: string; reload_status?: string }> {
+  if (isDemoMode()) return { status: 'ok', reload_status: 'Sidecar synced' }
   const res = await fetch('/api/amneziawg/peers', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(peer),
+  })
+  if (!res.ok) throw new Error('HTTP ' + res.status)
+  return res.json()
+}
+
+export async function deleteAwgPeer(id: string): Promise<{ status: string; reload_status?: string }> {
+  if (isDemoMode()) return { status: 'deleted', reload_status: 'Sidecar synced' }
+  const res = await fetch('/api/amneziawg/peers', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id }),
   })
   if (!res.ok) throw new Error('HTTP ' + res.status)
   return res.json()
