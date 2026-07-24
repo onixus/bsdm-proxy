@@ -65,6 +65,11 @@ pub struct Metrics {
 
     // Rate limit metrics
     pub rate_limit_rejected_total: CounterVec,
+    pub distributed_rate_limit_hits_total: Counter,
+
+    // Global session & Threat sync metrics
+    pub global_sessions_active: Gauge,
+    pub threat_sync_events_total: Counter,
 
     /// Requests that used the lightweight metrics fast path (no histograms).
     pub requests_fast_total: Counter,
@@ -325,6 +330,24 @@ impl Metrics {
         )?;
         registry.register(Box::new(rate_limit_rejected_total.clone()))?;
 
+        let distributed_rate_limit_hits_total = Counter::new(
+            "bsdm_proxy_distributed_rate_limit_hits_total",
+            "Total rate limit checks processed via distributed Redis counters",
+        )?;
+        registry.register(Box::new(distributed_rate_limit_hits_total.clone()))?;
+
+        let global_sessions_active = Gauge::new(
+            "bsdm_proxy_global_sessions_active",
+            "Total active user sessions in global session store",
+        )?;
+        registry.register(Box::new(global_sessions_active.clone()))?;
+
+        let threat_sync_events_total = Counter::new(
+            "bsdm_proxy_threat_sync_events_total",
+            "Total threat synchronization events received and applied",
+        )?;
+        registry.register(Box::new(threat_sync_events_total.clone()))?;
+
         let requests_fast_total = Counter::new(
             "bsdm_proxy_requests_fast_total",
             "HTTP requests completed on the lightweight metrics fast path",
@@ -466,6 +489,9 @@ impl Metrics {
             acl_eval_duration_seconds,
             policy_cache_hit_total,
             rate_limit_rejected_total,
+            distributed_rate_limit_hits_total,
+            global_sessions_active,
+            threat_sync_events_total,
             requests_fast_total,
             hierarchy_resolutions_total,
             hierarchy_peer_requests_total,

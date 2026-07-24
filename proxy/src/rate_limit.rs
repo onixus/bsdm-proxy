@@ -166,12 +166,16 @@ pub fn extract_api_key(headers: &HeaderMap, config: &RateLimitConfig) -> Option<
     None
 }
 
+use redis::aio::ConnectionManager;
+use redis::AsyncCommands;
+
 /// Token-bucket rate limiter with separate buckets per IP, user, and API key.
 pub struct RateLimiter {
     config: RateLimitConfig,
     ip_buckets: Mutex<HashMap<String, TokenBucket>>,
     user_buckets: Mutex<HashMap<String, TokenBucket>>,
     api_key_buckets: Mutex<HashMap<String, TokenBucket>>,
+    redis_conn: Option<ConnectionManager>,
 }
 
 impl RateLimiter {
@@ -181,14 +185,88 @@ impl RateLimiter {
             ip_buckets: Mutex::new(HashMap::new()),
             user_buckets: Mutex::new(HashMap::new()),
             api_key_buckets: Mutex::new(HashMap::new()),
+            redis_conn: None,
         }
+    }
+
+    pub fn with_redis(mut self, conn: Option<ConnectionManager>) -> Self {
+        self.redis_conn = conn;
+        self
     }
 
     pub fn config(&self) -> &RateLimitConfig {
         &self.config
     }
 
-    /// Returns `Some(violation)` when the request must be rejected.
+    pub fn is_distributed(&self) -> bool {
+        self.redis_conn.is_some()
+    }
+
+    /// Async rate limit check supporting distributed Redis counters with fallback to local token buckets.
+    pub async fn check_async(
+        &self,
+        client_ip: &str,
+        username: Option<&str>,
+        api_key: Option<&str>,
+    ) -> Option<RateLimitViolation> {
+        if !self.config.enabled {
+            return None;
+        }
+
+        if self.config.api_key_required && api_key.filter(|k| !k.is_empty()).is_none() {
+            return Some(RateLimitViolation::ApiKeyMissing);
+        }
+
+        // Distributed Redis checks if available
+        if let Some(ref conn) = self.redis_conn {
+            let window = 1u64; // 1-second sliding bucket
+            let mut conn = conn.clone();
+
+            // Check IP
+            let key = format!("bsdm:ratelimit:ip:{}", client_ip);
+            if let Ok(count) = conn.incr::<_, i64, i64>(&key, 1).await {
+                if count == 1 {
+                    let _ = conn.expire::<_, ()>(&key, window as i64).await;
+                }
+                if (count as f64) > self.config.ip_burst {
+                    return Some(RateLimitViolation::Ip);
+                }
+            }
+
+            // Check User
+            if let Some(user) = username.filter(|u| !u.is_empty()) {
+                let ukey = format!("bsdm:ratelimit:user:{}", user);
+                if let Ok(ucount) = conn.incr::<_, i64, i64>(&ukey, 1).await {
+                    if ucount == 1 {
+                        let _ = conn.expire::<_, ()>(&ukey, window as i64).await;
+                    }
+                    if (ucount as f64) > self.config.user_burst {
+                        return Some(RateLimitViolation::User);
+                    }
+                }
+            }
+
+            // Check API Key
+            if let Some(key_val) = api_key.filter(|k| !k.is_empty()) {
+                let kkey = format!("bsdm:ratelimit:apikey:{}", key_val);
+                if let Ok(kcount) = conn.incr::<_, i64, i64>(&kkey, 1).await {
+                    if kcount == 1 {
+                        let _ = conn.expire::<_, ()>(&kkey, window as i64).await;
+                    }
+                    if (kcount as f64) > self.config.api_key_burst {
+                        return Some(RateLimitViolation::ApiKey);
+                    }
+                }
+            }
+
+            return None;
+        }
+
+        // Fallback to local token buckets
+        self.check(client_ip, username, api_key)
+    }
+
+    /// Returns `Some(violation)` when the request must be rejected (local fallback sync mode).
     pub fn check(
         &self,
         client_ip: &str,

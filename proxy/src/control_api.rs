@@ -112,6 +112,57 @@ impl ControlApiState {
             Err(e) => json_response(StatusCode::BAD_REQUEST, &format!(r#"{{"error":"{}"}}"#, e)),
         }
     }
+
+    pub fn cluster_session_state(&self) -> Response<Body> {
+        let redis_connected = self.session_store.is_redis_connected();
+        let session_count = self.session_store.session_count();
+        let payload = serde_json::json!({
+            "status": if redis_connected { "redis_connected" } else { "standalone_memory" },
+            "redis_connected": redis_connected,
+            "session_count": session_count,
+            "distributed_rate_limit_enabled": redis_connected,
+        });
+        json_response(StatusCode::OK, &payload.to_string())
+    }
+
+    pub fn threat_sync_peers(&self) -> Response<Body> {
+        let peers = self.threat_sync.get_peers();
+        let events = self.threat_sync.get_recent_events();
+        let sync_enabled = self.threat_sync.is_sync_enabled();
+        let payload = serde_json::json!({
+            "node_id": self.threat_sync.node_id(),
+            "sync_enabled": sync_enabled,
+            "peers": peers,
+            "recent_events": events,
+        });
+        json_response(StatusCode::OK, &payload.to_string())
+    }
+
+    pub async fn threat_sync_broadcast(&self, body: Bytes) -> Response<Body> {
+        let event: crate::threat_sync::ThreatSyncEvent = match serde_json::from_slice(&body) {
+            Ok(evt) => evt,
+            Err(e) => {
+                return json_response(
+                    StatusCode::BAD_REQUEST,
+                    &format!(
+                        r#"{{"error":"invalid threat event payload: {}"}}"#,
+                        escape_json(&e.to_string())
+                    ),
+                );
+            }
+        };
+
+        match self.threat_sync.broadcast(event.clone()).await {
+            Ok(()) => {
+                self.metrics.threat_sync_events_total.inc();
+                json_response(StatusCode::OK, r#"{"status":"broadcasted"}"#)
+            }
+            Err(e) => json_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!(r#"{{"error":"broadcast failed: {}"}}"#, escape_json(&e)),
+            ),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -130,6 +181,8 @@ pub struct ControlApiState {
     dlp_engine: Arc<crate::dlp::DlpEngine>,
     auth_manager: Option<Arc<crate::auth::AuthManager>>,
     awg_server: Arc<tokio::sync::RwLock<crate::amneziawg::AwgServerConfig>>,
+    session_store: crate::session_store::GlobalSessionStore,
+    threat_sync: crate::threat_sync::ThreatSyncEngine,
 }
 
 impl ControlApiState {
@@ -148,6 +201,8 @@ impl ControlApiState {
         casb_engine: Arc<crate::casb::CasbEngine>,
         dlp_engine: Arc<crate::dlp::DlpEngine>,
         auth_manager: Option<Arc<crate::auth::AuthManager>>,
+        session_store: crate::session_store::GlobalSessionStore,
+        threat_sync: crate::threat_sync::ThreatSyncEngine,
     ) -> Self {
         Self {
             metrics,
@@ -166,6 +221,8 @@ impl ControlApiState {
             awg_server: Arc::new(tokio::sync::RwLock::new(
                 crate::amneziawg::AwgServerConfig::default(),
             )),
+            session_store,
+            threat_sync,
         }
     }
 
@@ -183,6 +240,8 @@ impl ControlApiState {
         casb_engine: Arc<crate::casb::CasbEngine>,
         dlp_engine: Arc<crate::dlp::DlpEngine>,
         auth_manager: Option<Arc<crate::auth::AuthManager>>,
+        session_store: crate::session_store::GlobalSessionStore,
+        threat_sync: crate::threat_sync::ThreatSyncEngine,
     ) -> Self {
         let api_token = std::env::var("CONTROL_API_TOKEN")
             .ok()
@@ -205,6 +264,8 @@ impl ControlApiState {
             casb_engine,
             dlp_engine,
             auth_manager,
+            session_store,
+            threat_sync,
         )
     }
 
@@ -256,6 +317,11 @@ impl ControlApiState {
             (&Method::GET, "/api/amneziawg/status") => self.amneziawg_status().await,
             (&Method::POST, "/api/amneziawg/config") => self.amneziawg_update(body).await,
             (&Method::POST, "/api/amneziawg/peers") => self.amneziawg_add_peer(body).await,
+            (&Method::GET, "/api/cluster/session-state") => self.cluster_session_state(),
+            (&Method::GET, "/api/threats/sync/peers") => self.threat_sync_peers(),
+            (&Method::POST, "/api/threats/sync/broadcast") => {
+                self.threat_sync_broadcast(body).await
+            }
             #[cfg(feature = "wasm")]
             (&Method::POST, "/api/wasm/reload") => self.wasm_reload(),
             _ => json_response(StatusCode::NOT_FOUND, r#"{"error":"not found"}"#),
@@ -784,6 +850,8 @@ mod tests {
             Arc::new(crate::casb::CasbEngine::new()),
             Arc::new(crate::dlp::DlpEngine::new()),
             None,
+            crate::session_store::GlobalSessionStore::new(None),
+            crate::threat_sync::ThreatSyncEngine::new("test-node".to_string(), None),
         )
     }
 
@@ -924,6 +992,8 @@ mod tests {
             Arc::new(crate::casb::CasbEngine::new()),
             Arc::new(crate::dlp::DlpEngine::new()),
             None,
+            crate::session_store::GlobalSessionStore::new(None),
+            crate::threat_sync::ThreatSyncEngine::new("test-node".to_string(), None),
         );
         let resp = state
             .dispatch(

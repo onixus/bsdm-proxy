@@ -43,10 +43,12 @@ pub mod selection;
 pub mod semantic_cache;
 pub mod server;
 pub mod session;
+pub mod session_store;
 pub mod sharded_cache;
 pub mod streaming_miss;
 pub mod tag_index;
 pub mod threat_score_cache;
+pub mod threat_sync;
 pub mod tls;
 pub mod upstream;
 #[cfg(feature = "wasm")]
@@ -97,9 +99,11 @@ pub use semantic_cache::{
 };
 pub use server::{handle_connection, metrics_server, wait_shutdown_signal};
 pub use session::{SessionCorrelation, SessionCorrelator};
+pub use session_store::GlobalSessionStore;
 pub use sharded_cache::HttpL1Cache;
 pub use tag_index::{parse_cache_tags, TagIndex};
 pub use threat_score_cache::{ThreatScoreCache, ThreatScoreConfig, ThreatScoreHit};
+pub use threat_sync::{ThreatSyncEngine, ThreatSyncEvent};
 pub use tls::CertCache;
 pub use upstream::{
     build_upstream_https_connector, UpstreamClientHandle, UpstreamTlsConfig, UpstreamTlsSnapshot,
