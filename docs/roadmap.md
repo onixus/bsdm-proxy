@@ -112,17 +112,17 @@ gantt
 ## 5. План работ (Actionable Work Plan: Q3 2026 – Q2 2027)
 
 ### 🗓️ Q3 2026: Защита ИИ и Встроенный DLP (GenAI CASB & Inline DLP)
-- [ ] **LLM Data Guard (GenAI CASB):** 
+- [x] **LLM Data Guard (GenAI CASB):** 
   * Wasm-модуль для инспекции и фильтрации API-запросов к OpenAI (ChatGPT), Anthropic (Claude) и Microsoft Copilot.
   * Автоматическая блокировка передачи исходного кода, API-ключей и персональных данных (PII) в LLM.
-- [ ] **Inline DLP Engine (v1):**
+- [x] **Inline DLP Engine (v1):**
   * Встроенный сканер регулярных выражений (DLP) для исходящих HTTP POST/PUT запросов.
   * Маскирование и блокировка PII, номеров кредитных карт и коммерческой тайны в режиме потока (без буферизации больших файлов в память).
 
 ### 🗓️ Q4 2026: Гибридный доступ и ZTNA Foundation
 - [ ] **BSDM Connect (Легкий Endpoint-агент):**
   * Компактный клиент под Windows, macOS и Linux на базе WireGuard для завертывания веб-трафика удаленных сотрудников в корпоративный BSDM-Proxy.
-- [ ] **Identity-Aware Reverse Proxy (IAP / ZTNA):**
+- [x] **Identity-Aware Reverse Proxy (IAP / ZTNA):**
   * Поддержка режима обратного прокси (Reverse Proxy) для защиты доступа к внутренним веб-ресурсам компании.
   * Интеграция с OIDC / OAuth2 провайдерами (Okta, Keycloak, Microsoft Entra ID).
 
