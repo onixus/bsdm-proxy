@@ -149,7 +149,13 @@ mod tests {
             created_at: "2026-07-24".to_string(),
         };
 
-        let conf = generate_client_conf("srvpub123", "proxy.corp.com:51820", &peer, &obf, "privkey123");
+        let conf = generate_client_conf(
+            "srvpub123",
+            "proxy.corp.com:51820",
+            &peer,
+            &obf,
+            "privkey123",
+        );
         assert!(conf.contains("PrivateKey = privkey123"));
         assert!(conf.contains("Address = 10.8.0.2/32"));
         assert!(conf.contains("PublicKey = srvpub123"));
