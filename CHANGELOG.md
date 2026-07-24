@@ -23,19 +23,19 @@ Release **0.5.07.033** (Cargo/semver `0.5.7+033`). Post-M5: DX control plane, Wa
 
 ### Added
 
-- **DNS sinkhole sidecar** — workspace crate `dns-sinkhole` (UDP RPZ-lite proxy); ADR 0004; compose profile `dns-sinkhole`; docs [dns-sinkhole.md](docs/dns-sinkhole.md) ([#108](https://github.com/onixus/bsdm-proxy/issues/108))
-- **ICAP adapter PoC** — env `ICAP_ENABLED` / `ICAP_URL`; REQMOD before upstream + RESPMOD on buffered MISS; compose profile `icap` (c-icap/ClamAV); docs [icap.md](docs/icap.md) ([#99](https://github.com/onixus/bsdm-proxy/issues/99))
-- **Wasm plugin host PoC** — Cargo feature `wasm` (Wasmtime); post-auth request hook with fuel limits; PoC `examples/wasm/deny_blocked_suffix.wat`; docs [wasm-plugins.md](docs/wasm-plugins.md) ([#188](https://github.com/onixus/bsdm-proxy/issues/188))
+- **DNS sinkhole sidecar** — workspace crate `dns-sinkhole` (UDP RPZ-lite proxy); ADR 0004; compose profile `dns-sinkhole`; docs [dns-sinkhole.md](docs/features/dns-sinkhole.md) ([#108](https://github.com/onixus/bsdm-proxy/issues/108))
+- **ICAP adapter PoC** — env `ICAP_ENABLED` / `ICAP_URL`; REQMOD before upstream + RESPMOD on buffered MISS; compose profile `icap` (c-icap/ClamAV); docs [icap.md](docs/features/icap-inspection.md) ([#99](https://github.com/onixus/bsdm-proxy/issues/99))
+- **Wasm plugin host PoC** — Cargo feature `wasm` (Wasmtime); post-auth request hook with fuel limits; PoC `examples/wasm/deny_blocked_suffix.wat`; docs [wasm-plugins.md](docs/features/wasm-plugins.md) ([#188](https://github.com/onixus/bsdm-proxy/issues/188))
 - **DX gRPC control plane** — optional Cargo feature `grpc`; proto `proxy/proto/control_plane.proto`; `CONTROL_GRPC_ENABLED` / `CONTROL_GRPC_BIND`; mirrors REST stats/purge/hierarchy/upstream TLS ([#187](https://github.com/onixus/bsdm-proxy/issues/187))
 - **Hierarchy peer mTLS** — `HIERARCHY_PEER_MTLS_*` wraps peer HTTP fetch in TLS + client cert ([#103](https://github.com/onixus/bsdm-proxy/issues/103))
 - **Semantic vector backend** — pluggable similarity index (`SEMANTIC_VECTOR_BACKEND=local|qdrant`) + optional HTTP embed provider; metric `bsdm_proxy_semantic_cache_vector_errors_total` ([#189](https://github.com/onixus/bsdm-proxy/issues/189))
-- **AI semantic / LLM cache prep** — `SEMANTIC_CACHE_ENABLED` POST body-hash cache for chat/completions paths; optional local cosine near-hit; docs [semantic-cache.md](docs/semantic-cache.md)
+- **AI semantic / LLM cache prep** — `SEMANTIC_CACHE_ENABLED` POST body-hash cache for chat/completions paths; optional local cosine near-hit; docs [semantic-cache.md](docs/features/semantic-cache.md)
 - **AI API-key rate limiting** — token bucket per API key (`RATE_LIMIT_API_KEY_*`); key from `X-API-Key` or `Authorization: Bearer`; optional `RATE_LIMIT_API_KEY_REQUIRED` → 401; metric label `api_key` / `api_key_missing`
 - **AI request coalescing** — singleflight for concurrent GET/HEAD cache MISSes (`MISS_COALESCE_ENABLED`); waiters serve `COALESCED-HIT`; metric `bsdm_proxy_cache_coalesced_total`
 - **DX upstream TLS hot reload** — `GET /api/upstream/tls`, `POST /api/upstream/tls/reload`; rebuilds Hyper client pool from `UPSTREAM_CA_CERT` / `UPSTREAM_HTTP2_ENABLED` (`ArcSwap`)
 - **DX hierarchy peer hot reload** — `GET /api/hierarchy/peers`, `POST /api/hierarchy/reload`; optional `CACHE_PEERS_PATH` / `HIERARCHY_PEERS_PATH` JSON; discovery siblings preserved
 - **DX Cache-Tag purge** — L1 secondary index for `Cache-Tag` / `Surrogate-Key`; `POST /api/cache/purge` accepts `tag` / `tags` (+ L2 key delete)
-- **DX Phase 2 control plane** — ACL CRUD (`PUT`/`DELETE`/`persist`), `GET /api/stats` Lite JSON, `POST /api/cache/purge`; admin-console Policies delete/persist; [docs/control-plane.md](docs/control-plane.md)
+- **DX Phase 2 control plane** — ACL CRUD (`PUT`/`DELETE`/`persist`), `GET /api/stats` Lite JSON, `POST /api/cache/purge`; admin-console Policies delete/persist; [docs/features/control-plane.md](docs/features/control-plane.md)
 - **Lite B21 — optional Kafka feature** — `kafka` Cargo feature (default on) for `bsdm-proxy` and `cache-indexer`; Lite Docker build uses `--no-default-features` (no `rdkafka` link) ([#52](https://github.com/onixus/bsdm-proxy/issues/52))
 - **M5.5 threat score write-back** — `ml-worker` publishes to `threat_score_cache` + `GET /api/threat-scores`; proxy optional async poll enriches `threat_sources` / block ([#169](https://github.com/onixus/bsdm-proxy/issues/169))
 - **Admin console** — Threat scores page (M5.5 snapshot + XAI); dashboard uses live write-back API
@@ -43,15 +43,15 @@ Release **0.5.07.033** (Cargo/semver `0.5.7+033`). Post-M5: DX control plane, Wa
 - **M5.3 lexical phishing** — `phishing_lexical_v0`: domain lexical heuristics + weak labels from PhishTank / UT1 / `phishing` category; `domain_phishing_features` table; Grafana panel; `scripts/ml/eval_phishing_lexical.py` ([#167](https://github.com/onixus/bsdm-proxy/issues/167))
 - **Admin console (UI/UX)** — React + Tailwind SPA in `admin-console/`: unified dashboard, logs with explainable ML (XAI), policies, settings; migrates `web-config` export logic
 - **M5.2 UEBA z-score** — `ueba_zscore_v0` (default): population baseline from `entity_features` or `ML_BASELINE_PATH`; Grafana anomalous-entities panel; `scripts/ml/export_baseline.py` + `compare_stub_vs_ueba.py` ([#166](https://github.com/onixus/bsdm-proxy/issues/166))
-- **M5.1 ML worker scaffold** — crate `ml-worker` extracts entity windows into ClickHouse `entity_features`, scores with `anomaly_stub_v0` into `ml_scores`, optional webhook; compose profile `ml`, packaging/systemd; ADR 0003 / [docs/ml-security.md](docs/ml-security.md) (B15 / #46)
+- **M5.1 ML worker scaffold** — crate `ml-worker` extracts entity windows into ClickHouse `entity_features`, scores with `anomaly_stub_v0` into `ml_scores`, optional webhook; compose profile `ml`, packaging/systemd; ADR 0003 / [docs/analytics/ml-security.md](docs/analytics/ml-security.md) (B15 / #46)
 
 ### Documentation
 
-- **Squid rock ↔ BSDM spill sizing** — [docs/capacity-planning.md](docs/capacity-planning.md) mapping + HA example ([#101](https://github.com/onixus/bsdm-proxy/issues/101))
-- **Issue tracker hygiene** — [docs/issue-tracker.md](docs/issue-tracker.md); close completed epics #165/#125/#102/#112; backlog #187 gRPC, #188 Wasm, #189 vector DB; BLOCKERS wave 3 strikethrough
+- **Squid rock ↔ BSDM spill sizing** — [docs/architecture/capacity-planning.md](docs/architecture/capacity-planning.md) mapping + HA example ([#101](https://github.com/onixus/bsdm-proxy/issues/101))
+- **Issue tracker hygiene** — [docs/project-status.md](docs/project-status.md); close completed epics #165/#125/#102/#112; backlog #187 gRPC, #188 Wasm, #189 vector DB; BLOCKERS wave 3 strikethrough
 - **Project docs refresh** — README / architecture / development / structure / docker / deployment / wiki index / env.example aligned with M1–M5 done and DX/AI Unreleased (Lite = proxy+SQLite, control plane, event sink, hierarchy peers paths, threat-score vars)
 
-Release package: `./scripts/build-package.sh` → `dist/bsdm-proxy-0.5.7.033-linux-<arch>.tar.gz`  
+Release package: `./scripts/build-package.sh` → `dist/bsdm-proxy-0.5.7.033-linux-<arch>.tar.gz`
 Notes: [docs/releases/v0.5.7+033.md](docs/releases/v0.5.7+033.md)
 
 ## [0.5.0] - 2026-07-16
@@ -64,9 +64,9 @@ Milestone **M4 Threat analytics**: rule-based alerts, C&C / Shannon heuristics, 
 - **M4 Shannon / high-entropy domains** — `high_entropy_domain` uses Shannon entropy on the leftmost DNS label (`ALERT_SHANNON_MIN_BITS`, modes `shannon|legacy|either`); Grafana long-domain candidates panel
 - **PhishTank API key** — `PHISHTANK_API_KEY` sent as `app_key`; category cache keeps feed source for `threat_sources`
 - **M4 beacon heuristic (B18)** — `beacon_periodic` rule in `alert-worker` (regular client→domain gaps); Grafana “Beacon candidates” panel; docs
-- **Lite SQLite indexer** — `INDEX_STORE=sqlite|memory`, `POST /api/events`, proxy `EVENT_SINK_URL`; Lite compose includes indexer ([docs/lite.md](docs/lite.md))
-- **Lite compose (Phase 1)** — [`docker-compose.lite.yml`](docker-compose.lite.yml) standalone proxy (no Kafka/CH); [`scripts/gen-ca.sh`](scripts/gen-ca.sh); docs [`docs/lite.md`](docs/lite.md)
-- **Alert worker (B19 / #50)** — `alert-worker` polls ClickHouse threat rules and POSTs SIEM JSON webhooks; compose profile `alerts`, Dockerfile target, Prometheus scrape, docs [`docs/alerting.md`](docs/alerting.md)
+- **Lite SQLite indexer** — `INDEX_STORE=sqlite|memory`, `POST /api/events`, proxy `EVENT_SINK_URL`; Lite compose includes indexer ([docs/getting-started/lite-mode.md](docs/getting-started/lite-mode.md))
+- **Lite compose (Phase 1)** — [`docker-compose.lite.yml`](docker-compose.lite.yml) standalone proxy (no Kafka/CH); [`scripts/gen-ca.sh`](scripts/gen-ca.sh); docs [`docs/getting-started/lite-mode.md`](docs/getting-started/lite-mode.md)
+- **Alert worker (B19 / #50)** — `alert-worker` polls ClickHouse threat rules and POSTs SIEM JSON webhooks; compose profile `alerts`, Dockerfile target, Prometheus scrape, docs [`docs/analytics/alerting.md`](docs/analytics/alerting.md)
 - **Strategic roadmap** — Lite / DX / Wasm / AI-traffic phases in [`docs/roadmap.md`](docs/roadmap.md)
 - **Web config GUI** — restored General/Cache/Kafka/Auth tabs; Performance, import `.env`, export `acl-rules.json`; compose aligned with root `docker-compose.yml` (P2-5)
 - **Categorization Prometheus metrics** + M4 threat panels / SQL ([#105](https://github.com/onixus/bsdm-proxy/issues/105))
@@ -78,7 +78,7 @@ Milestone **M4 Threat analytics**: rule-based alerts, C&C / Shannon heuristics, 
 - **Docs cleanup** — roadmap/README/wiki synced (M3/M4 done); blockers aligned with ClickHouse path; archived GitHub bootstrap scripts under `scripts/archive/`
 - **M4 roadmap** — threat analytics complete; next: M5 ML
 
-Release package: `./scripts/build-package.sh` → `dist/bsdm-proxy-0.5.0-linux-<arch>.tar.gz`  
+Release package: `./scripts/build-package.sh` → `dist/bsdm-proxy-0.5.0-linux-<arch>.tar.gz`
 Notes: [docs/releases/v0.5.0.md](docs/releases/v0.5.0.md)
 
 ## [0.3.2] - 2026-07-02
@@ -132,7 +132,7 @@ Milestone **M3 maintenance**: ClickHouse-only analytics, Search API, documentati
 
 ### Migration
 
-- OpenSearch users: migrate to ClickHouse — see [docs/releases/v0.3.1.md](docs/releases/v0.3.1.md) and [clickhouse-analytics.md](docs/clickhouse-analytics.md)
+- OpenSearch users: migrate to ClickHouse — see [docs/releases/v0.3.1.md](docs/releases/v0.3.1.md) and [clickhouse-analytics.md](docs/analytics/clickhouse-retrosearch.md)
 - `cache-indexer.env`: use `CLICKHOUSE_*`, remove `OPENSEARCH_*`
 
 Release package: `./scripts/build-package.sh` → `dist/bsdm-proxy-0.3.1-linux-<arch>.tar.gz`

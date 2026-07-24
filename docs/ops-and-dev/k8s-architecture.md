@@ -2,7 +2,7 @@
 
 Рекомендуемая архитектура развёртывания BSDM на Kubernetes: data plane (proxy + Redis L2) и analytics plane (Kafka → indexer → ClickHouse).
 
-См. также: [capacity-planning.md](capacity-planning.md) · [roadmap.md](roadmap.md) · [helm chart](../charts/bsdm/README.md)
+См. также: [capacity-planning.md](../architecture/capacity-planning.md) · [roadmap.md](../roadmap.md) · [helm chart](../../charts/bsdm/README.md)
 
 ---
 
@@ -18,7 +18,7 @@
 
 ---
 
-## Топология (corporate medium)
+## Топология (HA / corporate profile)
 
 ```mermaid
 flowchart TB
@@ -50,9 +50,12 @@ flowchart TB
   P -->|/metrics| PM
 ```
 
-### Референс sizing (corporate medium ≈5k users, ~350 peak RPS)
+### Исторический HA sizing (≈5k users, ~350 peak RPS)
 
-Estimate — см. оговорки в [capacity-planning.md](capacity-planning.md). Итоги кластера считайте по CH×1 vs CH×3.
+Этот профиль не подходит для пилота на 100 пользователей. Для пилота
+используйте [отдельный sizing](../getting-started/pilot-deployment.md).
+Любой production-профиль проверяйте по формулам из
+[capacity-planning.md](../architecture/capacity-planning.md).
 
 | Компонент | K8s | Replicas | CPU/pod | RAM/pod |
 |-----------|-----|----------|---------|---------|
@@ -62,7 +65,7 @@ Estimate — см. оговорки в [capacity-planning.md](capacity-planning.
 | Kafka | Strimzi / external | 3 | 2 / 4 | 8 Gi |
 | ClickHouse | StatefulSet / managed / ClickHouse Cloud | 1–3 | 8 / 8 | 32 Gi |
 
-Для ~1k users (малый prod): обычно **2** replica proxy, Redis optional, CH×1. Полные цифры: [capacity-planning.md](capacity-planning.md).
+Для ~1k users (малый prod): обычно **2** replica proxy, Redis optional, CH×1. Полные цифры: [capacity-planning.md](../architecture/capacity-planning.md).
 
 ---
 
@@ -178,12 +181,12 @@ flowchart LR
 
 | Компонент | Назначение |
 |-----------|------------|
-| Kafka topic `cache-events` | 12 partitions, RF=3, retention 7d |
+| Kafka topic `cache-events` | Число partitions, RF и retention задаются профилем |
 | cache-indexer | Consumer group → ClickHouse; HPA по lag |
-| **ClickHouse** (Operator / managed) | Table `bsdm.http_cache`, TTL 42d |
+| **ClickHouse** (Operator / managed) | Table `bsdm.http_cache`; TTL задаётся DDL |
 | Prometheus + Grafana | Proxy metrics + CH SQL dashboards |
 
-**OpenSearch не требуется** — analytics path только ClickHouse ([ADR 0002](adr/0002-clickhouse-analytics.md), epic [#125](https://github.com/onixus/bsdm-proxy/issues/125)).
+**OpenSearch не требуется** — analytics path только ClickHouse ([ADR 0002](../adr/0002-clickhouse-analytics.md), epic [#125](https://github.com/onixus/bsdm-proxy/issues/125)).
 
 Proxy **не должен** блокироваться на Kafka (bounded queue, drop-new).
 
@@ -200,7 +203,7 @@ kubectl create namespace bsdm-analytics
 kubectl apply -f charts/bsdm/examples/clickhouse-installation.yaml
 ```
 
-Пример CR: [`charts/bsdm/examples/clickhouse-installation.yaml`](../charts/bsdm/examples/clickhouse-installation.yaml) — 1 shard / 1 replica, PVC **100Gi** (Retain).
+Пример CR: [`charts/bsdm/examples/clickhouse-installation.yaml`](../../charts/bsdm/examples/clickhouse-installation.yaml) — 1 shard / 1 replica, PVC **100Gi** (Retain).
 
 Альтернативы: ClickHouse Cloud, managed DB, или plain StatefulSet (lab only).
 
@@ -238,15 +241,14 @@ helm upgrade --install bsdm-indexer ./charts/bsdm \
 
 Proxy Kafka brokers (data plane): `proxy.kafkaBrokers` in `values-prod.yaml` → `kafka-bootstrap.bsdm-analytics.svc:9092`.
 
-### Sizing storage (vs OpenSearch)
+### Sizing storage
 
-| | OpenSearch (legacy) | ClickHouse `http_cache` |
-|--|---------------------|-------------------------|
-| Guidance | ~64Gi StatefulSet | start **100Gi** PVC, grow with retention |
-| Retention | ISM ~42d | MergeTree **TTL 42 DAY** |
-| Compression | Lucene | columnar + TTL delete |
-
-Для SOC-объёмов (корпоративный medium) 100Gi обычно достаточно на 42 дня компактных `CacheEvent`; увеличивайте PVC / shards при sample rate 1 или длинном retention.
+DDL в `scripts/clickhouse/http_cache.sql` исторически содержит TTL 42 дня.
+Это не обязательное продуктовое значение: измените TTL до запуска и считайте
+PVC по фактическому числу событий, размеру строки, коэффициенту сжатия и
+запасу. Для пилота принят TTL **5 дней** и **200 GB NVMe на весь single-host
+стек**; подробный расчёт приведён в
+[capacity-planning.md](../architecture/capacity-planning.md).
 
 ### Backup / DR
 
@@ -255,7 +257,7 @@ Proxy Kafka brokers (data plane): `proxy.kafkaBrokers` in `values-prod.yaml` →
 | `FREEZE PARTITION` + volume snapshot | on-prem CHI / StatefulSet |
 | ClickHouse Cloud / managed backups | cloud |
 | S3 `BACKUP` / `RESTORE` (CH 22+) | cross-region DR |
-| Kafka retention 7d | replay-окно при потере fresh inserts |
+| Kafka retention согласно профилю | replay-окно при потере fresh inserts |
 
 Не полагайтесь на OpenSearch snapshots — их больше нет в product path.
 
@@ -292,7 +294,7 @@ ICP/HTCP (UDP) в k8s сложен. Рекомендация на старте:
 - Parent fetch через internal Service
 - ICP/HTCP: dedicated node pool + `hostNetwork: true` или отключить siblings
 
-См. [hierarchical-caching.md](hierarchical-caching.md).
+См. [hierarchical-caching.md](../architecture/hierarchical-caching.md).
 
 ---
 
@@ -344,7 +346,7 @@ bsdm-proxy + Redis + Kafka + ClickHouse + indexer + Grafana
 
 ## Helm chart
 
-Скелет: [`charts/bsdm/`](../charts/bsdm/README.md)
+Скелет: [`charts/bsdm/`](../../charts/bsdm/README.md)
 
 ```bash
 helm install bsdm ./charts/bsdm \
@@ -367,4 +369,4 @@ helm install bsdm ./charts/bsdm \
 
 ---
 
-*Последнее обновление: 2026-07 · BSDM v0.5.0 · M3 CH Operator (#135)*
+*Последнее обновление: 2026-07 · BSDM `0.6.1-1`.*

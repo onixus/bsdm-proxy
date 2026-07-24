@@ -64,7 +64,7 @@ Enable a subset: `ALERT_RULES=blocked_burst,beacon_periodic`.
 
 Alerts include labels `shannon_bits` and `entropy_match` (`shannon` / `legacy` / `shannon+legacy`).
 
-Starter SQL live in [`scripts/clickhouse/m4_threat_queries.sql`](../scripts/clickhouse/m4_threat_queries.sql).
+Starter SQL live in [`scripts/clickhouse/m4_threat_queries.sql`](../../scripts/clickhouse/m4_threat_queries.sql).
 
 ## Environment
 
@@ -100,8 +100,8 @@ Starter SQL live in [`scripts/clickhouse/m4_threat_queries.sql`](../scripts/clic
 ## Grafana Unified Alerting + Alertmanager
 
 Full stack includes **Alertmanager** (`:9093`) and provisioned Grafana rules
-under [`grafana/alerting/`](../grafana/alerting/). Prometheus loads
-[`prometheus/alerts/m4_threat.yml`](../prometheus/alerts/m4_threat.yml).
+under [`grafana/alerting/`](../../grafana/alerting/). Prometheus loads
+[`prometheus/alerts/m4_threat.yml`](../../prometheus/alerts/m4_threat.yml).
 
 ```
 alert-worker ──webhook──▶ SIEM          (profile alerts, rich CH findings)
@@ -136,6 +136,6 @@ Prometheus scrape (when profile enabled): job `alert-worker` → `:8090`.
 ## Related
 
 - Blocker B19 / issue [#50](https://github.com/onixus/bsdm-proxy/issues/50)
-- [clickhouse-analytics.md](clickhouse-analytics.md) · [roadmap.md](roadmap.md) M4 ✅
+- [clickhouse-analytics.md](clickhouse-retrosearch.md) · [roadmap.md](../roadmap.md) M4 ✅
 - Grafana provisioning: `grafana/alerting/` · Prometheus rules: `prometheus/alerts/`
 - Alertmanager: `alertmanager/` (compose service)

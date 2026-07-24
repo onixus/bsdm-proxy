@@ -1,160 +1,112 @@
-# Roadmap & План работ BSDM-Proxy (v0.6+)
+# Roadmap BSDM-Proxy
 
-> **Целевое состояние проекта:** Высокопроизводительный корпоративный SWG нового поколения на базе Rust с ретропоиском в ClickHouse, ML-аналитикой угроз и трансформацией в платформу **Gartner SSE / SASE** (Security Service Edge).
+Текущая версия workspace: **`0.6.1-1`**.
 
-Текущая версия: **0.6.0** (`v0.6`) · [Releases](https://github.com/onixus/bsdm-proxy/releases) · [CHANGELOG](../CHANGELOG.md)
+Roadmap описывает порядок работ. Фактическая зрелость реализации определяется
+[матрицей статуса](project-status.md), а не отметкой milestone или наличием UI.
 
----
+## Реализованная основа
 
-## 1. Матрица зрелости и Столпы платформы
+### Core proxy
 
-| Столп | Описание | Зрелость (v0.6) | Целевое (2027) |
-|-------|----------|-----------------|----------------|
-| **Squid Parity** | Forward proxy, TLS MITM, кэширование L1/L2, ACL, Auth, HTCP иерархия | **~93%** ✅ | ~95% |
-| **Ретропоиск** | Поиск и SOC-аналитика по историческому HTTP-трафику в ClickHouse | **~95%** ✅ | ~98% |
-| **ML-безопасность** | Feature Store, UEBA z-score, лексический фишинг, C&C беконы, Flight Risk | **~90%** ✅ | ~95% |
-| **SSE / SASE Evolution** | eBPF XDP, DoH/DoT, WASM плагины, AI Cache, GenAI CASB, Inline DLP | **~75%** 🚀 | ~95% |
-| **Итоговый уровень** | **Комплексный статус решения** | **~88%** | **~96%** |
+- HTTP forward proxy и CONNECT;
+- HTTPS MITM;
+- sharded L1, mmap spill, compression и revalidation;
+- Redis L2 и cache hierarchy;
+- Basic/LDAP/NTLM/Kerberos auth;
+- ACL, categorization и rate limiting;
+- REST control plane, health и Prometheus metrics.
 
-```mermaid
-gantt
-  title BSDM-Proxy Roadmap & Evolution
-  dateFormat YYYY-MM
-  section Core Engine
-  M1 Foundation           :done, m1, 2025-10, 2026-03
-  M2 Squid parity         :done, m2, 2026-03, 2026-06
-  M2.5 Data plane perf    :done, m25, 2026-06, 2026-07
-  section Analytics & ML
-  M3 Retro-search (ClickHouse) :done, m3, 2026-05, 2026-07
-  M4 Threat analytics     :done, m4, 2026-07, 2026-07
-  M5 ML security          :done, m5, 2026-07, 2026-07
-  section SSE / SASE Roadmap
-  Q3 GenAI CASB & DLP     :active, q3, 2026-07, 2026-09
-  Q4 BSDM Connect & ZTNA  :q4, 2026-10, 2026-12
-  Q1 Multi-Cluster Sync   :q1, 2027-01, 2027-03
-  Q2 WASM Hub & SLM AI    :q2, 2027-04, 2027-06
-```
+### Analytics
 
----
+- Kafka event pipeline;
+- cache-indexer;
+- ClickHouse schema и retro-search;
+- Grafana dashboards;
+- alert-worker;
+- ML feature store, UEBA/phishing/beacon scoring и threat-score write-back.
 
-## 2. Реализованные вехи разработки (Completed Milestones)
+### Optional modules
 
-### M1 — Foundation (v0.2.x) ✅
-- [x] Hyper forward proxy + HTTP CONNECT, MITM TLS.
-- [x] L1 cache, Kafka event pipeline, Prometheus метрики + Grafana дашборды.
-- [x] Auth (Basic / LDAP), ACL, категориальная фильтрация, E2E тестовый каркас.
-- [x] Иерархия Phase 3, rate limiting, рефакторинг `ProxyService`.
+- Lite mode с SQLite;
+- local/Qdrant semantic cache;
+- DNS sinkhole, DoH и DoT;
+- WASM request hook PoC;
+- ICAP REQMOD/RESPMOD PoC;
+- eBPF/XDP, DLP/CASB, reverse proxy/OIDC и AWG prototypes.
 
-### M2 — Squid Parity (v0.3.x) ✅
-- [x] Иерархия Phase 4 — peer discovery, cache digest, HTCP.
-- [x] Redis L2 кэш, HTTP/2 upstream, at-rest сжатие.
-- [x] ACL TimeWindow, REST Control API, группы NTLM / Kerberos / LDAP.
-- [x] Negative cache, ETag revalidation, библиотека `bsdm-events`.
+Слово «реализован» для optional-модуля не означает production readiness.
 
-### M2.5 — Data Plane Throughput (v0.3.1–0.3.2) ✅
-- [x] Tiered L1, streaming MISS, кэширование полисов и авторизации.
-- [x] Fast cache path, bounded Kafka queue, оффлайн категоризация, прекомпиляция ACL.
-- [x] Профили бенчмарков HTTP Archive.
+## Ближайший приоритет: стабилизация пилота
 
-### M3 — Retro-Search (v0.3.1+) ✅
-- [x] Схема ClickHouse (`bsdm.http_cache`) + индексатор `cache-indexer` (JSONEachRow).
-- [x] `/api/search` (JSON/CSV export) + Grafana дашборды для SOC.
-- [x] Session correlation, поддержка ClickHouse Operator (CHI) в Kubernetes.
+### P0 — целостность и безопасность
 
-### M4 — Threat Analytics (v0.5.x) ✅
-- [x] Обогащение схемы блокировками угроз в ClickHouse.
-- [x] Движок уведомлений `alert-worker` (webhooks, SIEM integration).
-- [x] Эвристика C&C беконов (`beacon_periodic`) + энтропия Шеннона (`ALERT_SHANNON_*`).
-- [x] Интеграция PhishTank API key, правила Grafana Unified Alerting и Prometheus Alertmanager.
+- [ ] Добавить DLP/CASB columns или миграцию в ClickHouse schema.
+- [ ] Добавить постоянный `DLP_ENABLED` и документированный default.
+- [ ] Проверять OIDC state, nonce, issuer, audience и JWT signature.
+- [ ] Удалить synthetic eBPF counters; читать подтверждённые kernel metrics.
+- [ ] Связать AWG control API с реальным lifecycle sidecar/config.
+- [ ] Закрыть control/search/metrics endpoints auth и network-policy defaults.
 
-### M5 — ML Security (v1.0.x / v0.5.x+) ✅
-- [x] **M5.1 Scaffolding:** ADR 0003, Feature Store на ClickHouse, бинарник `ml-worker`.
-- [x] **M5.2 UEBA:** Модель `ueba_zscore_v0` (базовые профили пользователей/IP).
-- [x] **M5.3 Phishing:** Модель `phishing_lexical_v0` (энтропия доменов, ключевые слова).
-- [x] **M5.4 C&C Beacon ML:** Модель `cc_beacon_v0` на парах `(client_ip, domain)`.
-- [x] **M5.5 Flight Risk ML:** Модель `flight_risk_v0` для выявления рисков увольнения/выгрузки данных.
-- [x] **M5.6 Threat Score Write-Back:** Кэш `threat_score_cache` + `GET /api/threat-scores` для O(1) блокировок в прокси.
+### P1 — воспроизводимый пилот
 
----
+- [ ] Провести full-path load test: MITM + auth + ACL + Kafka + ClickHouse.
+- [ ] Зафиксировать профиль 100 пользователей и retention 5 дней.
+- [x] Добавить reproducible pilot Compose overlay.
+- [ ] Добавить эквивалентный pilot values-файл для Helm.
+- [ ] Проверить backup/restore ClickHouse и CA rotation.
+- [ ] Добавить dashboards для Kafka lag, ClickHouse merges и disk pressure.
+- [ ] Проверить отдельный процесс на каждую ML-модель.
 
-## 3. Выполненные стратегические векторы v0.6
+### P2 — optional modules
 
-- **Lite Mode:** Запуск прокси с локальным SQLite индексатором (`docker-compose.lite.yml`) без зависимостей от Kafka и ClickHouse.
-- **Control Plane:** REST и gRPC API (`--features grpc`) для динамической перезагрузки ACL, иерархии и TLS-сертификатов без простоя.
-- **WASM Plugins & SDK:** Рантайм Wasmtime (`--features wasm`), библиотека [`bsdm-wasm-sdk`](../bsdm-wasm-sdk/), горячая перезагрузка модулей через Control API.
-- **AI Traffic Optimization:** Singleflight request coalescing (`MISS_COALESCE_ENABLED`), API Key Rate Limiting, семантическое кэширование с вектором Qdrant Vector DB.
-- **Encrypted DNS & Kernel Drops:** eBPF XDP аппаратный сброс пакетов, DoH (RFC 8484) и DoT (RFC 7858) шифрованные DNS-шлюзы в `dns-sinkhole`.
-- **Admin Console & Automation:** Однострочные инсталлеры (`Makefile`, `setup.ps1`, `install.sh`), обновленный Web UI с интерактивными графиками и расследованиями.
+- [ ] ICAP resilience и отдельный buffered-response benchmark.
+- [ ] Реальный embedding provider contract и Qdrant capacity test.
+- [ ] WASM ABI versioning, module signing и richer test suite.
+- [ ] DNSSEC/recursive-resolver integration strategy.
+- [ ] Admin Console build/deployment и end-to-end control API tests.
 
----
+## После успешного пилота
 
-## 4. Конкурентный анализ Gartner SSE/SASE & USPs
+### Data-plane HA
 
-**Лидеры рынка по Gartner:** Zscaler (ZIA), Palo Alto Networks (Prisma Access), Netskope, Cloudflare WARP.
+- две proxy-реплики за L4 load balancer;
+- Redis L2 с явной eviction/persistence policy;
+- session/rate-limit semantics между репликами;
+- failover test без потери policy enforcement.
 
-| Возможность (Gartner Core SSE) | Лидеры рынка | BSDM-Proxy (Текущее состояние v0.6) | Оценка |
-|--------------------------------|--------------|--------------------------------|--------|
-| **Secure Web Gateway (SWG)** | Облачный масштаб, категоризация, SSL-инспекция | Нативный Rust, MITM, L1/L2 кэш, ACL, eBPF XDP, DoH/DoT | 🟩 **Превосходит (по скорости)** |
-| **Advanced Threat Protection** | Sandbox, AI-based эвристика | ML-пайплайн в ClickHouse (UEBA, C&C, Phishing, Flight Risk) | 🟩 **Сильно** (асинхронный ML write-back) |
-| **Cloud Access Security Broker (CASB)**| Контроль SaaS-приложений | Категоризация доменов | 🟨 **В плане (Q3 2026: GenAI CASB)** |
-| **Data Loss Prevention (DLP)** | OCR, Regex в реальном времени | Инспекция через Wasm/ICAP | 🟨 **В плане (Q3 2026: Inline DLP)** |
-| **Zero Trust Network Access (ZTNA)**| Доступ к приватным сервисам | Forward Proxy | 🟨 **В плане (Q4 2026: Reverse IAP)** |
-| **Endpoint Agent** | Zscaler Connector, WARP | PAC-файлы, GPO, eBPF | 🟨 **В плане (Q4 2026: BSDM Connect)** |
+### Analytics reliability
 
-### Уникальные маркетинговые преимущества (USPs):
-1. **Data Sovereignty (100% Суверенитет данных):** 100% On-Premise или Private Cloud. Ключи SSL, телеметрия и логи не уходят во внешнее облако вендора.
-2. **"Стеклянная коробка" ML-аналитики (White-Box AI):** Полный доступ к SQL-фичам в ClickHouse, возможность кастомизации ML-моделей под корпоративные требования.
-3. **Rust-Native Speed & Memory Safety:** Минимальные задержки, эффективное использование CPU/RAM при многопоточной SSL-дешифровке.
-4. **WASM-Расширяемость:** Кастомная бизнес-логика и парсинг протоколов через скомпилированные Wasm-модули без модификации ядра прокси.
+- Kafka и ClickHouse topology по требуемому RPO/RTO;
+- migrations и schema compatibility;
+- backup/restore drills;
+- retention и tiered storage по фактическому event volume.
 
----
+### Multi-cluster
 
-## 5. План работ (Actionable Work Plan: Q3 2026 – Q2 2027)
+- [x] Добавить local session/threat-sync stores и control API scaffolding.
+- global session state;
+- threat indicator synchronization;
+- cluster identity и mTLS;
+- conflict resolution и backpressure.
 
-### 🗓️ Q3 2026: Защита ИИ и Встроенный DLP (GenAI CASB & Inline DLP)
-- [x] **LLM Data Guard (GenAI CASB):** 
-  * Wasm-модуль для инспекции и фильтрации API-запросов к OpenAI (ChatGPT), Anthropic (Claude) и Microsoft Copilot.
-  * Автоматическая блокировка передачи исходного кода, API-ключей и персональных данных (PII) в LLM.
-- [x] **Inline DLP Engine (v1):**
-  * Встроенный сканер регулярных выражений (DLP) для исходящих HTTP POST/PUT запросов.
-  * Маскирование и блокировка PII, номеров кредитных карт и коммерческой тайны в режиме потока (без буферизации больших файлов в память).
+Scaffolding пока запускается без Redis connection, subscriber и policy
+integration. Multi-cluster не считается реализованным до подтверждения
+single-cluster operational model и выполнения пунктов выше.
 
-### 🗓️ Q4 2026: Гибридный доступ и ZTNA Foundation
-- [ ] **BSDM Connect (Легкий Endpoint-агент):**
-  * Компактный клиент под Windows, macOS и Linux на базе WireGuard для завертывания веб-трафика удаленных сотрудников в корпоративный BSDM-Proxy.
-- [x] **Identity-Aware Reverse Proxy (IAP / ZTNA):**
-  * Поддержка режима обратного прокси (Reverse Proxy) для защиты доступа к внутренним веб-ресурсам компании.
-  * Интеграция с OIDC / OAuth2 провайдерами (Okta, Keycloak, Microsoft Entra ID).
+## Дальнейшие исследования
 
-### 🗓️ Q1 2027: Распределенная Enterprise-Экосистема
-- [ ] **Global Session State:**
-  * Синхронизация `session_id` и лимитов Rate Limiting между репликами в мульти-кластерной Kubernetes-среде через Redis / KeyDB.
-- [ ] **Real-Time Threat Sync:**
-  * P2P-обмен индикаторами компрометации (IoC) и ML-скорами угроз между независимыми инстансами прокси (по протоколу Gossip).
+- endpoint tunnel/agent для Windows, macOS и Linux;
+- identity-aware access после production-grade OIDC;
+- plugin distribution после стабилизации WASM ABI;
+- local ML/SLM categorization после определения latency и false-positive budget.
 
-### 🗓️ Q2 2027: WASM Marketplace и Local AI
-- [ ] **BSDM Plugin Hub (Маркетплейс Wasm):**
-  * Открытый портал для публикации и удобной установки сторонних Wasm-плагинов сообщества.
-- [ ] **Zero-Day AI Categorization:**
-  * Интеграция локальных компактных языковых моделей (SLM) для классификации не размеченных доменов на лету.
+## Правила roadmap
 
----
-
-## 6. Связанная документация
-
-| Документ | Тема |
-|----------|------|
-| [README.md](README.md) | Главный навигационный портал и карта Wiki |
-| [architecture/overview.md](architecture/overview.md) | Компоненты ядра и поток данных |
-| [features/control-plane.md](features/control-plane.md) | REST и gRPC Control Plane API |
-| [features/wasm-plugins.md](features/wasm-plugins.md) | Инструкция по созданию Wasm-плагинов |
-| [analytics/ml-security.md](analytics/ml-security.md) | Feature Store, ML models и скоринг |
-| [analytics/clickhouse-retrosearch.md](analytics/clickhouse-retrosearch.md) | ClickHouse DDL, ретропоиск и Search API |
-| [features/dns-sinkhole.md](features/dns-sinkhole.md) | UDP / DoH / DoT DNS Sinkhole |
-| [features/icap-inspection.md](features/icap-inspection.md) | Взаимодействие с внешними ICAP/AV сканерами |
-| [getting-started/lite-mode.md](getting-started/lite-mode.md) | Автономный запуск в режиме Lite |
-| [architecture/capacity-planning.md](architecture/capacity-planning.md) | Расчет аппаратных ресурсов |
-
----
-
-*Обновлено: Июль 2026 · Релиз v0.6.0 · Все roadmap и backlog данные консолидированы.*
+1. Выполненная задача не повышает зрелость функции автоматически.
+2. Production-ready требует tests, security review, deployment path, observability
+   и rollback.
+3. Capacity numbers публикуются вместе с workload assumptions.
+4. Исторические release notes не переписываются под текущую архитектуру.
+5. Маркетинговые сравнения и неподтверждённые проценты зрелости не являются
+   техническим roadmap.

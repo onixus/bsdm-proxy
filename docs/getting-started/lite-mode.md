@@ -2,7 +2,7 @@
 
 Standalone caching HTTPS proxy with optional SQLite Search API — **no Kafka or ClickHouse**.
 
-See [roadmap.md](roadmap.md) (Lite Mode).
+See [roadmap.md](../roadmap.md) (Lite Mode).
 
 ## One-command start
 
@@ -46,7 +46,7 @@ curl 'http://127.0.0.1:8080/api/search?domain=httpbin.org&limit=5'
 
 ## Full analytics stack
 
-Root [`docker-compose.yml`](../docker-compose.yml): Kafka → ClickHouse → Grafana / `alert-worker`.
+Root [`docker-compose.yml`](../../docker-compose.yml): Kafka → ClickHouse → Grafana / `alert-worker`.
 
 ## Roadmap leftovers
 

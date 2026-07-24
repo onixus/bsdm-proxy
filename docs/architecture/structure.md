@@ -1,97 +1,103 @@
 # Структура репозитория
 
-Актуальная карта каталогов BSDM-Proxy v0.5.0.
+Актуально для workspace `0.6.1-1`.
 
 ## Cargo workspace
 
-| Крейт | Путь | Назначение |
-|-------|------|------------|
-| `bsdm-proxy` | `proxy/` | HTTPS forward proxy (MITM, cache, auth, ACL, events) |
-| `cache-indexer` | `cache-indexer/` | Kafka|HTTP → ClickHouse|SQLite, Search API, `/metrics` |
-| `alert-worker` | `alert-worker/` | ClickHouse threat rules → SIEM/webhook (M4 / B19) |
-| `ml-worker` | `ml-worker/` | M5 features/scores + threat-score API |
-| `dns-sinkhole` | `dns-sinkhole/` | Optional DNS RPZ-lite sinkhole sidecar (P3 / #108) |
-| `bsdm-events` | `bsdm-events/` | Общие типы событий (`CacheEvent`) для proxy и indexer |
-| `e2e` | `e2e/` | Smoke и E2E тесты (subprocess proxy + mock upstream) |
+| Member | Путь | Назначение |
+|---|---|---|
+| `bsdm-proxy` | `proxy/` | Forward proxy, MITM, cache, policy и control plane |
+| `cache-indexer` | `cache-indexer/` | Kafka/HTTP → ClickHouse/SQLite |
+| `alert-worker` | `alert-worker/` | ClickHouse rules → webhook |
+| `ml-worker` | `ml-worker/` | Feature extraction и scoring |
+| `dns-sinkhole` | `dns-sinkhole/` | UDP DNS, DoH/DoT и RPZ-lite |
+| `bsdm-events` | `bsdm-events/` | Общая event schema |
+| `bsdm-proxy-e2e` | `e2e/` | Test harness |
+| `bsdm-wasm-sdk` | `bsdm-wasm-sdk/` | WASM guest ABI helpers |
+| WASM example | `examples/wasm/rust_plugin/` | Example guest plugin |
 
-Корневой [`Cargo.toml`](../Cargo.toml) объявляет workspace и shared dependencies.
+Корневой `Cargo.toml` — единственный источник состава workspace.
 
-## Дерево каталогов
+## Каталоги
 
-```
+```text
 bsdm-proxy/
-├── proxy/                  # Основной прокси
-│   └── src/
-│       ├── main.rs, proxy_service.rs, control_api.rs
-│       ├── miss_coalesce.rs, semantic_cache.rs, threat_score_cache.rs
-│       ├── hierarchy*, peers, icp/htcp, rate_limit, upstream, tls, metrics
-│       └── lib.rs
-├── cache-indexer/          # Kafka|HTTP → ClickHouse|SQLite + Search API
-├── ml-worker/              # M5 features/scores + threat-score API
-├── dns-sinkhole/           # Optional DNS RPZ-lite sidecar
-├── alert-worker/           # CH rule polling → webhook / SIEM
+├── proxy/                  # Основной data/control plane
+├── cache-indexer/          # Analytics ingest + Search API
+├── alert-worker/           # Detection rules
+├── ml-worker/              # Feature store и scoring
+├── dns-sinkhole/           # DNS security sidecar
 ├── bsdm-events/            # Shared event schema
-├── e2e/                    # Integration tests
-├── admin-console/          # Unified React admin UI (Dashboard, Logs, Policies, RPZ, Wasm, ICAP, Mesh, AI Cache)
-├── charts/bsdm/            # Helm chart (K8s proxy Deployment)
-├── config/                 # Примеры ACL-правил
-├── packaging/              # Release tarball, systemd units, install.sh
-├── scripts/                # build-package, pre-push-check, clickhouse SQL
-├── docs/                   # Wiki / документация
-├── grafana/                # Provisioning: datasources + dashboards + alerting
-├── prometheus/             # Scrape config + M4 alert rules
-├── alertmanager/           # Alertmanager template + entrypoint
-├── web-config/             # Legacy static config generator
-├── certs/                  # MITM CA (gitignored, генерируется локально)
-├── Dockerfile              # Multi-stage: proxy + cache-indexer + alert-worker + ml-worker + dns-sinkhole
-├── docker-compose.yml      # Полный стек (+ profiles `alerts`, `ml`)
-├── docker-compose.lite.yml # Lite: proxy + SQLite indexer (Phase 1)
-├── docker-compose.*.yml    # Профили: test, redis-l2, hierarchy, ha
-└── AGENTS.md               # Инструкции для Cursor Cloud Agent
+├── bsdm-wasm-sdk/          # Experimental WASM SDK
+├── e2e/                    # Integration test harness
+├── admin-console/          # React SPA
+├── charts/bsdm/            # Helm chart
+├── packaging/              # systemd package и env examples
+├── config/                 # ACL examples
+├── scripts/                # Build, test, SQL и docs automation
+├── docs/                   # Каноническая документация
+├── prometheus/             # Scrape config и rules
+├── grafana/                # Dashboards и provisioning
+├── alertmanager/           # Alertmanager template
+├── bpf/                    # Experimental XDP program
+├── examples/               # DNS/WASM examples
+├── Dockerfile              # Multi-stage images
+└── docker-compose*.yml     # Deployment examples
 ```
 
-## Docker Compose профили
+## Compose
 
-| Файл | Сервисы |
-|------|---------|
-| `docker-compose.lite.yml` | proxy + SQLite cache-indexer (MITM + L1 spill, no Kafka/CH) |
-| `docker-compose.yml` | proxy, cache-indexer, kafka, zookeeper, clickhouse, prometheus, alertmanager, grafana; optional `alert-worker` (`--profile alerts`), `ml-worker` (`--profile ml`), `dns-sinkhole` (`--profile dns-sinkhole`) |
-| `docker-compose.test.yml` | Минимальный стек для smoke/E2E |
-| `docker-compose.redis-l2.yml` | 2× proxy + Redis L2 |
-| `docker-compose.hierarchy.yml` | Multi-instance + ICP |
+| Файл | Назначение |
+|---|---|
+| `docker-compose.yml` | Analytics base + optional profiles |
+| `docker-compose.lite.yml` | Proxy + SQLite |
+| `docker-compose.test.yml` | Test stack |
+| `docker-compose.redis-l2.yml` | Redis L2 example |
+| `docker-compose.hierarchy.yml` | Cache hierarchy example |
 | `docker-compose.ha.yml` | HA lab sketch |
+| `docker-compose.awg.yml` | Experimental AWG sidecar |
 
-## Инфраструктура и конфигурация
+Основной Compose содержит profiles `alerts`, `ml`, `icap` и `dns-sinkhole`.
 
-| Путь | Назначение |
-|------|------------|
-| `grafana/datasources.yml` | Prometheus + ClickHouse datasources |
-| `grafana/dashboards/` | Proxy metrics + HTTP Traffic (ClickHouse) |
-| `grafana/alerting/` | Unified Alerting rules / contact points (M4) |
-| `prometheus/alerts/` | Prometheus rule files (M4 threat) |
-| `alertmanager/` | Alertmanager template + entrypoint |
-| `scripts/clickhouse/http_cache.sql` | Схема `bsdm.http_cache` |
-| `packaging/config/*.env.example` | Примеры env для native install |
-| `config/acl-rules.*.json` | Примеры ACL |
-
-## CI и автоматизация
+## Конфигурация и данные
 
 | Путь | Назначение |
-|------|------------|
-| `.github/workflows/` | CI: build, test, clippy, release |
-| `.githooks/pre-push` | fmt + clippy перед push |
-| `scripts/pre-push-check.sh` | Локальная проверка перед push |
+|---|---|
+| `packaging/config/*.env.example` | Native environment examples |
+| `scripts/clickhouse/*.sql` | ClickHouse schema |
+| `config/acl-rules*.json` | ACL examples |
+| `grafana/dashboards/` | Dashboards |
+| `prometheus/alerts/` | Prometheus rules |
+| `examples/dns/` | RPZ-lite example |
 
-## Удалённые / устаревшие компоненты
+## Документация
 
-Следующие элементы **удалены** в v0.3.0–v0.3.1:
+| Путь | Роль |
+|---|---|
+| `README.md` | Product overview |
+| `docs/README.md` | Documentation index |
+| `docs/project-status.md` | Feature maturity |
+| `docs/getting-started/` | Deployment |
+| `docs/architecture/` | Design и capacity |
+| `docs/features/` | Proxy modules |
+| `docs/analytics/` | Analytics/ML |
+| `docs/ops-and-dev/` | Operations/development |
+| `docs/releases/` | Historical release notes |
 
-| Было | Замена |
-|------|--------|
-| OpenSearch backend | ClickHouse (`bsdm.http_cache`) |
-| `docker-compose.clickhouse.yml` | ClickHouse в основном `docker-compose.yml` |
-| `grafana/clickhouse/` (дубликат) | `grafana/dashboards/` + `grafana/datasources.yml` |
-| `README.md_old`, `SDBM/` | — |
-| `.github/issue-bodies/ch-*.md` | Миграция завершена ([#125](https://github.com/onixus/bsdm-proxy/issues/125)) |
+Wiki не является отдельным источником истины. Она генерируется командой:
 
-См. [ADR 0002](adr/0002-clickhouse-analytics.md) · [clickhouse-analytics.md](clickhouse-analytics.md) · [licensing.md](licensing.md)
+```bash
+python3 scripts/sync-wiki.py /path/to/bsdm-proxy.wiki
+```
+
+## CI
+
+`.github/workflows/` содержит Rust, E2E, Docker, release, UI, load-test и docs
+workflows. Перед PR:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace --all-targets
+python3 scripts/check-doc-links.py
+```

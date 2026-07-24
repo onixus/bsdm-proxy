@@ -2,7 +2,7 @@
 
 Content-addressable caching for LLM-style `POST` APIs, plus optional near-hit via a pluggable similarity index (local memory or **Qdrant**).
 
-See [roadmap.md](roadmap.md) (AI Traffic Phase) · issue [#189](https://github.com/onixus/bsdm-proxy/issues/189).
+See [roadmap.md](../roadmap.md) (AI Traffic Phase) · issue [#189](https://github.com/onixus/bsdm-proxy/issues/189).
 
 ## Enable
 
@@ -18,11 +18,11 @@ SEMANTIC_CACHE_ENABLED=true
 
 ## Behavior
 
-1. **Exact hit** — SHA-256 of `method + URL + normalized JSON body` (`model` + `messages` / `prompt`).  
+1. **Exact hit** — SHA-256 of `method + URL + normalized JSON body` (`model` + `messages` / `prompt`).
    Header: `X-Cache-Status: LLM-HIT` · `bsdm_proxy_semantic_cache_exact_hits_total`
-2. **Near hit** (only if `SEMANTIC_CACHE_SIMILARITY < 1.0`) — embed + cosine / vector search.  
+2. **Near hit** (only if `SEMANTIC_CACHE_SIMILARITY < 1.0`) — embed + cosine / vector search.
    Header: `X-Cache-Status: SEMANTIC-HIT` · `bsdm_proxy_semantic_cache_similar_hits_total`
-3. **Miss** — upstream fetch; on `200` store in L1 with configured TTL.  
+3. **Miss** — upstream fetch; on `200` store in L1 with configured TTL.
    Header: `X-Cache-Status: LLM-MISS` · index updated for future near-hits
 
 Applies only to `POST` URLs whose path matches a configured prefix.

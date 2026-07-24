@@ -2,7 +2,8 @@
 
 Установка из готового release-архива. Общая документация: [README.md](../README.md) · [docs/README.md](../docs/README.md)
 
-**Текущая версия пакета:** `0.5.7.033` (Cargo `0.5.7+033` / marketing `0.5.07.033`) — [release notes](../docs/releases/v0.5.7+033.md) · [CHANGELOG](../CHANGELOG.md)
+**Текущая версия пакета:** `0.6.1-1`. Имя архива вычисляется из версии
+`proxy/Cargo.toml`; итоговое значение всегда проверяйте в `dist/`.
 
 ## Contents
 
@@ -21,8 +22,8 @@
 ## Quick start
 
 ```bash
-tar xzf bsdm-proxy-0.5.7.033-linux-x86_64.tar.gz
-cd bsdm-proxy-0.5.7.033-linux-x86_64
+tar xzf bsdm-proxy-0.6.1-1-linux-x86_64.tar.gz
+cd bsdm-proxy-0.6.1-1-linux-x86_64
 sudo ./install.sh --create-user --systemd
 ```
 
@@ -37,7 +38,7 @@ sudo systemctl start bsdm-proxy
 
 Optional SIEM alerts: configure `config/alert-worker.env.example` → `/etc/bsdm-proxy/alert-worker.env`, then `systemctl enable --now bsdm-alert-worker`.
 
-Optional M5 ML worker: apply `scripts/clickhouse/ml_features.sql`, configure `ml-worker.env`, then `systemctl enable --now bsdm-ml-worker` (see [docs/ml-security.md](../docs/ml-security.md)).
+Optional M5 ML worker: apply `scripts/clickhouse/ml_features.sql`, configure `ml-worker.env`, then `systemctl enable --now bsdm-ml-worker` (see [ML security](../docs/analytics/ml-security.md)).
 
 ## Manual run
 
@@ -68,13 +69,13 @@ curl http://127.0.0.1:9090/metrics | head
 cat VERSION
 ```
 
-Логи: `journalctl -u bsdm-proxy -f` или см. [docs/logging.md](../docs/logging.md) (`RUST_LOG` в `config/*.env.example`).
+Логи: `journalctl -u bsdm-proxy -f` или см. [Logging and metrics](../docs/ops-and-dev/logging.md) (`RUST_LOG` в `config/*.env.example`).
 
 ## Build package from source
 
 ```bash
 ./scripts/build-package.sh
-# → dist/bsdm-proxy-0.5.7.033-linux-<arch>.tar.gz
+# → dist/bsdm-proxy-0.6.1-1-linux-<arch>.tar.gz
 ```
 
-См. также [docs/development.md](../docs/development.md).
+См. также [Development guide](../docs/ops-and-dev/development.md).

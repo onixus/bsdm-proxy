@@ -41,4 +41,4 @@ Prior L1 design stored full response bodies inline in `quick_cache` (`Bytes` in 
 ## References
 
 - `proxy/src/cache_body.rs`, `proxy/src/sharded_cache.rs`, `proxy/src/cache.rs`
-- `docs/benchmarks-httparchive.md`, `docs/performance.md`
+- `docs/ops-and-dev/benchmarks.md`, `docs/architecture/performance.md`

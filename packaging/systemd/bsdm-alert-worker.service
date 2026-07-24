@@ -1,6 +1,6 @@
 [Unit]
 Description=BSDM-Proxy alert-worker (ClickHouse to SIEM webhook)
-Documentation=https://github.com/onixus/bsdm-proxy/blob/main/docs/alerting.md
+Documentation=https://github.com/onixus/bsdm-proxy/blob/main/docs/analytics/alerting.md
 After=network-online.target
 Wants=network-online.target
 

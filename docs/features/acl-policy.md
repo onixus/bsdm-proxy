@@ -1,6 +1,6 @@
 # Access Control Lists (ACL)
 
-> См. также: [оглавление документации](README.md) · [пример правил](../config/acl-rules.example.json)
+> См. также: [оглавление документации](../README.md) · [пример правил](../../config/acl-rules.example.json)
 
 > ⚠️ **Ограничения реализации:** REST ACL CRUD + persist, Cache-Tag purge, hierarchy peer reload, upstream TLS reload — ✅ (см. [control-plane.md](control-plane.md)); gRPC control plane — ещё в roadmap Phase 2.
 

@@ -14,7 +14,7 @@
 # Or enable indexer alongside proxy in one release (same cluster DNS):
 #   indexer.enabled=true + clickhouse.url pointing at CHI service.
 #
-# Full guide: docs/k8s-architecture.md
+# Full guide: docs/ops-and-dev/k8s-architecture.md
 
 # Disable proxy Deployment when installing indexer-only release into analytics ns
 fullnameOverride: bsdm
