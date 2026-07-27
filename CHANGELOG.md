@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-27
+
+Release **0.8.0**. Global Session State & Real-time Threat Sync, AmneziaWG Obfuscated Protocol Endpoint & BSDM Connect UI, DoH & DoT Encrypted DNS Gateways, and Admin Console modules (RPZ, Wasm, ICAP, Mesh Cluster, eBPF/XDP, Vector AI Cache).
+
+
 ### Added
 
 - **DoH (RFC 8484) & DoT (RFC 7858) Encrypted DNS Gateways** — Inbound DoH (`/dns-query`) and DoT (TCP/853 TLS) listeners for `dns-sinkhole`, wireformat base64url decoding, 2-byte TCP framing, and `admin-console` encrypted DNS panel ([#204](https://github.com/onixus/bsdm-proxy/pull/204))
