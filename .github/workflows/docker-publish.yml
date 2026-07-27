@@ -13,6 +13,7 @@ concurrency:
 permissions:
   contents: read
   packages: write
+  actions: write
 
 env:
   REGISTRY: ghcr.io
