@@ -641,6 +641,7 @@ function ApiTab({
         <FormGrid>
           <Input label="Search API token" type="password" value={settings.searchToken} onChange={(e) => update('searchToken', e.target.value)} />
           <Input label="ACL API token" type="password" value={settings.aclToken} onChange={(e) => update('aclToken', e.target.value)} />
+          <Input label="Control API token" type="password" value={settings.controlToken} onChange={(e) => update('controlToken', e.target.value)} />
         </FormGrid>
       </FormSection>
       <FormSection title="Demo mode">
