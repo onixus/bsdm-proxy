@@ -15,7 +15,7 @@ request = function()
   counter = counter + 1
   local url = target_url
   if miss_mode then
-    url = string.format("http://127.0.0.1:18080/miss/%d-%d", counter, math.random(1000000000))
+    url = string.format("%s/%d-%d", target_url, counter, math.random(1000000000))
   end
   return wrk.format("GET", url)
 end

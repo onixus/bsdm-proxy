@@ -71,7 +71,12 @@ impl ClickHouseWriter {
         params: &[(&str, String)],
     ) -> Result<String, Box<dyn std::error::Error>> {
         let base = self.config.url.trim_end_matches('/');
-        let mut req = self.client.post(base).query(&[("query", sql)]).body("");
+        let mut req = self
+            .client
+            .post(base)
+            .query(&[("query", sql)])
+            .header(reqwest::header::CONTENT_LENGTH, 0)
+            .body("");
         for (name, value) in params {
             req = req.query(&[(format!("param_{name}"), value.as_str())]);
         }

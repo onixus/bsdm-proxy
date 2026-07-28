@@ -30,8 +30,8 @@ CREATE TABLE IF NOT EXISTS bsdm.http_cache
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMMDD(ts)
-ORDER BY (domain, username, ts, event_id)
-TTL ts + INTERVAL 42 DAY
+ORDER BY (domain, ifNull(username, ''), ts, event_id)
+TTL toDateTime(ts) + INTERVAL 42 DAY
 SETTINGS index_granularity = 8192;
 
 -- M3: who accessed domain X (30 days)

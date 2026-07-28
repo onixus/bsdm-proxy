@@ -96,7 +96,21 @@ single-cluster operational model и выполнения пунктов выше
 
 ## Дальнейшие исследования
 
-- endpoint tunnel/agent для Windows, macOS и Linux;
+### ZTNA endpoint agents
+
+- [ ] Довести BSDM Connect (AmneziaWG) как первый endpoint agent до
+  управляемого lifecycle для Windows, macOS и Linux.
+- [ ] Добавить второй ZTNA agent/transport на базе
+  [TrustTunnel](https://github.com/TrustTunnel/TrustTunnel):
+  - enrollment устройства и привязка identity;
+  - генерация, выдача, rotation и отзыв клиентской конфигурации;
+  - full-tunnel и split-tunnel маршруты из policy;
+  - запуск, остановка, обновление и health/status через control plane;
+  - telemetry с agent/transport identity без передачи секретов;
+  - пакеты и end-to-end тесты для поддерживаемых desktop-платформ;
+  - threat model, проверка upstream dependency и rollback до включения в пилот.
+- [ ] Определить общий agent contract, чтобы BSDM Connect и TrustTunnel
+  использовали одинаковые enrollment, policy, telemetry и lifecycle API.
 - identity-aware access после production-grade OIDC;
 - plugin distribution после стабилизации WASM ABI;
 - local ML/SLM categorization после определения latency и false-positive budget.

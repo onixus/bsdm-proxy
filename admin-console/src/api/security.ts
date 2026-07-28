@@ -1,4 +1,4 @@
-import { apiFetch, aclClient } from './client'
+import { apiFetch, controlClient } from './client'
 
 export interface DlpPatternDto {
   pattern: string
@@ -6,7 +6,7 @@ export interface DlpPatternDto {
 }
 
 export async function fetchCasbDomains(): Promise<string[]> {
-  const { baseUrl, token } = aclClient()
+  const { baseUrl, token } = controlClient()
   try {
     return await apiFetch<string[]>('/api/security/casb', { baseUrl, token })
   } catch {
@@ -21,7 +21,7 @@ export async function fetchCasbDomains(): Promise<string[]> {
 }
 
 export async function saveCasbDomains(domains: string[]): Promise<void> {
-  const { baseUrl, token } = aclClient()
+  const { baseUrl, token } = controlClient()
   await apiFetch('/api/security/casb', {
     baseUrl,
     token,
@@ -31,7 +31,7 @@ export async function saveCasbDomains(domains: string[]): Promise<void> {
 }
 
 export async function fetchDlpPatterns(): Promise<DlpPatternDto[]> {
-  const { baseUrl, token } = aclClient()
+  const { baseUrl, token } = controlClient()
   try {
     return await apiFetch<DlpPatternDto[]>('/api/security/dlp', { baseUrl, token })
   } catch {
@@ -47,7 +47,7 @@ export async function fetchDlpPatterns(): Promise<DlpPatternDto[]> {
 }
 
 export async function saveDlpPatterns(patterns: DlpPatternDto[]): Promise<void> {
-  const { baseUrl, token } = aclClient()
+  const { baseUrl, token } = controlClient()
   await apiFetch('/api/security/dlp', {
     baseUrl,
     token,
