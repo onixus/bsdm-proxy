@@ -62,7 +62,7 @@ impl ReverseProxyConfig {
         })
     }
 
-    pub fn extract_session_cookie(req: &Request<hyper::body::Incoming>) -> Option<String> {
+    pub fn extract_session_cookie<B>(req: &Request<B>) -> Option<String> {
         req.headers().get("cookie").and_then(|val| {
             let val_str = val.to_str().ok()?;
             for part in val_str.split(';') {
@@ -75,7 +75,7 @@ impl ReverseProxyConfig {
         })
     }
 
-    pub fn extract_oidc_state_cookie(req: &Request<hyper::body::Incoming>) -> Option<String> {
+    pub fn extract_oidc_state_cookie<B>(req: &Request<B>) -> Option<String> {
         req.headers().get("cookie").and_then(|val| {
             let val_str = val.to_str().ok()?;
             for part in val_str.split(';') {
@@ -387,5 +387,28 @@ mod tests {
         assert!(!state.is_empty());
         assert!(config.verify_and_remove_state(&state));
         assert!(!config.verify_and_remove_state(&state)); // Cannot reuse state twice
+    }
+
+    #[test]
+    fn oidc_extract_cookies() {
+        let req = Request::builder()
+            .header(
+                "cookie",
+                "other=1; bsdm_session=sess-123; bsdm_oidc_state=state-xyz",
+            )
+            .body(())
+            .unwrap();
+
+        let (parts, _) = req.into_parts();
+        let dummy_req = Request::from_parts(parts, ());
+
+        assert_eq!(
+            ReverseProxyConfig::extract_session_cookie(&dummy_req),
+            Some("sess-123".to_string())
+        );
+        assert_eq!(
+            ReverseProxyConfig::extract_oidc_state_cookie(&dummy_req),
+            Some("state-xyz".to_string())
+        );
     }
 }
