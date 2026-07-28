@@ -4,9 +4,10 @@ import { Shield, CheckCircle2, ShieldCheck, Activity, AlertCircle, RefreshCw } f
 interface HeaderProps {
   onRefresh: () => void;
   isRefreshing: boolean;
+  healthStatus?: string;
 }
 
-export const Header: React.FC<HeaderProps> = ({ onRefresh, isRefreshing }) => {
+export const Header: React.FC<HeaderProps> = ({ onRefresh, isRefreshing, healthStatus = 'ok' }) => {
   return (
     <header className="w-full px-6 py-4 flex flex-col md:flex-row items-center justify-between gap-4 border-b border-slate-800/60 bg-slate-950/80 backdrop-blur-xl sticky top-0 z-50">
       {/* Top Left Logo & Brand */}
@@ -31,8 +32,10 @@ export const Header: React.FC<HeaderProps> = ({ onRefresh, isRefreshing }) => {
           <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
           <span className="text-slate-400">Node:</span>
           <span className="font-mono font-medium text-slate-200">#030712</span>
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-          <span className="text-emerald-400 font-semibold text-[11px]">Connected</span>
+          <span className={`w-2 h-2 rounded-full ${healthStatus === 'ok' ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`}></span>
+          <span className={`font-semibold text-[11px] ${healthStatus === 'ok' ? 'text-emerald-400' : 'text-rose-400'}`}>
+            {healthStatus === 'ok' ? 'Connected' : 'Degraded'}
+          </span>
         </div>
 
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900/90 border border-slate-800 text-slate-300">
