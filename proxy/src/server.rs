@@ -111,16 +111,15 @@ pub async fn metrics_server(
                             }
 
                             if let Some(api) = &control_api {
-                                if path == "/api/stats"
-                                    || path.starts_with("/api/cache/")
-                                    || path.starts_with("/api/hierarchy/")
-                                    || path.starts_with("/api/upstream/")
-                                    || path.starts_with("/api/security/")
-                                    || path.starts_with("/api/auth/")
-                                    || path.starts_with("/api/amneziawg/")
-                                    || path.starts_with("/api/cluster/")
-                                    || path.starts_with("/api/threats/")
-                                    || path.starts_with("/api/wasm/")
+                                if path.starts_with("/api/")
+                                    || path == "/"
+                                    || path.starts_with("/trust")
+                                    || path.starts_with("/admin")
+                                    || path.starts_with("/assets")
+                                    || path.ends_with(".svg")
+                                    || path.ends_with(".png")
+                                    || path.ends_with(".js")
+                                    || path.ends_with(".css")
                                 {
                                     return Ok::<_, Infallible>(api.handle_request(req).await);
                                 }
