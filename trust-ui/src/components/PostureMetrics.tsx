@@ -1,6 +1,16 @@
 import React from 'react';
 
-export const PostureMetrics: React.FC = () => {
+interface PostureMetricsProps {
+  metrics?: {
+    casbDlpBlocks?: number;
+    rpzSinkholeBlocks?: number;
+  };
+}
+
+export const PostureMetrics: React.FC<PostureMetricsProps> = ({ metrics }) => {
+  const casbBlocks = metrics?.casbDlpBlocks ?? 348;
+  const rpzBlocks = metrics?.rpzSinkholeBlocks ?? 3913;
+
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
       {/* Card 1: mTLS Validation */}
@@ -25,7 +35,7 @@ export const PostureMetrics: React.FC = () => {
         <div>
           <h3 className="text-sm font-medium text-slate-300">CASB DLP Inspections</h3>
           <p className="text-3xl font-extrabold text-emerald-400 mt-4 tracking-tight drop-shadow-[0_0_15px_rgba(16,185,129,0.3)]">
-            Secure
+            Secure ({casbBlocks})
           </p>
         </div>
         <div>
@@ -64,7 +74,7 @@ export const PostureMetrics: React.FC = () => {
         <div>
           <h3 className="text-sm font-medium text-slate-300">RPZ Sinkhole</h3>
           <p className="text-3xl font-extrabold text-rose-400 mt-4 tracking-tight drop-shadow-[0_0_15px_rgba(244,63,94,0.3)]">
-            3913
+            {rpzBlocks}
           </p>
         </div>
         <div className="space-y-1 text-xs border-t border-slate-800/80 pt-2">

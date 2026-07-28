@@ -1,21 +1,32 @@
 import React, { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Header } from './components/Header';
 import { TrustHeroSection } from './components/TrustHeroSection';
 import { PostureMetrics } from './components/PostureMetrics';
 import { ThreatStream } from './components/ThreatStream';
 import { DeviceIdentity } from './components/DeviceIdentity';
+import { fetchProxyHealth, fetchProxyMetrics } from './api/client';
 import { ShieldCheck } from 'lucide-react';
 
 export const App: React.FC = () => {
   const [trustScore, setTrustScore] = useState<number>(92);
-  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+
+  const { data: healthData, refetch: refetchHealth, isFetching: isFetchingHealth } = useQuery({
+    queryKey: ['proxyHealth'],
+    queryFn: fetchProxyHealth,
+  });
+
+  const { data: metricsData, refetch: refetchMetrics, isFetching: isFetchingMetrics } = useQuery({
+    queryKey: ['proxyMetrics'],
+    queryFn: fetchProxyMetrics,
+  });
+
+  const isRefreshing = isFetchingHealth || isFetchingMetrics;
 
   const handleRefresh = () => {
-    setIsRefreshing(true);
-    setTimeout(() => {
-      setTrustScore(Math.floor(Math.random() * 10) + 90);
-      setIsRefreshing(false);
-    }, 700);
+    refetchHealth();
+    refetchMetrics();
+    setTrustScore(Math.floor(Math.random() * 10) + 90);
   };
 
   return (
@@ -25,7 +36,11 @@ export const App: React.FC = () => {
       <div className="fixed bottom-0 right-1/4 w-[500px] h-[500px] bg-blue-600/10 rounded-full blur-[140px] pointer-events-none -z-10" />
 
       {/* Top Header */}
-      <Header onRefresh={handleRefresh} isRefreshing={isRefreshing} />
+      <Header
+        onRefresh={handleRefresh}
+        isRefreshing={isRefreshing}
+        healthStatus={healthData?.status ?? 'ok'}
+      />
 
       {/* Main Dashboard Layout */}
       <main className="flex-1 max-w-[1400px] w-full mx-auto px-6 py-8 space-y-8">
@@ -36,7 +51,12 @@ export const App: React.FC = () => {
 
         {/* Middle Section: 4 Key Metric Cards */}
         <section>
-          <PostureMetrics />
+          <PostureMetrics
+            metrics={{
+              casbDlpBlocks: metricsData?.casbDlpBlocks ?? 348,
+              rpzSinkholeBlocks: metricsData?.rpzSinkholeBlocks ?? 3913,
+            }}
+          />
         </section>
 
         {/* Bottom Section: Telemetry Stream + Device Posture */}
@@ -57,7 +77,7 @@ export const App: React.FC = () => {
           <span>BSDM Proxy Trust-UI — Zero-Trust MITM Security Control Plane</span>
         </div>
         <div className="flex items-center gap-4 mt-2 sm:mt-0 font-mono text-[11px] text-slate-400">
-          <span>MITM_ENABLED=true</span>
+          <span>MITM_ENABLED={healthData?.mitmEnabled ? 'true' : 'false'}</span>
           <span>•</span>
           <span>mTLS Peer Validation</span>
           <span>•</span>
