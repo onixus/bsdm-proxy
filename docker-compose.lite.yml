@@ -104,6 +104,17 @@ services:
     command: ["python3", "/mock-upstream.py"]
     restart: unless-stopped
 
+  trust-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: trust-ui
+    ports:
+      - "3001:80"
+    restart: unless-stopped
+    networks:
+      - bsdm-lite
+
 networks:
   bsdm-lite:
     driver: bridge

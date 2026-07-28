@@ -298,6 +298,17 @@ services:
     logging: *default-logging
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:9093/-/healthy || exit 1"]
+
+  trust-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: trust-ui
+    ports:
+      - "3001:80"
+    restart: unless-stopped
+    networks:
+      - bsdm-net
       interval: 10s
       timeout: 5s
       retries: 5
