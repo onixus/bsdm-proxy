@@ -1,70 +1,66 @@
-import { ShieldCheck, RefreshCw, Lock, Cpu } from 'lucide-react';
+import React from 'react';
+import { Shield, CheckCircle2, ShieldCheck, Activity, AlertCircle, RefreshCw } from 'lucide-react';
 
 interface HeaderProps {
   onRefresh: () => void;
   isRefreshing: boolean;
-  activeEnforcement: boolean;
-  onToggleEnforcement: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({
-  onRefresh,
-  isRefreshing,
-  activeEnforcement,
-  onToggleEnforcement,
-}) => {
+export const Header: React.FC<HeaderProps> = ({ onRefresh, isRefreshing }) => {
   return (
-    <header className="glass-panel sticky top-0 z-50 border-b border-slate-800/80 px-6 py-4">
-      <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4">
-        {/* Logo & Title */}
-        <div className="flex items-center gap-3">
-          <div className="relative p-2.5 rounded-xl bg-gradient-to-br from-cyan-500/20 to-blue-600/20 border border-cyan-500/30 text-cyan-400">
-            <ShieldCheck className="w-7 h-7 animate-pulse-subtle" />
-            <span className="absolute -top-1 -right-1 flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-cyan-500"></span>
+    <header className="w-full px-6 py-4 flex flex-col md:flex-row items-center justify-between gap-4 border-b border-slate-800/60 bg-slate-950/80 backdrop-blur-xl sticky top-0 z-50">
+      {/* Top Left Logo & Brand */}
+      <div className="flex items-center gap-3">
+        <div className="p-2 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.25)]">
+          <Shield className="w-7 h-7 stroke-[2.2]" />
+        </div>
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 className="text-lg font-bold text-white tracking-wide">BSDM PROXY</h1>
+            <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
+              TRUST-UI
             </span>
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl font-bold tracking-tight text-white">BSDM Proxy</h1>
-              <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
-                Trust-UI v1.0
-              </span>
-            </div>
-            <p className="text-xs text-slate-400">Zero-Trust Posture & Threat Analytics Control Plane</p>
-          </div>
+          <p className="text-[11px] text-slate-400">Zero-Trust Security & MITM Control Plane</p>
+        </div>
+      </div>
+
+      {/* Top Status Pill Bar (Matching exact mockup pill header) */}
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900/90 border border-slate-800 text-slate-300">
+          <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
+          <span className="text-slate-400">Node:</span>
+          <span className="font-mono font-medium text-slate-200">#030712</span>
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span className="text-emerald-400 font-semibold text-[11px]">Connected</span>
         </div>
 
-        {/* Global Controls & Status */}
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900/80 border border-slate-800 text-xs">
-            <Cpu className="w-4 h-4 text-emerald-400" />
-            <span className="text-slate-400">Engine:</span>
-            <span className="font-mono text-emerald-400 font-medium">PROXY-MITM ACTIVE</span>
-          </div>
-
-          <button
-            onClick={onToggleEnforcement}
-            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
-              activeEnforcement
-                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
-                : 'bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20'
-            }`}
-          >
-            <Lock className="w-3.5 h-3.5" />
-            <span>{activeEnforcement ? 'STRICT ZERO-TRUST' : 'ADAPTIVE PERMISSIVE'}</span>
-          </button>
-
-          <button
-            onClick={onRefresh}
-            disabled={isRefreshing}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium transition-colors disabled:opacity-50"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
-            <span>Refresh</span>
-          </button>
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900/90 border border-slate-800 text-slate-300">
+          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+          <span className="text-slate-400">CASB:</span>
+          <span className="text-emerald-400 font-semibold">DLP Active</span>
         </div>
+
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900/90 border border-slate-800 text-slate-300">
+          <Activity className="w-3.5 h-3.5 text-purple-400" />
+          <span className="text-slate-400">Threat Inspection:</span>
+          <span className="text-purple-400 font-semibold">Real-Time</span>
+        </div>
+
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900/90 border border-slate-800 text-slate-300">
+          <AlertCircle className="w-3.5 h-3.5 text-emerald-400" />
+          <span className="text-slate-400">Status:</span>
+          <span className="text-emerald-400 font-bold">Low Risk</span>
+        </div>
+
+        <button
+          onClick={onRefresh}
+          disabled={isRefreshing}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 font-semibold transition-all ml-1 disabled:opacity-50"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+          <span>Sync</span>
+        </button>
       </div>
     </header>
   );
