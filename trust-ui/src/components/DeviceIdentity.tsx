@@ -1,59 +1,30 @@
-import React from 'react';
-import { Monitor, Smartphone, CheckCircle2, Search, MoreVertical } from 'lucide-react';
-
-interface DeviceItem {
-  id: string;
-  name: string;
-  ip: string;
-  type: 'desktop' | 'phone';
-  status: 'Securoted' | 'Secured';
-  connection: string;
-}
-
-const mockDevices: DeviceItem[] = [
-  {
-    id: 'd1',
-    name: 'Desktop',
-    ip: '192.10.1039833',
-    type: 'desktop',
-    status: 'Securoted',
-    connection: 'Connected',
-  },
-  {
-    id: 'd2',
-    name: 'Desktop',
-    ip: '192.10.3598807',
-    type: 'phone',
-    status: 'Secured',
-    connection: 'Connected',
-  },
-  {
-    id: 'd3',
-    name: 'Hubruser Pro',
-    ip: '192.108.7.60125009',
-    type: 'desktop',
-    status: 'Secured',
-    connection: 'Connected',
-  },
-  {
-    id: 'd4',
-    name: 'Desktop',
-    ip: '192.10.1039831',
-    type: 'desktop',
-    status: 'Secured',
-    connection: 'Connected',
-  },
-  {
-    id: 'd5',
-    name: 'Desktop',
-    ip: '192.10.97.20970',
-    type: 'desktop',
-    status: 'Secured',
-    connection: 'Connected',
-  },
-];
+import React, { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { fetchRegisteredDevices, revokeDeviceCertificate, RegisteredDevice } from '../api/devices';
+import { Monitor, Smartphone, CheckCircle2, AlertTriangle, Search, ShieldX } from 'lucide-react';
 
 export const DeviceIdentity: React.FC = () => {
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const queryClient = useQueryClient();
+
+  const { data: devices = [] } = useQuery({
+    queryKey: ['registeredDevices'],
+    queryFn: fetchRegisteredDevices,
+  });
+
+  const revokeMutation = useMutation({
+    mutationFn: revokeDeviceCertificate,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['registeredDevices'] });
+    },
+  });
+
+  const filteredDevices = devices.filter((dev) =>
+    dev.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    dev.ip.includes(searchQuery) ||
+    (dev.certSubject && dev.certSubject.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
+
   return (
     <div className="cyber-card p-6 h-full flex flex-col justify-between">
       <div className="flex items-center justify-between mb-4">
@@ -62,8 +33,10 @@ export const DeviceIdentity: React.FC = () => {
           <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
           <input
             type="text"
-            placeholder="Search"
-            className="pl-8 pr-3 py-1 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-300 focus:outline-none focus:border-cyan-500/50 w-32"
+            placeholder="Search device / IP"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-8 pr-3 py-1 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-300 focus:outline-none focus:border-cyan-500/50 w-36"
           />
         </div>
       </div>
@@ -75,13 +48,13 @@ export const DeviceIdentity: React.FC = () => {
           <span className="text-[10px]">↕</span>
         </div>
         <div className="col-span-3">Status</div>
-        <div className="col-span-4 text-right">Postiunty</div>
+        <div className="col-span-4 text-right">Action / Cert</div>
       </div>
 
       {/* Device Rows */}
-      <div className="divide-y divide-slate-800/50 my-1">
-        {mockDevices.map((dev) => (
-          <div key={dev.id} className="grid grid-cols-12 gap-2 items-center py-3 px-2 hover:bg-slate-900/40 rounded-lg transition-colors text-xs">
+      <div className="divide-y divide-slate-800/50 my-1 max-h-[340px] overflow-y-auto pr-1">
+        {filteredDevices.map((dev: RegisteredDevice) => (
+          <div key={dev.id} className="grid grid-cols-12 gap-2 items-center py-2.5 px-2 hover:bg-slate-900/40 rounded-lg transition-colors text-xs">
             <div className="col-span-5 flex items-center gap-2.5">
               <div className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-400">
                 {dev.type === 'desktop' ? (
@@ -97,14 +70,27 @@ export const DeviceIdentity: React.FC = () => {
             </div>
 
             <div className="col-span-3 flex items-center gap-1 text-[11px]">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 fill-emerald-500/20" />
-              <span className="text-emerald-400 font-medium">{dev.status}</span>
+              {dev.status === 'Secured' ? (
+                <>
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 fill-emerald-500/20" />
+                  <span className="text-emerald-400 font-medium">{dev.status}</span>
+                </>
+              ) : (
+                <>
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-400 fill-amber-500/20" />
+                  <span className="text-amber-400 font-medium">{dev.status}</span>
+                </>
+              )}
             </div>
 
             <div className="col-span-4 flex items-center justify-end gap-2 text-[11px]">
-              <span className="text-slate-300 font-medium">{dev.connection}</span>
-              <button className="text-slate-500 hover:text-white transition-colors">
-                <MoreVertical className="w-3.5 h-3.5" />
+              <span className="text-slate-300 font-mono text-[10px] font-bold">{dev.trustScore}/100</span>
+              <button
+                onClick={() => revokeMutation.mutate(dev.id)}
+                title="Revoke mTLS Certificate"
+                className="p-1 text-slate-500 hover:text-rose-400 transition-colors"
+              >
+                <ShieldX className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
