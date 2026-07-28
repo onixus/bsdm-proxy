@@ -238,6 +238,8 @@ pub struct ControlApiState {
     awg_server: Arc<tokio::sync::RwLock<crate::amneziawg::AwgServerConfig>>,
     session_store: crate::session_store::GlobalSessionStore,
     threat_sync: crate::threat_sync::ThreatSyncEngine,
+    trust_ui_dir: Option<std::path::PathBuf>,
+    admin_console_dir: Option<std::path::PathBuf>,
 }
 
 impl ControlApiState {
@@ -278,6 +280,28 @@ impl ControlApiState {
             )),
             session_store,
             threat_sync,
+            trust_ui_dir: std::env::var("TRUST_UI_DIR")
+                .ok()
+                .map(std::path::PathBuf::from)
+                .or_else(|| {
+                    let p = std::path::PathBuf::from("./trust-ui/dist");
+                    if p.exists() {
+                        Some(p)
+                    } else {
+                        None
+                    }
+                }),
+            admin_console_dir: std::env::var("ADMIN_CONSOLE_DIR")
+                .ok()
+                .map(std::path::PathBuf::from)
+                .or_else(|| {
+                    let p = std::path::PathBuf::from("./admin-console/dist");
+                    if p.exists() {
+                        Some(p)
+                    } else {
+                        None
+                    }
+                }),
         }
     }
 
@@ -344,15 +368,17 @@ impl ControlApiState {
         body: Bytes,
         headers: &HeaderMap,
     ) -> Response<Body> {
-        // Public monitoring GETs; mutations require token when configured.
-        let needs_auth = !matches!(
-            (method, path),
-            (&Method::GET, "/api/stats")
-                | (&Method::GET, "/api/hierarchy/peers")
-                | (&Method::GET, "/api/upstream/tls")
-        );
-        if needs_auth && !self.is_authorized(headers) {
-            return json_response(StatusCode::UNAUTHORIZED, r#"{"error":"unauthorized"}"#);
+        // API endpoints authorization check
+        if path.starts_with("/api/") {
+            let public_api = matches!(
+                (method, path),
+                (&Method::GET, "/api/stats")
+                    | (&Method::GET, "/api/hierarchy/peers")
+                    | (&Method::GET, "/api/upstream/tls")
+            );
+            if !public_api && !self.is_authorized(headers) {
+                return json_response(StatusCode::UNAUTHORIZED, r#"{"error":"unauthorized"}"#);
+            }
         }
 
         match (method, path) {
@@ -380,7 +406,74 @@ impl ControlApiState {
             }
             #[cfg(feature = "wasm")]
             (&Method::POST, "/api/wasm/reload") => self.wasm_reload(),
-            _ => json_response(StatusCode::NOT_FOUND, r#"{"error":"not found"}"#),
+            _ => {
+                if method == Method::GET && !path.starts_with("/api/") {
+                    self.serve_static_ui(path).await
+                } else {
+                    json_response(StatusCode::NOT_FOUND, r#"{"error":"not found"}"#)
+                }
+            }
+        }
+    }
+
+    pub async fn serve_static_ui(&self, path: &str) -> Response<Body> {
+        // Prevent path traversal attacks
+        if path.contains("..") || path.contains('\0') {
+            return json_response(StatusCode::BAD_REQUEST, r#"{"error":"invalid path"}"#);
+        }
+
+        let base_dir = if path.starts_with("/admin") {
+            self.admin_console_dir
+                .clone()
+                .unwrap_or_else(|| std::path::PathBuf::from("./admin-console/dist"))
+        } else {
+            self.trust_ui_dir
+                .clone()
+                .unwrap_or_else(|| std::path::PathBuf::from("./trust-ui/dist"))
+        };
+
+        let relative_path = path.trim_start_matches('/');
+        let target = if relative_path.is_empty() {
+            base_dir.join("index.html")
+        } else {
+            base_dir.join(relative_path)
+        };
+
+        let file_path = if target.is_file() {
+            target
+        } else {
+            base_dir.join("index.html")
+        };
+
+        match tokio::fs::read(&file_path).await {
+            Ok(content) => {
+                let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                let mime = match ext {
+                    "html" | "htm" => "text/html; charset=utf-8",
+                    "js" | "mjs" => "application/javascript; charset=utf-8",
+                    "css" => "text/css; charset=utf-8",
+                    "svg" => "image/svg+xml",
+                    "png" => "image/png",
+                    "jpg" | "jpeg" => "image/jpeg",
+                    "ico" => "image/x-icon",
+                    "json" => "application/json",
+                    "woff2" => "font/woff2",
+                    "woff" => "font/woff",
+                    _ => "application/octet-stream",
+                };
+
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .header("Content-Type", mime)
+                    .body(full(content))
+                    .unwrap_or_else(|_| {
+                        json_response(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            r#"{"error":"internal error"}"#,
+                        )
+                    })
+            }
+            Err(_) => json_response(StatusCode::NOT_FOUND, r#"{"error":"not found"}"#),
         }
     }
 
@@ -1114,5 +1207,18 @@ mod tests {
             )
             .await;
         assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn static_ui_path_traversal_rejection() {
+        let metrics = Arc::new(Metrics::new().unwrap());
+        let cache = Arc::new(HttpL1Cache::new(100, 4));
+        let state = state_plain(metrics, cache);
+
+        let resp = state.serve_static_ui("/../etc/passwd").await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+        let resp_null = state.serve_static_ui("/index.html\0.png").await;
+        assert_eq!(resp_null.status(), StatusCode::BAD_REQUEST);
     }
 }
