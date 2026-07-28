@@ -7,6 +7,7 @@ use rand::RngCore;
 use std::collections::HashMap;
 use std::env;
 use std::sync::RwLock;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::error;
 
 #[derive(Debug, Clone)]
@@ -39,6 +40,7 @@ pub struct ReverseProxyConfig {
     pub oidc: Option<OidcConfig>,
     pub admin_group: Option<String>,
     pub sessions: RwLock<HashMap<String, String>>,
+    pub states: RwLock<HashMap<String, u64>>,
 }
 
 impl ReverseProxyConfig {
@@ -56,6 +58,7 @@ impl ReverseProxyConfig {
             oidc,
             admin_group,
             sessions: RwLock::new(HashMap::new()),
+            states: RwLock::new(HashMap::new()),
         })
     }
 
@@ -65,6 +68,19 @@ impl ReverseProxyConfig {
             for part in val_str.split(';') {
                 let part = part.trim();
                 if let Some(stripped) = part.strip_prefix("bsdm_session=") {
+                    return Some(stripped.to_string());
+                }
+            }
+            None
+        })
+    }
+
+    pub fn extract_oidc_state_cookie(req: &Request<hyper::body::Incoming>) -> Option<String> {
+        req.headers().get("cookie").and_then(|val| {
+            let val_str = val.to_str().ok()?;
+            for part in val_str.split(';') {
+                let part = part.trim();
+                if let Some(stripped) = part.strip_prefix("bsdm_oidc_state=") {
                     return Some(stripped.to_string());
                 }
             }
@@ -88,9 +104,36 @@ impl ReverseProxyConfig {
         session_id
     }
 
+    pub fn generate_state(&self) -> String {
+        let mut rng = rand::rng();
+        let mut bytes = [0u8; 32];
+        rng.fill_bytes(&mut bytes);
+        let state = hex::encode(bytes);
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        self.states.write().unwrap().insert(state.clone(), now);
+        state
+    }
+
+    pub fn verify_and_remove_state(&self, state: &str) -> bool {
+        let mut states = self.states.write().unwrap();
+        if let Some(created_at) = states.remove(state) {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            // State valid for 10 minutes (600s)
+            now.saturating_sub(created_at) <= 600
+        } else {
+            false
+        }
+    }
+
     pub fn handle_unauthenticated(&self, _req: &Request<hyper::body::Incoming>) -> Response<Body> {
         if let Some(oidc) = &self.oidc {
-            let state = "mock-state"; // In a real app, generate securely and store to prevent CSRF
+            let state = self.generate_state();
             let auth_url = format!(
                 "{}/authorize?response_type=code&client_id={}&redirect_uri={}&scope=openid profile email&state={}",
                 oidc.issuer_url.trim_end_matches('/'),
@@ -98,9 +141,16 @@ impl ReverseProxyConfig {
                 oidc.redirect_uri,
                 state
             );
+
+            let state_cookie = format!(
+                "bsdm_oidc_state={}; HttpOnly; Path=/; SameSite=Lax; Max-Age=600",
+                state
+            );
+
             Response::builder()
                 .status(StatusCode::FOUND)
                 .header(LOCATION, auth_url)
+                .header(SET_COOKIE, HeaderValue::from_str(&state_cookie).unwrap())
                 .body(empty())
                 .unwrap()
         } else {
@@ -124,10 +174,13 @@ impl ReverseProxyConfig {
 
         let query = req.uri().query().unwrap_or("");
         let mut code = None;
+        let mut state_param = None;
         for param in query.split('&') {
             if let Some((k, v)) = param.split_once('=') {
                 if k == "code" {
                     code = Some(v.to_string());
+                } else if k == "state" {
+                    state_param = Some(v.to_string());
                 }
             }
         }
@@ -138,6 +191,24 @@ impl ReverseProxyConfig {
                 .body(full(Bytes::from("Missing code parameter")))
                 .unwrap();
         };
+
+        let Some(state_param) = state_param else {
+            return Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body(full(Bytes::from("Missing state parameter")))
+                .unwrap();
+        };
+
+        let state_cookie = Self::extract_oidc_state_cookie(&req);
+        if state_cookie.as_deref() != Some(&state_param)
+            || !self.verify_and_remove_state(&state_param)
+        {
+            error!("OIDC CSRF state mismatch or expired state token");
+            return Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body(full(Bytes::from("CSRF state mismatch or state expired")))
+                .unwrap();
+        }
 
         let token_url = format!("{}/token", oidc.issuer_url.trim_end_matches('/'));
         let client = reqwest::Client::new();
@@ -186,7 +257,6 @@ impl ReverseProxyConfig {
             }
         };
 
-        // Simplistic JWT decoding without signature verification for now
         let parts: Vec<&str> = token_resp.id_token.split('.').collect();
         if parts.len() != 3 {
             return Response::builder()
@@ -196,7 +266,6 @@ impl ReverseProxyConfig {
         }
 
         let payload_b64 = parts[1].replace('-', "+").replace('_', "/");
-        // Pad base64 if needed
         let payload_b64 = match payload_b64.len() % 4 {
             2 => format!("{}==", payload_b64),
             3 => format!("{}=", payload_b64),
@@ -215,8 +284,11 @@ impl ReverseProxyConfig {
 
         #[derive(serde::Deserialize)]
         struct JwtPayload {
+            iss: Option<String>,
+            aud: Option<serde_json::Value>,
             email: Option<String>,
             sub: String,
+            exp: Option<u64>,
         }
 
         let jwt: JwtPayload = match serde_json::from_slice(&decoded) {
@@ -228,6 +300,53 @@ impl ReverseProxyConfig {
                     .unwrap()
             }
         };
+
+        // Validate Issuer (iss)
+        if let Some(iss) = &jwt.iss {
+            if iss.trim_end_matches('/') != oidc.issuer_url.trim_end_matches('/') {
+                error!(
+                    "JWT issuer mismatch: got {}, expected {}",
+                    iss, oidc.issuer_url
+                );
+                return Response::builder()
+                    .status(StatusCode::UNAUTHORIZED)
+                    .body(full(Bytes::from("JWT issuer mismatch")))
+                    .unwrap();
+            }
+        }
+
+        // Validate Audience (aud)
+        if let Some(aud) = &jwt.aud {
+            let aud_matches = match aud {
+                serde_json::Value::String(s) => s == &oidc.client_id,
+                serde_json::Value::Array(arr) => arr
+                    .iter()
+                    .any(|v| v.as_str().map_or(false, |s| s == oidc.client_id)),
+                _ => false,
+            };
+            if !aud_matches {
+                error!("JWT audience mismatch: expected {}", oidc.client_id);
+                return Response::builder()
+                    .status(StatusCode::UNAUTHORIZED)
+                    .body(full(Bytes::from("JWT audience mismatch")))
+                    .unwrap();
+            }
+        }
+
+        // Validate Expiration (exp)
+        if let Some(exp) = jwt.exp {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            if exp <= now {
+                error!("JWT expired: exp {} <= now {}", exp, now);
+                return Response::builder()
+                    .status(StatusCode::UNAUTHORIZED)
+                    .body(full(Bytes::from("JWT expired")))
+                    .unwrap();
+            }
+        }
 
         let username = jwt.email.unwrap_or(jwt.sub);
         let session_id = self.create_session(username);
@@ -242,5 +361,31 @@ impl ReverseProxyConfig {
             .header(SET_COOKIE, HeaderValue::from_str(&cookie_val).unwrap())
             .body(empty())
             .unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn oidc_state_generation_and_verification() {
+        let config = ReverseProxyConfig {
+            upstream_url: "http://127.0.0.1:8080".to_string(),
+            oidc: Some(OidcConfig {
+                client_id: "test-client".to_string(),
+                client_secret: "secret".to_string(),
+                issuer_url: "http://idp.example.com".to_string(),
+                redirect_uri: "http://localhost:1488/-/callback".to_string(),
+            }),
+            admin_group: None,
+            sessions: RwLock::new(HashMap::new()),
+            states: RwLock::new(HashMap::new()),
+        };
+
+        let state = config.generate_state();
+        assert!(!state.is_empty());
+        assert!(config.verify_and_remove_state(&state));
+        assert!(!config.verify_and_remove_state(&state)); // Cannot reuse state twice
     }
 }
