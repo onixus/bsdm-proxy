@@ -26,7 +26,9 @@ CREATE TABLE IF NOT EXISTS bsdm.http_cache
     session_id String DEFAULT '',
     parent_event_id Nullable(String),
     redirect_url Nullable(String),
-    headers String DEFAULT '{}'
+    headers String DEFAULT '{}',
+    dlp_violation Nullable(String),
+    casb_alert Nullable(String)
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMMDD(ts)
