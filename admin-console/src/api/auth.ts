@@ -1,5 +1,4 @@
-import { apiFetch } from './client';
-import { loadApiSettings } from './settings';
+import { apiFetch, controlClient } from './client';
 
 export interface BasicUser {
     username: string;
@@ -7,24 +6,26 @@ export interface BasicUser {
 }
 
 export async function getBasicUsers(): Promise<BasicUser[]> {
-    const s = loadApiSettings();
-    return apiFetch<BasicUser[]>('/api/auth/basic/users', { baseUrl: s.metricsBaseUrl });
+    const { baseUrl, token } = controlClient();
+    return apiFetch<BasicUser[]>('/api/auth/basic/users', { baseUrl, token });
 }
 
 export async function putBasicUser(username: string, role: string, password?: string): Promise<void> {
-    const s = loadApiSettings();
+    const { baseUrl, token } = controlClient();
     return apiFetch<void>('/api/auth/basic/users', {
         method: 'POST',
-        baseUrl: s.metricsBaseUrl,
+        baseUrl,
+        token,
         body: { username, role, password }
     });
 }
 
 export async function deleteBasicUser(username: string): Promise<void> {
-    const s = loadApiSettings();
+    const { baseUrl, token } = controlClient();
     return apiFetch<void>('/api/auth/basic/users', {
         method: 'DELETE',
-        baseUrl: s.metricsBaseUrl,
+        baseUrl,
+        token,
         body: { username }
     });
 }

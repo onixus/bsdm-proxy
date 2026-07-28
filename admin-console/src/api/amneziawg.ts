@@ -1,4 +1,5 @@
 import { demo, isDemoMode, live, type Sourced } from './source'
+import { apiFetch, controlClient } from './client'
 
 export interface AwgObfuscationConfig {
   jc: number
@@ -85,10 +86,8 @@ const mockStatus: AwgServerConfig = {
 export async function fetchAwgStatus(): Promise<Sourced<AwgServerConfig>> {
   if (isDemoMode()) return demo(mockStatus)
   try {
-    const res = await fetch('/api/amneziawg/status')
-    if (!res.ok) throw new Error('HTTP ' + res.status)
-    const json = await res.json()
-    return live(json)
+    const { baseUrl, token } = controlClient()
+    return live(await apiFetch<AwgServerConfig>('/api/amneziawg/status', { baseUrl, token }))
   } catch {
     return demo(mockStatus)
   }
@@ -96,33 +95,33 @@ export async function fetchAwgStatus(): Promise<Sourced<AwgServerConfig>> {
 
 export async function updateAwgConfig(config: AwgServerConfig): Promise<{ status: string; reload_status?: string }> {
   if (isDemoMode()) return { status: 'ok', reload_status: 'Sidecar synced' }
-  const res = await fetch('/api/amneziawg/config', {
+  const { baseUrl, token } = controlClient()
+  return apiFetch('/api/amneziawg/config', {
+    baseUrl,
+    token,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(config),
+    body: config,
   })
-  if (!res.ok) throw new Error('HTTP ' + res.status)
-  return res.json()
 }
 
 export async function addAwgPeer(peer: AwgPeerConfig): Promise<{ status: string; reload_status?: string }> {
   if (isDemoMode()) return { status: 'ok', reload_status: 'Sidecar synced' }
-  const res = await fetch('/api/amneziawg/peers', {
+  const { baseUrl, token } = controlClient()
+  return apiFetch('/api/amneziawg/peers', {
+    baseUrl,
+    token,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(peer),
+    body: peer,
   })
-  if (!res.ok) throw new Error('HTTP ' + res.status)
-  return res.json()
 }
 
 export async function deleteAwgPeer(id: string): Promise<{ status: string; reload_status?: string }> {
   if (isDemoMode()) return { status: 'deleted', reload_status: 'Sidecar synced' }
-  const res = await fetch('/api/amneziawg/peers', {
+  const { baseUrl, token } = controlClient()
+  return apiFetch('/api/amneziawg/peers', {
+    baseUrl,
+    token,
     method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id }),
+    body: { id },
   })
-  if (!res.ok) throw new Error('HTTP ' + res.status)
-  return res.json()
 }

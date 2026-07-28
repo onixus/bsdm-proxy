@@ -67,3 +67,11 @@ export function aclClient() {
     token: s.aclToken,
   }
 }
+
+export function controlClient() {
+  const s = loadApiSettings()
+  return {
+    baseUrl: s.metricsBaseUrl,
+    token: s.controlToken,
+  }
+}

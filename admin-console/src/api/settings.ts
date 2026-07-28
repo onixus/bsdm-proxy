@@ -7,6 +7,7 @@ export interface ApiSettings {
   metricsBaseUrl: string
   searchToken: string
   aclToken: string
+  controlToken: string
 }
 
 const STORAGE_KEY = 'bsdm-admin-api-settings'
@@ -18,19 +19,26 @@ const defaults: ApiSettings = {
   metricsBaseUrl: '',
   searchToken: '',
   aclToken: '',
+  controlToken: '',
+}
+
+let runtimeTokens: Pick<ApiSettings, 'searchToken' | 'aclToken' | 'controlToken'> = {
+  searchToken: '',
+  aclToken: '',
+  controlToken: '',
 }
 
 export function loadApiSettings(): ApiSettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return { ...defaults }
-    return { ...defaults, ...JSON.parse(raw) }
+    if (!raw) return { ...defaults, ...runtimeTokens }
+    return { ...defaults, ...JSON.parse(raw), ...runtimeTokens }
   } catch {
-    return { ...defaults }
+    return { ...defaults, ...runtimeTokens }
   }
 }
 
-const SENSITIVE_API_KEYS = ['searchToken', 'aclToken'] as const satisfies readonly (keyof ApiSettings)[]
+const SENSITIVE_API_KEYS = ['searchToken', 'aclToken', 'controlToken'] as const satisfies readonly (keyof ApiSettings)[]
 
 function apiSettingsForStorage(settings: ApiSettings): Omit<ApiSettings, (typeof SENSITIVE_API_KEYS)[number]> {
   const stored = { ...settings }
@@ -41,6 +49,11 @@ function apiSettingsForStorage(settings: ApiSettings): Omit<ApiSettings, (typeof
 }
 
 export function saveApiSettings(settings: ApiSettings): void {
+  runtimeTokens = {
+    searchToken: settings.searchToken,
+    aclToken: settings.aclToken,
+    controlToken: settings.controlToken,
+  }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(apiSettingsForStorage(settings)))
 }
 

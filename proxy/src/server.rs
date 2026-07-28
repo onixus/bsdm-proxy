@@ -117,6 +117,10 @@ pub async fn metrics_server(
                                     || path.starts_with("/api/upstream/")
                                     || path.starts_with("/api/security/")
                                     || path.starts_with("/api/auth/")
+                                    || path.starts_with("/api/amneziawg/")
+                                    || path.starts_with("/api/cluster/")
+                                    || path.starts_with("/api/threats/")
+                                    || path.starts_with("/api/wasm/")
                                 {
                                     return Ok::<_, Infallible>(api.handle_request(req).await);
                                 }

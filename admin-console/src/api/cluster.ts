@@ -1,4 +1,4 @@
-import { apiFetch, aclClient } from './client'
+import { apiFetch, aclClient, controlClient } from './client'
 
 export type ClusterNodeRole = 'primary' | 'worker' | 'edge'
 export type ClusterNodeStatus = 'healthy' | 'degraded' | 'offline'
@@ -390,10 +390,8 @@ const mockThreatSyncReport: ThreatSyncPeersReport = {
 export async function fetchClusterSessionState(): Promise<Sourced<ClusterSessionState>> {
   if (isDemoMode()) return demo(mockClusterSessionState)
   try {
-    const res = await fetch('/api/cluster/session-state')
-    if (!res.ok) throw new Error('HTTP ' + res.status)
-    const json = await res.json()
-    return live(json)
+    const { baseUrl, token } = controlClient()
+    return live(await apiFetch<ClusterSessionState>('/api/cluster/session-state', { baseUrl, token }))
   } catch {
     return demo(mockClusterSessionState)
   }
@@ -402,10 +400,8 @@ export async function fetchClusterSessionState(): Promise<Sourced<ClusterSession
 export async function fetchThreatSyncPeers(): Promise<Sourced<ThreatSyncPeersReport>> {
   if (isDemoMode()) return demo(mockThreatSyncReport)
   try {
-    const res = await fetch('/api/threats/sync/peers')
-    if (!res.ok) throw new Error('HTTP ' + res.status)
-    const json = await res.json()
-    return live(json)
+    const { baseUrl, token } = controlClient()
+    return live(await apiFetch<ThreatSyncPeersReport>('/api/threats/sync/peers', { baseUrl, token }))
   } catch {
     return demo(mockThreatSyncReport)
   }
@@ -415,11 +411,11 @@ export async function broadcastThreatSync(
   event: Partial<ThreatSyncEvent>
 ): Promise<{ status: string }> {
   if (isDemoMode()) return { status: 'broadcasted' }
-  const res = await fetch('/api/threats/sync/broadcast', {
+  const { baseUrl, token } = controlClient()
+  return apiFetch('/api/threats/sync/broadcast', {
+    baseUrl,
+    token,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(event),
+    body: event,
   })
-  if (!res.ok) throw new Error('HTTP ' + res.status)
-  return res.json()
 }
