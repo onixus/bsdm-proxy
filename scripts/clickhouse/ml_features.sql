@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS bsdm.entity_features
 ENGINE = MergeTree
 PARTITION BY toYYYYMMDD(window_start)
 ORDER BY (entity_type, entity_id, window_start)
-TTL window_start + INTERVAL 90 DAY
+TTL toDateTime(window_start) + INTERVAL 90 DAY
 SETTINGS index_granularity = 8192;
 
 -- Model / stub scores keyed to an entity window.
@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS bsdm.ml_scores
 ENGINE = MergeTree
 PARTITION BY toYYYYMMDD(scored_at)
 ORDER BY (entity_type, entity_id, scored_at)
-TTL scored_at + INTERVAL 90 DAY
+TTL toDateTime(scored_at) + INTERVAL 90 DAY
 SETTINGS index_granularity = 8192;
 
 -- M5.3 per-domain lexical phishing features (ml-worker phishing_lexical_v0).
@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS bsdm.domain_phishing_features
 ENGINE = MergeTree
 PARTITION BY toYYYYMMDD(window_start)
 ORDER BY (domain, window_start)
-TTL window_start + INTERVAL 90 DAY
+TTL toDateTime(window_start) + INTERVAL 90 DAY
 SETTINGS index_granularity = 8192;
 
 -- M5.4 client→domain C&C beacon features (ml-worker cc_beacon_v0).
@@ -98,7 +98,7 @@ CREATE TABLE IF NOT EXISTS bsdm.beacon_pair_features
 ENGINE = MergeTree
 PARTITION BY toYYYYMMDD(window_start)
 ORDER BY (client_ip, domain, window_start)
-TTL window_start + INTERVAL 90 DAY
+TTL toDateTime(window_start) + INTERVAL 90 DAY
 SETTINGS index_granularity = 8192;
 
 -- M5.5 threat score write-back cache (ml-worker → proxy poll).
@@ -115,7 +115,7 @@ CREATE TABLE IF NOT EXISTS bsdm.threat_score_cache
 ENGINE = MergeTree
 PARTITION BY toYYYYMMDD(scored_at)
 ORDER BY (entity_type, entity_id, scored_at)
-TTL expires_at
+TTL toDateTime(expires_at)
 SETTINGS index_granularity = 8192;
 
 -- Example: top phishing-scored domains (last 24h)
