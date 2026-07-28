@@ -40,16 +40,15 @@ unset NO_COLOR FORCE_COLOR CLICOLOR
 
 # Optional proxy auth (corporate profile): WRK_PROXY_AUTH_HEADER or CURL_PROXY_USER=user:pass
 bench_proxy_auth_args() {
-  BENCH_PROXY_AUTH_ARGS=()
+  BENCH_WRK_AUTH_HEADER=""
+  BENCH_OHA_PROXY_HEADER=""
   if [[ -n "${WRK_PROXY_AUTH_HEADER:-}" ]]; then
-    BENCH_PROXY_AUTH_ARGS=(-H "${WRK_PROXY_AUTH_HEADER}")
-    BENCH_OHA_PROXY_HEADER=(--proxy-header "${WRK_PROXY_AUTH_HEADER}")
+    BENCH_WRK_AUTH_HEADER="${WRK_PROXY_AUTH_HEADER}"
+    BENCH_OHA_PROXY_HEADER="${WRK_PROXY_AUTH_HEADER}"
   elif [[ -n "${CURL_PROXY_USER:-}" ]]; then
     local hdr="Proxy-Authorization: Basic $(printf '%s' "${CURL_PROXY_USER}" | base64 -w0)"
-    BENCH_PROXY_AUTH_ARGS=(-H "${hdr}")
-    BENCH_OHA_PROXY_HEADER=(--proxy-header "${hdr}")
-  else
-    BENCH_OHA_PROXY_HEADER=()
+    BENCH_WRK_AUTH_HEADER="${hdr}"
+    BENCH_OHA_PROXY_HEADER="${hdr}"
   fi
 }
 
@@ -65,8 +64,8 @@ run_oha() {
   local mode="$1"
   local conn="$2"
   local -a cmd=(oha -c "${conn}" -z "${OHA_DURATION}" --no-tui -x "${PROXY}")
-  if ((${#BENCH_OHA_PROXY_HEADER[@]})); then
-    cmd+=("${BENCH_OHA_PROXY_HEADER[@]}")
+  if [[ -n "${BENCH_OHA_PROXY_HEADER}" ]]; then
+    cmd+=(--proxy-header "${BENCH_OHA_PROXY_HEADER}")
   fi
   if [[ "$mode" == "miss" ]]; then
     # Unique path per request → cache MISS (dots in host are literal in rand_regex)
@@ -75,6 +74,18 @@ run_oha() {
   else
     "${cmd[@]}" "${HIT_URL}" 2>&1
   fi
+}
+
+run_wrk() {
+  local conn="$1"
+  local target_url="$2"
+  local miss_mode="$3"
+  local -a cmd=(wrk -t4 -c"${conn}" -d"${WRK_DURATION}")
+  if [[ -n "${BENCH_WRK_AUTH_HEADER}" ]]; then
+    cmd+=(-H "${BENCH_WRK_AUTH_HEADER}")
+  fi
+  cmd+=(-s "${ROOT}/scripts/wrk-proxy.lua" "${PROXY}")
+  WRK_TARGET_URL="${target_url}" WRK_MISS_MODE="${miss_mode}" "${cmd[@]}"
 }
 
 print_oha_summary() {
@@ -119,18 +130,12 @@ bench_warm_hit
 
 echo ""
 echo "==> wrk L1 HIT (${WRK_DURATION}, ${WRK_CONN_HIT} conn)"
-WRK_TARGET_URL="${HIT_URL}" WRK_MISS_MODE=0 \
-  wrk -t4 -c"${WRK_CONN_HIT}" -d"${WRK_DURATION}" \
-    "${BENCH_PROXY_AUTH_ARGS[@]}" \
-    -s "${ROOT}/scripts/wrk-proxy.lua" "${PROXY}" 2>&1 \
+run_wrk "${WRK_CONN_HIT}" "${HIT_URL}" 0 2>&1 \
   | grep -E 'Requests/sec|Latency|Non-2xx|Socket errors|wrk status' || true
 
 echo ""
 echo "==> wrk L1 MISS (${WRK_DURATION}, ${WRK_CONN_MISS} conn)"
-WRK_TARGET_URL="${HIT_URL}" WRK_MISS_MODE=1 \
-  wrk -t4 -c"${WRK_CONN_MISS}" -d"${WRK_DURATION}" \
-    "${BENCH_PROXY_AUTH_ARGS[@]}" \
-    -s "${ROOT}/scripts/wrk-proxy.lua" "${PROXY}" 2>&1 \
+run_wrk "${WRK_CONN_MISS}" "${MISS_URL}" 1 2>&1 \
   | grep -E 'Requests/sec|Latency|Non-2xx|Socket errors|wrk status' || true
 
 echo ""
