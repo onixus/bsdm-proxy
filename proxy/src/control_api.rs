@@ -17,6 +17,7 @@ use crate::http_types::{full, Body};
 use crate::l2_cache::RedisL2Cache;
 use crate::metrics::Metrics;
 use crate::peers::PeerRegistry;
+use crate::pinning::PinningRegistry;
 use crate::sharded_cache::HttpL1Cache;
 use crate::upstream::UpstreamClientHandle;
 
@@ -221,14 +222,82 @@ impl ControlApiState {
     }
 
     fn agent_policy(&self) -> Response<Body> {
-        let policy_config = crate::policy_config::load_policy_config();
         let dto = serde_json::json!({
             "policy_version": "v0.1.0",
-            "policy_mode": policy_config.policy_mode.as_str(),
-            "mitm_categories": policy_config.mitm_categories,
-            "pinning_exceptions": policy_config.pinning_exceptions,
+            "policy_mode": crate::policy_config::configured_policy_mode().as_str(),
+            "mitm_categories": crate::policy_config::configured_mitm_categories(),
+            "pinning_exceptions": self.pinning_registry.active_domains(),
         });
         json_response(StatusCode::OK, &dto.to_string())
+    }
+
+    fn pinning_exceptions(&self) -> Response<Body> {
+        let entries = self.pinning_registry.snapshot();
+        let active_count = self.pinning_registry.active_domains().len();
+        let payload = serde_json::json!({
+            "source": self.pinning_registry.source(),
+            "audit_path": self.pinning_registry.audit_path(),
+            "count": entries.len(),
+            "active_count": active_count,
+            "exceptions": entries,
+        });
+        json_response(StatusCode::OK, &payload.to_string())
+    }
+
+    fn pinning_reload(&self, body: Bytes) -> Response<Body> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct ReloadRequest {
+            actor: String,
+            reason: String,
+        }
+
+        let request: ReloadRequest = match serde_json::from_slice(&body) {
+            Ok(request) => request,
+            Err(error) => {
+                return json_response(
+                    StatusCode::BAD_REQUEST,
+                    &serde_json::json!({
+                        "error": format!("invalid reload payload: {error}"),
+                    })
+                    .to_string(),
+                );
+            }
+        };
+        match self
+            .pinning_registry
+            .reload(&request.actor, &request.reason)
+        {
+            Ok(report) => {
+                info!(
+                    actor = %request.actor,
+                    reason = %request.reason,
+                    added = report.added.len(),
+                    removed = report.removed.len(),
+                    updated = report.updated.len(),
+                    "Certificate pinning exceptions reloaded"
+                );
+                match serde_json::to_string(&report) {
+                    Ok(payload) => json_response(StatusCode::OK, &payload),
+                    Err(error) => json_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        &serde_json::json!({"error": error.to_string()}).to_string(),
+                    ),
+                }
+            }
+            Err(error) => {
+                warn!(
+                    actor = %request.actor,
+                    reason = %request.reason,
+                    error = %error,
+                    "Certificate pinning exception reload failed"
+                );
+                json_response(
+                    StatusCode::BAD_REQUEST,
+                    &serde_json::json!({"error": error}).to_string(),
+                )
+            }
+        }
     }
 
     async fn agent_heartbeat(&self, body: Bytes) -> Response<Body> {
@@ -268,6 +337,7 @@ pub struct ControlApiState {
     wasm_hook: Option<Arc<std::sync::RwLock<crate::wasm_host::WasmHookEngine>>>,
     casb_engine: Arc<crate::casb::CasbEngine>,
     dlp_engine: Arc<crate::dlp::DlpEngine>,
+    pinning_registry: Arc<PinningRegistry>,
     auth_manager: Option<Arc<crate::auth::AuthManager>>,
     awg_server: Arc<tokio::sync::RwLock<crate::amneziawg::AwgServerConfig>>,
     session_store: crate::session_store::GlobalSessionStore,
@@ -291,6 +361,7 @@ impl ControlApiState {
         >,
         casb_engine: Arc<crate::casb::CasbEngine>,
         dlp_engine: Arc<crate::dlp::DlpEngine>,
+        pinning_registry: Arc<PinningRegistry>,
         auth_manager: Option<Arc<crate::auth::AuthManager>>,
         session_store: crate::session_store::GlobalSessionStore,
         threat_sync: crate::threat_sync::ThreatSyncEngine,
@@ -308,6 +379,7 @@ impl ControlApiState {
             wasm_hook,
             casb_engine,
             dlp_engine,
+            pinning_registry,
             auth_manager,
             awg_server: Arc::new(tokio::sync::RwLock::new(
                 crate::amneziawg::AwgServerConfig::default(),
@@ -352,6 +424,7 @@ impl ControlApiState {
         >,
         casb_engine: Arc<crate::casb::CasbEngine>,
         dlp_engine: Arc<crate::dlp::DlpEngine>,
+        pinning_registry: Arc<PinningRegistry>,
         auth_manager: Option<Arc<crate::auth::AuthManager>>,
         session_store: crate::session_store::GlobalSessionStore,
         threat_sync: crate::threat_sync::ThreatSyncEngine,
@@ -376,6 +449,7 @@ impl ControlApiState {
             wasm_hook,
             casb_engine,
             dlp_engine,
+            pinning_registry,
             auth_manager,
             session_store,
             threat_sync,
@@ -438,6 +512,8 @@ impl ControlApiState {
             (&Method::POST, "/api/threats/sync/broadcast") => {
                 self.threat_sync_broadcast(body).await
             }
+            (&Method::GET, "/api/pinning/exceptions") => self.pinning_exceptions(),
+            (&Method::POST, "/api/pinning/exceptions/reload") => self.pinning_reload(body),
             (&Method::GET, "/api/v1/agent/policy") => self.agent_policy(),
             (&Method::POST, "/api/v1/agent/heartbeat") => self.agent_heartbeat(body).await,
             (&Method::GET, "/api/agent/policy") => {
@@ -1055,6 +1131,7 @@ mod tests {
             None,
             Arc::new(crate::casb::CasbEngine::new()),
             Arc::new(crate::dlp::DlpEngine::new()),
+            Arc::new(PinningRegistry::from_entries(Vec::new()).unwrap()),
             None,
             crate::session_store::GlobalSessionStore::new(None),
             crate::threat_sync::ThreatSyncEngine::new("test-node".to_string(), None),
@@ -1197,6 +1274,7 @@ mod tests {
             None,
             Arc::new(crate::casb::CasbEngine::new()),
             Arc::new(crate::dlp::DlpEngine::new()),
+            Arc::new(PinningRegistry::from_entries(Vec::new()).unwrap()),
             None,
             crate::session_store::GlobalSessionStore::new(None),
             crate::threat_sync::ThreatSyncEngine::new("test-node".to_string(), None),
@@ -1358,5 +1436,48 @@ mod tests {
             )
             .await;
         assert_eq!(unsupported_version.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn pinning_registry_status_and_reload_validation() {
+        let metrics = Arc::new(Metrics::new().unwrap());
+        let cache = Arc::new(HttpL1Cache::new(100, 4));
+        let state = state_plain(metrics, cache);
+
+        let status = state
+            .dispatch(
+                &Method::GET,
+                "/api/pinning/exceptions",
+                Bytes::new(),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(status.status(), StatusCode::OK);
+        let body = BodyExt::collect(status.into_body())
+            .await
+            .unwrap()
+            .to_bytes();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload["source"], "environment");
+        assert_eq!(payload["count"], 0);
+
+        let reload = state
+            .dispatch(
+                &Method::POST,
+                "/api/pinning/exceptions/reload",
+                Bytes::from_static(br#"{"actor":"alice","reason":"SEC-42 approved"}"#),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(reload.status(), StatusCode::BAD_REQUEST);
+        let body = BodyExt::collect(reload.into_body())
+            .await
+            .unwrap()
+            .to_bytes();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(payload["error"]
+            .as_str()
+            .unwrap()
+            .contains("PINNING_EXCEPTIONS_PATH"));
     }
 }

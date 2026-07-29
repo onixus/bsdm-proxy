@@ -140,6 +140,20 @@ curl -X POST http://127.0.0.1:9090/api/v1/agent/heartbeat \
   -d '{"device_id":"mac-001","status":"healthy","agent_version":"0.1.0"}'
 ```
 
+## Certificate Pinning exceptions
+
+The authenticated Control API exposes the live managed exception registry:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/pinning/exceptions` | Current entries, source file, and audit path |
+| `POST` | `/api/pinning/exceptions/reload` | Validate file, append audit records, atomically replace the live registry |
+
+Reload requires a JSON body containing non-empty `actor` and `reason` values.
+`PINNING_EXCEPTIONS_PATH` must be configured. See
+[Certificate Pinning Exceptions](certificate-pinning.md) for the schema and safe
+change procedure.
+
 ## Upstream TLS (hot reload)
 
 Rebuilds the shared Hyper upstream client pool after re-reading env / CA file. In-flight requests keep the previous pool until idle drain.

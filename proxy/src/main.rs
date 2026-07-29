@@ -201,7 +201,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let proxy_policy = ProxyPolicy {
         policy_mode: policy_config.policy_mode,
         mitm_categories: policy_config.mitm_categories.clone(),
-        pinning_exceptions: policy_config.pinning_exceptions.clone(),
+        pinning_registry: policy_config.pinning_registry.clone(),
         acl_engine: policy_config.acl_engine.clone(),
         categorization: policy_config.categorization.clone(),
     };
@@ -267,18 +267,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         service.wasm_hook.clone(),
         service.casb_engine(),
         service.dlp_engine(),
+        service.pinning_registry(),
         auth.clone(),
         session_store,
         threat_sync,
     ));
     info!(
-        "Control plane API on :{}/api/stats · :{}/api/cache/purge · :{}/api/hierarchy/* · :{}/api/upstream/tls",
-        metrics_port, metrics_port, metrics_port, metrics_port
+        "Control plane API on :{}/api/stats · :{}/api/cache/purge · :{}/api/hierarchy/* · :{}/api/upstream/tls · :{}/api/pinning/exceptions",
+        metrics_port, metrics_port, metrics_port, metrics_port, metrics_port
     );
     if !control_api.auth_required() {
         warn!(
             "CONTROL_API_TOKEN is not set — mutating endpoints on :{}/api/cache/purge, \
-             /api/hierarchy/reload and /api/upstream/tls/reload are unauthenticated; \
+             /api/hierarchy/reload, /api/upstream/tls/reload and \
+             /api/pinning/exceptions/reload are unauthenticated; \
              set CONTROL_API_TOKEN or restrict access to METRICS_PORT",
             metrics_port
         );

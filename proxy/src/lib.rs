@@ -33,6 +33,7 @@ pub mod peer_discovery;
 pub mod peer_fetch;
 pub mod peers;
 pub mod perf;
+pub mod pinning;
 pub mod pipeline;
 pub mod policy_cache;
 pub mod policy_config;
@@ -87,6 +88,7 @@ pub use peer_discovery::{run_peer_discovery, PeerDiscoveryConfig};
 pub use peer_fetch::{fetch_via_peer, PeerFetchError, PeerTlsConfig};
 pub use peers::{CachePeer, PeerConfig, PeerRegistry, PeerType, ReplaceStaticStats};
 pub use perf::{bind_http_listeners, PerfConfig};
+pub use pinning::{PinningException, PinningRegistry, PinningReloadReport};
 pub use pipeline::{dispatch_cache_event, new_event_id, HttpEventPipeline};
 #[cfg(feature = "kafka")]
 pub use pipeline::{flush_kafka, KafkaEventPipeline};

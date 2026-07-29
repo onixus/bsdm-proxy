@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   structured decision logs, Grafana breakdowns, and Search API filtering for
   `dns`, `sni`, `mitm`, and `pinning-bypass`, including compatible SQLite and
   ClickHouse schema upgrades.
+- **Managed Certificate Pinning exceptions** — Added a validated, hot-reloadable
+  JSON registry, authenticated Control API reload, append-only JSONL audit trail,
+  expiry support, and a safe operator procedure while retaining the legacy
+  `PINNING_EXCEPTIONS` startup fallback.
 
 ## [0.8.0] - 2026-07-27
 
