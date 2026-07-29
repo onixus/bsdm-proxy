@@ -3,7 +3,7 @@
 Этот документ — единая точка правды о текущем состоянии BSDM-Proxy. Он описывает
 реализованный код, а не целевые возможности из roadmap.
 
-Текущая версия Cargo workspace: **`0.6.1-1`**. Версию нужно сверять с
+Текущая версия Cargo workspace: **`0.8.0`**. Версию нужно сверять с
 `proxy/Cargo.toml` и остальными workspace-крейтами.
 
 ## Уровни зрелости
@@ -19,33 +19,32 @@
 
 | Область | Функция | Статус | Комментарий |
 |---|---|---|---|
-| Архитектура | Hybrid Policy (DNS -> SNI -> Selective MITM) | Основной | `POLICY_MODE` (`selective-mitm` по умолчанию, `sni`, `full-mitm`). Порт по умолчанию `3128`. |
+| Архитектура | Hybrid Policy (DNS -> SNI -> Selective MITM) | Основной | `POLICY_MODE` (`selective-mitm` по умолчанию, `sni`, `full-mitm`). Интегрировано с Agent Contract v0.1. |
 | Data plane | HTTP forward proxy, CONNECT, Selective/Full MITM | Основной | MITM включается селективно по категориям (`MITM_CATEGORIES`). |
 | Кеш | L1, mmap spill, compression, revalidation, miss coalescing | Основной | `CACHE_CAPACITY` — общая ёмкость L1, которая делится между шардами. |
 | Кеш | Redis L2, ICP/HTCP hierarchy | Beta | Нужны отдельные Redis/peer deployment и failover-тесты. |
 | Политики | ACL, categorization, rate limiting, SNI filtering | Основной | Фильтрация по SNI выполняется до TLS расшифровки. |
-| Аутентификация | Basic | Основной | Секреты должны храниться вне Git. |
+| Аутентификация | Basic, OIDC | Основной | OIDC включает строгую валидацию CSRF token, JWT issuer, aud и exp. |
 | Аутентификация | LDAP, NTLM, Kerberos | Beta | Требуют соответствующей Cargo feature и интеграционного стенда. |
-| Аналитика | Kafka → cache-indexer → ClickHouse, Search API | Основной | Срок хранения задаётся TTL ClickHouse, а не числом пользователей. |
+| Аналитика | Kafka → cache-indexer → ClickHouse, Search API | Основной | Срок хранения задаётся TTL ClickHouse. Поля `dlp_violation` и `casb_alert` поддерживаются в схеме. |
 | Detection | alert-worker | Beta | Запросы правил выполняются периодически; нужен контроль ClickHouse latency. |
 | ML | UEBA, phishing, beacon, threat-score write-back | Beta | Один процесс `ml-worker` обслуживает одну выбранную модель. |
-| DNS | DNS Sinkhole + RPZ (Core component) | Основной | Переведён в базовый состав поставки прокси (Core). |
-| AI cache | Exact LLM POST cache, local/Qdrant near-hit | Beta | Local hash embedding ищет близкие формулировки, но не является semantic model. |
-| Extensions | WASM request hook | Experimental (Frozen) | Заморожено. Один PoC hook, ограниченный ABI. |
-| Inspection | ICAP REQMOD/RESPMOD | Experimental (Frozen) | Заморожено. RESPMOD требует buffered MISS. |
-| DLP/CASB | Сигнатурное сканирование request body | Experimental (Frozen) | Заморожено. Набор строковых сигнатур. |
-| ZTNA/IAP | Reverse proxy + OIDC | Experimental (Frozen) | Заморожено. Требует приведения к Agent Contract v0.1. |
-| Network | eBPF/XDP manager | Experimental (Frozen) | Заморожено. Не является основным вектором. |
+| DNS | DNS Sinkhole + RPZ (Core component) | Основной | Включает DoH (`/dns-query`) и DoT (TCP/853) шлюзы шифрованного DNS. |
+| AI cache | Exact LLM POST cache, local/Qdrant near-hit | Beta | Поддерживает векторный бэкенд Qdrant (`SEMANTIC_VECTOR_BACKEND=qdrant`) и квотирование по API ключам. |
+| Extensions | WASM request hook | Experimental (Frozen) | Заморожено. PoC hook с fuel limits. |
+| Inspection | ICAP REQMOD/RESPMOD | Experimental (Frozen) | Заморожено. RESPMOD требует buffered MISS (`STREAMING_MISS_ENABLED=false`). |
+| DLP/CASB | Сигнатурное сканирование request body | Experimental (Frozen) | Заморожено. Сигнатурный сканер. |
+| ZTNA/IAP | Reverse proxy + OIDC | Experimental (Frozen) | Описан в Agent Contract v0.1 (ADR 0005). |
+| Network | eBPF/XDP manager | Experimental (Frozen) | Заморожено. `EBPF_XDP_ENABLED` интерфейс. |
 | Remote access | AmneziaWG sidecar/config API | Experimental (Frozen) | Заморожено. |
-| Cluster | Global sessions, distributed rate limit, threat sync | Experimental (Frozen) | Заморожено. Scaffolding. |
-| Admin UI | React SPA | Beta | UI нужно собирать и публиковать отдельно; основной Compose его не обслуживает. |
+| Cluster | Global sessions, distributed rate limit, threat sync | Experimental (Frozen) | Scaffolding gRPC mesh. |
+| Admin UI & Trust UI | Native Static UI Routing | Beta | Native UI routing на `/admin` (Admin Console) и `/trust` (Trust-UI) прямо через proxy binary. |
 
 ## Известные ограничения
 
 1. `docker compose up` запускает analytics base, но не все опциональные профили.
    `alert-worker`, `ml-worker`, DNS и ICAP включаются отдельно.
-2. Поля `dlp_violation` и `casb_alert` присутствуют в event mapper, но их необходимо
-   добавить в ClickHouse-схему до включения DLP/CASB analytics.
+2. Поля `dlp_violation` и `casb_alert` интегрированы в схему ClickHouse и event mapper proxy.
 3. Для одновременного запуска нескольких ML-моделей нужны отдельные экземпляры
    `ml-worker` с разными значениями `ML_MODEL`.
 4. ICAP RESPMOD не выполняется на streaming MISS. Для полного response scanning

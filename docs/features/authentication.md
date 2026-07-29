@@ -9,6 +9,7 @@ BSDM-Proxy supports proxy authentication backends for access control.
 | Backend | Status | Build feature | Header |
 |---------|--------|---------------|--------|
 | **Basic** | ✅ | `auth-basic` (default) | `Proxy-Authorization: Basic` |
+| **OIDC** | ✅ | `auth-basic` | `Authorization: Bearer <JWT>` / Cookie |
 | **LDAP** | ✅ | `auth-ldap` | `Basic` (username/password) |
 | **NTLM** | ✅ | `auth-ntlm` | `NTLM` (multi-round) |
 | **Kerberos** | ✅ | `auth-kerberos` | `Negotiate` / SPNEGO (multi-round) |

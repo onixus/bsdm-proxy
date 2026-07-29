@@ -20,6 +20,7 @@ GitHub Wiki является автоматически обновляемым �
 | Документ | Назначение |
 |---|---|
 | [Overview](architecture/overview.md) | Компоненты, request path и data flow |
+| [Agent contract](architecture/agent-contract.md) | Спецификация взаимодействия локального агента v0.1 |
 | [Capacity planning](architecture/capacity-planning.md) | Формулы, пилотный профиль и масштабирование |
 | [Performance](architecture/performance.md) | Benchmarks и production tuning |
 | [Hierarchy](architecture/hierarchical-caching.md) | L1/L2, ICP, HTCP и peer selection |
@@ -29,12 +30,12 @@ GitHub Wiki является автоматически обновляемым �
 
 | Документ | Зрелость |
 |---|---|
-| [Authentication](features/authentication.md) | Basic — основной; LDAP/NTLM/Kerberos — beta |
+| [Authentication](features/authentication.md) | Basic/OIDC — основной; LDAP/NTLM/Kerberos — beta |
 | [ACL](features/acl-policy.md) | основной |
 | [Categorization](features/categorization.md) | основной/beta по источнику |
 | [Control plane](features/control-plane.md) | REST — основной; gRPC — beta |
 | [Semantic cache](features/semantic-cache.md) | beta |
-| [DNS sinkhole, DoH, DoT](features/dns-sinkhole.md) | beta |
+| [DNS sinkhole, DoH, DoT](features/dns-sinkhole.md) | основной |
 | [WASM plugins](features/wasm-plugins.md) | experimental |
 | [ICAP](features/icap-inspection.md) | experimental |
 
@@ -63,8 +64,9 @@ GitHub Wiki является автоматически обновляемым �
 - [ADR 0002: ClickHouse analytics](adr/0002-clickhouse-analytics.md)
 - [ADR 0003: ML feature store](adr/0003-ml-worker-feature-store.md)
 - [ADR 0004: DNS sinkhole](adr/0004-dns-sinkhole-sidecar.md)
+- [ADR 0005: Local policy agent](adr/0005-local-policy-agent-vs-tunnel-first.md)
 - [Roadmap](roadmap.md)
-- [Release notes](releases/)
+- [Release notes (v0.8.0)](releases/v0.8.0.md)
 
 Исторические release notes сохраняют версии и ограничения соответствующего
 релиза. Их не следует использовать как актуальную deployment-инструкцию.

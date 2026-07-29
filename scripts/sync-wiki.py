@@ -19,6 +19,7 @@ PAGES: dict[str, str] = {
     "docs/getting-started/lite-mode.md": "Lite-Mode.md",
     "docs/getting-started/troubleshooting.md": "Troubleshooting-and-FAQ.md",
     "docs/architecture/overview.md": "Architecture-Overview.md",
+    "docs/architecture/agent-contract.md": "Agent-Contract.md",
     "docs/architecture/capacity-planning.md": "Capacity-Planning.md",
     "docs/architecture/performance.md": "Performance-Tuning.md",
     "docs/architecture/hierarchical-caching.md": "Hierarchical-Caching.md",
@@ -39,15 +40,23 @@ PAGES: dict[str, str] = {
     "docs/ops-and-dev/logging.md": "Logging-and-Metrics.md",
     "docs/ops-and-dev/benchmarks.md": "Benchmarks.md",
     "docs/ops-and-dev/development.md": "Development-Guide.md",
+    "docs/ops-and-dev/ca-lifecycle.md": "CA-Lifecycle.md",
+    "docs/ops-and-dev/load-test-selective-mitm.md": "Load-Test-Selective-MITM.md",
     "docs/ops-and-dev/licensing.md": "Licensing.md",
     "docs/maintenance.md": "Documentation-Maintenance.md",
     "docs/roadmap.md": "Roadmap.md",
+    "docs/adr/0001-tiered-sharded-l1-cache.md": "ADR-0001-Tiered-Sharded-L1-Cache.md",
+    "docs/adr/0002-clickhouse-analytics.md": "ADR-0002-ClickHouse-Analytics.md",
+    "docs/adr/0003-ml-worker-feature-store.md": "ADR-0003-ML-Worker-Feature-Store.md",
+    "docs/adr/0004-dns-sinkhole-sidecar.md": "ADR-0004-DNS-Sinkhole-Sidecar.md",
+    "docs/adr/0005-local-policy-agent-vs-tunnel-first.md": "ADR-0005-Local-Policy-Agent-vs-Tunnel-First.md",
     "docs/releases/v0.2.3-test.md": "Release-0.2.3-test.md",
     "docs/releases/v0.3.0.md": "Release-0.3.0.md",
     "docs/releases/v0.3.1.md": "Release-0.3.1.md",
     "docs/releases/v0.3.2.md": "Release-0.3.2.md",
     "docs/releases/v0.5.0.md": "Release-0.5.0.md",
     "docs/releases/v0.5.7+033.md": "Release-0.5.7+033.md",
+    "docs/releases/v0.8.0.md": "Release-0.8.0.md",
 }
 
 LINK_RE = re.compile(r"(!?\[[^\]]*]\()([^)]+)(\))")
@@ -107,12 +116,20 @@ def sidebar() -> str:
 * [Troubleshooting](Troubleshooting-and-FAQ)
 * [Configuration](Configuration)
 
-## Architecture
+## Architecture & Design
 * [Overview](Architecture-Overview)
+* [Agent contract](Agent-Contract)
 * [Capacity planning](Capacity-Planning)
 * [Performance](Performance-Tuning)
 * [Hierarchy](Hierarchical-Caching)
 * [Codebase structure](Codebase-Structure)
+
+## ADRs
+* [ADR 0001: Tiered sharded L1](ADR-0001-Tiered-Sharded-L1-Cache)
+* [ADR 0002: ClickHouse analytics](ADR-0002-ClickHouse-Analytics)
+* [ADR 0003: ML feature store](ADR-0003-ML-Worker-Feature-Store)
+* [ADR 0004: DNS sinkhole](ADR-0004-DNS-Sinkhole-Sidecar)
+* [ADR 0005: Local policy agent](ADR-0005-Local-Policy-Agent-vs-Tunnel-First)
 
 ## Security and policy
 * [Authentication](Authentication)
@@ -134,9 +151,12 @@ def sidebar() -> str:
 * [Logging and metrics](Logging-and-Metrics)
 * [Benchmarks](Benchmarks)
 * [Development](Development-Guide)
+* [CA lifecycle](CA-Lifecycle)
+* [Load test MITM](Load-Test-Selective-MITM)
 * [Licensing](Licensing)
 * [Docs maintenance](Documentation-Maintenance)
 * [Roadmap](Roadmap)
+* [Release v0.8.0](Release-0.8.0)
 """
 
 

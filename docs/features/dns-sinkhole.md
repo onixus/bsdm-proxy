@@ -14,17 +14,18 @@ Issue: [#108](https://github.com/onixus/bsdm-proxy/issues/108) · Roadmap: [road
 
 Clients point DHCP/DoH stub / container `dns:` at this service. The HTTPS proxy keeps ACL/UT1; DNS is an optional first hop.
 
-## Status (Beta)
+## Status (Основной / Core component)
 
 | Item | Status |
 |------|--------|
-| Design / ADR | ✅ |
+| Design / ADR | ✅ ([ADR 0004](../adr/0004-dns-sinkhole-sidecar.md)) |
 | Crate `dns-sinkhole` (UDP :53) | ✅ |
 | RPZ-lite zone file + plain domain list | ✅ |
 | Sinkhole A/AAAA or NXDOMAIN | ✅ |
 | Forward to upstream resolver | ✅ |
 | Compose profile `dns-sinkhole` | ✅ |
-| DoH (`:8443`) / DoT (`:853`) with configured TLS certificate | ✅ |
+| DoH (`/dns-query` :8443) / DoT (TCP/853 TLS) listeners | ✅ (RFC 8484 / RFC 7858 base64url & 2-byte framing) |
+| Admin Console RPZ & Query Simulator | ✅ (`/rpz`) |
 | DNSSEC validation | ❌ not implemented |
 | Full RFC RPZ (client-IP triggers, NSDNAME, …) | ❌ sketch only |
 
