@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Agent API versioning** — Standardized Agent Contract v0.1 on
+  `/api/v1/agent/*`; retained the previous `/api/agent/*` policy and heartbeat
+  routes as compatibility aliases, and updated the reference agent heartbeat
+  client to use the canonical versioned endpoint.
+
 ## [0.8.0] - 2026-07-27
 
 Release **0.8.0**. Hybrid Policy Engine & Local Agent Contract, Global Session State & Real-time Threat Sync, Native UI Routing (Trust-UI & Admin Console), OIDC Security Validation, DoH & DoT Encrypted DNS Gateways, and Admin Console modules (RPZ, Wasm, ICAP, Mesh Cluster, eBPF/XDP, Vector AI Cache).

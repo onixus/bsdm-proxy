@@ -121,15 +121,21 @@ Endpoints for On-Device SWG Local Policy Agents policy synchronization and heart
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/agent/policy` | Returns active policy contract (`policy_mode`, `mitm_categories`, `pinning_exceptions`) |
-| `POST` | `/api/agent/heartbeat` | Receives agent telemetry and heartbeats (`device_id`, `status`, `agent_version`) |
+| `GET` | `/api/v1/agent/policy` | Returns active policy contract (`policy_mode`, `mitm_categories`, `pinning_exceptions`) |
+| `POST` | `/api/v1/agent/heartbeat` | Receives agent telemetry and heartbeats (`device_id`, `status`, `agent_version`) |
+
+The `/api/v1/agent/*` namespace is canonical for Agent Contract v0.1.
+The previous unversioned `/api/agent/policy` and `/api/agent/heartbeat` paths
+remain compatibility aliases for existing agents and must not be used by new clients.
 
 ```bash
 # Fetch active policy
-curl http://127.0.0.1:9090/api/agent/policy
+curl http://127.0.0.1:9090/api/v1/agent/policy \
+  -H "Authorization: Bearer $CONTROL_API_TOKEN"
 
 # Send agent heartbeat
-curl -X POST http://127.0.0.1:9090/api/agent/heartbeat \
+curl -X POST http://127.0.0.1:9090/api/v1/agent/heartbeat \
+  -H "Authorization: Bearer $CONTROL_API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"device_id":"mac-001","status":"healthy","agent_version":"0.1.0"}'
 ```
