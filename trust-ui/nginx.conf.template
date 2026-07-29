@@ -1,0 +1,38 @@
+server {
+    listen 80;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    location = /health {
+        proxy_pass http://proxy:9090/health;
+        proxy_set_header Host $host;
+    }
+
+    location = /metrics {
+        proxy_pass http://proxy:9090/metrics;
+        proxy_set_header Host $host;
+    }
+
+    location = /api/stats {
+        proxy_pass http://proxy:9090/api/stats;
+        proxy_set_header Host $host;
+    }
+
+    location = /api/search {
+        proxy_pass http://cache-indexer:8080;
+        proxy_set_header Host $host;
+        proxy_set_header Authorization "Bearer ${SEARCH_API_TOKEN}";
+    }
+
+    location ^~ /api/v1/ {
+        proxy_pass http://proxy:9090;
+        proxy_set_header Host $host;
+        proxy_set_header Authorization "Bearer ${CONTROL_API_TOKEN}";
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

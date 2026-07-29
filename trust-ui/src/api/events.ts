@@ -1,52 +1,22 @@
-export interface LiveTelemetryEvent {
-  id: string;
-  timestamp: string;
-  clientIp: string;
-  upstream: string;
-  trustScore: number;
-  action: 'ALLOWED' | 'BLOCKED' | 'MITM_INSPECTED' | 'SINKHOLED';
-  reason: string;
+export interface TrafficEvent {
+  ts: number;
+  username?: string;
+  client_ip: string;
+  url: string;
+  method: string;
+  status: number;
+  cache_status: string;
+  domain: string;
+  event_id: string;
+  session_id: string;
+  decision_source?: string;
 }
 
-export type EventCallback = (event: LiveTelemetryEvent) => void;
-
-export class TelemetryStreamClient {
-  private eventSource: EventSource | null = null;
-  private listeners: EventCallback[] = [];
-
-  constructor(private url: string = '/api/v1/events/stream') {}
-
-  public connect(onEvent: EventCallback) {
-    this.listeners.push(onEvent);
-
-    try {
-      this.eventSource = new EventSource(this.url);
-      this.eventSource.onmessage = (e) => {
-        try {
-          const data: LiveTelemetryEvent = JSON.parse(e.data);
-          this.notify(data);
-        } catch (err) {
-          console.error('Failed to parse SSE event:', err);
-        }
-      };
-      this.eventSource.onerror = () => {
-        // Fallback simulated stream when backend stream is not available
-        this.eventSource?.close();
-      };
-    } catch {
-      // Backend SSE not running, graceful fallback handling
-    }
+export const fetchRecentEvents = async (): Promise<TrafficEvent[]> => {
+  const query = new URLSearchParams({ days: '1', limit: '50' });
+  const response = await fetch(`/api/search?${query}`);
+  if (!response.ok) {
+    throw new Error(`Search API returned HTTP ${response.status}`);
   }
-
-  public notify(event: LiveTelemetryEvent) {
-    this.listeners.forEach((cb) => cb(event));
-  }
-
-  public disconnect() {
-    if (this.eventSource) {
-      this.eventSource.close();
-      this.eventSource = null;
-    }
-    this.listeners = [];
-  }
-}
+  return (await response.json()) as TrafficEvent[];
+};
