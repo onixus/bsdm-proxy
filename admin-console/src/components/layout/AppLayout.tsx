@@ -1,6 +1,6 @@
 import { useState, useEffect, type ReactNode } from 'react'
 import { useLocation } from 'react-router-dom'
-import { Menu, Search, Command, ShieldCheck, ChevronRight } from 'lucide-react'
+import { Menu, Search, Command, ShieldAlert, ChevronRight } from 'lucide-react'
 import { Sidebar } from './Sidebar'
 import { CommandPalette } from '../ui/CommandPalette'
 
@@ -30,7 +30,7 @@ export function AppLayout({ children }: AppLayoutProps) {
     '/wasm': { title: 'Wasm Plugins', category: 'Extensions' },
     '/cluster': { title: 'Cluster Mesh', category: 'Extensions' },
     '/ai-cache': { title: 'AI Semantic Cache', category: 'Extensions' },
-    '/users': { title: 'Active Directory Users', category: 'System' },
+    '/users': { title: 'Users', category: 'System' },
     '/settings': { title: 'Console Settings', category: 'System' },
   }
 
@@ -63,9 +63,9 @@ export function AppLayout({ children }: AppLayoutProps) {
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-success/30 bg-success/10 text-success text-xs font-semibold">
-              <ShieldCheck className="size-3.5" />
-              <span>Node Protected</span>
+            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-warning/30 bg-warning/10 text-warning text-xs font-semibold">
+              <ShieldAlert className="size-3.5" />
+              <span>Unauthenticated UI</span>
             </div>
 
             <button
@@ -89,5 +89,4 @@ export function AppLayout({ children }: AppLayoutProps) {
     </div>
   )
 }
-
 
