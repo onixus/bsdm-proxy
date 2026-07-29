@@ -46,14 +46,20 @@ pub enum LocalDecision {
 pub struct AgentEngine {
     device_id: String,
     control_plane_url: String,
+    control_api_token: Option<String>,
     policy: Arc<RwLock<LocalPolicy>>,
 }
 
 impl AgentEngine {
-    pub fn new(device_id: String, control_plane_url: String) -> Self {
+    pub fn new(
+        device_id: String,
+        control_plane_url: String,
+        control_api_token: Option<String>,
+    ) -> Self {
         Self {
             device_id,
             control_plane_url,
+            control_api_token,
             policy: Arc::new(RwLock::new(LocalPolicy::default())),
         }
     }
@@ -120,8 +126,20 @@ impl AgentEngine {
             interval.tick().await;
             info!(device_id = %self.device_id, "Sending agent heartbeat to control plane...");
 
-            let health_url = format!("{}/health", self.control_plane_url);
-            match client.get(&health_url).send().await {
+            let heartbeat_url = format!(
+                "{}/api/v1/agent/heartbeat",
+                self.control_plane_url.trim_end_matches('/')
+            );
+            let mut request = client.post(&heartbeat_url).json(&serde_json::json!({
+                "device_id": self.device_id,
+                "status": "healthy",
+                "agent_version": env!("CARGO_PKG_VERSION"),
+            }));
+            if let Some(token) = &self.control_api_token {
+                request = request.bearer_auth(token);
+            }
+
+            match request.send().await {
                 Ok(resp) if resp.status().is_success() => {
                     info!(
                         "Agent heartbeat ACK from control plane ({})",
@@ -132,7 +150,7 @@ impl AgentEngine {
                     warn!("Control plane returned status: {}", resp.status());
                 }
                 Err(e) => {
-                    warn!("Failed to reach control plane at {}: {}", health_url, e);
+                    warn!("Failed to reach control plane at {}: {}", heartbeat_url, e);
                 }
             }
         }
@@ -153,8 +171,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let device_id = std::env::var("DEVICE_ID").unwrap_or_else(|_| "dev-mac-001".to_string());
     let control_plane_url =
         std::env::var("CONTROL_PLANE_URL").unwrap_or_else(|_| "http://127.0.0.1:9090".to_string());
+    let control_api_token = std::env::var("CONTROL_API_TOKEN")
+        .ok()
+        .filter(|token| !token.is_empty());
 
-    let agent = Arc::new(AgentEngine::new(device_id.clone(), control_plane_url));
+    let agent = Arc::new(AgentEngine::new(
+        device_id.clone(),
+        control_plane_url,
+        control_api_token,
+    ));
 
     // Demonstrate local policy evaluation
     let test_domains = vec![

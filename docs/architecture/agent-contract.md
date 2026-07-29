@@ -6,6 +6,18 @@ This document defines the specification and interaction contract between the BSD
 
 The BSDM Agent architecture operates on a **Local Policy Agent** model: policy decision enforcement happens directly on-device using a local policy engine, while the central control plane manages enrollment, policy distribution, heartbeat, and telemetry ingestion.
 
+All Agent Contract v0.1 HTTP endpoints use the canonical
+`/api/v1/agent/*` namespace. The unversioned `/api/agent/*` namespace is
+deprecated and retained only as a compatibility alias for the implemented
+policy and heartbeat endpoints.
+
+### Implementation status
+
+- Implemented: `GET /api/v1/agent/policy`,
+  `POST /api/v1/agent/heartbeat`.
+- Reserved by this contract: `POST /api/v1/agent/enroll`,
+  `POST /api/v1/agent/events`, and policy push.
+
 ---
 
 ## 1. Device Enrollment & Identity Binding
