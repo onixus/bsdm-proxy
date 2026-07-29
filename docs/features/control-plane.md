@@ -1,8 +1,14 @@
-# Control plane API (DX Phase 2)
+# Control plane API (REST & gRPC)
 
-REST endpoints on the proxy metrics port (`METRICS_PORT`, default `9090`). No Grafana required for Lite ops.
+REST endpoints on the proxy metrics port (`METRICS_PORT`, default `9090`), gRPC mesh service (`CONTROL_GRPC_BIND`), and Native UI Routing for embedded web consoles. No Grafana required for Lite ops.
 
-See also: [roadmap.md](../roadmap.md) (Control Plane Phase) · [acl.md](acl-policy.md).
+See also: [roadmap.md](../roadmap.md) · [acl.md](acl-policy.md) · [Agent Contract](../architecture/agent-contract.md).
+
+## Native UI Routing
+
+Proxy embeds static UI routing directly into the binary:
+- **Admin Console**: Available at `http://127.0.0.1:9090/admin/` (or via reverse proxy).
+- **Trust-UI**: Available at `http://127.0.0.1:9090/trust/` (end-user posture & policy portal).
 
 ## Auth
 

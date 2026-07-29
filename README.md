@@ -3,13 +3,13 @@
 [![Build Status](https://github.com/onixus/bsdm-proxy/actions/workflows/rust.yml/badge.svg)](https://github.com/onixus/bsdm-proxy/actions/workflows/rust.yml)
 [![E2E Tests](https://github.com/onixus/bsdm-proxy/actions/workflows/e2e.yml/badge.svg)](https://github.com/onixus/bsdm-proxy/actions/workflows/e2e.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.6.1--1-blue.svg)](https://github.com/onixus/bsdm-proxy/releases)
+[![Version](https://img.shields.io/badge/version-0.8.0-blue.svg)](https://github.com/onixus/bsdm-proxy/releases)
 
 BSDM-Proxy — кеширующий HTTP/HTTPS forward proxy на Rust с MITM TLS,
 аутентификацией, ACL, категоризацией, аналитикой трафика и опциональными
 security-модулями.
 
-Текущая версия workspace: **`0.6.1-1`**.
+Текущая версия workspace: **`0.8.0`**.
 
 > Проект содержит функции разной зрелости. Перед развёртыванием прочитайте
 > [матрицу статуса](docs/project-status.md): наличие кода или UI не означает
@@ -169,11 +169,13 @@ E2E:
 |---|---|
 | [Documentation index](docs/README.md) | Полная карта документации |
 | [Project status](docs/project-status.md) | Зрелость и ограничения функций |
+| [Agent contract](docs/architecture/agent-contract.md) | Протокол взаимодействия локального агента v0.1 |
+| [ADR 0005: Hybrid Policy Agent](docs/adr/0005-local-policy-agent-vs-tunnel-first.md) | Архитектурное решение гибридной фильтрации |
 | [Pilot deployment](docs/getting-started/pilot-deployment.md) | 100 пользователей, TTL 5 дней |
 | [Capacity planning](docs/architecture/capacity-planning.md) | Формулы и масштабирование |
 | [Configuration](docs/ops-and-dev/configuration.md) | Переменные окружения |
 | [Architecture](docs/architecture/overview.md) | Компоненты и потоки |
-| [Roadmap](docs/roadmap.md) | Будущие работы |
+| [Roadmap](docs/roadmap.md) | Стратегия развития |
 | [Documentation maintenance](docs/maintenance.md) | Правила и Wiki sync |
 
 GitHub Wiki публикуется как зеркало канонических файлов из `docs/`.

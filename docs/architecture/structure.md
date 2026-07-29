@@ -6,7 +6,7 @@
 
 | Member | Путь | Назначение |
 |---|---|---|
-| `bsdm-proxy` | `proxy/` | Forward proxy, MITM, cache, policy и control plane |
+| `bsdm-proxy` | `proxy/` | Forward proxy, MITM, cache, policy, UI routing и control plane |
 | `cache-indexer` | `cache-indexer/` | Kafka/HTTP → ClickHouse/SQLite |
 | `alert-worker` | `alert-worker/` | ClickHouse rules → webhook |
 | `ml-worker` | `ml-worker/` | Feature extraction и scoring |
@@ -15,7 +15,7 @@
 | `bsdm-proxy-e2e` | `e2e/` | Test harness |
 | `bsdm-wasm-sdk` | `bsdm-wasm-sdk/` | WASM guest ABI helpers |
 | WASM example | `examples/wasm/rust_plugin/` | Example guest plugin |
-| `agent-spike` | `examples/agent-spike/` | On-Device SWG Local Policy Agent Spike (Phase C) |
+| `agent-spike` | `examples/agent-spike/` | On-Device SWG Local Policy Agent Spike (Agent Contract v0.1) |
 
 Корневой `Cargo.toml` — единственный источник состава workspace.
 
@@ -27,16 +27,16 @@ bsdm-proxy/
 ├── cache-indexer/          # Analytics ingest + Search API
 ├── alert-worker/           # Detection rules
 ├── ml-worker/              # Feature store и scoring
-├── dns-sinkhole/           # Core DNS security sidecar
+├── dns-sinkhole/           # Core DNS security sidecar (DoH/DoT/RPZ)
 ├── bsdm-events/            # Shared event schema
-├── bsdm-wasm-sdk/          # Experimental WASM SDK
+├── bsdm-wasm-sdk/          # WASM SDK
 ├── e2e/                    # Integration test harness
-├── admin-console/          # React SPA
-├── trust-ui/               # React SPA (Trust User Dashboard)
+├── admin-console/          # React SPA управления (`/admin/`)
+├── trust-ui/               # End-user Trust portal SPA (`/trust/`)
 ├── charts/bsdm/            # Helm chart
 ├── packaging/              # systemd package и env examples
 ├── config/                 # ACL examples
-├── scripts/                # Build, test, SQL и docs automation
+├── scripts/                # Build, test, load test и docs automation
 ├── docs/                   # Каноническая документация
 ├── prometheus/             # Scrape config и rules
 ├── grafana/                # Dashboards и provisioning

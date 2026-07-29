@@ -9,11 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.8.0] - 2026-07-27
 
-Release **0.8.0**. Global Session State & Real-time Threat Sync, AmneziaWG Obfuscated Protocol Endpoint & BSDM Connect UI, DoH & DoT Encrypted DNS Gateways, and Admin Console modules (RPZ, Wasm, ICAP, Mesh Cluster, eBPF/XDP, Vector AI Cache).
+Release **0.8.0**. Hybrid Policy Engine & Local Agent Contract, Global Session State & Real-time Threat Sync, Native UI Routing (Trust-UI & Admin Console), OIDC Security Validation, DoH & DoT Encrypted DNS Gateways, and Admin Console modules (RPZ, Wasm, ICAP, Mesh Cluster, eBPF/XDP, Vector AI Cache).
 
 
 ### Added
 
+- **Hybrid Policy Engine & Agent Contract** — Implementation of hybrid policy resolution (`POLICY_MODE`: `selective-mitm`, `sni`, `full-mitm`), Local Policy Agent Contract v0.1 specification ([docs/architecture/agent-contract.md](docs/architecture/agent-contract.md)), ADR 0005 ([docs/adr/0005-local-policy-agent-vs-tunnel-first.md](docs/adr/0005-local-policy-agent-vs-tunnel-first.md)), `examples/agent-spike`, and load test harness `scripts/run-hybrid-load-test.sh` ([#262](https://github.com/onixus/bsdm-proxy/pull/262))
+- **Security (OIDC) Verification & JWT Audit** — Strict CSRF state verification, JWT issuer, audience, and expiration claim validation ([#241](https://github.com/onixus/bsdm-proxy/pull/241))
+- **ClickHouse DLP & CASB Schema Migration** — Added `dlp_violation` and `casb_alert` columns to `http_cache` schema and ingest pipeline ([#239](https://github.com/onixus/bsdm-proxy/pull/239))
+- **Native Static UI Routing & Reverse Proxy** — Native routing for Trust-UI (`/trust/`) and Admin Console (`/admin/`) directly through proxy ([#238](https://github.com/onixus/bsdm-proxy/pull/238))
+- **Trust-UI End-User Portal (Phases 1-5)** — Live policy streaming, client device posture, threat status UI, and container integration ([#234](https://github.com/onixus/bsdm-proxy/pull/234)-[#237](https://github.com/onixus/bsdm-proxy/pull/237))
 - **DoH (RFC 8484) & DoT (RFC 7858) Encrypted DNS Gateways** — Inbound DoH (`/dns-query`) and DoT (TCP/853 TLS) listeners for `dns-sinkhole`, wireformat base64url decoding, 2-byte TCP framing, and `admin-console` encrypted DNS panel ([#204](https://github.com/onixus/bsdm-proxy/pull/204))
 - **Admin Console RPZ Sinkhole Module (`/rpz`)** — RPZ list parsing, feed management, custom overrides, and DNS query simulator ([#108](https://github.com/onixus/bsdm-proxy/issues/108))
 - **Admin Console Wasm Plugins Module (`/wasm`)** — Interactive Wasm Request Sandbox, WAT source viewer, plugin directory, and engine settings ([#188](https://github.com/onixus/bsdm-proxy/issues/188))

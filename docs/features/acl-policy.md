@@ -1,13 +1,14 @@
 # Access Control Lists (ACL)
 
-> См. также: [оглавление документации](../README.md) · [пример правил](../../config/acl-rules.example.json)
+> См. также: [оглавление документации](../README.md) · [пример правил](../../config/acl-rules.example.json) · [Agent Contract](../architecture/agent-contract.md)
 
-> ⚠️ **Ограничения реализации:** REST ACL CRUD + persist, Cache-Tag purge, hierarchy peer reload, upstream TLS reload — ✅ (см. [control-plane.md](control-plane.md)); gRPC control plane — ещё в roadmap Phase 2.
+> ✅ **Статус реализации:** REST ACL CRUD + persist, Cache-Tag purge, hierarchy peer reload, upstream TLS reload и gRPC control mesh (`grpc` feature, см. [control-plane.md](control-plane.md)).
 
-Flexible access control system for BSDM-Proxy with multiple rule types and priority-based matching.
+Flexible access control system for BSDM-Proxy with multiple rule types, policy resolution modes (`POLICY_MODE`), and priority-based matching.
 
 ## Features
 
+- ✅ **Hybrid Policy Modes** - `POLICY_MODE`: `selective-mitm` (default), `sni` (no TLS decrypt), `full-mitm`
 - ✅ **Domain-based rules** - Exact and wildcard matching
 - ✅ **URL pattern matching** - Prefix and regex support
 - ✅ **Category-based filtering** - Block by content category

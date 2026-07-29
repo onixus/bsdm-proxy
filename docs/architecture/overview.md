@@ -1,13 +1,13 @@
 # Архитектура BSDM-Proxy
 
-Этот документ описывает фактические компоненты и потоки версии `0.6.1-1`.
+Этот документ описывает фактические компоненты и потоки версии `0.8.0`.
 Зрелость функций указана отдельно в [Project status](../project-status.md).
 
 ## Системный контекст
 
 ```mermaid
 flowchart LR
-    Client["Browser / application"] --> Proxy["BSDM-Proxy"]
+    Client["Browser / Agent"] --> Proxy["BSDM-Proxy"]
     Proxy --> Origin["Origin / upstream"]
     Proxy --> Redis[("Redis L2")]
     Proxy --> Peer["Cache peer"]
@@ -23,18 +23,25 @@ flowchart LR
 
 Redis, peers, workers и часть monitoring stack являются опциональными.
 
-## Request path
+## Request path & Hybrid Policy Resolution
 
-Упрощённый HTTP/MITM path:
+Упрощённый HTTP/MITM path с выбором политики (`POLICY_MODE`):
 
 ```mermaid
 flowchart TD
-    Request["Request"] --> Auth["Authentication"]
+    Request["Request"] --> PolicyMode{"POLICY_MODE"}
+    PolicyMode -->|DNS / SNI| SNICheck["SNI Filter (no TLS decrypt)"]
+    PolicyMode -->|selective-mitm| CatCheck{"Category MITM Match?"}
+    PolicyMode -->|full-mitm| FullDecrypt["Full TLS Decrypt"]
+    CatCheck -->|No| Passthrough["Bypass / Tunnel"]
+    CatCheck -->|Yes| FullDecrypt
+    SNICheck --> Auth["Authentication (Basic/OIDC)"]
+    FullDecrypt --> Auth
     Auth --> Rate["Rate limit"]
     Rate --> Hook["Optional WASM"]
-    Hook --> Policy["ACL + categorization"]
+    Hook --> Policy["ACL + Categorization"]
     Policy --> L1["L1 lookup"]
-    L1 -->|miss| L2["Optional Redis L2"]
+    L1 -->|miss| L2["Optional Redis L2 / Qdrant"]
     L2 -->|miss| Hier["Optional hierarchy"]
     Hier -->|miss| Upstream["Upstream fetch"]
     Upstream --> Store["Cache store + event"]
@@ -52,13 +59,15 @@ CONNECT работает в двух режимах:
 
 | Компонент | Реализация | Назначение |
 |---|---|---|
-| proxy | `proxy/` | Data plane, cache, auth, policy, control API |
+| proxy | `proxy/` | Data plane, cache, auth, policy, native UI routing, control API |
 | cache-indexer | `cache-indexer/` | Kafka/HTTP ingest в ClickHouse или SQLite |
 | bsdm-events | `bsdm-events/` | Общая event schema |
 | alert-worker | `alert-worker/` | Periodic ClickHouse rules → webhook |
 | ml-worker | `ml-worker/` | Feature extraction, scoring и write-back |
-| dns-sinkhole | `dns-sinkhole/` | UDP DNS, DoH/DoT и RPZ-lite filtering |
-| admin-console | `admin-console/` | Отдельно собираемая React SPA |
+| dns-sinkhole | `dns-sinkhole/` | UDP DNS, DoH (8484), DoT (853) и RPZ filtering |
+| trust-ui | `trust-ui/` | Пользовательский веб-портал доверия и статуса (`/trust/`) |
+| admin-console | `admin-console/` | Административная веб-консоль управления (`/admin/`) |
+| agent-spike | `examples/agent-spike/` | Референсный локальный агент согласно Agent Contract v0.1 |
 | monitoring | `prometheus/`, `grafana/`, `alertmanager/` | Metrics, dashboards и alerts |
 
 ## Proxy internals
