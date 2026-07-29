@@ -34,6 +34,7 @@ GitHub Wiki является автоматически обновляемым �
 | [ACL](features/acl-policy.md) | основной |
 | [Categorization](features/categorization.md) | основной/beta по источнику |
 | [Control plane](features/control-plane.md) | REST — основной; gRPC — beta |
+| [Certificate Pinning exceptions](features/certificate-pinning.md) | Управляемый bypass-реестр, reload и аудит |
 | [Semantic cache](features/semantic-cache.md) | beta |
 | [DNS sinkhole, DoH, DoT](features/dns-sinkhole.md) | основной |
 | [WASM plugins](features/wasm-plugins.md) | experimental |

@@ -3,6 +3,7 @@
 use crate::acl::{AclAction, AclEngine, AclEngineHandle};
 use crate::acl_config::{load_acl_engine_from_file, parse_acl_action};
 use crate::categorization::{CategorizationConfig, CategorizationEngine};
+use crate::pinning::PinningRegistry;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{info, warn};
@@ -47,7 +48,7 @@ impl std::fmt::Display for PolicyMode {
 pub struct PolicyConfig {
     pub policy_mode: PolicyMode,
     pub mitm_categories: Vec<String>,
-    pub pinning_exceptions: Vec<String>,
+    pub pinning_registry: Arc<PinningRegistry>,
     pub acl_enabled: bool,
     pub acl_engine: Option<Arc<AclEngineHandle>>,
     pub acl_rules_path: Option<String>,
@@ -117,29 +118,36 @@ fn load_categorization_config() -> CategorizationConfig {
     }
 }
 
-pub fn load_policy_config() -> PolicyConfig {
-    let policy_mode = std::env::var("POLICY_MODE")
+pub fn configured_policy_mode() -> PolicyMode {
+    std::env::var("POLICY_MODE")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(PolicyMode::SelectiveMitm);
+        .unwrap_or(PolicyMode::SelectiveMitm)
+}
 
-    let mitm_categories = std::env::var("MITM_CATEGORIES")
+pub fn configured_mitm_categories() -> Vec<String> {
+    std::env::var("MITM_CATEGORIES")
         .unwrap_or_else(|_| "malware,phishing,illegal-content".to_string())
         .split(',')
         .map(|s| s.trim().to_ascii_lowercase())
         .filter(|s| !s.is_empty())
-        .collect();
+        .collect()
+}
 
-    let pinning_exceptions = std::env::var("PINNING_EXCEPTIONS")
-        .unwrap_or_else(|_| ".slack.com,.teams.microsoft.com,.zoom.us".to_string())
-        .split(',')
-        .map(|s| s.trim().to_ascii_lowercase())
-        .filter(|s| !s.is_empty())
-        .collect();
+pub fn load_policy_config() -> PolicyConfig {
+    let policy_mode = configured_policy_mode();
+    let mitm_categories = configured_mitm_categories();
+
+    let pinning_registry = Arc::new(PinningRegistry::from_env().unwrap_or_else(|error| {
+        panic!("Failed to load certificate pinning exception registry: {error}")
+    }));
 
     info!(
-        "Policy mode initialized: mode={}, mitm_categories={:?}, pinning_exceptions={:?}",
-        policy_mode, mitm_categories, pinning_exceptions
+        "Policy mode initialized: mode={}, mitm_categories={:?}, pinning_exceptions={}, pinning_source={}",
+        policy_mode,
+        mitm_categories,
+        pinning_registry.snapshot().len(),
+        pinning_registry.source()
     );
 
     let acl_enabled = env_flag("ACL_ENABLED");
@@ -183,7 +191,7 @@ pub fn load_policy_config() -> PolicyConfig {
     PolicyConfig {
         policy_mode,
         mitm_categories,
-        pinning_exceptions,
+        pinning_registry,
         acl_enabled,
         acl_engine,
         acl_rules_path: rules_path,

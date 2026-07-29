@@ -34,6 +34,7 @@ use crate::miss_coalesce::{CoalesceJoin, MissFlightMap, MissFlightPermit};
 use crate::peer_fetch::{fetch_via_peer, PeerTlsConfig};
 use crate::peers::CachePeer;
 use crate::perf::PerfConfig;
+use crate::pinning::PinningRegistry;
 use crate::pipeline::{dispatch_cache_event, new_event_id, CacheEvent, HttpEventPipeline};
 #[cfg(feature = "kafka")]
 use crate::pipeline::{flush_kafka, KafkaEventPipeline};
@@ -55,7 +56,7 @@ use crate::wasm_host::{try_load_from_env, WasmHookDecision, WasmHookRequest};
 pub struct ProxyPolicy {
     pub policy_mode: crate::policy_config::PolicyMode,
     pub mitm_categories: Vec<String>,
-    pub pinning_exceptions: Vec<String>,
+    pub pinning_registry: Arc<PinningRegistry>,
     pub acl_engine: Option<Arc<AclEngineHandle>>,
     pub categorization: Option<Arc<CategorizationEngine>>,
 }
@@ -354,7 +355,7 @@ pub struct ProxyService {
     pub(crate) metrics: Arc<Metrics>,
     pub(crate) policy_mode: crate::policy_config::PolicyMode,
     pub(crate) mitm_categories: std::collections::HashSet<String>,
-    pub(crate) pinning_exceptions: Vec<String>,
+    pub(crate) pinning_registry: Arc<PinningRegistry>,
     pub(crate) mitm_enabled: bool,
     auth: Option<Arc<AuthManager>>,
     acl_engine: Option<Arc<AclEngineHandle>>,
@@ -381,14 +382,7 @@ pub struct ProxyService {
 
 impl ProxyService {
     pub(crate) fn tls_policy_decision(&self, domain: &str) -> TlsPolicyDecision {
-        let domain_lower = domain.to_ascii_lowercase();
-        let pinned = self.pinning_exceptions.iter().any(|exc| {
-            if exc.starts_with('.') {
-                domain_lower.ends_with(exc) || domain_lower == exc.trim_start_matches('.')
-            } else {
-                domain_lower == *exc
-            }
-        });
+        let pinned = self.pinning_registry.matches(domain);
 
         let selective_mitm = if self.mitm_enabled
             && !pinned
@@ -456,6 +450,10 @@ impl ProxyService {
 
     pub fn upstream_client(&self) -> UpstreamClientHandle {
         self.http_client.clone()
+    }
+
+    pub fn pinning_registry(&self) -> Arc<PinningRegistry> {
+        self.pinning_registry.clone()
     }
 
     fn miss_completion_handle(&self) -> MissCompletionHandle {
@@ -540,7 +538,7 @@ impl ProxyService {
             metrics,
             policy_mode: policy.policy_mode,
             mitm_categories: policy.mitm_categories.iter().cloned().collect(),
-            pinning_exceptions: policy.pinning_exceptions.clone(),
+            pinning_registry: policy.pinning_registry.clone(),
             mitm_enabled,
             auth,
             acl_engine: policy.acl_engine.clone(),

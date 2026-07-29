@@ -56,6 +56,8 @@ services:
       - METRICS_PORT=9090
       - POLICY_MODE=selective-mitm
       - MITM_CATEGORIES=malware,phishing,illegal-content
+      - PINNING_EXCEPTIONS_PATH=/etc/bsdm-proxy/pinning-exceptions.json
+      - PINNING_AUDIT_LOG_PATH=/var/log/bsdm-proxy/pinning-audit.jsonl
       - MITM_ENABLED=true
       - AUTH_ENABLED=false
       - ACL_ENABLED=false
@@ -73,6 +75,8 @@ services:
       - RUST_BACKTRACE=0
     volumes:
       - ./certs:/certs:ro
+      - ./config/pinning-exceptions.example.json:/etc/bsdm-proxy/pinning-exceptions.json:ro
+      - lite-pinning-audit:/var/log/bsdm-proxy
       - lite-spill:/var/cache/bsdm-spill
     depends_on:
       cache-indexer:
@@ -125,4 +129,6 @@ volumes:
   lite-spill:
     driver: local
   lite-indexer:
+    driver: local
+  lite-pinning-audit:
     driver: local

@@ -107,6 +107,8 @@ services:
       - METRICS_PORT=9090
       - POLICY_MODE=selective-mitm
       - MITM_CATEGORIES=malware,phishing,illegal-content
+      - PINNING_EXCEPTIONS_PATH=/etc/bsdm-proxy/pinning-exceptions.json
+      - PINNING_AUDIT_LOG_PATH=/var/log/bsdm-proxy/pinning-audit.jsonl
       - MITM_ENABLED=true
       - AUTH_ENABLED=false
       - SHUTDOWN_TIMEOUT_SECONDS=30
@@ -130,6 +132,8 @@ services:
     volumes:
       - ./certs:/certs:ro
       - ./config/acl-rules.example.json:/etc/bsdm-proxy/acl-rules.json:ro
+      - ./config/pinning-exceptions.example.json:/etc/bsdm-proxy/pinning-exceptions.json:ro
+      - pinning-audit:/var/log/bsdm-proxy
     tty: true
     stdin_open: true
     restart: unless-stopped
@@ -311,9 +315,6 @@ services:
     restart: unless-stopped
     networks:
       - bsdm-net
-      interval: 10s
-      timeout: 5s
-      retries: 5
     deploy:
       resources:
         limits:
@@ -456,4 +457,6 @@ volumes:
   grafana-data:
     driver: local
   alertmanager-data:
+    driver: local
+  pinning-audit:
     driver: local

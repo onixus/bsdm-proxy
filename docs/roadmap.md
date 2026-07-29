@@ -29,7 +29,7 @@ Roadmap определяет порядок работ в рамках стра�
 ## Фаза B — Selective MITM Hardening & Pilot
 
 - [x] Документирование и регламентация полного жизненного цикла CA (`docs/ops-and-dev/ca-lifecycle.md`).
-- [ ] Управление реестром исключений Certificate Pinning (`pinning_exceptions.json`).
+- [x] Управление реестром исключений Certificate Pinning (`pinning_exceptions.json`).
 - [ ] Включение MITM строго через политики (запрет глобальных флагов принудительного MITM в продакшене).
 - [ ] Профиль нагрузочного тестирования пилота: Selective MITM + DNS + Auth (100 пользователей).
 - [ ] Проверка резервного копирования и восстановления ClickHouse / ротации CA.
