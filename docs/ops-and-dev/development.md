@@ -158,19 +158,19 @@ E2E harness: `e2e/src/lib.rs` — `ProxyHarness`, mock upstream, test CA, hierar
 
 ```bash
 docker compose -f docker-compose.hierarchy.yml up -d --build
-curl -x http://127.0.0.1:1488 http://upstream/get
+curl -x http://127.0.0.1:3128 http://upstream/get
 docker compose -f docker-compose.hierarchy.yml down
 ```
 
-3-tier stack: **child** (1488) → **sibling** (ICP, 1490) / **parent** (1489) → **upstream**.
+3-tier stack: **child** (3128) → **sibling** (ICP, 1490) / **parent** (1489) → **upstream**.
 
 ### Redis L2 demo (Docker)
 
 ```bash
 docker compose -f docker-compose.redis-l2.yml up -d --build
-curl -x http://127.0.0.1:1488 http://upstream/get          # MISS
+curl -x http://127.0.0.1:3128 http://upstream/get          # MISS
 docker compose -f docker-compose.redis-l2.yml restart proxy-a  # clears L1 only
-curl -x http://127.0.0.1:1488 http://upstream/get          # L2-HIT (x-cache-status)
+curl -x http://127.0.0.1:3128 http://upstream/get          # L2-HIT (x-cache-status)
 docker compose -f docker-compose.redis-l2.yml down
 ```
 
@@ -318,7 +318,7 @@ cargo run -p bsdm-proxy --bin proxy
 Проверка:
 ```bash
 curl http://127.0.0.1:9090/health
-curl -x http://127.0.0.1:1488 https://httpbin.org/get
+curl -x http://127.0.0.1:3128 https://httpbin.org/get
 ```
 
 ## Полезные env для разработки

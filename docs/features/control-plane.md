@@ -95,7 +95,7 @@ Requires `HIERARCHY_ENABLED=true`. Reloads **static** parents/siblings only; mul
 2. Else `CACHE_PARENTS` / `CACHE_SIBLINGS` env (same format as startup)
 
 ```json
-{"parents":["parent.example.com:1488:1.0"],"siblings":["sib.example.com:1488:1.0:3130"]}
+{"parents":["parent.example.com:3128:1.0"],"siblings":["sib.example.com:3128:1.0:3130"]}
 ```
 
 ```bash
@@ -107,6 +107,25 @@ curl -X POST http://127.0.0.1:9090/api/hierarchy/reload \
 
 ```json
 {"status":"reloaded","source":"file","added":2,"removed":1,"preserved_discovery":3}
+```
+
+## Agent Contract v0.1 API
+
+Endpoints for On-Device SWG Local Policy Agents policy synchronization and heartbeat:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/agent/policy` | Returns active policy contract (`policy_mode`, `mitm_categories`, `pinning_exceptions`) |
+| `POST` | `/api/agent/heartbeat` | Receives agent telemetry and heartbeats (`device_id`, `status`, `agent_version`) |
+
+```bash
+# Fetch active policy
+curl http://127.0.0.1:9090/api/agent/policy
+
+# Send agent heartbeat
+curl -X POST http://127.0.0.1:9090/api/agent/heartbeat \
+  -H "Content-Type: application/json" \
+  -d '{"device_id":"mac-001","status":"healthy","agent_version":"0.1.0"}'
 ```
 
 ## Upstream TLS (hot reload)

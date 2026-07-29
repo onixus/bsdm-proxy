@@ -13,7 +13,7 @@ docker compose -f docker-compose.lite.yml up -d --build
 
 | Service | Port | Notes |
 |---------|------|--------|
-| proxy | 1488 | Forward proxy, MITM, L1 + spill |
+| proxy | 3128 | Forward proxy, MITM, L1 + spill |
 | proxy metrics | 9090 | `/health`, `/metrics` |
 | cache-indexer | 8080 | `INDEX_STORE=sqlite`, `/api/search`, `POST /api/events` |
 
@@ -23,7 +23,7 @@ Proxy posts `CacheEvent` JSON to `EVENT_SINK_URL` (Kafka unset).
 
 ```bash
 curl http://127.0.0.1:9090/health
-curl --cacert certs/ca.crt -x http://127.0.0.1:1488 https://httpbin.org/get
+curl --cacert certs/ca.crt -x http://127.0.0.1:3128 https://httpbin.org/get
 sleep 1
 curl 'http://127.0.0.1:8080/api/search?domain=httpbin.org&limit=5'
 ```

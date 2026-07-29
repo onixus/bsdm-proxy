@@ -365,7 +365,7 @@ bsdm_proxy_acl_eval_duration_seconds
 docker-compose logs -f proxy | grep -i acl
 
 # Test domain matching
-curl -x http://localhost:1488 https://example.com
+curl -x http://localhost:3128 https://example.com
 
 # Check rule priority
 cat acl-rules.json | jq '.rules | sort_by(.priority) | reverse'

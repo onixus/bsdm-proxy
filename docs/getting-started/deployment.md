@@ -46,7 +46,7 @@ docker compose -f docker-compose.lite.yml ps
 ```bash
 curl http://127.0.0.1:9090/health
 curl --cacert certs/ca.crt \
-  -x http://127.0.0.1:1488 \
+  -x http://127.0.0.1:3128 \
   https://httpbin.org/get
 curl 'http://127.0.0.1:8080/api/search?limit=5'
 ```
@@ -63,15 +63,14 @@ docker compose up -d --build
 docker compose ps
 ```
 
-Состав: proxy, Kafka, Zookeeper, ClickHouse, cache-indexer, Prometheus,
+Состав: proxy, dns-sinkhole, Kafka, Zookeeper, ClickHouse, cache-indexer, Prometheus,
 Alertmanager и Grafana.
 
-Профили:
+Профили (опциональные модули):
 
 ```bash
 docker compose --profile alerts up -d --build
 docker compose --profile ml up -d --build
-docker compose --profile dns-sinkhole up -d --build
 docker compose --profile icap up -d
 ```
 
@@ -146,7 +145,7 @@ helm upgrade --install bsdm-indexer ../../charts/bsdm \
 
 | Компонент | Порт | Endpoint |
 |---|---:|---|
-| proxy | 1488 | HTTP proxy / CONNECT |
+| proxy | 3128 | HTTP proxy / CONNECT |
 | proxy control | 9090 | `/health`, `/ready`, `/metrics` |
 | cache-indexer | 8080 | `/health`, `/metrics`, `/api/search` |
 | ICP | 3130/udp | hierarchy |
@@ -163,7 +162,7 @@ endpoints в client network.
 ```bash
 curl http://127.0.0.1:9090/health
 curl http://127.0.0.1:9090/ready
-curl -x http://127.0.0.1:1488 http://httpbin.org/get
+curl -x http://127.0.0.1:3128 http://httpbin.org/get
 curl 'http://127.0.0.1:8123/?query=SELECT+count()+FROM+bsdm.http_cache'
 curl 'http://127.0.0.1:8080/api/search?limit=5'
 ```

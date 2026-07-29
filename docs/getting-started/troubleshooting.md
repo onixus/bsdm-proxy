@@ -27,7 +27,7 @@ docker compose logs --tail=200 proxy
 
 ```bash
 curl --cacert certs/ca.crt \
-  -x http://127.0.0.1:1488 \
+  -x http://127.0.0.1:3128 \
   https://httpbin.org/get
 ```
 
