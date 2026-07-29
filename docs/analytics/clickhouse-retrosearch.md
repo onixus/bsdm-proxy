@@ -130,6 +130,7 @@ LIMIT 50;
 | `domain` | Нет | Фильтр по домену |
 | `username` | Нет | Фильтр по имени пользователя |
 | `session_id` | Нет | Фильтр по сессии с хронологической сортировкой |
+| `decision_source` | Нет | Фильтр по источнику решения (`dns`, `sni`, `mitm`, `pinning-bypass`, `local-agent`) |
 | `from` | Нет | Unix timestamp начала периода |
 | `to` | Нет | Unix timestamp конца периода |
 | `days` | Нет | Глубина поиска в днях (по умолчанию 30) |
@@ -144,6 +145,9 @@ curl -s 'http://127.0.0.1:8080/api/search?domain=httpbin.org&days=7' | jq .
 
 # Экспорт результатов в CSV для SOC / ИБ-расследования
 curl -s 'http://127.0.0.1:8080/api/search?domain=malicious.org&format=csv' -o incident.csv
+
+# Проверка объёма расшифрованного трафика
+curl -s 'http://127.0.0.1:8080/api/search?decision_source=mitm&days=1' | jq .
 
 # Запрос с авторизацией по Bearer токену
 curl -H "Authorization: Bearer secret_token" \

@@ -43,6 +43,10 @@ impl MemoryStore {
                     || e.username.as_deref().unwrap_or("") == query.username.as_str()
             })
             .filter(|e| query.session_id.is_empty() || e.session_id == query.session_id)
+            .filter(|e| {
+                query.decision_source.is_empty()
+                    || e.decision_source.as_deref().unwrap_or("") == query.decision_source.as_str()
+            })
             .map(event_to_hit)
             .collect();
         if query.session_timeline {
@@ -73,6 +77,7 @@ fn event_to_hit(e: &CacheEvent) -> SearchHit {
         session_id: e.session_id.clone(),
         parent_event_id: e.parent_event_id.clone(),
         redirect_url: e.redirect_url.clone(),
+        decision_source: e.decision_source.clone(),
     }
 }
 
@@ -122,6 +127,7 @@ mod tests {
             domain: "a.com".into(),
             username: String::new(),
             session_id: String::new(),
+            decision_source: String::new(),
             limit: 10,
             session_timeline: false,
         });
@@ -139,11 +145,36 @@ mod tests {
             domain: String::new(),
             username: String::new(),
             session_id: String::new(),
+            decision_source: String::new(),
             limit: 10,
             session_timeline: true,
         });
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[0].ts, 2);
         assert_eq!(hits[1].ts, 3);
+    }
+
+    #[test]
+    fn filters_by_decision_source() {
+        let store = MemoryStore::new(10);
+        let mut mitm = sample("a.com", 1);
+        mitm.decision_source = Some("mitm".into());
+        let mut sni = sample("b.com", 2);
+        sni.decision_source = Some("sni".into());
+        store.insert_batch(&[mitm, sni]);
+
+        let hits = store.search(&SearchQuery {
+            from_ts: 0,
+            to_ts: 100,
+            domain: String::new(),
+            username: String::new(),
+            session_id: String::new(),
+            decision_source: "mitm".into(),
+            limit: 10,
+            session_timeline: false,
+        });
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].domain, "a.com");
+        assert_eq!(hits[0].decision_source.as_deref(), Some("mitm"));
     }
 }

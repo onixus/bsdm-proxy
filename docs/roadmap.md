@@ -22,7 +22,7 @@ Roadmap определяет порядок работ в рамках стра�
 - [x] Движок правил на уровне SNI (ClientHello) до TLS-терминирования.
 - [x] Селективный MITM по списку категорий (`MITM_CATEGORIES=malware,phishing,illegal-content`).
 - [x] Изменение порта прокси по умолчанию с `1488` на `3128`.
-- [ ] Расширенная наблюдаемость исключений (`decision_source` = `dns | sni | mitm | pinning-bypass`).
+- [x] Расширенная наблюдаемость исключений (`decision_source` = `dns | sni | mitm | pinning-bypass`).
 
 ---
 

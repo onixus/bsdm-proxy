@@ -7,12 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
+### Added
 
-- **Agent API versioning** — Standardized Agent Contract v0.1 on
-  `/api/v1/agent/*`; retained the previous `/api/agent/*` policy and heartbeat
-  routes as compatibility aliases, and updated the reference agent heartbeat
-  client to use the canonical versioned endpoint.
+- **Policy decision-source observability** — Added bounded Prometheus counters,
+  structured decision logs, Grafana breakdowns, and Search API filtering for
+  `dns`, `sni`, `mitm`, and `pinning-bypass`, including compatible SQLite and
+  ClickHouse schema upgrades.
 
 ## [0.8.0] - 2026-07-27
 

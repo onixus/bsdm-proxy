@@ -65,6 +65,12 @@ impl SearchApi {
         let domain = sanitize_filter(query.get("domain").map(String::as_str).unwrap_or(""));
         let username = sanitize_filter(query.get("username").map(String::as_str).unwrap_or(""));
         let session_id = sanitize_filter(query.get("session_id").map(String::as_str).unwrap_or(""));
+        let decision_source = sanitize_filter(
+            query
+                .get("decision_source")
+                .map(String::as_str)
+                .unwrap_or(""),
+        );
         let limit = query
             .get("limit")
             .and_then(|v| v.parse::<u32>().ok())
@@ -94,6 +100,7 @@ impl SearchApi {
             domain,
             username,
             session_id: session_id.clone(),
+            decision_source,
             limit,
             session_timeline: !session_id.is_empty(),
         };
@@ -206,6 +213,7 @@ fn hits_to_csv(hits: &[crate::store::SearchHit]) -> String {
         "session_id",
         "parent_event_id",
         "redirect_url",
+        "decision_source",
     ];
     let mut out = headers.join(",");
     out.push('\n');
@@ -226,6 +234,7 @@ fn hits_to_csv(hits: &[crate::store::SearchHit]) -> String {
             h.session_id.clone(),
             h.parent_event_id.clone().unwrap_or_default(),
             h.redirect_url.clone().unwrap_or_default(),
+            h.decision_source.clone().unwrap_or_default(),
         ];
         out.push_str(
             &row.iter()

@@ -14,7 +14,7 @@ use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
-use prometheus::{IntCounter, Registry};
+use prometheus::{IntCounter, IntCounterVec, Opts, Registry};
 use std::convert::Infallible;
 use std::fs::File;
 use std::io::BufReader;
@@ -32,6 +32,7 @@ pub struct Metrics {
     pub blocked: IntCounter,
     pub forwarded: IntCounter,
     pub errors: IntCounter,
+    pub policy_decision_source: IntCounterVec,
     pub registry: Registry,
 }
 
@@ -47,6 +48,14 @@ impl Metrics {
                 .map_err(|e| e.to_string())?;
         let errors = IntCounter::new("dns_sinkhole_errors_total", "Handler errors")
             .map_err(|e| e.to_string())?;
+        let policy_decision_source = IntCounterVec::new(
+            Opts::new(
+                "bsdm_proxy_policy_decision_source_total",
+                "Total policy decisions by decision source",
+            ),
+            &["source"],
+        )
+        .map_err(|e| e.to_string())?;
         registry
             .register(Box::new(queries.clone()))
             .map_err(|e| e.to_string())?;
@@ -59,11 +68,15 @@ impl Metrics {
         registry
             .register(Box::new(errors.clone()))
             .map_err(|e| e.to_string())?;
+        registry
+            .register(Box::new(policy_decision_source.clone()))
+            .map_err(|e| e.to_string())?;
         Ok(Self {
             queries,
             blocked,
             forwarded,
             errors,
+            policy_decision_source,
             registry,
         })
     }
@@ -147,6 +160,16 @@ pub async fn process_dns_query(
 
     if let Some(action) = zone.lookup(&query.question.name) {
         metrics.blocked.inc();
+        metrics
+            .policy_decision_source
+            .with_label_values(&["dns"])
+            .inc();
+        info!(
+            domain = %query.question.name,
+            decision_source = "dns",
+            action = "block",
+            "DNS policy decision"
+        );
         return Ok(build_block_response(cfg, &query, action));
     }
 
@@ -508,5 +531,12 @@ mod tests {
         assert_eq!(u16::from_be_bytes([buf[6], buf[7]]), 1); // ANCOUNT
         assert_eq!(&buf[n - 4..n], &[127, 0, 0, 1]);
         assert_eq!(metrics.blocked.get(), 1);
+        assert_eq!(
+            metrics
+                .policy_decision_source
+                .with_label_values(&["dns"])
+                .get(),
+            1
+        );
     }
 }

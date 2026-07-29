@@ -60,6 +60,64 @@ pub struct ProxyPolicy {
     pub categorization: Option<Arc<CategorizationEngine>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TlsPolicyDecision {
+    pub mitm: bool,
+    pub decision_source: &'static str,
+    pub bypass_reason: Option<&'static str>,
+}
+
+fn classify_tls_policy_decision(
+    mitm_enabled: bool,
+    pinned: bool,
+    policy_mode: crate::policy_config::PolicyMode,
+    selective_mitm: bool,
+) -> TlsPolicyDecision {
+    if !mitm_enabled {
+        return TlsPolicyDecision {
+            mitm: false,
+            decision_source: "sni",
+            bypass_reason: Some("mitm_disabled"),
+        };
+    }
+    if pinned {
+        return TlsPolicyDecision {
+            mitm: false,
+            decision_source: "pinning-bypass",
+            bypass_reason: Some("certificate_pinning_exception"),
+        };
+    }
+    match policy_mode {
+        crate::policy_config::PolicyMode::Sni => TlsPolicyDecision {
+            mitm: false,
+            decision_source: "sni",
+            bypass_reason: Some("policy_mode_sni"),
+        },
+        crate::policy_config::PolicyMode::FullMitm => TlsPolicyDecision {
+            mitm: true,
+            decision_source: "mitm",
+            bypass_reason: None,
+        },
+        crate::policy_config::PolicyMode::SelectiveMitm => TlsPolicyDecision {
+            mitm: selective_mitm,
+            decision_source: if selective_mitm { "mitm" } else { "sni" },
+            bypass_reason: if selective_mitm {
+                None
+            } else {
+                Some("category_not_selected_for_mitm")
+            },
+        },
+    }
+}
+
+fn request_decision_source(url: &str) -> &'static str {
+    if url.starts_with("https://") {
+        "mitm"
+    } else {
+        "sni"
+    }
+}
+
 /// Cloneable handles for streaming MISS completion (runs after body drained).
 #[derive(Clone)]
 struct MissCompletionHandle {
@@ -266,7 +324,7 @@ impl MissCompletionHandle {
                     redirect_url,
                     dlp_violation: None,
                     casb_alert: None,
-                    decision_source: None,
+                    decision_source: Some(request_decision_source(url).to_string()),
                     bypass_reason: None,
                     event_id,
                 };
@@ -322,39 +380,50 @@ pub struct ProxyService {
 }
 
 impl ProxyService {
-    pub fn should_mitm_domain(&self, domain: &str) -> bool {
-        if !self.mitm_enabled {
-            return false;
-        }
-
+    pub(crate) fn tls_policy_decision(&self, domain: &str) -> TlsPolicyDecision {
         let domain_lower = domain.to_ascii_lowercase();
-        if self.pinning_exceptions.iter().any(|exc| {
+        let pinned = self.pinning_exceptions.iter().any(|exc| {
             if exc.starts_with('.') {
                 domain_lower.ends_with(exc) || domain_lower == exc.trim_start_matches('.')
             } else {
                 domain_lower == *exc
             }
-        }) {
-            tracing::info!(
-                domain = %domain,
-                decision_source = "pinning-bypass",
-                bypass_reason = "certificate_pinning_exception",
-                "Skipping TLS MITM due to certificate pinning exception"
-            );
-            return false;
-        }
+        });
 
-        match self.policy_mode {
-            crate::policy_config::PolicyMode::Sni => false,
-            crate::policy_config::PolicyMode::FullMitm => true,
-            crate::policy_config::PolicyMode::SelectiveMitm => {
-                let url = format!("https://{}", domain);
-                let (categories, _) = self.categorize_url(&url);
-                categories
-                    .iter()
-                    .any(|cat| self.mitm_categories.contains(&cat.to_ascii_lowercase()))
-            }
-        }
+        let selective_mitm = if self.mitm_enabled
+            && !pinned
+            && self.policy_mode == crate::policy_config::PolicyMode::SelectiveMitm
+        {
+            let url = format!("https://{}", domain);
+            let (categories, _) = self.categorize_url(&url);
+            categories
+                .iter()
+                .any(|cat| self.mitm_categories.contains(&cat.to_ascii_lowercase()))
+        } else {
+            false
+        };
+        let decision = classify_tls_policy_decision(
+            self.mitm_enabled,
+            pinned,
+            self.policy_mode,
+            selective_mitm,
+        );
+
+        self.metrics
+            .record_policy_decision_source(decision.decision_source);
+        info!(
+            domain = %domain,
+            policy_mode = %self.policy_mode,
+            decision_source = decision.decision_source,
+            mitm = decision.mitm,
+            bypass_reason = decision.bypass_reason.unwrap_or("none"),
+            "TLS policy decision"
+        );
+        decision
+    }
+
+    pub fn should_mitm_domain(&self, domain: &str) -> bool {
+        self.tls_policy_decision(domain).mitm
     }
 
     pub fn http_cache(&self) -> Arc<HttpL1Cache> {
@@ -565,7 +634,7 @@ impl ProxyService {
                 redirect_url,
                 dlp_violation: None,
                 casb_alert: None,
-                decision_source: None,
+                decision_source: Some(request_decision_source(url).to_string()),
                 bypass_reason: None,
                 event_id,
             };
@@ -589,6 +658,14 @@ impl ProxyService {
         threat_sources: &[String],
         request_start: Instant,
     ) {
+        let decision_source = request_decision_source(url);
+        self.metrics.record_policy_decision_source(decision_source);
+        info!(
+            domain = %domain,
+            decision_source,
+            action = %decision.action,
+            "ACL policy decision"
+        );
         if let Ok(timestamp) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
             let status = match decision.action {
                 AclAction::Deny => 403,
@@ -629,7 +706,7 @@ impl ProxyService {
                 redirect_url,
                 dlp_violation: None,
                 casb_alert: None,
-                decision_source: Some("sni".to_string()),
+                decision_source: Some(decision_source.to_string()),
                 bypass_reason: None,
                 event_id,
             };
@@ -2599,5 +2676,96 @@ impl ProxyService {
                 response
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod decision_source_tests {
+    use super::{classify_tls_policy_decision, request_decision_source, TlsPolicyDecision};
+    use crate::policy_config::PolicyMode;
+
+    #[test]
+    fn classifies_all_policy_modes_and_bypasses() {
+        let cases = [
+            (
+                false,
+                false,
+                PolicyMode::FullMitm,
+                false,
+                TlsPolicyDecision {
+                    mitm: false,
+                    decision_source: "sni",
+                    bypass_reason: Some("mitm_disabled"),
+                },
+            ),
+            (
+                true,
+                true,
+                PolicyMode::FullMitm,
+                false,
+                TlsPolicyDecision {
+                    mitm: false,
+                    decision_source: "pinning-bypass",
+                    bypass_reason: Some("certificate_pinning_exception"),
+                },
+            ),
+            (
+                true,
+                false,
+                PolicyMode::Sni,
+                false,
+                TlsPolicyDecision {
+                    mitm: false,
+                    decision_source: "sni",
+                    bypass_reason: Some("policy_mode_sni"),
+                },
+            ),
+            (
+                true,
+                false,
+                PolicyMode::FullMitm,
+                false,
+                TlsPolicyDecision {
+                    mitm: true,
+                    decision_source: "mitm",
+                    bypass_reason: None,
+                },
+            ),
+            (
+                true,
+                false,
+                PolicyMode::SelectiveMitm,
+                true,
+                TlsPolicyDecision {
+                    mitm: true,
+                    decision_source: "mitm",
+                    bypass_reason: None,
+                },
+            ),
+            (
+                true,
+                false,
+                PolicyMode::SelectiveMitm,
+                false,
+                TlsPolicyDecision {
+                    mitm: false,
+                    decision_source: "sni",
+                    bypass_reason: Some("category_not_selected_for_mitm"),
+                },
+            ),
+        ];
+
+        for (enabled, pinned, mode, selective_mitm, expected) in cases {
+            assert_eq!(
+                classify_tls_policy_decision(enabled, pinned, mode, selective_mitm),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn classifies_decrypted_and_plain_http_events() {
+        assert_eq!(request_decision_source("https://example.com/path"), "mitm");
+        assert_eq!(request_decision_source("http://example.com/path"), "sni");
     }
 }

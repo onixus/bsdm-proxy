@@ -62,6 +62,7 @@ pub struct Metrics {
     pub acl_rules_matched_total: CounterVec,
     pub acl_eval_duration_seconds: Histogram,
     pub policy_cache_hit_total: Counter,
+    pub policy_decision_source_total: CounterVec,
 
     // Rate limit metrics
     pub rate_limit_rejected_total: CounterVec,
@@ -321,6 +322,15 @@ impl Metrics {
         )?;
         registry.register(Box::new(policy_cache_hit_total.clone()))?;
 
+        let policy_decision_source_total = CounterVec::new(
+            Opts::new(
+                "bsdm_proxy_policy_decision_source_total",
+                "Total policy decisions by decision source (dns, sni, mitm, pinning-bypass, auth-deny, bypass)",
+            ),
+            &["source"],
+        )?;
+        registry.register(Box::new(policy_decision_source_total.clone()))?;
+
         let rate_limit_rejected_total = CounterVec::new(
             Opts::new(
                 "bsdm_proxy_rate_limit_rejected_total",
@@ -488,6 +498,7 @@ impl Metrics {
             acl_rules_matched_total,
             acl_eval_duration_seconds,
             policy_cache_hit_total,
+            policy_decision_source_total,
             rate_limit_rejected_total,
             distributed_rate_limit_hits_total,
             global_sessions_active,
@@ -548,6 +559,16 @@ impl Metrics {
 
     pub fn record_categorization_online_enrich_scheduled(&self) {
         self.categorization_online_enrich_scheduled_total.inc();
+    }
+
+    pub fn record_policy_decision_source(&self, source: &str) {
+        let source = match source {
+            "dns" | "sni" | "mitm" | "pinning-bypass" | "auth-deny" | "local-agent" => source,
+            _ => "unknown",
+        };
+        self.policy_decision_source_total
+            .with_label_values(&[source])
+            .inc();
     }
 
     pub fn record_hierarchy_resolution(&self, result: &str) {
@@ -701,5 +722,18 @@ mod tests {
         assert!(out.contains("bsdm_proxy_categorization_blocked_total"));
         assert!(out.contains("bsdm_proxy_categorization_online_enrich_scheduled_total"));
         assert!(out.contains(r#"category="malware""#));
+    }
+
+    #[test]
+    fn policy_decision_source_metrics_are_bounded() {
+        let m = Metrics::new().unwrap();
+        m.record_policy_decision_source("mitm");
+        m.record_policy_decision_source("pinning-bypass");
+        m.record_policy_decision_source("untrusted-arbitrary-value");
+        let out = String::from_utf8(m.export().unwrap()).unwrap();
+        assert!(out.contains(r#"source="mitm"} 1"#));
+        assert!(out.contains(r#"source="pinning-bypass"} 1"#));
+        assert!(out.contains(r#"source="unknown"} 1"#));
+        assert!(!out.contains("untrusted-arbitrary-value"));
     }
 }
