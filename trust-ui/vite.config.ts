@@ -8,8 +8,20 @@ export default defineConfig({
   server: {
     port: 3001,
     proxy: {
-      '/api': {
-        target: 'http://127.0.0.1:1488',
+      '/api/search': {
+        target: 'http://127.0.0.1:8080',
+        changeOrigin: true,
+      },
+      '/api/stats': {
+        target: 'http://127.0.0.1:9090',
+        changeOrigin: true,
+      },
+      '/api/v1': {
+        target: 'http://127.0.0.1:9090',
+        changeOrigin: true,
+      },
+      '/health': {
+        target: 'http://127.0.0.1:9090',
         changeOrigin: true,
       },
       '/metrics': {

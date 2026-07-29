@@ -310,6 +310,10 @@ services:
       context: .
       dockerfile: Dockerfile
       target: trust-ui
+    environment:
+      SEARCH_API_TOKEN: "${SEARCH_API_TOKEN:-}"
+      CONTROL_API_TOKEN: "${CONTROL_API_TOKEN:-}"
+      NGINX_ENVSUBST_FILTER: "SEARCH_API_TOKEN|CONTROL_API_TOKEN"
     ports:
       - "3001:80"
     restart: unless-stopped

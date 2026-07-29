@@ -7,9 +7,10 @@ export const DeviceIdentity: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const queryClient = useQueryClient();
 
-  const { data: devices = [] } = useQuery({
+  const { data: devices = [], error, isLoading } = useQuery({
     queryKey: ['registeredDevices'],
     queryFn: fetchRegisteredDevices,
+    retry: false,
   });
 
   const revokeMutation = useMutation({
@@ -53,6 +54,19 @@ export const DeviceIdentity: React.FC = () => {
 
       {/* Device Rows */}
       <div className="divide-y divide-slate-800/50 my-1 max-h-[340px] overflow-y-auto pr-1">
+        {isLoading && (
+          <div className="py-12 text-center text-sm text-slate-500">Loading devices…</div>
+        )}
+        {error && (
+          <div className="my-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-300">
+            {(error as Error).message}
+          </div>
+        )}
+        {!isLoading && !error && filteredDevices.length === 0 && (
+          <div className="py-12 text-center text-sm text-slate-500">
+            No registered devices returned by the API.
+          </div>
+        )}
         {filteredDevices.map((dev: RegisteredDevice) => (
           <div key={dev.id} className="grid grid-cols-12 gap-2 items-center py-2.5 px-2 hover:bg-slate-900/40 rounded-lg transition-colors text-xs">
             <div className="col-span-5 flex items-center gap-2.5">
@@ -84,7 +98,11 @@ export const DeviceIdentity: React.FC = () => {
             </div>
 
             <div className="col-span-4 flex items-center justify-end gap-2 text-[11px]">
-              <span className="text-slate-300 font-mono text-[10px] font-bold">{dev.trustScore}/100</span>
+              {dev.trustScore !== undefined && (
+                <span className="text-slate-300 font-mono text-[10px] font-bold">
+                  {dev.trustScore}/100
+                </span>
+              )}
               <button
                 onClick={() => revokeMutation.mutate(dev.id)}
                 title="Revoke mTLS Certificate"
@@ -96,6 +114,9 @@ export const DeviceIdentity: React.FC = () => {
           </div>
         ))}
       </div>
+      {revokeMutation.error && (
+        <p className="mt-3 text-xs text-rose-400">{revokeMutation.error.message}</p>
+      )}
     </div>
   );
 };

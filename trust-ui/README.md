@@ -1,15 +1,18 @@
 # Trust-UI
 
-**Trust-UI** is the Zero-Trust Posture & Threat Analytics Control Plane dashboard for **BSDM-Proxy**.
+**Trust-UI** is the live Zero-Trust posture dashboard for **BSDM-Proxy**.
+
+Trust-UI has no demo mode and never substitutes synthetic values when a backend
+is unavailable. Failed, unsupported, and empty APIs are shown explicitly in the
+interface.
 
 ## Features
 
-- **Real-Time Trust Scoring**: Instant visualization of network security index (0–100) and risk posture.
-- **mTLS & Upstream Validation**: Monitor peer authentication and client certificate validation metrics.
-- **Inline CASB DLP Monitoring**: Live tracking of Aho-Corasick pattern matches blocking confidential data leaks.
-- **ML-Worker & Anomaly Vector Metrics**: Real-time Kafka feature-store scoring feed integration.
-- **RPZ-lite DNS Sinkhole Overview**: Tracking UDP RPZ-lite domain intercepts.
-- **Live Threat Stream Log**: Searchable and filterable traffic decision stream (ALLOWED, BLOCKED, SINKHOLED, MITM_INSPECTED).
+- **Node health and runtime stats** from `/health` and `/api/stats`.
+- **Security counters** parsed from the proxy `/metrics` endpoint.
+- **Recent traffic decisions** polled from the cache-indexer `/api/search` endpoint.
+- **Device identity posture** from `/api/v1/devices` when that API is implemented
+  by the deployment. Current BSDM nodes return an explicit unsupported state.
 
 ## Getting Started
 
@@ -21,7 +24,19 @@ npm install
 npm run dev
 ```
 
-The application runs on `http://localhost:3001` by default and proxies backend management requests (`/api`) to the BSDM Proxy instance at `http://127.0.0.1:1488`.
+The application runs on `http://localhost:3001` by default. The Vite development
+server routes proxy health/stats/metrics and future device identity requests to
+`127.0.0.1:9090`, and search requests to the cache-indexer on
+`127.0.0.1:8080`.
+
+Production deployments must expose the same paths through the origin serving
+Trust-UI.
+
+The repository's `trust-ui` Docker image includes an Nginx configuration that
+routes health, stats, and metrics to the `proxy` compose service and search
+requests to `cache-indexer`. `SEARCH_API_TOKEN` and `CONTROL_API_TOKEN` are
+injected into the Nginx configuration at container startup and remain outside
+the browser bundle.
 
 ### Production Build
 

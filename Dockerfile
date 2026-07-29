@@ -216,6 +216,6 @@ RUN npm run build
 
 FROM nginx:alpine AS trust-ui
 COPY --from=trust-ui-builder /app/dist /usr/share/nginx/html
+COPY trust-ui/nginx.conf.template /etc/nginx/templates/default.conf.template
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
-
