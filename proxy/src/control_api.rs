@@ -7,8 +7,9 @@ use hyper::header::HeaderValue;
 use hyper::header::AUTHORIZATION;
 use hyper::{HeaderMap, Method, Request, Response, StatusCode};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use std::time::Instant;
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tracing::{info, warn};
 
 use crate::cache_key::http_cache_key;
@@ -25,6 +26,36 @@ use crate::upstream::UpstreamClientHandle;
 struct DlpPatternDto {
     pub pattern: String,
     pub description: String,
+}
+
+#[derive(Clone, Debug)]
+struct RegisteredDevice {
+    id: String,
+    name: String,
+    ip: String,
+    device_type: String,
+    agent_status: String,
+    agent_version: Option<String>,
+    policy_version: Option<String>,
+    cert_subject: Option<String>,
+    cert_fingerprint: Option<String>,
+    trust_score: Option<u8>,
+    last_seen: u64,
+    revoked: bool,
+}
+
+#[derive(Deserialize)]
+struct AgentHeartbeatDto {
+    device_id: String,
+    status: Option<String>,
+    agent_version: Option<String>,
+    policy_version: Option<String>,
+    name: Option<String>,
+    ip: Option<String>,
+    device_type: Option<String>,
+    cert_subject: Option<String>,
+    cert_fingerprint: Option<String>,
+    trust_score: Option<u8>,
 }
 
 impl ControlApiState {
@@ -301,15 +332,64 @@ impl ControlApiState {
     }
 
     async fn agent_heartbeat(&self, body: Bytes) -> Response<Body> {
-        #[derive(Deserialize)]
-        struct AgentHeartbeatDto {
-            device_id: String,
-            status: Option<String>,
-            agent_version: Option<String>,
-        }
         match serde_json::from_slice::<AgentHeartbeatDto>(&body) {
             Ok(hb) => {
-                info!(device_id = %hb.device_id, status = ?hb.status, agent_version = ?hb.agent_version, "Agent heartbeat received");
+                if hb.device_id.trim().is_empty() {
+                    return json_response(
+                        StatusCode::BAD_REQUEST,
+                        r#"{"error":"device_id must not be empty"}"#,
+                    );
+                }
+                if hb.trust_score.is_some_and(|score| score > 100) {
+                    return json_response(
+                        StatusCode::BAD_REQUEST,
+                        r#"{"error":"trust_score must be between 0 and 100"}"#,
+                    );
+                }
+                let mut devices = self.devices.write().expect("device registry lock");
+                let previous = devices.get(&hb.device_id);
+                let device = RegisteredDevice {
+                    id: hb.device_id.clone(),
+                    name: hb
+                        .name
+                        .filter(|name| !name.trim().is_empty())
+                        .or_else(|| previous.map(|device| device.name.clone()))
+                        .unwrap_or_else(|| hb.device_id.clone()),
+                    ip: hb
+                        .ip
+                        .or_else(|| previous.map(|device| device.ip.clone()))
+                        .unwrap_or_default(),
+                    device_type: hb
+                        .device_type
+                        .filter(|kind| matches!(kind.as_str(), "desktop" | "phone"))
+                        .or_else(|| previous.map(|device| device.device_type.clone()))
+                        .unwrap_or_else(|| "desktop".to_string()),
+                    agent_status: hb.status.unwrap_or_else(|| "healthy".to_string()),
+                    agent_version: hb
+                        .agent_version
+                        .or_else(|| previous.and_then(|device| device.agent_version.clone())),
+                    policy_version: hb
+                        .policy_version
+                        .or_else(|| previous.and_then(|device| device.policy_version.clone())),
+                    cert_subject: hb
+                        .cert_subject
+                        .or_else(|| previous.and_then(|device| device.cert_subject.clone())),
+                    cert_fingerprint: hb
+                        .cert_fingerprint
+                        .or_else(|| previous.and_then(|device| device.cert_fingerprint.clone())),
+                    trust_score: hb
+                        .trust_score
+                        .or_else(|| previous.and_then(|device| device.trust_score)),
+                    last_seen: unix_timestamp(),
+                    revoked: previous.is_some_and(|device| device.revoked),
+                };
+                info!(
+                    device_id = %device.id,
+                    status = %device.agent_status,
+                    agent_version = ?device.agent_version,
+                    "Agent heartbeat received"
+                );
+                devices.insert(device.id.clone(), device);
                 json_response(StatusCode::OK, r#"{"status":"acknowledged"}"#)
             }
             Err(e) => json_response(
@@ -320,6 +400,58 @@ impl ControlApiState {
                 ),
             ),
         }
+    }
+
+    fn registered_devices(&self) -> Response<Body> {
+        let devices = self.devices.read().expect("device registry lock");
+        let mut rows: Vec<_> = devices
+            .values()
+            .map(|device| {
+                serde_json::json!({
+                    "id": device.id,
+                    "name": device.name,
+                    "ip": device.ip,
+                    "type": device.device_type,
+                    "status": if device.revoked {
+                        "Revoked"
+                    } else if device.agent_status.eq_ignore_ascii_case("healthy") {
+                        "Secured"
+                    } else {
+                        "Flagged"
+                    },
+                    "connection": device.last_seen.to_string(),
+                    "lastSeen": device.last_seen,
+                    "agentStatus": device.agent_status,
+                    "agentVersion": device.agent_version,
+                    "policyVersion": device.policy_version,
+                    "certSubject": device.cert_subject,
+                    "certFingerprint": device.cert_fingerprint,
+                    "trustScore": device.trust_score,
+                })
+            })
+            .collect();
+        rows.sort_by_key(|row| std::cmp::Reverse(row["lastSeen"].as_u64().unwrap_or(0)));
+        json_response(StatusCode::OK, &serde_json::Value::Array(rows).to_string())
+    }
+
+    fn revoke_device(&self, device_id: &str) -> Response<Body> {
+        if device_id.is_empty() || device_id.contains('/') {
+            return json_response(StatusCode::BAD_REQUEST, r#"{"error":"invalid device id"}"#);
+        }
+        let mut devices = self.devices.write().expect("device registry lock");
+        let Some(device) = devices.get_mut(device_id) else {
+            return json_response(StatusCode::NOT_FOUND, r#"{"error":"device not found"}"#);
+        };
+        device.revoked = true;
+        warn!(device_id, "Device trust revoked");
+        json_response(
+            StatusCode::OK,
+            &serde_json::json!({
+                "success": true,
+                "message": format!("Device {device_id} revoked"),
+            })
+            .to_string(),
+        )
     }
 }
 
@@ -344,6 +476,7 @@ pub struct ControlApiState {
     threat_sync: crate::threat_sync::ThreatSyncEngine,
     trust_ui_dir: Option<std::path::PathBuf>,
     admin_console_dir: Option<std::path::PathBuf>,
+    devices: Arc<RwLock<HashMap<String, RegisteredDevice>>>,
 }
 
 impl ControlApiState {
@@ -408,6 +541,7 @@ impl ControlApiState {
                         None
                     }
                 }),
+            devices: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -486,6 +620,18 @@ impl ControlApiState {
             );
             if !public_api && !self.is_authorized(headers) {
                 return json_response(StatusCode::UNAUTHORIZED, r#"{"error":"unauthorized"}"#);
+            }
+        }
+
+        if method == Method::GET && path == "/api/v1/devices" {
+            return self.registered_devices();
+        }
+        if method == Method::POST {
+            if let Some(device_id) = path
+                .strip_prefix("/api/v1/devices/")
+                .and_then(|path| path.strip_suffix("/revoke"))
+            {
+                return self.revoke_device(device_id);
             }
         }
 
@@ -1098,6 +1244,13 @@ fn deprecated_agent_alias(
     response
 }
 
+fn unix_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
 fn escape_json(value: &str) -> String {
     value
         .replace('\\', "\\\\")
@@ -1379,8 +1532,9 @@ mod tests {
         assert_eq!(v["policy_mode"], "selective-mitm");
 
         // Canonical versioned heartbeat endpoint.
-        let hb_payload =
-            Bytes::from(r#"{"device_id":"laptop-001","status":"healthy","agent_version":"0.1.0"}"#);
+        let hb_payload = Bytes::from(
+            r#"{"device_id":"laptop-001","name":"Alice laptop","ip":"10.0.0.5","device_type":"desktop","status":"healthy","agent_version":"0.1.0","policy_version":"v0.1.0","trust_score":97}"#,
+        );
         let resp = state
             .dispatch(
                 &Method::POST,
@@ -1393,6 +1547,50 @@ mod tests {
         let body = BodyExt::collect(resp.into_body()).await.unwrap().to_bytes();
         let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(v["status"], "acknowledged");
+
+        let devices = state
+            .dispatch(
+                &Method::GET,
+                "/api/v1/devices",
+                Bytes::new(),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(devices.status(), StatusCode::OK);
+        let body = BodyExt::collect(devices.into_body())
+            .await
+            .unwrap()
+            .to_bytes();
+        let devices: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(devices[0]["id"], "laptop-001");
+        assert_eq!(devices[0]["name"], "Alice laptop");
+        assert_eq!(devices[0]["status"], "Secured");
+        assert_eq!(devices[0]["trustScore"], 97);
+        assert!(devices[0]["lastSeen"].as_u64().unwrap() > 0);
+
+        let revoked = state
+            .dispatch(
+                &Method::POST,
+                "/api/v1/devices/laptop-001/revoke",
+                Bytes::new(),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(revoked.status(), StatusCode::OK);
+        let devices = state
+            .dispatch(
+                &Method::GET,
+                "/api/v1/devices",
+                Bytes::new(),
+                &HeaderMap::new(),
+            )
+            .await;
+        let body = BodyExt::collect(devices.into_body())
+            .await
+            .unwrap()
+            .to_bytes();
+        let devices: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(devices[0]["status"], "Revoked");
 
         // Unversioned v0.1 paths remain aliases for existing agents.
         let legacy_policy = state

@@ -31,6 +31,10 @@ pub struct HttpCacheRow {
     pub threat_sources: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub acl_action: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub acl_rule_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub acl_reason: Option<String>,
     pub session_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_event_id: Option<String>,
@@ -72,6 +76,8 @@ pub fn cache_event_to_row(event: &CacheEvent) -> HttpCacheRow {
         categories: event.categories.clone(),
         threat_sources: event.threat_sources.clone(),
         acl_action: event.acl_action.clone(),
+        acl_rule_id: event.acl_rule_id.clone(),
+        acl_reason: event.acl_reason.clone(),
         session_id: event.session_id.clone(),
         parent_event_id: event.parent_event_id.clone(),
         redirect_url: event.redirect_url.clone(),
@@ -144,6 +150,8 @@ mod tests {
             categories: vec!["news".to_string()],
             threat_sources: vec!["ut1".to_string()],
             acl_action: Some("allow".to_string()),
+            acl_rule_id: Some("allow-news".to_string()),
+            acl_reason: Some("news is allowed".to_string()),
             session_id: "sess-abc".to_string(),
             parent_event_id: Some("evt-parent".to_string()),
             redirect_url: Some("https://example.com/next".to_string()),
@@ -163,6 +171,7 @@ mod tests {
         assert_eq!(row.client_ip, "10.0.0.5");
         assert_eq!(row.request_duration_ms, 42);
         assert_eq!(row.session_id, "sess-abc");
+        assert_eq!(row.acl_rule_id.as_deref(), Some("allow-news"));
         assert_eq!(row.parent_event_id.as_deref(), Some("evt-parent"));
         assert_eq!(
             row.redirect_url.as_deref(),

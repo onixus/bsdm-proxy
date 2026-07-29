@@ -320,6 +320,8 @@ impl MissCompletionHandle {
                     categories: categories.to_vec(),
                     threat_sources: threat_sources.to_vec(),
                     acl_action: None,
+                    acl_rule_id: None,
+                    acl_reason: None,
                     session_id: corr.session_id,
                     parent_event_id: corr.parent_event_id,
                     redirect_url,
@@ -627,6 +629,8 @@ impl ProxyService {
                 categories: categories.to_vec(),
                 threat_sources: threat_sources.to_vec(),
                 acl_action: None,
+                acl_rule_id: None,
+                acl_reason: None,
                 session_id: corr.session_id,
                 parent_event_id: corr.parent_event_id,
                 redirect_url,
@@ -641,7 +645,7 @@ impl ProxyService {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn emit_policy_event(
+    pub(crate) fn emit_policy_event(
         &self,
         url: &str,
         method: &str,
@@ -655,8 +659,8 @@ impl ProxyService {
         categories: &[String],
         threat_sources: &[String],
         request_start: Instant,
+        decision_source: &str,
     ) {
-        let decision_source = request_decision_source(url);
         self.metrics.record_policy_decision_source(decision_source);
         info!(
             domain = %domain,
@@ -699,6 +703,8 @@ impl ProxyService {
                 categories: categories.to_vec(),
                 threat_sources: threat_sources.to_vec(),
                 acl_action: Some(decision.action.to_string()),
+                acl_rule_id: decision.rule_id.clone(),
+                acl_reason: Some(decision.reason.clone()),
                 session_id: corr.session_id,
                 parent_event_id: corr.parent_event_id,
                 redirect_url,
@@ -1943,6 +1949,7 @@ impl ProxyService {
                 &categories,
                 &threat_sources,
                 request_start,
+                request_decision_source(&url),
             );
             let response = Self::policy_response(&decision);
             if let Some(g) = guard.take() {
@@ -2004,6 +2011,8 @@ impl ProxyService {
                                 categories: categories.to_vec(),
                                 threat_sources: threat_sources.to_vec(),
                                 acl_action: Some("deny".to_string()),
+                                acl_rule_id: None,
+                                acl_reason: Some(err_msg.clone()),
                                 session_id: String::new(),
                                 parent_event_id: None,
                                 redirect_url: None,
@@ -2330,6 +2339,8 @@ impl ProxyService {
                                 categories: categories.to_vec(),
                                 threat_sources: threat_sources.to_vec(),
                                 acl_action: Some("deny".to_string()),
+                                acl_rule_id: None,
+                                acl_reason: Some(err_msg.clone()),
                                 session_id: String::new(),
                                 parent_event_id: None,
                                 redirect_url: None,

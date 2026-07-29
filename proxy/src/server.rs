@@ -323,6 +323,8 @@ async fn handle_connect_tunnel(
                             categories: vec![],
                             threat_sources: vec![],
                             acl_action: None,
+                            acl_rule_id: None,
+                            acl_reason: None,
                             session_id: corr.session_id,
                             parent_event_id: corr.parent_event_id,
                             redirect_url: None,
@@ -496,6 +498,11 @@ pub async fn handle_connection(
                     Ok(user) => user,
                     Err(resp) => return Ok(resp),
                 };
+                let user_agent = req
+                    .headers()
+                    .get("user-agent")
+                    .and_then(|value| value.to_str().ok())
+                    .map(str::to_string);
 
                 let policy_username = proxy_user.as_deref().map(|u| u.username.as_str());
                 let policy_groups: Vec<&str> = proxy_user
@@ -521,7 +528,7 @@ pub async fn handle_connection(
                     return Ok::<_, Infallible>(resp);
                 }
 
-                let (policy_decision, _, _) = service
+                let (policy_decision, categories, threat_sources) = service
                     .check_policy(
                         &connect_url,
                         &connect_domain,
@@ -531,6 +538,22 @@ pub async fn handle_connection(
                     )
                     .await;
                 if let Some(decision) = policy_decision {
+                    let (user_id, username) = ProxyService::user_fields(proxy_user.as_deref());
+                    service.emit_policy_event(
+                        &connect_url,
+                        "CONNECT",
+                        service.generate_cache_key("CONNECT", &authority).as_ref(),
+                        &decision,
+                        &user_id,
+                        &username,
+                        user_agent.as_deref(),
+                        &client_ip,
+                        &connect_domain,
+                        &categories,
+                        &threat_sources,
+                        request_start,
+                        "sni",
+                    );
                     return Ok::<_, Infallible>(ProxyService::policy_response(&decision));
                 }
 

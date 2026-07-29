@@ -26,6 +26,8 @@ mod tests {
             categories: vec!["malware".to_string()],
             threat_sources: vec!["urlhaus".to_string()],
             acl_action: None,
+            acl_rule_id: None,
+            acl_reason: None,
             session_id: String::new(),
             parent_event_id: None,
             redirect_url: None,
@@ -67,6 +69,8 @@ mod tests {
             categories: vec!["malware".to_string()],
             threat_sources: vec!["urlhaus".to_string()],
             acl_action: None,
+            acl_rule_id: None,
+            acl_reason: None,
             session_id: String::new(),
             parent_event_id: None,
             redirect_url: None,
@@ -127,6 +131,8 @@ mod tests {
             categories: vec!["malware".to_string()],
             threat_sources: vec!["ut1".to_string()],
             acl_action: Some("deny".to_string()),
+            acl_rule_id: Some("deny-malware".to_string()),
+            acl_reason: Some("malware category denied".to_string()),
             session_id: String::new(),
             parent_event_id: None,
             redirect_url: None,
@@ -139,6 +145,8 @@ mod tests {
 
         let row = bsdm_events::cache_event_to_row(&event);
         assert_eq!(row.acl_action.as_deref(), Some("deny"));
+        assert_eq!(row.acl_rule_id.as_deref(), Some("deny-malware"));
+        assert_eq!(row.acl_reason.as_deref(), Some("malware category denied"));
         assert_eq!(row.threat_sources, vec!["ut1"]);
     }
 
@@ -166,6 +174,8 @@ mod tests {
                 categories: vec![],
                 threat_sources: vec![],
                 acl_action: None,
+                acl_rule_id: None,
+                acl_reason: None,
                 session_id: String::new(),
                 parent_event_id: None,
                 redirect_url: None,
@@ -207,6 +217,8 @@ mod tests {
             categories: vec!["malware".to_string()],
             threat_sources: vec!["ut1".to_string()],
             acl_action: Some("deny".to_string()),
+            acl_rule_id: Some("deny-malware".to_string()),
+            acl_reason: Some("malware category denied".to_string()),
             session_id: String::new(),
             parent_event_id: None,
             redirect_url: None,
@@ -219,6 +231,8 @@ mod tests {
 
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("\"acl_action\":\"deny\""));
+        assert!(json.contains("\"acl_rule_id\":\"deny-malware\""));
+        assert!(json.contains("\"acl_reason\":\"malware category denied\""));
         assert!(json.contains("\"cache_status\":\"BLOCKED\""));
     }
 }

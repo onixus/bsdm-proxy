@@ -80,6 +80,9 @@ export const DeviceIdentity: React.FC = () => {
               <div>
                 <p className="font-semibold text-slate-200">{dev.name}</p>
                 <p className="text-[10px] text-slate-500 font-mono">{dev.ip}</p>
+                <p className="text-[10px] text-slate-600">
+                  Seen {new Date(dev.lastSeen * 1_000).toLocaleString()}
+                </p>
               </div>
             </div>
 
@@ -105,8 +108,9 @@ export const DeviceIdentity: React.FC = () => {
               )}
               <button
                 onClick={() => revokeMutation.mutate(dev.id)}
-                title="Revoke mTLS Certificate"
-                className="p-1 text-slate-500 hover:text-rose-400 transition-colors"
+                disabled={dev.status === 'Revoked' || revokeMutation.isPending}
+                title="Revoke device trust"
+                className="p-1 text-slate-500 hover:text-rose-400 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
               >
                 <ShieldX className="w-3.5 h-3.5" />
               </button>

@@ -39,6 +39,12 @@ pub struct CacheEvent {
     /// ACL decision when request was denied or redirected: deny, redirect.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acl_action: Option<String>,
+    /// Stable identifier of the ACL rule that produced the decision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acl_rule_id: Option<String>,
+    /// Human-readable reason supplied by the ACL engine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acl_reason: Option<String>,
     /// Soft browsing session (same IP + principal + UA within idle window).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub session_id: String,
@@ -101,6 +107,8 @@ mod tests {
             categories: vec![],
             threat_sources: vec![],
             acl_action: None,
+            acl_rule_id: None,
+            acl_reason: None,
             session_id: String::new(),
             parent_event_id: None,
             redirect_url: None,
@@ -133,6 +141,8 @@ mod tests {
         assert_eq!(event.categories, vec!["malware"]);
         assert!(event.threat_sources.is_empty());
         assert!(event.acl_action.is_none());
+        assert!(event.acl_rule_id.is_none());
+        assert!(event.acl_reason.is_none());
     }
 
     #[test]
@@ -156,6 +166,8 @@ mod tests {
             categories: vec!["malware".to_string()],
             threat_sources: vec!["urlhaus".to_string()],
             acl_action: Some("deny".to_string()),
+            acl_rule_id: Some("block-malware".to_string()),
+            acl_reason: Some("malware category denied".to_string()),
             session_id: "sess-1".to_string(),
             parent_event_id: Some("evt-redir".to_string()),
             redirect_url: None,
@@ -167,6 +179,8 @@ mod tests {
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("\"acl_action\":\"deny\""));
+        assert!(json.contains("\"acl_rule_id\":\"block-malware\""));
+        assert!(json.contains("\"acl_reason\":\"malware category denied\""));
         assert!(json.contains("\"threat_sources\":[\"urlhaus\"]"));
         assert!(json.contains("\"session_id\":\"sess-1\""));
         assert!(json.contains("\"parent_event_id\":\"evt-redir\""));

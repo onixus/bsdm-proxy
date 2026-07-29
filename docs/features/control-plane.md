@@ -123,6 +123,8 @@ Endpoints for On-Device SWG Local Policy Agents policy synchronization and heart
 |--------|------|-------------|
 | `GET` | `/api/v1/agent/policy` | Returns active policy contract (`policy_mode`, `mitm_categories`, `pinning_exceptions`) |
 | `POST` | `/api/v1/agent/heartbeat` | Receives agent telemetry and heartbeats (`device_id`, `status`, `agent_version`) |
+| `GET` | `/api/v1/devices` | Lists devices observed through agent heartbeats |
+| `POST` | `/api/v1/devices/{device_id}/revoke` | Marks an observed device as revoked |
 
 The `/api/v1/agent/*` namespace is canonical for Agent Contract v0.1.
 The previous unversioned `/api/agent/policy` and `/api/agent/heartbeat` paths
