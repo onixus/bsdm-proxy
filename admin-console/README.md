@@ -24,17 +24,31 @@ Replaces the legacy static [`web-config/`](../web-config/) generator with a mode
 | `/logs` | Retro-search with server+client filters, live tail, pagination, CSV export, session timeline, XAI modal |
 | `/analytics` | Aggregations over the search sample: traffic over time, status/cache/decision mix, top talkers, threat severity |
 | `/threat-scores` | ML write-back snapshot with model filter and traffic drill-down |
-| `/policies` | Runtime ACL rules viewer / reload |
+| `/security` | Supported data-security controls |
+| `/policies` | Runtime ACL rules viewer / reload / persist |
+| `/rpz` | DNS policy management |
+| `/users` | Basic-auth user management |
 | `/settings` | Live node state + config generator (cache, auth, filtering, threat/ML, hierarchy/TLS, rate-limit/eBPF/Wasm, events) |
+
+The default sidebar only advertises the supported Hybrid operator paths above.
+Frozen modules remain directly routable for development and compatibility, but
+are intentionally hidden from primary navigation:
+
+- `/wasm`
+- `/cluster`
+- `/ai-cache`
+- `/amneziawg`
+
+Their product status is defined in [`docs/project-status.md`](../docs/project-status.md).
 
 ## Data honesty
 
 Every fetcher returns `Sourced<T>` — payload plus provenance (`live` or `demo`).
 A failed request renders a real **error state**; sample data appears **only**
 when the user enables demo mode (Settings → Console API), and is always marked
-with a "Demo" badge. Pages whose backend endpoints don't exist yet (RPZ, Wasm,
-Cluster Mesh, AI Cache, eBPF stats) carry an explicit "Preview — no backend
-endpoint" banner.
+with a "Demo" badge. Developer-only frozen routes carry an explicit preview
+banner when their backend endpoint is not available. Frozen eBPF content is not
+shown on the core Policies workflow.
 
 ## Quick start
 
@@ -74,7 +88,19 @@ Configure base URLs under **Settings → API**. Empty base URLs use Vite dev-ser
 
 Passwords and API tokens are **not** persisted to `localStorage` — they remain in memory for the current browser session only.
 
-When APIs are unreachable, the console shows **demo data** so layouts and XAI components remain testable offline.
+When APIs are unreachable, the console shows an explicit error unless the
+operator has deliberately enabled demo mode.
+
+## Identity and version
+
+The shell identifies itself as a **local, unauthenticated console** until a real
+authentication/session contract is implemented. It does not fabricate an AD
+user or role. API tokens configured under Settings authorize individual backend
+requests; they do not create a UI identity.
+
+The displayed product version is injected at build time from
+[`proxy/Cargo.toml`](../proxy/Cargo.toml), the same manifest used to build the
+proxy binary.
 
 ## UI/UX deliverables
 

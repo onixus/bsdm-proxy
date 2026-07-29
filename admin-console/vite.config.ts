@@ -1,12 +1,23 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { readFileSync } from 'node:fs'
+
+const proxyManifest = readFileSync(new URL('../proxy/Cargo.toml', import.meta.url), 'utf8')
+const appVersion = proxyManifest.match(/^version\s*=\s*"([^"]+)"/m)?.[1]
+
+if (!appVersion) {
+  throw new Error('Unable to read BSDM product version from proxy/Cargo.toml')
+}
 
 const bearerHeaders = (token: string | undefined) =>
   token ? { Authorization: `Bearer ${token}` } : undefined
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  define: {
+    __APP_VERSION__: JSON.stringify(appVersion),
+  },
   base: '/',
   server: {
     port: 5173,

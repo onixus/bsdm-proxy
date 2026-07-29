@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { RefreshCw, RotateCcw, Save, Trash2, Cpu, Zap } from 'lucide-react'
+import { RefreshCw, RotateCcw, Save, Trash2 } from 'lucide-react'
 import {
   deleteAclRule,
   fetchAclRules,
@@ -8,10 +8,8 @@ import {
   type AclRule,
   type AclRulesResponse,
 } from '../api/acl'
-import { fetchEbpfStats, fetchEbpfBlockedIps, type EbpfStats, type EbpfBlockedIp } from '../api/ebpf'
 import { Button } from '../components/ui/Button'
 import { Panel } from '../components/dashboard/MetricWidget'
-import { PreviewBanner } from '../components/ui/DataState'
 import { useToast } from '../components/ui/Toast'
 import { useLanguage, translations } from '../lib/i18n'
 
@@ -21,21 +19,12 @@ export function PoliciesPage() {
 
   const { toast } = useToast()
   const [data, setData] = useState<AclRulesResponse | null>(null)
-  const [ebpfStats, setEbpfStats] = useState<EbpfStats | null>(null)
-  const [ebpfIps, setEbpfIps] = useState<EbpfBlockedIp[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
 
   const load = async () => {
     setLoading(true)
-    const [aclData, st, ips] = await Promise.all([
-      fetchAclRules(),
-      fetchEbpfStats(),
-      fetchEbpfBlockedIps(),
-    ])
-    setData(aclData)
-    setEbpfStats(st)
-    setEbpfIps(ips)
+    setData(await fetchAclRules())
     setLoading(false)
   }
 
@@ -175,69 +164,6 @@ export function PoliciesPage() {
         </div>
       </Panel>
 
-
-      {/* eBPF XDP Kernel Bypass Panel */}
-      <Panel title={tr.policies.ebpfTitle}>
-        <div className="space-y-4">
-          <PreviewBanner feature="The eBPF/XDP stats view" />
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <div className="rounded-md border border-border bg-surface-0 p-3">
-              <div className="flex items-center justify-between text-xs text-text-secondary">
-                <span>{tr.policies.xdpMode}</span>
-                <span className="rounded bg-success/20 px-2 py-0.5 font-mono text-[10px] font-bold text-success">
-                  {ebpfStats?.enabled ? 'ACTIVE' : 'STUB / OFF'}
-                </span>
-              </div>
-              <div className="mt-2 text-lg font-bold font-mono text-text-primary">
-                {ebpfStats?.mode?.toUpperCase() || 'DRIVER'} ({ebpfStats?.interface || 'eth0'})
-              </div>
-            </div>
-
-            <div className="rounded-md border border-border bg-surface-0 p-3">
-              <div className="flex items-center justify-between text-xs text-text-secondary">
-                <span>{tr.policies.zeroCpuDrops}</span>
-                <Zap className="size-4 text-accent" />
-              </div>
-              <div className="mt-2 text-lg font-bold font-mono text-text-primary">
-                {ebpfStats?.packetsDroppedTotal?.toLocaleString() || '184,250'} pkts
-              </div>
-            </div>
-
-            <div className="rounded-md border border-border bg-surface-0 p-3">
-              <div className="flex items-center justify-between text-xs text-text-secondary">
-                <span>{tr.policies.dropLatency}</span>
-                <Cpu className="size-4 text-success" />
-              </div>
-              <div className="mt-2 text-lg font-bold font-mono text-success">
-                {ebpfStats?.kernelLatencyUs || 0.45} µs (0% Userspace CPU)
-              </div>
-            </div>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="border-b border-border text-text-secondary uppercase">
-                <tr>
-                  <th className="py-2 pr-4">{tr.policies.blockedIp}</th>
-                  <th className="py-2 pr-4">{tr.policies.reason}</th>
-                  <th className="py-2 pr-4">{tr.policies.packetsDropped}</th>
-                  <th className="py-2">{tr.policies.addedDate}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/50 text-text-primary font-mono">
-                {ebpfIps.map((item) => (
-                  <tr key={item.id}>
-                    <td className="py-2 pr-4 text-accent font-bold">{item.ip}</td>
-                    <td className="py-2 pr-4 font-sans text-text-secondary">{item.reason}</td>
-                    <td className="py-2 pr-4 text-text-primary font-bold">{item.packetsDropped.toLocaleString()}</td>
-                    <td className="py-2 text-text-secondary">{new Date(item.addedAt).toLocaleTimeString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </Panel>
 
       <div className="rounded-lg border border-border bg-surface-0 p-4 text-sm text-text-secondary">
         {tr.policies.liveCrud}{' '}

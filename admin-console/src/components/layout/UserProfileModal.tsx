@@ -1,20 +1,12 @@
 import { useState } from 'react'
-import {
-  User,
-  ShieldCheck,
-  Key,
-  Globe,
-  Clock,
-  LogOut,
-  Moon,
-  Sun,
-  CheckCircle2,
-  Lock,
-  ShieldAlert,
-} from 'lucide-react'
-import { Modal } from '../ui/Modal'
+import { KeyRound, MonitorCog, Moon, Settings, ShieldAlert, Sun } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { loadApiSettings } from '../../api/settings'
+import { APP_VERSION } from '../../lib/build'
+import { useLanguage } from '../../lib/i18n'
+import { applyTheme, loadTheme, type Theme } from '../../lib/theme'
 import { Button } from '../ui/Button'
-import { loadTheme, applyTheme, type Theme } from '../../lib/theme'
+import { Modal } from '../ui/Modal'
 
 interface UserProfileModalProps {
   open: boolean
@@ -23,6 +15,11 @@ interface UserProfileModalProps {
 
 export function UserProfileModal({ open, onClose }: UserProfileModalProps) {
   const [theme, setTheme] = useState<Theme>(loadTheme)
+  const [lang] = useLanguage()
+  const navigate = useNavigate()
+  const settings = loadApiSettings()
+  const hasApiCredentials = Boolean(settings.searchToken || settings.aclToken || settings.controlToken)
+  const ru = lang === 'ru'
 
   const toggleTheme = () => {
     const next = theme === 'dark' ? 'light' : 'dark'
@@ -30,123 +27,112 @@ export function UserProfileModal({ open, onClose }: UserProfileModalProps) {
     applyTheme(next)
   }
 
-  // Simulated active user identity info extracted from current session/headers
-  const user = {
-    username: 'admin.user',
-    displayName: 'Администратор Безопасности (AD User)',
-    email: 'admin.security@company.local',
-    domain: 'CORP.LOCAL',
-    authMethod: 'Active Directory / NTLM & OIDC',
-    role: 'System Administrator (Full Access)',
-    ipAddress: '127.0.0.1',
-    sessionCreated: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    permissions: [
-      'ZTNA / IAP Reverse Proxy Control',
-      'Active Directory / LDAP Sync',
-      'ACL & Content Filtering Engine',
-      'ML Threat & UEBA Score Management',
-      'Kernel eBPF & Wasm Hooks',
-      'Kafka / ClickHouse Analytics Access',
-    ],
-  }
-
-  const handleLogout = () => {
-    document.cookie = 'bsdm_session=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;'
-    window.location.reload()
+  const openSettings = () => {
+    onClose()
+    navigate('/settings')
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Профиль пользователя & Сессия" wide>
-      <div className="space-y-6">
-        {/* User Card Header */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 rounded-xl border border-accent/30 bg-accent/10 p-4">
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={ru ? 'Доступ к консоли' : 'Console access'}
+      wide
+    >
+      <div className="space-y-5">
+        <div className="flex flex-col items-start justify-between gap-4 rounded-xl border border-warning/40 bg-warning/10 p-4 sm:flex-row sm:items-center">
           <div className="flex items-center gap-4">
-            <div className="flex size-14 items-center justify-center rounded-full bg-accent/20 text-accent font-bold text-xl border border-accent/40 shadow-inner">
-              <User className="size-7" />
+            <div className="flex size-12 shrink-0 items-center justify-center rounded-full border border-warning/40 bg-warning/15 text-warning">
+              <ShieldAlert className="size-6" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-lg font-bold text-text-primary">{user.displayName}</h3>
-                <span className="rounded-full bg-accent/20 px-2 py-0.5 text-xs font-semibold text-accent border border-accent/30">
-                  AD / SSO Active
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-lg font-bold text-text-primary">
+                  {ru ? 'Локальная консоль' : 'Local console'}
+                </h3>
+                <span className="rounded-full border border-warning/40 bg-warning/15 px-2 py-0.5 text-xs font-semibold text-warning">
+                  {ru ? 'Без аутентификации' : 'Unauthenticated'}
                 </span>
               </div>
-              <p className="text-xs text-text-secondary">
-                {user.email} · <span className="font-mono">{user.domain}</span>
+              <p className="mt-1 text-xs text-text-secondary">
+                {ru
+                  ? 'Backend не предоставляет этой UI подтверждённую личность пользователя или роль.'
+                  : 'The backend does not provide this UI with a verified user identity or role.'}
               </p>
             </div>
           </div>
-          <Button
-            type="button"
-            variant="secondary"
-            className="text-xs shrink-0"
-            onClick={toggleTheme}
-          >
+          <Button type="button" variant="secondary" className="shrink-0 text-xs" onClick={toggleTheme}>
             {theme === 'dark' ? (
               <>
-                <Sun className="size-4 text-warning" /> Светлая тема
+                <Sun className="size-4 text-warning" /> {ru ? 'Светлая тема' : 'Light theme'}
               </>
             ) : (
               <>
-                <Moon className="size-4 text-accent" /> Тёмная тема
+                <Moon className="size-4 text-accent" /> {ru ? 'Тёмная тема' : 'Dark theme'}
               </>
             )}
           </Button>
         </div>
 
-        {/* Grid Session Info */}
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="rounded-lg border border-border bg-surface-1 p-3.5 space-y-1">
-            <div className="flex items-center gap-2 text-xs font-semibold text-text-secondary">
-              <Key className="size-3.5 text-accent" /> Метод аутентификации
-            </div>
-            <p className="text-sm font-medium text-text-primary">{user.authMethod}</p>
-          </div>
-          <div className="rounded-lg border border-border bg-surface-1 p-3.5 space-y-1">
-            <div className="flex items-center gap-2 text-xs font-semibold text-text-secondary">
-              <ShieldCheck className="size-3.5 text-accent" /> Роль в системе
-            </div>
-            <p className="text-sm font-medium text-text-primary">{user.role}</p>
-          </div>
-          <div className="rounded-lg border border-border bg-surface-1 p-3.5 space-y-1">
-            <div className="flex items-center gap-2 text-xs font-semibold text-text-secondary">
-              <Globe className="size-3.5 text-accent" /> IP-адрес клиента
-            </div>
-            <p className="font-mono text-sm font-medium text-text-primary">{user.ipAddress}</p>
-          </div>
-          <div className="rounded-lg border border-border bg-surface-1 p-3.5 space-y-1">
-            <div className="flex items-center gap-2 text-xs font-semibold text-text-secondary">
-              <Clock className="size-3.5 text-accent" /> Время старта сессии
-            </div>
-            <p className="text-sm font-medium text-text-primary">{user.sessionCreated} (Активна)</p>
-          </div>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <StatusCard
+            icon={MonitorCog}
+            label={ru ? 'Режим доступа' : 'Access mode'}
+            value={ru ? 'Локальная browser-сессия' : 'Local browser session'}
+          />
+          <StatusCard
+            icon={KeyRound}
+            label={ru ? 'API credentials' : 'API credentials'}
+            value={
+              hasApiCredentials
+                ? (ru ? 'Заданы для этой вкладки' : 'Configured for this tab')
+                : (ru ? 'Не заданы' : 'Not configured')
+            }
+            warning={!hasApiCredentials}
+          />
+          <StatusCard
+            icon={Settings}
+            label={ru ? 'Версия продукта' : 'Product version'}
+            value={`v${APP_VERSION}`}
+          />
         </div>
 
-        {/* Granted Permissions List */}
-        <div className="space-y-3 rounded-xl border border-border bg-surface-1 p-4">
-          <h4 className="flex items-center gap-2 text-sm font-bold text-text-primary">
-            <Lock className="size-4 text-accent" /> Назначенные привилегии и разрешения
-          </h4>
-          <div className="grid gap-2 sm:grid-cols-2 text-xs">
-            {user.permissions.map((perm, idx) => (
-              <div key={idx} className="flex items-center gap-2 rounded-md bg-surface-0 px-3 py-2 border border-border/50 text-text-primary">
-                <CheckCircle2 className="size-4 shrink-0 text-accent" />
-                <span>{perm}</span>
-              </div>
-            ))}
-          </div>
+        <div className="rounded-lg border border-border bg-surface-1 p-4 text-sm text-text-secondary">
+          {ru
+            ? 'API-токены авторизуют отдельные запросы к сервисам, но не создают пользовательскую сессию в Admin Console. Не публикуйте консоль в недоверенную сеть без внешнего access gateway.'
+            : 'API tokens authorize individual service requests; they do not create an Admin Console user session. Do not expose the console to an untrusted network without an external access gateway.'}
         </div>
 
-        {/* Footer Actions */}
         <div className="flex items-center justify-between border-t border-border pt-4">
-          <span className="text-xs text-text-secondary flex items-center gap-1">
-            <ShieldAlert className="size-3.5 text-accent" /> BSDM ZTNA Security Subsystem v0.6
-          </span>
-          <Button variant="danger" onClick={handleLogout} className="text-xs">
-            <LogOut className="size-4" /> Завершить сессию (Logout)
+          <span className="text-xs text-text-secondary">BSDM Admin Console v{APP_VERSION}</span>
+          <Button variant="primary" onClick={openSettings} className="text-xs">
+            <Settings className="size-4" />
+            {ru ? 'Открыть настройки API' : 'Open API settings'}
           </Button>
         </div>
       </div>
     </Modal>
+  )
+}
+
+function StatusCard({
+  icon: Icon,
+  label,
+  value,
+  warning = false,
+}: {
+  icon: typeof MonitorCog
+  label: string
+  value: string
+  warning?: boolean
+}) {
+  return (
+    <div className="space-y-1 rounded-lg border border-border bg-surface-1 p-3.5">
+      <div className="flex items-center gap-2 text-xs font-semibold text-text-secondary">
+        <Icon className={`size-3.5 ${warning ? 'text-warning' : 'text-accent'}`} />
+        {label}
+      </div>
+      <p className={`text-sm font-medium ${warning ? 'text-warning' : 'text-text-primary'}`}>{value}</p>
+    </div>
   )
 }

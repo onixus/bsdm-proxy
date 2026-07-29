@@ -9,9 +9,6 @@ import {
   Brain,
   BarChart3,
   Radio,
-  Cpu,
-  Network,
-  Sparkles,
   User,
   Command,
   ArrowRight,
@@ -37,10 +34,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
     { to: '/security', title: t.nav.security, desc: 'Security policies & DLP rules', icon: Shield },
     { to: '/policies', title: t.nav.policies, desc: 'ACL configuration rules & IP blocks', icon: Shield },
     { to: '/rpz', title: t.nav.rpz, desc: 'Response Policy Zone DNS filtering', icon: Radio },
-    { to: '/wasm', title: t.nav.wasm, desc: 'Wasm plugin manager & dynamic extensions', icon: Cpu },
-    { to: '/cluster', title: t.nav.cluster, desc: 'Cluster Mesh topology & peer synchronization', icon: Network },
-    { to: '/ai-cache', title: t.nav.aiCache, desc: 'AI Semantic caching & LLM token stats', icon: Sparkles },
-    { to: '/users', title: t.nav.users, desc: 'Active Directory users & proxy permissions', icon: User },
+    { to: '/users', title: t.nav.users, desc: 'Basic authentication users & proxy roles', icon: User },
     { to: '/settings', title: t.nav.settings, desc: 'Live node configuration & export options', icon: Settings },
   ]
 

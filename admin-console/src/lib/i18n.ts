@@ -56,9 +56,7 @@ export const translations = {
     header: {
       brand: 'BSDM Консоль управления',
       profile: 'Профиль пользователя',
-      activeDirectory: 'Active Directory SSO',
       demoMode: 'Демо-режим',
-      version: 'Единая панель управления · v0.6',
       switchLang: 'Переключить на English',
     },
     // General Actions & Statuses
@@ -153,14 +151,6 @@ export const translations = {
       type: 'Тип',
       action: 'Действие',
       status: 'Статус',
-      ebpfTitle: 'Обход сброса пакетов ядра eBPF / XDP (Уровень L4)',
-      xdpMode: 'Режим Kernel XDP',
-      zeroCpuDrops: 'Отброшено пакетов (Zero-CPU)',
-      dropLatency: 'Задержка сброса ядром',
-      blockedIp: 'Заблокированный IP-адрес',
-      reason: 'Причина / Правило',
-      packetsDropped: 'Отброшено пакетов',
-      addedDate: 'Дата добавления',
       liveCrud: 'Live CRUD на порту метрик:',
     },
     // Analytics Page
@@ -312,9 +302,7 @@ export const translations = {
     header: {
       brand: 'BSDM Console',
       profile: 'User Profile',
-      activeDirectory: 'Active Directory SSO',
       demoMode: 'Demo mode',
-      version: 'Single pane of glass · v0.6',
       switchLang: 'Switch to Russian',
     },
     // General Actions & Statuses
@@ -409,14 +397,6 @@ export const translations = {
       type: 'Type',
       action: 'Action',
       status: 'Status',
-      ebpfTitle: 'eBPF / XDP Kernel Packet Drop Bypass (L4 Hardware Layer)',
-      xdpMode: 'Kernel XDP Mode',
-      zeroCpuDrops: 'Zero-CPU Packets Dropped',
-      dropLatency: 'Kernel Drop Latency',
-      blockedIp: 'Blocked IP Address',
-      reason: 'Reason / Rule',
-      packetsDropped: 'Packets Dropped',
-      addedDate: 'Added Date',
       liveCrud: 'Live CRUD on metrics port:',
     },
     // Analytics Page

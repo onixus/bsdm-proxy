@@ -11,18 +11,15 @@ import {
   Brain,
   FlaskConical,
   Radio,
-  Cpu,
-  Network,
-  Sparkles,
   Sun,
   Moon,
   User,
   ChevronRight,
   Languages,
   ShieldAlert,
-  Smartphone,
 } from 'lucide-react'
 import { isDemoMode } from '../../api/source'
+import { APP_VERSION } from '../../lib/build'
 import { applyTheme, loadTheme, type Theme } from '../../lib/theme'
 import { useLanguage, translations } from '../../lib/i18n'
 import { UserProfileModal } from './UserProfileModal'
@@ -56,15 +53,6 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         { to: '/security', label: t.nav.security, icon: ShieldAlert },
         { to: '/policies', label: t.nav.policies, icon: Shield },
         { to: '/rpz', label: t.nav.rpz, icon: Radio },
-      ],
-    },
-    {
-      title: lang === 'ru' ? 'Расширения & Кластер' : 'Extensions & Mesh',
-      items: [
-        { to: '/wasm', label: t.nav.wasm, icon: Cpu },
-        { to: '/cluster', label: t.nav.cluster, icon: Network },
-        { to: '/ai-cache', label: t.nav.aiCache, icon: Sparkles },
-        { to: '/amneziawg', label: 'AmneziaWG Connect', icon: Smartphone },
       ],
     },
     {
@@ -109,14 +97,10 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           <div className="flex items-center gap-2.5">
             <div className="relative flex items-center justify-center size-8 rounded-lg bg-accent/15 border border-accent/30 text-accent shadow-glow-accent">
               <Activity className="size-5" />
-              <span className="absolute -top-0.5 -right-0.5 flex size-2">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-75"></span>
-                <span className="relative inline-flex size-2 rounded-full bg-success"></span>
-              </span>
             </div>
             <div>
               <span className="font-bold text-text-primary text-sm tracking-tight block">BSDM Console</span>
-              <span className="text-[10px] text-text-secondary font-mono leading-none">v0.6 · proxy-node</span>
+              <span className="text-[10px] text-text-secondary font-mono leading-none">v{APP_VERSION} · admin-console</span>
             </div>
           </div>
           <div className="flex items-center gap-1">
@@ -199,8 +183,12 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                 <User className="size-4" />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-bold text-text-primary truncate">admin.user</p>
-                <p className="text-[10px] text-text-secondary truncate">{t.header.activeDirectory}</p>
+                <p className="text-xs font-bold text-text-primary truncate">
+                  {lang === 'ru' ? 'Локальная консоль' : 'Local console'}
+                </p>
+                <p className="text-[10px] text-warning truncate">
+                  {lang === 'ru' ? 'Без аутентифицированной сессии' : 'No authenticated session'}
+                </p>
               </div>
             </div>
             <ChevronRight className="size-4 text-text-secondary group-hover:text-accent shrink-0 transition-transform group-hover:translate-x-0.5" />
@@ -219,4 +207,3 @@ export function Sidebar({ open, onClose }: SidebarProps) {
     </>
   )
 }
-
