@@ -1,4 +1,4 @@
-import { loadApiSettings } from './settings'
+import { resolveApiSettings } from './settings'
 
 export class ApiError extends Error {
   status: number
@@ -53,7 +53,7 @@ export async function apiFetch<T>(
 }
 
 export function searchClient() {
-  const s = loadApiSettings()
+  const s = resolveApiSettings()
   return {
     baseUrl: s.searchBaseUrl,
     token: s.searchToken,
@@ -61,7 +61,7 @@ export function searchClient() {
 }
 
 export function aclClient() {
-  const s = loadApiSettings()
+  const s = resolveApiSettings()
   return {
     baseUrl: s.aclBaseUrl,
     token: s.aclToken,
@@ -69,7 +69,7 @@ export function aclClient() {
 }
 
 export function controlClient() {
-  const s = loadApiSettings()
+  const s = resolveApiSettings()
   return {
     baseUrl: s.metricsBaseUrl,
     token: s.controlToken,

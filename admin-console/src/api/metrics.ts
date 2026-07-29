@@ -1,4 +1,4 @@
-import { loadApiSettings } from './settings'
+import { resolveApiSettings } from './settings'
 import { apiFetch } from './client'
 import { demo, live, isDemoMode, type Sourced } from './source'
 import { groupByLabel, histogram, histogramQuantile, scrapeMetrics, sumMetric, type PromSample } from './prometheus'
@@ -52,9 +52,12 @@ export interface Telemetry {
 }
 
 export async function fetchProxyStats(): Promise<ProxyStats | null> {
-  const settings = loadApiSettings()
+  const settings = resolveApiSettings()
   try {
-    return await apiFetch<ProxyStats>('/api/stats', { baseUrl: settings.metricsBaseUrl })
+    return await apiFetch<ProxyStats>('/api/stats', {
+      baseUrl: settings.metricsBaseUrl,
+      token: settings.controlToken,
+    })
   } catch {
     return null
   }
@@ -67,9 +70,10 @@ export async function purgeCache(body: {
   tag?: string
   tags?: string[]
 }): Promise<void> {
-  const settings = loadApiSettings()
+  const settings = resolveApiSettings()
   await apiFetch('/api/cache/purge', {
     baseUrl: settings.metricsBaseUrl,
+    token: settings.controlToken,
     method: 'POST',
     body,
   })
@@ -83,9 +87,12 @@ const WINDOW_MS = 30 * 60_000
  */
 export async function fetchTelemetry(): Promise<Sourced<Telemetry>> {
   try {
-    const settings = loadApiSettings()
+    const settings = resolveApiSettings()
     const [stats, snap] = await Promise.all([
-      apiFetch<ProxyStats>('/api/stats', { baseUrl: settings.metricsBaseUrl }),
+      apiFetch<ProxyStats>('/api/stats', {
+        baseUrl: settings.metricsBaseUrl,
+        token: settings.controlToken,
+      }),
       scrapeMetrics().catch(() => null),
     ])
 
