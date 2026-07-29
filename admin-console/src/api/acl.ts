@@ -1,4 +1,5 @@
 import { apiFetch, aclClient } from './client'
+import { isDemoMode } from './source'
 
 export interface AclRule {
   id: string
@@ -20,8 +21,9 @@ export async function fetchAclRules(): Promise<AclRulesResponse> {
   const { baseUrl, token } = aclClient()
   try {
     return await apiFetch<AclRulesResponse>('/api/acl/rules', { baseUrl, token })
-  } catch {
-    return mockRules()
+  } catch (error) {
+    if (isDemoMode()) return mockRules()
+    throw error
   }
 }
 

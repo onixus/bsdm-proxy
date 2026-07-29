@@ -8,8 +8,10 @@ import {
   type AclRule,
   type AclRulesResponse,
 } from '../api/acl'
+import { ApiError } from '../api/client'
 import { Button } from '../components/ui/Button'
 import { Panel } from '../components/dashboard/MetricWidget'
+import { ErrorState } from '../components/ui/DataState'
 import { useToast } from '../components/ui/Toast'
 import { useLanguage, translations } from '../lib/i18n'
 
@@ -19,13 +21,25 @@ export function PoliciesPage() {
 
   const { toast } = useToast()
   const [data, setData] = useState<AclRulesResponse | null>(null)
+  const [loadError, setLoadError] = useState<{ title: string; detail: string } | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
 
   const load = async () => {
     setLoading(true)
-    setData(await fetchAclRules())
-    setLoading(false)
+    setLoadError(null)
+    try {
+      setData(await fetchAclRules())
+    } catch (error) {
+      setData(null)
+      const unauthorized = error instanceof ApiError && (error.status === 401 || error.status === 403)
+      setLoadError({
+        title: unauthorized ? 'ACL API unauthorized' : 'ACL API unreachable',
+        detail: error instanceof ApiError ? `HTTP ${error.status}: ${error.message}` : String(error),
+      })
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => {
@@ -96,73 +110,77 @@ export function PoliciesPage() {
             <RefreshCw className={`size-4 ${loading ? 'animate-spin' : ''}`} />
             {tr.policies.refresh}
           </Button>
-          <Button variant="secondary" onClick={handlePersist} disabled={busy}>
+          <Button variant="secondary" onClick={handlePersist} disabled={busy || loading || !data}>
             <Save className="size-4" />
             {tr.policies.persist}
           </Button>
-          <Button variant="primary-glow" onClick={handleReload} disabled={busy}>
+          <Button variant="primary-glow" onClick={handleReload} disabled={busy || loading || !data}>
             <RotateCcw className={`size-4 ${busy ? 'animate-spin' : ''}`} />
             {tr.policies.reload}
           </Button>
         </div>
       </div>
 
-      <Panel
-        title={`${tr.policies.activeRules} (${filteredRules.length})`}
-        action={
-          <div className="w-64">
-            <input
-              type="text"
-              placeholder="Поиск правил..."
-              value={ruleFilter}
-              onChange={(e) => setRuleFilter(e.target.value)}
-              className="w-full rounded-lg border border-border bg-surface-0 px-3 py-1.5 text-xs text-text-primary placeholder:text-text-secondary focus:border-accent focus:outline-none"
-            />
-          </div>
-        }
-      >
-        <div className="hidden overflow-x-auto md:block">
-          <table className="w-full min-w-[640px] text-left text-sm">
-            <thead className="border-b border-border text-xs uppercase text-text-secondary font-bold">
-              <tr>
-                <th className="pb-3 pr-4">{tr.policies.priority}</th>
-                <th className="pb-3 pr-4">{tr.policies.name}</th>
-                <th className="pb-3 pr-4">{tr.policies.type}</th>
-                <th className="pb-3 pr-4">{tr.policies.action}</th>
-                <th className="pb-3 pr-4">{tr.policies.status}</th>
-                <th className="pb-3"> </th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredRules.map((rule) => (
-                <RuleRow key={rule.id} rule={rule} onDelete={handleDelete} disabled={busy} />
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="space-y-3 md:hidden">
-          {filteredRules.map((rule) => (
-            <div key={rule.id} className="rounded-xl border border-border/80 bg-surface-0/60 p-4">
-              <div className="flex items-start justify-between gap-2">
-                <span className="font-semibold text-text-primary">{rule.name}</span>
-                <button
-                  type="button"
-                  className="text-danger hover:text-danger/80 cursor-pointer"
-                  disabled={busy}
-                  onClick={() => handleDelete(rule.id)}
-                  aria-label={`Delete ${rule.id}`}
-                >
-                  <Trash2 className="size-4" />
-                </button>
-              </div>
-              <p className="mt-1.5 font-mono text-xs text-text-secondary">
-                P{rule.priority} · {rule.action} · {formatRuleType(rule)}
-              </p>
+      {loadError ? (
+        <ErrorState title={loadError.title} detail={loadError.detail} onRetry={load} />
+      ) : (
+        <Panel
+          title={`${tr.policies.activeRules} (${filteredRules.length})`}
+          action={
+            <div className="w-64">
+              <input
+                type="text"
+                placeholder="Поиск правил..."
+                value={ruleFilter}
+                onChange={(e) => setRuleFilter(e.target.value)}
+                className="w-full rounded-lg border border-border bg-surface-0 px-3 py-1.5 text-xs text-text-primary placeholder:text-text-secondary focus:border-accent focus:outline-none"
+              />
             </div>
-          ))}
-        </div>
-      </Panel>
+          }
+        >
+          <div className="hidden overflow-x-auto md:block">
+            <table className="w-full min-w-[640px] text-left text-sm">
+              <thead className="border-b border-border text-xs uppercase text-text-secondary font-bold">
+                <tr>
+                  <th className="pb-3 pr-4">{tr.policies.priority}</th>
+                  <th className="pb-3 pr-4">{tr.policies.name}</th>
+                  <th className="pb-3 pr-4">{tr.policies.type}</th>
+                  <th className="pb-3 pr-4">{tr.policies.action}</th>
+                  <th className="pb-3 pr-4">{tr.policies.status}</th>
+                  <th className="pb-3"> </th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredRules.map((rule) => (
+                  <RuleRow key={rule.id} rule={rule} onDelete={handleDelete} disabled={busy} />
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="space-y-3 md:hidden">
+              {filteredRules.map((rule) => (
+                <div key={rule.id} className="rounded-xl border border-border/80 bg-surface-0/60 p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="font-semibold text-text-primary">{rule.name}</span>
+                    <button
+                      type="button"
+                      className="text-danger hover:text-danger/80 cursor-pointer"
+                      disabled={busy}
+                      onClick={() => handleDelete(rule.id)}
+                      aria-label={`Delete ${rule.id}`}
+                    >
+                      <Trash2 className="size-4" />
+                    </button>
+                  </div>
+                  <p className="mt-1.5 font-mono text-xs text-text-secondary">
+                    P{rule.priority} · {rule.action} · {formatRuleType(rule)}
+                  </p>
+                </div>
+              ))}
+          </div>
+        </Panel>
+      )}
 
 
       <div className="rounded-lg border border-border bg-surface-0 p-4 text-sm text-text-secondary">

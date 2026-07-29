@@ -18,7 +18,9 @@ export function UserProfileModal({ open, onClose }: UserProfileModalProps) {
   const [lang] = useLanguage()
   const navigate = useNavigate()
   const settings = loadApiSettings()
-  const hasApiCredentials = Boolean(settings.searchToken || settings.aclToken || settings.controlToken)
+  const hasApiCredentials = Boolean(
+    settings.controlPlaneToken || settings.searchToken || settings.aclToken || settings.controlToken,
+  )
   const ru = lang === 'ru'
 
   const toggleTheme = () => {

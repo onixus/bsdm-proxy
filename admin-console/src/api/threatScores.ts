@@ -1,4 +1,4 @@
-import { loadApiSettings } from './settings'
+import { resolveApiSettings } from './settings'
 import { apiFetch } from './client'
 import { demo, isDemoMode, live, type Sourced } from './source'
 import type { MlFactor } from './search'
@@ -19,11 +19,12 @@ export interface ThreatScoreSnapshot {
 }
 
 export async function fetchThreatScores(): Promise<Sourced<ThreatScoreSnapshot>> {
-  const settings = loadApiSettings()
+  const settings = resolveApiSettings()
   try {
     return live(
       await apiFetch<ThreatScoreSnapshot>('/api/threat-scores', {
         baseUrl: settings.mlBaseUrl,
+        token: settings.mlToken,
       }),
     )
   } catch (err) {

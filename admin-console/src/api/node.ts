@@ -1,5 +1,5 @@
 import { apiFetch } from './client'
-import { loadApiSettings } from './settings'
+import { resolveApiSettings } from './settings'
 import { demo, isDemoMode, live, type Sourced } from './source'
 
 /** Live control-plane state of this proxy node (real endpoints on the metrics port). */
@@ -19,10 +19,11 @@ export interface UpstreamTlsStatus {
 }
 
 export async function fetchHierarchyPeers(): Promise<Sourced<HierarchyPeer[]>> {
-  const settings = loadApiSettings()
+  const settings = resolveApiSettings()
   try {
     const res = await apiFetch<HierarchyPeer[] | { peers: HierarchyPeer[] }>('/api/hierarchy/peers', {
       baseUrl: settings.metricsBaseUrl,
+      token: settings.controlToken,
     })
     return live(Array.isArray(res) ? res : (res.peers ?? []))
   } catch (err) {
@@ -36,9 +37,14 @@ export async function fetchHierarchyPeers(): Promise<Sourced<HierarchyPeer[]>> {
 }
 
 export async function fetchUpstreamTls(): Promise<Sourced<UpstreamTlsStatus>> {
-  const settings = loadApiSettings()
+  const settings = resolveApiSettings()
   try {
-    return live(await apiFetch<UpstreamTlsStatus>('/api/upstream/tls', { baseUrl: settings.metricsBaseUrl }))
+    return live(
+      await apiFetch<UpstreamTlsStatus>('/api/upstream/tls', {
+        baseUrl: settings.metricsBaseUrl,
+        token: settings.controlToken,
+      }),
+    )
   } catch (err) {
     if (isDemoMode()) return demo({ mode: 'system-roots', client_certs: 0, note: 'demo' })
     throw err

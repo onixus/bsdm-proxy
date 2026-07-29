@@ -45,7 +45,7 @@ export function ErrorState({
         <p className="font-semibold text-text-primary text-base">{title}</p>
         {detail && <p className="mt-1 break-all font-mono text-xs text-text-secondary bg-surface-0/60 p-2 rounded-md border border-border">{detail}</p>}
         <p className="mt-2 text-xs text-text-secondary max-w-md">
-          Check API endpoints in Settings → API, or enable demo mode to explore the UI offline.
+          Check the connection in Settings → Console API, or enable demo mode to explore the UI offline.
         </p>
       </div>
       {onRetry && (
@@ -103,4 +103,3 @@ export function PreviewBanner({ feature, children }: { feature: string; children
     </div>
   )
 }
-

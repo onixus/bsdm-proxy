@@ -82,14 +82,27 @@ The UI talks to existing BSDM REST endpoints (no backend changes required):
 | `GET /api/search` | `:8080` | Logs |
 | `GET/POST /api/acl/*` | `:9090` | Policies |
 | `GET /metrics` | `:9090` | Dashboard |
-| `GET /api/ml/scores` | `:8091` | Dashboard (future; mock fallback) |
+| `GET /api/threat-scores` | `:8091` | Dashboard / Threat Scores |
 
-Configure base URLs under **Settings → API**. Empty base URLs use Vite dev-server proxies defined in `vite.config.ts`.
+Configure the connection under **Settings → Console API**:
 
-Passwords and API tokens are **not** persisted to `localStorage` — they remain in memory for the current browser session only.
+- **Single endpoint** (default) — one Control Plane base URL and token. The
+  deployment gateway must route `/api/search`, `/api/acl`, `/api/stats`,
+  `/api/threat-scores`, and `/metrics` on the same origin.
+- **Advanced split deployment** — independent Search, ACL, Control/Metrics, and
+  ML worker base URLs with the existing Search, ACL, and Control tokens.
 
-When APIs are unreachable, the console shows an explicit error unless the
-operator has deliberately enabled demo mode.
+An empty single-endpoint URL uses same-origin paths; Vite maps those paths to
+the local development services defined in `vite.config.ts`. Existing saved
+multi-URL configurations are migrated to Advanced mode.
+
+Use **Test connection** to run read-only health probes for every dependency.
+Each service is reported as connected, unauthorized, or unreachable.
+
+Passwords and API tokens are **not** persisted to `localStorage` — they remain
+in memory for the current browser tab only. When APIs are unreachable, the
+console shows an explicit service error unless the operator has deliberately
+enabled demo mode.
 
 ## Identity and version
 

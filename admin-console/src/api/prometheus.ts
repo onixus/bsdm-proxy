@@ -1,4 +1,4 @@
-import { loadApiSettings } from './settings'
+import { resolveApiSettings } from './settings'
 
 /** One sample from the Prometheus text exposition format. */
 export interface PromSample {
@@ -20,9 +20,11 @@ export interface PromSnapshot {
 }
 
 export async function scrapeMetrics(): Promise<PromSnapshot> {
-  const settings = loadApiSettings()
+  const settings = resolveApiSettings()
   const base = settings.metricsBaseUrl.trim()
-  const res = await fetch(`${base}/metrics`, { headers: { Accept: 'text/plain' } })
+  const headers: Record<string, string> = { Accept: 'text/plain' }
+  if (settings.controlToken) headers.Authorization = `Bearer ${settings.controlToken}`
+  const res = await fetch(`${base}/metrics`, { headers })
   if (!res.ok) throw new Error(`GET /metrics → HTTP ${res.status}`)
   const text = await res.text()
   return { scrapedAt: Date.now(), samples: parsePrometheusText(text) }
