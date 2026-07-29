@@ -5,6 +5,10 @@ export interface RegisteredDevice {
   type: 'desktop' | 'phone';
   status: 'Secured' | 'Flagged' | 'Revoked';
   connection: string;
+  lastSeen: number;
+  agentStatus: string;
+  agentVersion?: string;
+  policyVersion?: string;
   certSubject?: string;
   certFingerprint?: string;
   trustScore?: number;
@@ -15,7 +19,7 @@ export const fetchRegisteredDevices = async (): Promise<RegisteredDevice[]> => {
   if (!response.ok) {
     throw new Error(
       response.status === 404
-        ? 'Device identity API is not implemented by this node'
+        ? 'Device identity API is unavailable on this node'
         : `Device identity API returned HTTP ${response.status}`,
     );
   }
@@ -29,7 +33,7 @@ export const revokeDeviceCertificate = async (
     method: 'POST',
   });
   if (!response.ok) {
-    throw new Error(`Certificate revoke API returned HTTP ${response.status}`);
+    throw new Error(`Device revoke API returned HTTP ${response.status}`);
   }
   return (await response.json()) as { success: boolean; message: string };
 };

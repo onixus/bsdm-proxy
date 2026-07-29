@@ -38,6 +38,9 @@ pub struct SearchHit {
     pub parent_event_id: Option<String>,
     pub redirect_url: Option<String>,
     pub decision_source: Option<String>,
+    pub acl_action: Option<String>,
+    pub acl_rule_id: Option<String>,
+    pub acl_reason: Option<String>,
 }
 
 impl SearchHit {
@@ -56,6 +59,9 @@ impl SearchHit {
             "parent_event_id": self.parent_event_id,
             "redirect_url": self.redirect_url,
             "decision_source": self.decision_source,
+            "acl_action": self.acl_action,
+            "acl_rule_id": self.acl_rule_id,
+            "acl_reason": self.acl_reason,
         })
     }
 }
@@ -116,7 +122,8 @@ async fn search_clickhouse(
     };
     let sql = format!(
         "SELECT toUnixTimestamp(ts) AS ts, username, toString(client_ip) AS client_ip, url, method, status, \
-         cache_status, domain, event_id, session_id, parent_event_id, redirect_url, decision_source \
+         cache_status, domain, event_id, session_id, parent_event_id, redirect_url, decision_source, \
+         acl_action, acl_rule_id, acl_reason \
          FROM {table} \
          WHERE ts >= fromUnixTimestamp({{from:UInt32}}) \
            AND ts <= fromUnixTimestamp({{to:UInt32}}) \
@@ -168,6 +175,9 @@ pub fn parse_search_ndjson(
             parent_event_id: json_opt_string(&v, "parent_event_id"),
             redirect_url: json_opt_string(&v, "redirect_url"),
             decision_source: json_opt_string(&v, "decision_source"),
+            acl_action: json_opt_string(&v, "acl_action"),
+            acl_rule_id: json_opt_string(&v, "acl_rule_id"),
+            acl_reason: json_opt_string(&v, "acl_reason"),
         });
     }
     Ok(out)

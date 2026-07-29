@@ -78,6 +78,9 @@ fn event_to_hit(e: &CacheEvent) -> SearchHit {
         parent_event_id: e.parent_event_id.clone(),
         redirect_url: e.redirect_url.clone(),
         decision_source: e.decision_source.clone(),
+        acl_action: e.acl_action.clone(),
+        acl_rule_id: e.acl_rule_id.clone(),
+        acl_reason: e.acl_reason.clone(),
     }
 }
 
@@ -106,6 +109,8 @@ mod tests {
             categories: vec![],
             threat_sources: vec![],
             acl_action: None,
+            acl_rule_id: None,
+            acl_reason: None,
             session_id: "s1".into(),
             parent_event_id: None,
             redirect_url: None,
@@ -176,5 +181,34 @@ mod tests {
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].domain, "a.com");
         assert_eq!(hits[0].decision_source.as_deref(), Some("mitm"));
+    }
+
+    #[test]
+    fn exposes_acl_decision_details() {
+        let store = MemoryStore::new(10);
+        let mut blocked = sample("blocked.example", 1);
+        blocked.status = 403;
+        blocked.cache_status = "BLOCKED".into();
+        blocked.acl_action = Some("deny".into());
+        blocked.acl_rule_id = Some("deny-malware".into());
+        blocked.acl_reason = Some("malware category denied".into());
+        store.insert_batch(&[blocked]);
+
+        let hits = store.search(&SearchQuery {
+            from_ts: 0,
+            to_ts: 100,
+            domain: String::new(),
+            username: String::new(),
+            session_id: String::new(),
+            decision_source: String::new(),
+            limit: 10,
+            session_timeline: false,
+        });
+        assert_eq!(hits[0].acl_action.as_deref(), Some("deny"));
+        assert_eq!(hits[0].acl_rule_id.as_deref(), Some("deny-malware"));
+        assert_eq!(
+            hits[0].acl_reason.as_deref(),
+            Some("malware category denied")
+        );
     }
 }

@@ -14,7 +14,8 @@ policy and heartbeat endpoints.
 ### Implementation status
 
 - Implemented: `GET /api/v1/agent/policy`,
-  `POST /api/v1/agent/heartbeat`.
+  `POST /api/v1/agent/heartbeat`, `GET /api/v1/devices`, and
+  `POST /api/v1/devices/{device_id}/revoke`.
 - Reserved by this contract: `POST /api/v1/agent/enroll`,
   `POST /api/v1/agent/events`, and policy push.
 
@@ -63,6 +64,12 @@ policy and heartbeat endpoints.
 ### 3.1 Heartbeat (`POST /api/v1/agent/heartbeat`)
 - Periodicity: Default 60s.
 - Contains: `device_id`, `policy_version`, `agent_version`, `status` (`healthy`, `degraded`).
+- May include inventory/posture fields used by Trust UI: `name`, `ip`,
+  `device_type` (`desktop`, `phone`), `cert_subject`, `cert_fingerprint`,
+  and `trust_score` (0–100).
+- The proxy keeps the latest heartbeat for each device in its runtime registry.
+  `GET /api/v1/devices` exposes only those observed devices; it does not create
+  placeholder inventory.
 
 ### 3.2 Telemetry Ingestion (`POST /api/v1/agent/events`)
 - Batched events logged locally and shipped back to ClickHouse event pipeline via Control Plane API.

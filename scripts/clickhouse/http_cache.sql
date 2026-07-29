@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS bsdm.http_cache
     categories Array(LowCardinality(String)),
     threat_sources Array(LowCardinality(String)),
     acl_action LowCardinality(Nullable(String)),
+    acl_rule_id Nullable(String),
+    acl_reason Nullable(String),
     session_id String DEFAULT '',
     parent_event_id Nullable(String),
     redirect_url Nullable(String),
@@ -45,6 +47,12 @@ ALTER TABLE bsdm.http_cache
 ALTER TABLE bsdm.http_cache
     ADD COLUMN IF NOT EXISTS bypass_reason Nullable(String);
 
+ALTER TABLE bsdm.http_cache
+    ADD COLUMN IF NOT EXISTS acl_rule_id Nullable(String);
+
+ALTER TABLE bsdm.http_cache
+    ADD COLUMN IF NOT EXISTS acl_reason Nullable(String);
+
 -- M3: who accessed domain X (30 days)
 -- SELECT ts, username, client_ip, url, method, status, cache_status, session_id
 -- FROM bsdm.http_cache
@@ -58,7 +66,7 @@ ALTER TABLE bsdm.http_cache
 -- ORDER BY ts ASC;
 
 -- M4: blocked events with threat sources
--- SELECT ts, username, domain, url, categories, threat_sources, acl_action, session_id
+-- SELECT ts, username, domain, url, categories, threat_sources, acl_action, acl_rule_id, acl_reason, session_id
 -- FROM bsdm.http_cache
 -- WHERE cache_status = 'DENY' OR acl_action = 'deny'
 --   AND ts >= now() - INTERVAL 7 DAY;

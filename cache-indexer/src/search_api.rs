@@ -214,6 +214,9 @@ fn hits_to_csv(hits: &[crate::store::SearchHit]) -> String {
         "parent_event_id",
         "redirect_url",
         "decision_source",
+        "acl_action",
+        "acl_rule_id",
+        "acl_reason",
     ];
     let mut out = headers.join(",");
     out.push('\n');
@@ -235,6 +238,9 @@ fn hits_to_csv(hits: &[crate::store::SearchHit]) -> String {
             h.parent_event_id.clone().unwrap_or_default(),
             h.redirect_url.clone().unwrap_or_default(),
             h.decision_source.clone().unwrap_or_default(),
+            h.acl_action.clone().unwrap_or_default(),
+            h.acl_rule_id.clone().unwrap_or_default(),
+            h.acl_reason.clone().unwrap_or_default(),
         ];
         out.push_str(
             &row.iter()

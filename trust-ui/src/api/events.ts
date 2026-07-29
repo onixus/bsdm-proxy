@@ -10,6 +10,9 @@ export interface TrafficEvent {
   event_id: string;
   session_id: string;
   decision_source?: string;
+  acl_action?: string;
+  acl_rule_id?: string;
+  acl_reason?: string;
 }
 
 export const fetchRecentEvents = async (): Promise<TrafficEvent[]> => {

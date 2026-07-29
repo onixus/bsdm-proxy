@@ -5,6 +5,9 @@ use bsdm_proxy_e2e::{
     test_ca_cert_path, wait_for_tcp, workspace_path, HarnessConfig, ProxyHarness,
 };
 use std::net::SocketAddr;
+use std::time::Duration;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
 
 #[tokio::test]
 async fn e2e_cache_hit_on_repeat_request() {
@@ -100,6 +103,97 @@ async fn e2e_acl_denies_blocked_domain() {
         .expect("blocked request");
 
     assert_eq!(response.status(), reqwest::StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn e2e_acl_denied_connect_emits_policy_event() {
+    let _guard = proxy_test_guard().await;
+    let sink = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind event sink");
+    let sink_port = sink.local_addr().expect("sink address").port();
+    let (event_tx, event_rx) = tokio::sync::oneshot::channel();
+    let sink_task = tokio::spawn(async move {
+        let (mut stream, _) = sink.accept().await.expect("accept event");
+        let mut request = Vec::new();
+        let body = loop {
+            let mut chunk = [0_u8; 4096];
+            let read = stream.read(&mut chunk).await.expect("read event");
+            assert!(read > 0, "event sink request ended before body");
+            request.extend_from_slice(&chunk[..read]);
+            let Some(header_end) = request.windows(4).position(|w| w == b"\r\n\r\n") else {
+                continue;
+            };
+            let header_end = header_end + 4;
+            let headers = std::str::from_utf8(&request[..header_end]).expect("event headers");
+            let content_length = headers
+                .lines()
+                .find_map(|line| {
+                    line.to_ascii_lowercase()
+                        .strip_prefix("content-length:")
+                        .map(str::trim)
+                        .and_then(|value| value.parse::<usize>().ok())
+                })
+                .expect("content length");
+            if request.len() >= header_end + content_length {
+                break request[header_end..header_end + content_length].to_vec();
+            }
+        };
+        stream
+            .write_all(b"HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n")
+            .await
+            .expect("reply to event");
+        event_tx.send(body).expect("send captured event");
+    });
+
+    let harness = ProxyHarness::start(HarnessConfig {
+        acl_enabled: true,
+        acl_rules_path: Some(workspace_path("config/acl-rules.test.json")),
+        extra_env: [(
+            "EVENT_SINK_URL".to_string(),
+            format!("http://127.0.0.1:{sink_port}/api/events"),
+        )]
+        .into(),
+        ..Default::default()
+    })
+    .await
+    .expect("start proxy");
+
+    let mut proxy = TcpStream::connect(("127.0.0.1", harness.proxy_port))
+        .await
+        .expect("connect to proxy");
+    proxy
+        .write_all(
+            b"CONNECT blocked.test:443 HTTP/1.1\r\nHost: blocked.test:443\r\nUser-Agent: e2e-connect\r\n\r\n",
+        )
+        .await
+        .expect("write CONNECT");
+    let mut response = [0_u8; 1024];
+    let read = proxy
+        .read(&mut response)
+        .await
+        .expect("read CONNECT response");
+    assert!(
+        std::str::from_utf8(&response[..read])
+            .expect("CONNECT response text")
+            .starts_with("HTTP/1.1 403"),
+        "CONNECT should be denied"
+    );
+
+    let body = tokio::time::timeout(Duration::from_secs(5), event_rx)
+        .await
+        .expect("policy event timeout")
+        .expect("policy event channel");
+    let event: bsdm_events::CacheEvent =
+        serde_json::from_slice(&body).expect("deserialize policy event");
+    assert_eq!(event.method, "CONNECT");
+    assert_eq!(event.cache_status, "BLOCKED");
+    assert_eq!(event.decision_source.as_deref(), Some("sni"));
+    assert_eq!(event.acl_action.as_deref(), Some("deny"));
+    assert_eq!(event.acl_rule_id.as_deref(), Some("block-test-domain"));
+    assert!(event.acl_reason.is_some());
+
+    sink_task.await.expect("event sink task");
 }
 
 #[tokio::test]

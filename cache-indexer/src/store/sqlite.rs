@@ -40,8 +40,9 @@ impl SqliteStore {
                 r#"
                 INSERT INTO events (
                   event_id, ts, domain, username, client_ip, url, method, status,
-                  cache_status, session_id, parent_event_id, redirect_url, decision_source, payload
-                ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)
+                  cache_status, session_id, parent_event_id, redirect_url, decision_source,
+                  acl_action, acl_rule_id, acl_reason, payload
+                ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
                 ON CONFLICT(event_id) DO UPDATE SET
                   ts=excluded.ts,
                   domain=excluded.domain,
@@ -55,6 +56,9 @@ impl SqliteStore {
                   parent_event_id=excluded.parent_event_id,
                   redirect_url=excluded.redirect_url,
                   decision_source=excluded.decision_source,
+                  acl_action=excluded.acl_action,
+                  acl_rule_id=excluded.acl_rule_id,
+                  acl_reason=excluded.acl_reason,
                   payload=excluded.payload
                 "#,
             )?;
@@ -78,6 +82,9 @@ impl SqliteStore {
                     e.parent_event_id,
                     e.redirect_url,
                     e.decision_source,
+                    e.acl_action,
+                    e.acl_rule_id,
+                    e.acl_reason,
                     payload,
                 ])?;
             }
@@ -110,7 +117,8 @@ impl SqliteStore {
         };
         let sql = format!(
             "SELECT ts, username, client_ip, url, method, status, cache_status, domain, \
-             event_id, session_id, parent_event_id, redirect_url, decision_source \
+             event_id, session_id, parent_event_id, redirect_url, decision_source, \
+             acl_action, acl_rule_id, acl_reason \
              FROM events \
              WHERE ts >= ?1 AND ts <= ?2 \
                AND (?3 = '' OR domain = ?3) \
@@ -147,6 +155,9 @@ impl SqliteStore {
                     parent_event_id: row.get(10)?,
                     redirect_url: row.get(11)?,
                     decision_source: row.get(12)?,
+                    acl_action: row.get(13)?,
+                    acl_rule_id: row.get(14)?,
+                    acl_reason: row.get(15)?,
                 })
             },
         )?;
@@ -176,6 +187,9 @@ fn initialize_schema(conn: &Connection) -> Result<(), Box<dyn std::error::Error 
               parent_event_id TEXT,
               redirect_url TEXT,
               decision_source TEXT,
+              acl_action TEXT,
+              acl_rule_id TEXT,
+              acl_reason TEXT,
               payload TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
@@ -186,6 +200,11 @@ fn initialize_schema(conn: &Connection) -> Result<(), Box<dyn std::error::Error 
     )?;
     if !has_column(conn, "events", "decision_source")? {
         conn.execute("ALTER TABLE events ADD COLUMN decision_source TEXT", [])?;
+    }
+    for column in ["acl_action", "acl_rule_id", "acl_reason"] {
+        if !has_column(conn, "events", column)? {
+            conn.execute(&format!("ALTER TABLE events ADD COLUMN {column} TEXT"), [])?;
+        }
     }
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_events_decision_source_ts
@@ -231,6 +250,8 @@ mod tests {
             categories: vec![],
             threat_sources: vec![],
             acl_action: None,
+            acl_rule_id: None,
+            acl_reason: None,
             session_id: "sess".into(),
             parent_event_id: None,
             redirect_url: None,
@@ -292,6 +313,9 @@ mod tests {
 
         initialize_schema(&conn).unwrap();
         assert!(has_column(&conn, "events", "decision_source").unwrap());
+        assert!(has_column(&conn, "events", "acl_action").unwrap());
+        assert!(has_column(&conn, "events", "acl_rule_id").unwrap());
+        assert!(has_column(&conn, "events", "acl_reason").unwrap());
 
         let store = SqliteStore {
             conn: Mutex::new(conn),

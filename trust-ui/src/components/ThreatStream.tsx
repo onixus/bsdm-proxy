@@ -4,7 +4,13 @@ import { Activity, Search } from 'lucide-react';
 import { fetchRecentEvents, type TrafficEvent } from '../api/events';
 
 function eventAction(event: TrafficEvent): 'ALLOWED' | 'BLOCKED' | 'INSPECTED' {
-  if (event.status === 403 || event.cache_status === 'DENIED') return 'BLOCKED';
+  if (
+    event.status === 403 ||
+    event.cache_status === 'BLOCKED' ||
+    event.cache_status === 'DENIED' ||
+    event.acl_action === 'deny'
+  )
+    return 'BLOCKED';
   if (event.decision_source === 'mitm') return 'INSPECTED';
   return 'ALLOWED';
 }
@@ -120,6 +126,14 @@ export const ThreatStream: React.FC = () => {
                   <p className="text-[10px] text-slate-500">
                     {event.method} · {event.cache_status}
                   </p>
+                  {eventAction(event) === 'BLOCKED' && (event.acl_rule_id || event.acl_reason) && (
+                    <p
+                      className="text-[10px] text-rose-300 truncate"
+                      title={[event.acl_rule_id, event.acl_reason].filter(Boolean).join(': ')}
+                    >
+                      {event.acl_rule_id || 'ACL'} · {event.acl_reason || 'Denied by policy'}
+                    </p>
+                  )}
                 </div>
                 <div className="col-span-2">{actionBadge(eventAction(event))}</div>
                 <div className="col-span-2 text-right font-bold text-slate-200">{event.status}</div>
