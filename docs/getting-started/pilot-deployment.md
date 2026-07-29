@@ -216,7 +216,7 @@ curl http://127.0.0.1:9090/api/security/dlp \
 ```bash
 curl http://127.0.0.1:9090/health
 curl http://127.0.0.1:9090/ready
-curl --cacert certs/ca.crt -x http://127.0.0.1:1488 https://httpbin.org/get
+curl --cacert certs/ca.crt -x http://127.0.0.1:3128 https://httpbin.org/get
 curl 'http://127.0.0.1:8123/?query=SELECT+count()+FROM+bsdm.http_cache'
 curl 'http://127.0.0.1:8080/api/search?limit=5'
 ```

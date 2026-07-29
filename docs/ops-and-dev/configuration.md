@@ -10,9 +10,12 @@ native install находятся в `packaging/config/*.env.example`; Compose �
 
 | Переменная | Default | Назначение |
 |---|---:|---|
-| `HTTP_PORT` | `1488` | Proxy listener |
+| `HTTP_PORT` | `3128` | Proxy listener |
 | `METRICS_PORT` | `9090` | Health, metrics и REST control |
-| `MITM_ENABLED` | `true` | HTTPS MITM; требует `ca.key` и `ca.crt` |
+| `POLICY_MODE` | `selective-mitm` | Режим политики (`selective-mitm`, `sni`, `full-mitm`) |
+| `MITM_CATEGORIES` | `malware,phishing,illegal-content` | Категории доменов для терминирования TLS в selective-mitm |
+| `PINNING_EXCEPTIONS` | `.slack.com,.teams.microsoft.com,.zoom.us` | Исключения Certificate Pinning для байпаса MITM |
+| `MITM_ENABLED` | `true` | HTTPS MITM; требует `ca.key` и `ca.crt` при POLICY_MODE != sni |
 | `SHUTDOWN_TIMEOUT_SECONDS` | `30` | Graceful shutdown |
 | `WORKER_COUNT` | `1` | SO_REUSEPORT accept loops на Unix |
 | `RUST_LOG` | component-specific | tracing filter |

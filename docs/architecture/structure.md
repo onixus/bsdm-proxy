@@ -1,6 +1,6 @@
 # Структура репозитория
 
-Актуально для workspace `0.6.1-1`.
+Актуально для workspace `0.8.0`.
 
 ## Cargo workspace
 
@@ -10,11 +10,12 @@
 | `cache-indexer` | `cache-indexer/` | Kafka/HTTP → ClickHouse/SQLite |
 | `alert-worker` | `alert-worker/` | ClickHouse rules → webhook |
 | `ml-worker` | `ml-worker/` | Feature extraction и scoring |
-| `dns-sinkhole` | `dns-sinkhole/` | UDP DNS, DoH/DoT и RPZ-lite |
+| `dns-sinkhole` | `dns-sinkhole/` | Core UDP DNS, DoH/DoT и RPZ-lite |
 | `bsdm-events` | `bsdm-events/` | Общая event schema |
 | `bsdm-proxy-e2e` | `e2e/` | Test harness |
 | `bsdm-wasm-sdk` | `bsdm-wasm-sdk/` | WASM guest ABI helpers |
 | WASM example | `examples/wasm/rust_plugin/` | Example guest plugin |
+| `agent-spike` | `examples/agent-spike/` | On-Device SWG Local Policy Agent Spike (Phase C) |
 
 Корневой `Cargo.toml` — единственный источник состава workspace.
 
@@ -26,11 +27,12 @@ bsdm-proxy/
 ├── cache-indexer/          # Analytics ingest + Search API
 ├── alert-worker/           # Detection rules
 ├── ml-worker/              # Feature store и scoring
-├── dns-sinkhole/           # DNS security sidecar
+├── dns-sinkhole/           # Core DNS security sidecar
 ├── bsdm-events/            # Shared event schema
 ├── bsdm-wasm-sdk/          # Experimental WASM SDK
 ├── e2e/                    # Integration test harness
 ├── admin-console/          # React SPA
+├── trust-ui/               # React SPA (Trust User Dashboard)
 ├── charts/bsdm/            # Helm chart
 ├── packaging/              # systemd package и env examples
 ├── config/                 # ACL examples
@@ -40,7 +42,7 @@ bsdm-proxy/
 ├── grafana/                # Dashboards и provisioning
 ├── alertmanager/           # Alertmanager template
 ├── bpf/                    # Experimental XDP program
-├── examples/               # DNS/WASM examples
+├── examples/               # Agent, DNS и WASM examples
 ├── Dockerfile              # Multi-stage images
 └── docker-compose*.yml     # Deployment examples
 ```
@@ -57,7 +59,7 @@ bsdm-proxy/
 | `docker-compose.ha.yml` | HA lab sketch |
 | `docker-compose.awg.yml` | Experimental AWG sidecar |
 
-Основной Compose содержит profiles `alerts`, `ml`, `icap` и `dns-sinkhole`.
+Основной Compose включает `dns-sinkhole` в базовом стеке; профили опциональных компонентов: `alerts`, `ml`, `icap`.
 
 ## Конфигурация и данные
 

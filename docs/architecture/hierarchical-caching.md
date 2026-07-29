@@ -112,15 +112,15 @@ Enum CacheSelectionStrategy {
 HIERARCHY_ENABLED=true
 
 # Parent caches (comma-separated: host:port[:weight])
-CACHE_PARENTS=parent1.example.com:1488:1.0,parent2.example.com:1488:0.5
+CACHE_PARENTS=parent1.example.com:3128:1.0,parent2.example.com:3128:0.5
 
 # Sibling caches (host:port[:weight][:icp_port])
-CACHE_SIBLINGS=sibling1.example.com:1488,sibling2.example.com:1488:1.0:3130
+CACHE_SIBLINGS=sibling1.example.com:3128,sibling2.example.com:3128:1.0:3130
 
 # Optional peers JSON file (overrides CACHE_PARENTS / CACHE_SIBLINGS when set)
 # CACHE_PEERS_PATH=/etc/bsdm/peers.json
 # HIERARCHY_PEERS_PATH=/etc/bsdm/peers.json   # alias
-# {"parents":["parent:1488:1.0"],"siblings":["sib:1488:1.0:3130"]}
+# {"parents":["parent:3128:1.0"],"siblings":["sib:3128:1.0:3130"]}
 # Hot reload: POST /api/hierarchy/reload  (see control-plane.md)
 
 # ICP server bind (UDP, default 0.0.0.0:3130)

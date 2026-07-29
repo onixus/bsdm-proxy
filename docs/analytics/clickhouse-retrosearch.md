@@ -22,7 +22,7 @@ docker compose up -d --build
 curl 'http://127.0.0.1:8123/?query=SHOW+TABLES+FROM+bsdm'
 
 # Генерация тестового трафика
-curl -x http://127.0.0.1:1488 http://httpbin.org/get
+curl -x http://127.0.0.1:3128 http://httpbin.org/get
 
 # Проверка записей в ClickHouse и через Search API
 curl 'http://127.0.0.1:8123/?query=SELECT+count()+FROM+bsdm.http_cache'
@@ -57,6 +57,8 @@ curl 'http://127.0.0.1:8080/api/search?limit=5'
 | `response_size` | `UInt64` | Размер ответа в байтах |
 | `categories` | `Array(String)` | Категории домена (UT1) |
 | `acl_action` | `String` | Действие ACL (allow, block) |
+| `decision_source` | `Nullable(String)` | Источник решения политики (`dns`, `sni`, `mitm`, `pinning-bypass`, `local-agent`) |
+| `bypass_reason` | `Nullable(String)` | Причина байпаса терминирования TLS (`connect_tunnel`, `certificate_pinning_exception`) |
 | `threat_sources` | `Array(String)` | Источники обнаруженных угроз (PhishTank, ML) |
 | `session_id` | `String` | Soft browsing ID сессии (IP + User + User-Agent) |
 | `parent_event_id` | `Nullable(UUID)` | ID родительского запроса (для цепочек редиректов) |

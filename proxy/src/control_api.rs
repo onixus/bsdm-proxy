@@ -218,6 +218,39 @@ impl ControlApiState {
             ),
         }
     }
+
+    fn agent_policy(&self) -> Response<Body> {
+        let policy_config = crate::policy_config::load_policy_config();
+        let dto = serde_json::json!({
+            "policy_version": "v0.1.0",
+            "policy_mode": policy_config.policy_mode.as_str(),
+            "mitm_categories": policy_config.mitm_categories,
+            "pinning_exceptions": policy_config.pinning_exceptions,
+        });
+        json_response(StatusCode::OK, &dto.to_string())
+    }
+
+    async fn agent_heartbeat(&self, body: Bytes) -> Response<Body> {
+        #[derive(Deserialize)]
+        struct AgentHeartbeatDto {
+            device_id: String,
+            status: Option<String>,
+            agent_version: Option<String>,
+        }
+        match serde_json::from_slice::<AgentHeartbeatDto>(&body) {
+            Ok(hb) => {
+                info!(device_id = %hb.device_id, status = ?hb.status, agent_version = ?hb.agent_version, "Agent heartbeat received");
+                json_response(StatusCode::OK, r#"{"status":"acknowledged"}"#)
+            }
+            Err(e) => json_response(
+                StatusCode::BAD_REQUEST,
+                &format!(
+                    r#"{{"error":"invalid heartbeat payload: {}"}}"#,
+                    escape_json(&e.to_string())
+                ),
+            ),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -404,6 +437,8 @@ impl ControlApiState {
             (&Method::POST, "/api/threats/sync/broadcast") => {
                 self.threat_sync_broadcast(body).await
             }
+            (&Method::GET, "/api/agent/policy") => self.agent_policy(),
+            (&Method::POST, "/api/agent/heartbeat") => self.agent_heartbeat(body).await,
             #[cfg(feature = "wasm")]
             (&Method::POST, "/api/wasm/reload") => self.wasm_reload(),
             _ => {
@@ -1220,5 +1255,43 @@ mod tests {
 
         let resp_null = state.serve_static_ui("/index.html\0.png").await;
         assert_eq!(resp_null.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn agent_policy_and_heartbeat_endpoints() {
+        let metrics = Arc::new(Metrics::new().unwrap());
+        let cache = Arc::new(HttpL1Cache::new(100, 4));
+        let state = state_plain(metrics, cache);
+
+        // Test GET /api/agent/policy
+        let resp = state
+            .dispatch(
+                &Method::GET,
+                "/api/agent/policy",
+                Bytes::new(),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = BodyExt::collect(resp.into_body()).await.unwrap().to_bytes();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["policy_version"], "v0.1.0");
+        assert_eq!(v["policy_mode"], "selective-mitm");
+
+        // Test POST /api/agent/heartbeat
+        let hb_payload =
+            Bytes::from(r#"{"device_id":"laptop-001","status":"healthy","agent_version":"0.1.0"}"#);
+        let resp = state
+            .dispatch(
+                &Method::POST,
+                "/api/agent/heartbeat",
+                hb_payload,
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = BodyExt::collect(resp.into_body()).await.unwrap().to_bytes();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["status"], "acknowledged");
     }
 }

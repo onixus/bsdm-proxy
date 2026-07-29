@@ -28,7 +28,7 @@ flowchart TB
   end
 
   subgraph ingress [Ingress]
-    LB[LB / Gateway :1488]
+    LB[LB / Gateway :3128]
   end
 
   subgraph ns_proxy [namespace bsdm-proxy]
@@ -132,7 +132,7 @@ Spill files: `mode 0o600`, directory `0o700` (см. `ensure_private_spill_dir` �
 # bsdm-proxy — user traffic
 ports:
   - name: proxy
-    port: 1488
+    port: 3128
   - name: metrics
     port: 9090
 sessionAffinity: None
@@ -140,12 +140,12 @@ sessionAffinity: None
 
 | Трафик | Доступ |
 |--------|--------|
-| Proxy :1488 | Internal LB / ClusterIP из corporate CIDR |
+| Proxy :3128 | Internal LB / ClusterIP из corporate CIDR |
 | Metrics :9090 | NetworkPolicy: только `monitoring` namespace |
 | ACL API `/api/acl/*` | Тот же :9090 + `ACL_API_TOKEN` |
 
 **NetworkPolicy (минимум):**
-- Ingress → proxy:1488 from `corporate` CIDR
+- Ingress → proxy:3128 from `corporate` CIDR
 - Egress: internet :80/:443, Redis, Kafka, LDAP
 - Deny all else
 
