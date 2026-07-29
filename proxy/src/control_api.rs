@@ -3,6 +3,7 @@
 use bytes::Bytes;
 use http_body_util::BodyExt;
 use hyper::body::Incoming;
+use hyper::header::HeaderValue;
 use hyper::header::AUTHORIZATION;
 use hyper::{HeaderMap, Method, Request, Response, StatusCode};
 use serde::{Deserialize, Serialize};
@@ -437,8 +438,14 @@ impl ControlApiState {
             (&Method::POST, "/api/threats/sync/broadcast") => {
                 self.threat_sync_broadcast(body).await
             }
-            (&Method::GET, "/api/agent/policy") => self.agent_policy(),
-            (&Method::POST, "/api/agent/heartbeat") => self.agent_heartbeat(body).await,
+            (&Method::GET, "/api/v1/agent/policy") => self.agent_policy(),
+            (&Method::POST, "/api/v1/agent/heartbeat") => self.agent_heartbeat(body).await,
+            (&Method::GET, "/api/agent/policy") => {
+                deprecated_agent_alias(self.agent_policy(), "/api/v1/agent/policy")
+            }
+            (&Method::POST, "/api/agent/heartbeat") => {
+                deprecated_agent_alias(self.agent_heartbeat(body).await, "/api/v1/agent/heartbeat")
+            }
             #[cfg(feature = "wasm")]
             (&Method::POST, "/api/wasm/reload") => self.wasm_reload(),
             _ => {
@@ -1000,6 +1007,21 @@ fn json_response(status: StatusCode, body: &str) -> Response<Body> {
         .unwrap_or_else(|_| Response::new(full(Bytes::from_static(b"500 Internal Server Error"))))
 }
 
+fn deprecated_agent_alias(
+    mut response: Response<Body>,
+    successor_path: &'static str,
+) -> Response<Body> {
+    response
+        .headers_mut()
+        .insert("deprecation", HeaderValue::from_static("true"));
+    response.headers_mut().insert(
+        "link",
+        HeaderValue::from_str(&format!("<{successor_path}>; rel=\"successor-version\""))
+            .expect("static successor path must produce a valid Link header"),
+    );
+    response
+}
+
 fn escape_json(value: &str) -> String {
     value
         .replace('\\', "\\\\")
@@ -1263,11 +1285,11 @@ mod tests {
         let cache = Arc::new(HttpL1Cache::new(100, 4));
         let state = state_plain(metrics, cache);
 
-        // Test GET /api/agent/policy
+        // Canonical versioned policy endpoint.
         let resp = state
             .dispatch(
                 &Method::GET,
-                "/api/agent/policy",
+                "/api/v1/agent/policy",
                 Bytes::new(),
                 &HeaderMap::new(),
             )
@@ -1278,13 +1300,13 @@ mod tests {
         assert_eq!(v["policy_version"], "v0.1.0");
         assert_eq!(v["policy_mode"], "selective-mitm");
 
-        // Test POST /api/agent/heartbeat
+        // Canonical versioned heartbeat endpoint.
         let hb_payload =
             Bytes::from(r#"{"device_id":"laptop-001","status":"healthy","agent_version":"0.1.0"}"#);
         let resp = state
             .dispatch(
                 &Method::POST,
-                "/api/agent/heartbeat",
+                "/api/v1/agent/heartbeat",
                 hb_payload,
                 &HeaderMap::new(),
             )
@@ -1293,5 +1315,48 @@ mod tests {
         let body = BodyExt::collect(resp.into_body()).await.unwrap().to_bytes();
         let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(v["status"], "acknowledged");
+
+        // Unversioned v0.1 paths remain aliases for existing agents.
+        let legacy_policy = state
+            .dispatch(
+                &Method::GET,
+                "/api/agent/policy",
+                Bytes::new(),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(legacy_policy.status(), StatusCode::OK);
+        assert_eq!(legacy_policy.headers()["deprecation"], "true");
+        assert_eq!(
+            legacy_policy.headers()["link"],
+            "</api/v1/agent/policy>; rel=\"successor-version\""
+        );
+
+        let legacy_heartbeat = state
+            .dispatch(
+                &Method::POST,
+                "/api/agent/heartbeat",
+                Bytes::from(
+                    r#"{"device_id":"legacy-001","status":"healthy","agent_version":"0.1.0"}"#,
+                ),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(legacy_heartbeat.status(), StatusCode::OK);
+        assert_eq!(legacy_heartbeat.headers()["deprecation"], "true");
+        assert_eq!(
+            legacy_heartbeat.headers()["link"],
+            "</api/v1/agent/heartbeat>; rel=\"successor-version\""
+        );
+
+        let unsupported_version = state
+            .dispatch(
+                &Method::GET,
+                "/api/v2/agent/policy",
+                Bytes::new(),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(unsupported_version.status(), StatusCode::NOT_FOUND);
     }
 }
