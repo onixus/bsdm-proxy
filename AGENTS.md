@@ -35,10 +35,10 @@ Running and testing:
   Lite node (proxy + SQLite indexer, no Kafka/CH):
   `./scripts/gen-ca.sh && docker compose -f docker-compose.lite.yml up -d --build`
   (see `docs/getting-started/lite-mode.md`).
-- Run locally: `HTTP_PORT=1488 METRICS_PORT=9090 cargo run -p bsdm-proxy --bin proxy`
+- Run locally: `HTTP_PORT=3128 METRICS_PORT=9090 cargo run -p bsdm-proxy --bin proxy`
   (or the built `./target/debug/proxy`). Verify with `curl http://127.0.0.1:9090/health`
-  and `curl -x http://127.0.0.1:1488 http://httpbin.org/get`. HTTPS through MITM:
-  `curl --cacert certs/ca.crt -x http://127.0.0.1:1488 https://httpbin.org/uuid`.
+  and `curl -x http://127.0.0.1:3128 http://httpbin.org/get`. HTTPS through MITM:
+  `curl --cacert certs/ca.crt -x http://127.0.0.1:3128 https://httpbin.org/uuid`.
 - The full Docker stack (`docker-compose.yml`: Kafka, ClickHouse, Prometheus, Grafana) is
   optional and only needed to exercise the analytics pipeline / dashboards end to end.
   Lite compose does not start that plane.

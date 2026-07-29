@@ -106,6 +106,8 @@ mod tests {
             redirect_url: None,
             dlp_violation: None,
             casb_alert: None,
+            decision_source: None,
+            bypass_reason: None,
             event_id: format!("e-{ts}"),
         }
     }

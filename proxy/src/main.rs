@@ -1,5 +1,4 @@
 mod auth_config;
-mod policy_config;
 
 use auth_config::load_auth_config;
 #[cfg(feature = "kafka")]
@@ -7,14 +6,13 @@ use bsdm_proxy::KafkaEventPipeline;
 use bsdm_proxy::{
     bind_http_listeners, build_hierarchy_manager, ensure_private_spill_dir, handle_connection,
     htcp_peer_port, htcp_server_bind_addr, http_cache_key, icp_server_bind_addr,
-    load_hierarchy_config, metrics_server, run_peer_discovery, should_start_htcp_server,
-    should_start_icp_server, wait_shutdown_signal, AclAction, AuthManager, CacheConfig, CertCache,
-    ControlApiState, GlobalSessionStore, HtcpServer, HttpEventPipeline, IcpServer, L2CacheConfig,
-    Metrics, PeerDiscoveryConfig, PerfConfig, PolicyCacheConfig, PolicyDecisionCache, ProxyPolicy,
-    ProxyService, RateLimitConfig, RedisL2Cache, ThreatScoreCache, ThreatScoreConfig,
-    ThreatSyncEngine, UpstreamTlsConfig,
+    load_hierarchy_config, load_policy_config, metrics_server, policy_config::reload_acl_engine,
+    run_peer_discovery, should_start_htcp_server, should_start_icp_server, wait_shutdown_signal,
+    AclAction, AuthManager, CacheConfig, CertCache, ControlApiState, GlobalSessionStore,
+    HtcpServer, HttpEventPipeline, IcpServer, L2CacheConfig, Metrics, PeerDiscoveryConfig,
+    PerfConfig, PolicyCacheConfig, PolicyDecisionCache, ProxyPolicy, ProxyService, RateLimitConfig,
+    RedisL2Cache, ThreatScoreCache, ThreatScoreConfig, ThreatSyncEngine, UpstreamTlsConfig,
 };
-use policy_config::{load_policy_config, reload_acl_engine};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -201,6 +199,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let auth = Some(Arc::new(AuthManager::new(auth_config.clone())));
 
     let proxy_policy = ProxyPolicy {
+        policy_mode: policy_config.policy_mode,
+        mitm_categories: policy_config.mitm_categories.clone(),
+        pinning_exceptions: policy_config.pinning_exceptions.clone(),
         acl_engine: policy_config.acl_engine.clone(),
         categorization: policy_config.categorization.clone(),
     };
@@ -365,7 +366,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let http_port = std::env::var("HTTP_PORT")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(1488);
+        .unwrap_or(3128);
 
     if let (Some(setup), Some(digest)) = (hierarchy_setup.as_ref(), digest_registry.clone()) {
         let discovery_config = PeerDiscoveryConfig::from_env(

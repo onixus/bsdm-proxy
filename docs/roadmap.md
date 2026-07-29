@@ -1,126 +1,63 @@
-# Roadmap BSDM-Proxy
+# Roadmap BSDM-Proxy (Hybrid + Agent Architecture)
 
-Текущая версия workspace: **`0.6.1-1`**.
+Текущая версия workspace: **`0.8.0`**.
 
-Roadmap описывает порядок работ. Фактическая зрелость реализации определяется
-[матрицей статуса](project-status.md), а не отметкой milestone или наличием UI.
+Roadmap определяет порядок работ в рамках стратегии **Hybrid Policy (DNS -> SNI -> Selective MITM)** и переход к **On-Device Local Policy Agent**. Фактическая зрелость функционала фиксируется в [матрице статуса](project-status.md).
 
-## Реализованная основа
+---
 
-### Core proxy
+## Архитектурная философия
 
-- HTTP forward proxy и CONNECT;
-- HTTPS MITM;
-- sharded L1, mmap spill, compression и revalidation;
-- Redis L2 и cache hierarchy;
-- Basic/LDAP/NTLM/Kerberos auth;
-- ACL, categorization и rate limiting;
-- REST control plane, health и Prometheus metrics.
+1. **DNS/RPZ — первичный рубеж**: фильтрация вредоносных и заблокированных доменов на уровне DNS до установления соединений.
+2. **SNI (ClientHello) — контроль до расшифровки**: применение правил (Allow/Deny/Redirect) без терминирования TLS.
+3. **Selective MITM — селективная расшифровка**: расшифровка HTTPS применяется исключительно для целевых категорий высокого риска (`MITM_CATEGORIES`).
+4. **Local Agent — фильтрация на устройствах**: исполнение правил на эндпоинтах пользователя (On-Device SWG) вместо централизованного туннелирования.
 
-### Analytics
+---
 
-- Kafka event pipeline;
-- cache-indexer;
-- ClickHouse schema и retro-search;
-- Grafana dashboards;
-- alert-worker;
-- ML feature store, UEBA/phishing/beacon scoring и threat-score write-back.
+## Фаза A — Hybrid Policy Foundation
 
-### Optional modules
+- [x] Внедрение параметра `POLICY_MODE` (`selective-mitm` | `sni` | `full-mitm`) — по умолчанию `selective-mitm`.
+- [x] Перевод `dns-sinkhole` в Core-компонент поставки (включение в базовый `docker-compose.yml`).
+- [x] Движок правил на уровне SNI (ClientHello) до TLS-терминирования.
+- [x] Селективный MITM по списку категорий (`MITM_CATEGORIES=malware,phishing,illegal-content`).
+- [x] Изменение порта прокси по умолчанию с `1488` на `3128`.
+- [ ] Расширенная наблюдаемость исключений (`decision_source` = `dns | sni | mitm | pinning-bypass`).
 
-- Lite mode с SQLite;
-- local/Qdrant semantic cache;
-- DNS sinkhole, DoH и DoT;
-- WASM request hook PoC;
-- ICAP REQMOD/RESPMOD PoC;
-- eBPF/XDP, DLP/CASB, reverse proxy/OIDC и AWG prototypes.
+---
 
-Слово «реализован» для optional-модуля не означает production readiness.
+## Фаза B — Selective MITM Hardening & Pilot
 
-## Ближайший приоритет: стабилизация пилота
+- [x] Документирование и регламентация полного жизненного цикла CA (`docs/ops-and-dev/ca-lifecycle.md`).
+- [ ] Управление реестром исключений Certificate Pinning (`pinning_exceptions.json`).
+- [ ] Включение MITM строго через политики (запрет глобальных флагов принудительного MITM в продакшене).
+- [ ] Профиль нагрузочного тестирования пилота: Selective MITM + DNS + Auth (100 пользователей).
+- [ ] Проверка резервного копирования и восстановления ClickHouse / ротации CA.
 
-### P0 — целостность и безопасность
+---
 
-- [ ] Добавить DLP/CASB columns или миграцию в ClickHouse schema.
-- [ ] Добавить постоянный `DLP_ENABLED` и документированный default.
-- [ ] Проверять OIDC state, nonce, issuer, audience и JWT signature.
-- [ ] Удалить synthetic eBPF counters; читать подтверждённые kernel metrics.
-- [ ] Связать AWG control API с реальным lifecycle sidecar/config.
-- [ ] Закрыть control/search/metrics endpoints auth и network-policy defaults.
+## Фаза C — Agent Direction (On-Device SWG)
 
-### P1 — воспроизводимый пилот
+- [x] Разработка спецификации Agent Contract v0.1 (`docs/architecture/agent-contract.md`).
+- [x] Написание ADR 0005: Local Policy Agent vs Tunnel-First (`docs/adr/0005-local-policy-agent-vs-tunnel-first.md`).
+- [ ] Создание минимального прототипа агента (Minimal Agent Spike) под целевую ОС (Linux/Windows).
+- [ ] Динамическая доставка политик и регистрация устройств через Control Plane API.
 
-- [ ] Провести full-path load test: MITM + auth + ACL + Kafka + ClickHouse.
-- [ ] Зафиксировать профиль 100 пользователей и retention 5 дней.
-- [x] Добавить reproducible pilot Compose overlay.
-- [ ] Добавить эквивалентный pilot values-файл для Helm.
-- [ ] Проверить backup/restore ClickHouse и CA rotation.
-- [ ] Добавить dashboards для Kafka lag, ClickHouse merges и disk pressure.
-- [ ] Проверить отдельный процесс на каждую ML-модель.
+---
 
-### P2 — optional modules
+## Замороженные модули (Scope Freeze)
 
-- [ ] ICAP resilience и отдельный buffered-response benchmark.
-- [ ] Реальный embedding provider contract и Qdrant capacity test.
-- [ ] WASM ABI versioning, module signing и richer test suite.
-- [ ] DNSSEC/recursive-resolver integration strategy.
-- [ ] Admin Console build/deployment и end-to-end control API tests.
+Следующие экспериментальные модули заморожены в текущем виде для исключения фичер-крипа:
+- **AmneziaWG / BSDM Connect**: Заморожен до полной реализации Agent Contract v0.1.
+- **eBPF/XDP**: Заморожен, не является основным вектором фильтрации.
+- **Native String DLP**: Заморожен до появления полноценного спека.
+- **Mock OIDC Reverse Proxy**: Заморожен.
+- **Global Session / Threat Sync Scaffolding**: Заморожен до подтверждения однокластерной модели.
 
-## После успешного пилота
-
-### Data-plane HA
-
-- две proxy-реплики за L4 load balancer;
-- Redis L2 с явной eviction/persistence policy;
-- session/rate-limit semantics между репликами;
-- failover test без потери policy enforcement.
-
-### Analytics reliability
-
-- Kafka и ClickHouse topology по требуемому RPO/RTO;
-- migrations и schema compatibility;
-- backup/restore drills;
-- retention и tiered storage по фактическому event volume.
-
-### Multi-cluster
-
-- [x] Добавить local session/threat-sync stores и control API scaffolding.
-- global session state;
-- threat indicator synchronization;
-- cluster identity и mTLS;
-- conflict resolution и backpressure.
-
-Scaffolding пока запускается без Redis connection, subscriber и policy
-integration. Multi-cluster не считается реализованным до подтверждения
-single-cluster operational model и выполнения пунктов выше.
-
-## Дальнейшие исследования
-
-### ZTNA endpoint agents
-
-- [ ] Довести BSDM Connect (AmneziaWG) как первый endpoint agent до
-  управляемого lifecycle для Windows, macOS и Linux.
-- [ ] Добавить второй ZTNA agent/transport на базе
-  [TrustTunnel](https://github.com/TrustTunnel/TrustTunnel):
-  - enrollment устройства и привязка identity;
-  - генерация, выдача, rotation и отзыв клиентской конфигурации;
-  - full-tunnel и split-tunnel маршруты из policy;
-  - запуск, остановка, обновление и health/status через control plane;
-  - telemetry с agent/transport identity без передачи секретов;
-  - пакеты и end-to-end тесты для поддерживаемых desktop-платформ;
-  - threat model, проверка upstream dependency и rollback до включения в пилот.
-- [ ] Определить общий agent contract, чтобы BSDM Connect и TrustTunnel
-  использовали одинаковые enrollment, policy, telemetry и lifecycle API.
-- identity-aware access после production-grade OIDC;
-- plugin distribution после стабилизации WASM ABI;
-- local ML/SLM categorization после определения latency и false-positive budget.
+---
 
 ## Правила roadmap
 
-1. Выполненная задача не повышает зрелость функции автоматически.
-2. Production-ready требует tests, security review, deployment path, observability
-   и rollback.
-3. Capacity numbers публикуются вместе с workload assumptions.
-4. Исторические release notes не переписываются под текущую архитектуру.
-5. Маркетинговые сравнения и неподтверждённые проценты зрелости не являются
-   техническим roadmap.
+1. Выполненная задача не повышает зрелость функции автоматически (требуются тесты, документация, наблюдаемость).
+2. Безопасность и предсказуемость селективного режима имеют приоритет перед расширением функционала.
+3. Исторические release notes не переписываются под новую архитектуру.

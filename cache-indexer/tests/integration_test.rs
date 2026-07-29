@@ -31,6 +31,8 @@ mod tests {
             redirect_url: None,
             dlp_violation: None,
             casb_alert: None,
+            decision_source: None,
+            bypass_reason: None,
             event_id: "evt-1".to_string(),
         };
 
@@ -70,6 +72,8 @@ mod tests {
             redirect_url: None,
             dlp_violation: None,
             casb_alert: None,
+            decision_source: None,
+            bypass_reason: None,
             event_id: "evt-1".to_string(),
         };
 
@@ -128,6 +132,8 @@ mod tests {
             redirect_url: None,
             dlp_violation: None,
             casb_alert: None,
+            decision_source: None,
+            bypass_reason: None,
             event_id: "evt-block".to_string(),
         };
 
@@ -165,6 +171,8 @@ mod tests {
                 redirect_url: None,
                 dlp_violation: None,
                 casb_alert: None,
+                decision_source: None,
+                bypass_reason: None,
                 event_id: format!("evt-{i}"),
             });
         }
@@ -204,6 +212,8 @@ mod tests {
             redirect_url: None,
             dlp_violation: None,
             casb_alert: None,
+            decision_source: None,
+            bypass_reason: None,
             event_id: "evt-block".to_string(),
         };
 

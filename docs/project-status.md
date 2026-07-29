@@ -19,24 +19,25 @@
 
 | Область | Функция | Статус | Комментарий |
 |---|---|---|---|
-| Data plane | HTTP forward proxy, CONNECT, HTTPS MITM | Основной | MITM требует локального CA и явного доверия клиентов. |
+| Архитектура | Hybrid Policy (DNS -> SNI -> Selective MITM) | Основной | `POLICY_MODE` (`selective-mitm` по умолчанию, `sni`, `full-mitm`). Порт по умолчанию `3128`. |
+| Data plane | HTTP forward proxy, CONNECT, Selective/Full MITM | Основной | MITM включается селективно по категориям (`MITM_CATEGORIES`). |
 | Кеш | L1, mmap spill, compression, revalidation, miss coalescing | Основной | `CACHE_CAPACITY` — общая ёмкость L1, которая делится между шардами. |
 | Кеш | Redis L2, ICP/HTCP hierarchy | Beta | Нужны отдельные Redis/peer deployment и failover-тесты. |
-| Политики | ACL, categorization, rate limiting | Основной | Fast cache path нельзя включать при обязательной проверке политики. |
+| Политики | ACL, categorization, rate limiting, SNI filtering | Основной | Фильтрация по SNI выполняется до TLS расшифровки. |
 | Аутентификация | Basic | Основной | Секреты должны храниться вне Git. |
 | Аутентификация | LDAP, NTLM, Kerberos | Beta | Требуют соответствующей Cargo feature и интеграционного стенда. |
 | Аналитика | Kafka → cache-indexer → ClickHouse, Search API | Основной | Срок хранения задаётся TTL ClickHouse, а не числом пользователей. |
 | Detection | alert-worker | Beta | Запросы правил выполняются периодически; нужен контроль ClickHouse latency. |
 | ML | UEBA, phishing, beacon, threat-score write-back | Beta | Один процесс `ml-worker` обслуживает одну выбранную модель. |
-| DNS | UDP sinkhole, DoH, DoT | Beta | Не является полноценным recursive resolver или DNSSEC validator. |
+| DNS | DNS Sinkhole + RPZ (Core component) | Основной | Переведён в базовый состав поставки прокси (Core). |
 | AI cache | Exact LLM POST cache, local/Qdrant near-hit | Beta | Local hash embedding ищет близкие формулировки, но не является semantic model. |
-| Extensions | WASM request hook | Experimental | Один PoC hook, ограниченный ABI, без WASI filesystem/network. |
-| Inspection | ICAP REQMOD/RESPMOD | Experimental | RESPMOD требует buffered MISS; ICAP-over-TLS не реализован. |
-| DLP/CASB | Сигнатурное сканирование request body | Experimental | Набор строковых сигнатур; это не полноценный DLP/PII engine. |
-| ZTNA/IAP | Reverse proxy + OIDC | Experimental | Текущая реализация не проверяет подпись JWT и использует mock OIDC state. |
-| Network | eBPF/XDP manager | Experimental | Требует Linux privileges, clang/ip/bpftool и отдельной проверки метрик. |
-| Remote access | AmneziaWG sidecar/config API | Experimental | Compose sidecar и control-plane state пока не образуют единый lifecycle. |
-| Cluster | Global sessions, distributed rate limit, threat sync | Experimental | Есть локальные stores и REST endpoints, но runtime не передаёт им Redis connection и не применяет synchronized IoC к policy. |
+| Extensions | WASM request hook | Experimental (Frozen) | Заморожено. Один PoC hook, ограниченный ABI. |
+| Inspection | ICAP REQMOD/RESPMOD | Experimental (Frozen) | Заморожено. RESPMOD требует buffered MISS. |
+| DLP/CASB | Сигнатурное сканирование request body | Experimental (Frozen) | Заморожено. Набор строковых сигнатур. |
+| ZTNA/IAP | Reverse proxy + OIDC | Experimental (Frozen) | Заморожено. Требует приведения к Agent Contract v0.1. |
+| Network | eBPF/XDP manager | Experimental (Frozen) | Заморожено. Не является основным вектором. |
+| Remote access | AmneziaWG sidecar/config API | Experimental (Frozen) | Заморожено. |
+| Cluster | Global sessions, distributed rate limit, threat sync | Experimental (Frozen) | Заморожено. Scaffolding. |
 | Admin UI | React SPA | Beta | UI нужно собирать и публиковать отдельно; основной Compose его не обслуживает. |
 
 ## Известные ограничения

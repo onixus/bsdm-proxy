@@ -48,12 +48,14 @@ services:
       args:
         LITE_BUILD: "1"
     ports:
-      - "1488:1488"
+      - "3128:3128"
       - "9090:9090"
       - "18080:18080"
     environment:
-      - HTTP_PORT=1488
+      - HTTP_PORT=3128
       - METRICS_PORT=9090
+      - POLICY_MODE=selective-mitm
+      - MITM_CATEGORIES=malware,phishing,illegal-content
       - MITM_ENABLED=true
       - AUTH_ENABLED=false
       - ACL_ENABLED=false

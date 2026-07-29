@@ -327,6 +327,8 @@ async fn handle_connect_tunnel(
                             redirect_url: None,
                             dlp_violation: None,
                             casb_alert: None,
+                            decision_source: Some("sni".to_string()),
+                            bypass_reason: Some("connect_tunnel".to_string()),
                             event_id,
                         };
                         service.send_cache_event(event);
@@ -534,8 +536,8 @@ pub async fn handle_connection(
                     async move {
                         match hyper::upgrade::on(req).await {
                             Ok(upgraded) => {
-                                let (_, port) = parse_authority(&authority);
-                                if service.mitm_enabled && should_mitm_port(port) {
+                                let (domain, port) = parse_authority(&authority);
+                                if should_mitm_port(port) && service.should_mitm_domain(&domain) {
                                     handle_connect_mitm(
                                         upgraded, authority, service, client_ip, proxy_user,
                                     )

@@ -30,21 +30,8 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v4
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libssl-dev \
-            pkg-config \
-            cmake \
-            librdkafka-dev \
-            libclang-dev
-
-      - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Cargo dependencies
-        uses: Swatinem/rust-cache@v2
+      - name: Setup Rust environment
+        uses: ./.github/actions/setup-rust
 
       - name: Run tests
         run: cargo test --workspace --all-targets
@@ -66,21 +53,8 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v4
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libssl-dev \
-            pkg-config \
-            cmake \
-            librdkafka-dev \
-            libclang-dev
-
-      - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Cargo dependencies
-        uses: Swatinem/rust-cache@v2
+      - name: Setup Rust environment
+        uses: ./.github/actions/setup-rust
 
       - name: Build release package
         run: ./scripts/build-package.sh

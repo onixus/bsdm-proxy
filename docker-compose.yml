@@ -95,7 +95,7 @@ services:
       cache_from:
         - type=registry,ref=ghcr.io/onixus/bsdm-proxy:latest
     ports:
-      - "1488:1488"
+      - "3128:3128"
       - "9090:9090"
     environment:
       - KAFKA_BROKERS=kafka:9092
@@ -103,8 +103,10 @@ services:
       - CACHE_CAPACITY=10000
       - CACHE_TTL_SECONDS=3600
       - MAX_CACHE_BODY_SIZE=10485760
-      - HTTP_PORT=1488
+      - HTTP_PORT=3128
       - METRICS_PORT=9090
+      - POLICY_MODE=selective-mitm
+      - MITM_CATEGORIES=malware,phishing,illegal-content
       - MITM_ENABLED=true
       - AUTH_ENABLED=false
       - SHUTDOWN_TIMEOUT_SECONDS=30
@@ -406,7 +408,6 @@ services:
           memory: 512M
 
   dns-sinkhole:
-    profiles: ["dns-sinkhole"]
     build:
       context: .
       dockerfile: Dockerfile

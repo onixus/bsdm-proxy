@@ -1,0 +1,31 @@
+name: Setup Rust Environment
+description: Install system deps, Rust toolchain, and enable Cargo cache
+
+inputs:
+  components:
+    description: "Comma-separated Rust components to install (e.g. rustfmt,clippy)"
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Install system dependencies
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y --no-install-recommends \
+          libssl-dev \
+          pkg-config \
+          cmake \
+          librdkafka-dev \
+          libclang-dev \
+          protobuf-compiler
+
+    - name: Set up Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: ${{ inputs.components }}
+
+    - name: Cache Cargo dependencies
+      uses: Swatinem/rust-cache@v2

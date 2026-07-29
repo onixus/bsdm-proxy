@@ -35,6 +35,7 @@ pub mod peers;
 pub mod perf;
 pub mod pipeline;
 pub mod policy_cache;
+pub mod policy_config;
 pub mod proxy_service;
 pub mod rate_limit;
 pub mod reverse_proxy;
@@ -90,6 +91,7 @@ pub use pipeline::{dispatch_cache_event, new_event_id, HttpEventPipeline};
 #[cfg(feature = "kafka")]
 pub use pipeline::{flush_kafka, KafkaEventPipeline};
 pub use policy_cache::{PolicyCacheConfig, PolicyDecisionCache};
+pub use policy_config::{load_policy_config, PolicyConfig, PolicyMode};
 pub use proxy_service::{ProxyPolicy, ProxyService};
 pub use rate_limit::{extract_api_key, RateLimitConfig, RateLimitViolation, RateLimiter};
 pub use reverse_proxy::{OidcConfig, ReverseProxyConfig};

@@ -1,4 +1,4 @@
-name: Rust CI
+name: CI
 
 on:
   push:
@@ -22,24 +22,10 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v4
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libssl-dev \
-            pkg-config \
-            cmake \
-            librdkafka-dev \
-            libclang-dev \
-            protobuf-compiler
-
-      - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Setup Rust environment
+        uses: ./.github/actions/setup-rust
         with:
-          components: rustfmt, clippy
-
-      - name: Cache Cargo dependencies
-        uses: Swatinem/rust-cache@v2
+          components: rustfmt,clippy
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -55,7 +41,7 @@ jobs:
           cargo build -p bsdm-proxy --no-default-features --features auth-basic --all-targets
           cargo build -p cache-indexer --no-default-features --all-targets
 
-      - name: Run tests
+      - name: Run tests (unit + e2e + smoke)
         run: cargo test --workspace --all-targets
 
       - name: Build and test gRPC control plane feature

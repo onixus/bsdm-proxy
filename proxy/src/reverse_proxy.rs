@@ -321,7 +321,7 @@ impl ReverseProxyConfig {
                 serde_json::Value::String(s) => s == &oidc.client_id,
                 serde_json::Value::Array(arr) => arr
                     .iter()
-                    .any(|v| v.as_str().map_or(false, |s| s == oidc.client_id)),
+                    .any(|v| v.as_str().is_some_and(|s| s == oidc.client_id)),
                 _ => false,
             };
             if !aud_matches {

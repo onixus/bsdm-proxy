@@ -34,6 +34,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-spike"
+version = "0.1.0"
+dependencies = [
+ "bsdm-events",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
