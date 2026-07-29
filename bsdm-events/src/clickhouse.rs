@@ -41,6 +41,10 @@ pub struct HttpCacheRow {
     pub dlp_violation: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub casb_alert: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decision_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bypass_reason: Option<String>,
 }
 
 /// Map proxy `CacheEvent` JSON to a ClickHouse JSONEachRow document.
@@ -74,6 +78,8 @@ pub fn cache_event_to_row(event: &CacheEvent) -> HttpCacheRow {
         headers: headers_json(&event.headers),
         dlp_violation: event.dlp_violation.clone(),
         casb_alert: event.casb_alert.clone(),
+        decision_source: event.decision_source.clone(),
+        bypass_reason: event.bypass_reason.clone(),
     }
 }
 
@@ -143,6 +149,8 @@ mod tests {
             redirect_url: Some("https://example.com/next".to_string()),
             dlp_violation: None,
             casb_alert: None,
+            decision_source: None,
+            bypass_reason: None,
             event_id: "evt-ch-1".to_string(),
         }
     }

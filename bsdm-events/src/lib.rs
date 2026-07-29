@@ -54,6 +54,12 @@ pub struct CacheEvent {
     /// Cloud Access Security Broker (CASB) alert for GenAI leaks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub casb_alert: Option<String>,
+    /// Source of decision: dns, sni, mitm, pinning-bypass, manual-bypass.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decision_source: Option<String>,
+    /// Reason for bypass if decision was bypassed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bypass_reason: Option<String>,
     #[serde(default)]
     pub event_id: String,
 }
@@ -100,6 +106,8 @@ mod tests {
             redirect_url: None,
             dlp_violation: None,
             casb_alert: None,
+            decision_source: None,
+            bypass_reason: None,
             event_id: "evt-1".to_string(),
         };
         assert_eq!(document_id(&event), "evt-1");
@@ -153,6 +161,8 @@ mod tests {
             redirect_url: None,
             dlp_violation: None,
             casb_alert: None,
+            decision_source: None,
+            bypass_reason: None,
             event_id: "evt-block".to_string(),
         };
         let json = serde_json::to_string(&event).unwrap();

@@ -1,0 +1,39 @@
+name: Trust UI CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'trust-ui/**'
+      - '.github/workflows/trust-ui.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'trust-ui/**'
+      - '.github/workflows/trust-ui.yml'
+
+concurrency:
+  group: trust-ui-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build & Typecheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: trust-ui
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: trust-ui/package-lock.json
+
+      - run: npm ci
+      - run: npm run build

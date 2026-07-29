@@ -53,6 +53,9 @@ use crate::upstream::{UpstreamClientHandle, UpstreamTlsConfig};
 use crate::wasm_host::{try_load_from_env, WasmHookDecision, WasmHookRequest};
 
 pub struct ProxyPolicy {
+    pub policy_mode: crate::policy_config::PolicyMode,
+    pub mitm_categories: Vec<String>,
+    pub pinning_exceptions: Vec<String>,
     pub acl_engine: Option<Arc<AclEngineHandle>>,
     pub categorization: Option<Arc<CategorizationEngine>>,
 }
@@ -263,6 +266,8 @@ impl MissCompletionHandle {
                     redirect_url,
                     dlp_violation: None,
                     casb_alert: None,
+                    decision_source: None,
+                    bypass_reason: None,
                     event_id,
                 };
                 self.send_cache_event(event);
@@ -289,6 +294,9 @@ pub struct ProxyService {
     http_pipeline: Option<Arc<HttpEventPipeline>>,
     http_client: UpstreamClientHandle,
     pub(crate) metrics: Arc<Metrics>,
+    pub(crate) policy_mode: crate::policy_config::PolicyMode,
+    pub(crate) mitm_categories: std::collections::HashSet<String>,
+    pub(crate) pinning_exceptions: Vec<String>,
     pub(crate) mitm_enabled: bool,
     auth: Option<Arc<AuthManager>>,
     acl_engine: Option<Arc<AclEngineHandle>>,
@@ -314,6 +322,41 @@ pub struct ProxyService {
 }
 
 impl ProxyService {
+    pub fn should_mitm_domain(&self, domain: &str) -> bool {
+        if !self.mitm_enabled {
+            return false;
+        }
+
+        let domain_lower = domain.to_ascii_lowercase();
+        if self.pinning_exceptions.iter().any(|exc| {
+            if exc.starts_with('.') {
+                domain_lower.ends_with(exc) || domain_lower == exc.trim_start_matches('.')
+            } else {
+                domain_lower == *exc
+            }
+        }) {
+            tracing::info!(
+                domain = %domain,
+                decision_source = "pinning-bypass",
+                bypass_reason = "certificate_pinning_exception",
+                "Skipping TLS MITM due to certificate pinning exception"
+            );
+            return false;
+        }
+
+        match self.policy_mode {
+            crate::policy_config::PolicyMode::Sni => false,
+            crate::policy_config::PolicyMode::FullMitm => true,
+            crate::policy_config::PolicyMode::SelectiveMitm => {
+                let url = format!("https://{}", domain);
+                let (categories, _) = self.categorize_url(&url);
+                categories
+                    .iter()
+                    .any(|cat| self.mitm_categories.contains(&cat.to_ascii_lowercase()))
+            }
+        }
+    }
+
     pub fn http_cache(&self) -> Arc<HttpL1Cache> {
         self.http_cache.clone()
     }
@@ -426,6 +469,9 @@ impl ProxyService {
             http_pipeline,
             http_client,
             metrics,
+            policy_mode: policy.policy_mode,
+            mitm_categories: policy.mitm_categories.iter().cloned().collect(),
+            pinning_exceptions: policy.pinning_exceptions.clone(),
             mitm_enabled,
             auth,
             acl_engine: policy.acl_engine.clone(),
@@ -519,6 +565,8 @@ impl ProxyService {
                 redirect_url,
                 dlp_violation: None,
                 casb_alert: None,
+                decision_source: None,
+                bypass_reason: None,
                 event_id,
             };
             self.send_cache_event(event);
@@ -581,6 +629,8 @@ impl ProxyService {
                 redirect_url,
                 dlp_violation: None,
                 casb_alert: None,
+                decision_source: Some("sni".to_string()),
+                bypass_reason: None,
                 event_id,
             };
             self.send_cache_event(event);
@@ -1888,6 +1938,8 @@ impl ProxyService {
                                 } else {
                                     None
                                 },
+                                decision_source: Some("mitm".to_string()),
+                                bypass_reason: None,
                                 event_id: new_event_id(),
                             };
                             self.send_cache_event(event);
@@ -2212,6 +2264,8 @@ impl ProxyService {
                                 } else {
                                     None
                                 },
+                                decision_source: Some("mitm".to_string()),
+                                bypass_reason: None,
                                 event_id: new_event_id(),
                             };
                             if !event.session_id.is_empty() {
