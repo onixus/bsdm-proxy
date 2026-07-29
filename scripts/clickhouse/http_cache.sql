@@ -28,13 +28,22 @@ CREATE TABLE IF NOT EXISTS bsdm.http_cache
     redirect_url Nullable(String),
     headers String DEFAULT '{}',
     dlp_violation Nullable(String),
-    casb_alert Nullable(String)
+    casb_alert Nullable(String),
+    decision_source LowCardinality(Nullable(String)),
+    bypass_reason Nullable(String)
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMMDD(ts)
 ORDER BY (domain, ifNull(username, ''), ts, event_id)
 TTL toDateTime(ts) + INTERVAL 42 DAY
 SETTINGS index_granularity = 8192;
+
+-- Upgrade existing installations created before decision-source observability.
+ALTER TABLE bsdm.http_cache
+    ADD COLUMN IF NOT EXISTS decision_source LowCardinality(Nullable(String));
+
+ALTER TABLE bsdm.http_cache
+    ADD COLUMN IF NOT EXISTS bypass_reason Nullable(String);
 
 -- M3: who accessed domain X (30 days)
 -- SELECT ts, username, client_ip, url, method, status, cache_status, session_id

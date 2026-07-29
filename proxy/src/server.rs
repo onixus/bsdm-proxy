@@ -29,7 +29,7 @@ use crate::control_api::ControlApiState;
 use crate::http_types::{empty, full};
 use crate::metrics::Metrics;
 use crate::pipeline::{new_event_id, CacheEvent};
-use crate::proxy_service::ProxyService;
+use crate::proxy_service::{ProxyService, TlsPolicyDecision};
 use crate::tls::{parse_authority, rewrite_mitm_request, should_mitm_port};
 
 fn tune_client_tcp(stream: &TcpStream, addr: SocketAddr) {
@@ -276,6 +276,7 @@ async fn handle_connect_tunnel(
     client_ip: String,
     request_start: Instant,
     proxy_user: Option<Arc<UserInfo>>,
+    tls_decision: TlsPolicyDecision,
 ) {
     let mut client_io = TokioIo::new(upgraded);
 
@@ -327,8 +328,13 @@ async fn handle_connect_tunnel(
                             redirect_url: None,
                             dlp_violation: None,
                             casb_alert: None,
-                            decision_source: Some("sni".to_string()),
-                            bypass_reason: Some("connect_tunnel".to_string()),
+                            decision_source: Some(tls_decision.decision_source.to_string()),
+                            bypass_reason: Some(
+                                tls_decision
+                                    .bypass_reason
+                                    .unwrap_or("connect_tunnel")
+                                    .to_string(),
+                            ),
                             event_id,
                         };
                         service.send_cache_event(event);
@@ -537,7 +543,25 @@ pub async fn handle_connection(
                         match hyper::upgrade::on(req).await {
                             Ok(upgraded) => {
                                 let (domain, port) = parse_authority(&authority);
-                                if should_mitm_port(port) && service.should_mitm_domain(&domain) {
+                                let tls_decision = if should_mitm_port(port) {
+                                    service.tls_policy_decision(&domain)
+                                } else {
+                                    service.metrics.record_policy_decision_source("sni");
+                                    info!(
+                                        domain = %domain,
+                                        port,
+                                        decision_source = "sni",
+                                        mitm = false,
+                                        bypass_reason = "non_mitm_port",
+                                        "TLS policy decision"
+                                    );
+                                    TlsPolicyDecision {
+                                        mitm: false,
+                                        decision_source: "sni",
+                                        bypass_reason: Some("non_mitm_port"),
+                                    }
+                                };
+                                if tls_decision.mitm {
                                     handle_connect_mitm(
                                         upgraded, authority, service, client_ip, proxy_user,
                                     )
@@ -550,6 +574,7 @@ pub async fn handle_connection(
                                         client_ip,
                                         request_start,
                                         proxy_user,
+                                        tls_decision,
                                     )
                                     .await;
                                 }

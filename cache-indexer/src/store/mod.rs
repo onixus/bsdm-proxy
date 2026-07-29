@@ -18,6 +18,7 @@ pub struct SearchQuery {
     pub domain: String,
     pub username: String,
     pub session_id: String,
+    pub decision_source: String,
     pub limit: u32,
     pub session_timeline: bool,
 }
@@ -36,6 +37,7 @@ pub struct SearchHit {
     pub session_id: String,
     pub parent_event_id: Option<String>,
     pub redirect_url: Option<String>,
+    pub decision_source: Option<String>,
 }
 
 impl SearchHit {
@@ -53,6 +55,7 @@ impl SearchHit {
             "session_id": self.session_id,
             "parent_event_id": self.parent_event_id,
             "redirect_url": self.redirect_url,
+            "decision_source": self.decision_source,
         })
     }
 }
@@ -113,13 +116,14 @@ async fn search_clickhouse(
     };
     let sql = format!(
         "SELECT toUnixTimestamp(ts) AS ts, username, toString(client_ip) AS client_ip, url, method, status, \
-         cache_status, domain, event_id, session_id, parent_event_id, redirect_url \
+         cache_status, domain, event_id, session_id, parent_event_id, redirect_url, decision_source \
          FROM {table} \
          WHERE ts >= fromUnixTimestamp({{from:UInt32}}) \
            AND ts <= fromUnixTimestamp({{to:UInt32}}) \
            AND (length({{domain:String}}) = 0 OR domain = {{domain:String}}) \
            AND (length({{username:String}}) = 0 OR username = {{username:String}}) \
            AND (length({{session_id:String}}) = 0 OR session_id = {{session_id:String}}) \
+           AND (length({{decision_source:String}}) = 0 OR decision_source = {{decision_source:String}}) \
          ORDER BY {order} \
          LIMIT {{limit:UInt32}} \
          FORMAT JSONEachRow"
@@ -130,6 +134,7 @@ async fn search_clickhouse(
         ("domain", query.domain.clone()),
         ("username", query.username.clone()),
         ("session_id", query.session_id.clone()),
+        ("decision_source", query.decision_source.clone()),
         ("limit", query.limit.to_string()),
     ];
     let body = writer
@@ -162,6 +167,7 @@ pub fn parse_search_ndjson(
             session_id: json_string(&v, "session_id"),
             parent_event_id: json_opt_string(&v, "parent_event_id"),
             redirect_url: json_opt_string(&v, "redirect_url"),
+            decision_source: json_opt_string(&v, "decision_source"),
         });
     }
     Ok(out)

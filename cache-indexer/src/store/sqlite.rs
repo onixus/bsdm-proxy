@@ -22,30 +22,7 @@ impl SqliteStore {
             }
         }
         let conn = Connection::open(path)?;
-        conn.execute_batch(
-            r#"
-            PRAGMA journal_mode=WAL;
-            CREATE TABLE IF NOT EXISTS events (
-              event_id TEXT PRIMARY KEY,
-              ts INTEGER NOT NULL,
-              domain TEXT NOT NULL,
-              username TEXT,
-              client_ip TEXT NOT NULL,
-              url TEXT NOT NULL,
-              method TEXT NOT NULL,
-              status INTEGER NOT NULL,
-              cache_status TEXT NOT NULL,
-              session_id TEXT NOT NULL DEFAULT '',
-              parent_event_id TEXT,
-              redirect_url TEXT,
-              payload TEXT NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
-            CREATE INDEX IF NOT EXISTS idx_events_domain_ts ON events(domain, ts);
-            CREATE INDEX IF NOT EXISTS idx_events_user_ts ON events(username, ts);
-            CREATE INDEX IF NOT EXISTS idx_events_session_ts ON events(session_id, ts);
-            "#,
-        )?;
+        initialize_schema(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
             max_rows: max_rows.max(1),
@@ -63,8 +40,8 @@ impl SqliteStore {
                 r#"
                 INSERT INTO events (
                   event_id, ts, domain, username, client_ip, url, method, status,
-                  cache_status, session_id, parent_event_id, redirect_url, payload
-                ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)
+                  cache_status, session_id, parent_event_id, redirect_url, decision_source, payload
+                ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)
                 ON CONFLICT(event_id) DO UPDATE SET
                   ts=excluded.ts,
                   domain=excluded.domain,
@@ -77,6 +54,7 @@ impl SqliteStore {
                   session_id=excluded.session_id,
                   parent_event_id=excluded.parent_event_id,
                   redirect_url=excluded.redirect_url,
+                  decision_source=excluded.decision_source,
                   payload=excluded.payload
                 "#,
             )?;
@@ -99,6 +77,7 @@ impl SqliteStore {
                     e.session_id,
                     e.parent_event_id,
                     e.redirect_url,
+                    e.decision_source,
                     payload,
                 ])?;
             }
@@ -131,14 +110,15 @@ impl SqliteStore {
         };
         let sql = format!(
             "SELECT ts, username, client_ip, url, method, status, cache_status, domain, \
-             event_id, session_id, parent_event_id, redirect_url \
+             event_id, session_id, parent_event_id, redirect_url, decision_source \
              FROM events \
              WHERE ts >= ?1 AND ts <= ?2 \
                AND (?3 = '' OR domain = ?3) \
                AND (?4 = '' OR username = ?4) \
                AND (?5 = '' OR session_id = ?5) \
+               AND (?6 = '' OR decision_source = ?6) \
              ORDER BY {order} \
-             LIMIT ?6"
+             LIMIT ?7"
         );
         let conn = self.conn.lock().expect("sqlite lock");
         let mut stmt = conn.prepare(&sql)?;
@@ -149,6 +129,7 @@ impl SqliteStore {
                 query.domain,
                 query.username,
                 query.session_id,
+                query.decision_source,
                 query.limit as i64,
             ],
             |row| {
@@ -165,6 +146,7 @@ impl SqliteStore {
                     session_id: row.get(9)?,
                     parent_event_id: row.get(10)?,
                     redirect_url: row.get(11)?,
+                    decision_source: row.get(12)?,
                 })
             },
         )?;
@@ -176,12 +158,60 @@ impl SqliteStore {
     }
 }
 
+fn initialize_schema(conn: &Connection) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    conn.execute_batch(
+        r#"
+            PRAGMA journal_mode=WAL;
+            CREATE TABLE IF NOT EXISTS events (
+              event_id TEXT PRIMARY KEY,
+              ts INTEGER NOT NULL,
+              domain TEXT NOT NULL,
+              username TEXT,
+              client_ip TEXT NOT NULL,
+              url TEXT NOT NULL,
+              method TEXT NOT NULL,
+              status INTEGER NOT NULL,
+              cache_status TEXT NOT NULL,
+              session_id TEXT NOT NULL DEFAULT '',
+              parent_event_id TEXT,
+              redirect_url TEXT,
+              decision_source TEXT,
+              payload TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
+            CREATE INDEX IF NOT EXISTS idx_events_domain_ts ON events(domain, ts);
+            CREATE INDEX IF NOT EXISTS idx_events_user_ts ON events(username, ts);
+            CREATE INDEX IF NOT EXISTS idx_events_session_ts ON events(session_id, ts);
+            "#,
+    )?;
+    if !has_column(conn, "events", "decision_source")? {
+        conn.execute("ALTER TABLE events ADD COLUMN decision_source TEXT", [])?;
+    }
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_events_decision_source_ts
+         ON events(decision_source, ts)",
+        [],
+    )?;
+    Ok(())
+}
+
+fn has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, rusqlite::Error> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let names = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    for name in names {
+        if name? == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    fn sample(domain: &str, ts: u64, id: &str) -> CacheEvent {
+    fn sample(domain: &str, ts: u64, id: &str, decision_source: Option<&str>) -> CacheEvent {
         CacheEvent {
             url: format!("https://{domain}/"),
             method: "GET".into(),
@@ -206,7 +236,7 @@ mod tests {
             redirect_url: None,
             dlp_violation: None,
             casb_alert: None,
-            decision_source: None,
+            decision_source: decision_source.map(str::to_string),
             bypass_reason: None,
             event_id: id.into(),
         }
@@ -216,7 +246,10 @@ mod tests {
     fn sqlite_roundtrip() {
         let store = SqliteStore::open(":memory:", 100).unwrap();
         store
-            .insert_batch(&[sample("ex.com", 50, "e1"), sample("other.com", 60, "e2")])
+            .insert_batch(&[
+                sample("ex.com", 50, "e1", Some("mitm")),
+                sample("other.com", 60, "e2", Some("sni")),
+            ])
             .unwrap();
         let hits = store
             .search(&SearchQuery {
@@ -225,11 +258,60 @@ mod tests {
                 domain: "ex.com".into(),
                 username: String::new(),
                 session_id: String::new(),
+                decision_source: "mitm".into(),
                 limit: 10,
                 session_timeline: false,
             })
             .unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].event_id, "e1");
+        assert_eq!(hits[0].decision_source.as_deref(), Some("mitm"));
+    }
+
+    #[test]
+    fn migrates_existing_database_with_decision_source() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE events (
+               event_id TEXT PRIMARY KEY,
+               ts INTEGER NOT NULL,
+               domain TEXT NOT NULL,
+               username TEXT,
+               client_ip TEXT NOT NULL,
+               url TEXT NOT NULL,
+               method TEXT NOT NULL,
+               status INTEGER NOT NULL,
+               cache_status TEXT NOT NULL,
+               session_id TEXT NOT NULL DEFAULT '',
+               parent_event_id TEXT,
+               redirect_url TEXT,
+               payload TEXT NOT NULL
+             );",
+        )
+        .unwrap();
+
+        initialize_schema(&conn).unwrap();
+        assert!(has_column(&conn, "events", "decision_source").unwrap());
+
+        let store = SqliteStore {
+            conn: Mutex::new(conn),
+            max_rows: 100,
+        };
+        store
+            .insert_batch(&[sample("ex.com", 50, "e1", Some("pinning-bypass"))])
+            .unwrap();
+        let hits = store
+            .search(&SearchQuery {
+                from_ts: 0,
+                to_ts: 100,
+                domain: String::new(),
+                username: String::new(),
+                session_id: String::new(),
+                decision_source: "pinning-bypass".into(),
+                limit: 10,
+                session_timeline: false,
+            })
+            .unwrap();
+        assert_eq!(hits.len(), 1);
     }
 }
