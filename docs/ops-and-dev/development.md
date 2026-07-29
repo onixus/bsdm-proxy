@@ -289,18 +289,19 @@ ls scripts/archive/
 
 ## CI
 
-| Workflow | Триггер | Шаги |
-|----------|---------|------|
-| [rust.yml](../../.github/workflows/rust.yml) | push/PR → main | fmt, clippy, build, test, cargo-audit |
-| [e2e.yml](../../.github/workflows/e2e.yml) | push/PR → main | smoke + e2e |
-| [close-blockers.yml](../../.github/workflows/close-blockers.yml) | PR merged / manual | auto-close B1–B25 issues |
-| [pr-blocker-hint.yml](../../.github/workflows/pr-blocker-hint.yml) | PR opened/edited | комментарий со ссылками на issue |
+| Workflow | Trigger | Description |
+|----------|---------|-------------|
+| [ci.yml](../../.github/workflows/ci.yml) | push/PR → main | fmt, clippy, build, tests (unit + e2e + smoke), cargo-audit |
+| [trust-ui.yml](../../.github/workflows/trust-ui.yml) | push/PR → main | npm build & typecheck for trust-ui |
+| [admin-console.yml](../../.github/workflows/admin-console.yml) | push/PR → main | npm lint & build for admin-console |
+| [load-test.yml](../../.github/workflows/load-test.yml) | push/PR → main | wrk high-intensity load test |
 | [release.yml](../../.github/workflows/release.yml) | push tag `v*` / manual | test, build packages, GitHub Release |
+| [docs.yml](../../.github/workflows/docs.yml) | push/PR → main | check local markdown links, sync wiki |
 
-## Локальный запуск proxy
+## Local proxy run
 
 ```bash
-export HTTP_PORT=1488
+export HTTP_PORT=3128
 export METRICS_PORT=9090
 export MITM_ENABLED=true
 export RUST_LOG=info,bsdm_proxy=debug   # см. docs/ops-and-dev/logging.md
