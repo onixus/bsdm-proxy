@@ -40,6 +40,7 @@ pub mod policy_config;
 pub mod proxy_service;
 pub mod rate_limit;
 pub mod reverse_proxy;
+pub mod runtime_config;
 pub mod security_util;
 pub mod selection;
 pub mod semantic_cache;

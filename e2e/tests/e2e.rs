@@ -308,3 +308,31 @@ async fn e2e_mitm_https_with_self_signed_ca() {
         "upstream-tls:/mitm-test"
     );
 }
+
+#[tokio::test]
+async fn e2e_selective_mitm_pinning_bypass_fallback() {
+    let _guard = proxy_test_guard().await;
+
+    let mut extra_env = std::collections::HashMap::new();
+    extra_env.insert("PINNING_EXCEPTIONS".to_string(), "127.0.0.1".to_string());
+
+    let harness = ProxyHarness::start(HarnessConfig {
+        mitm_enabled: true,
+        https_upstream_port: Some(8444),
+        upstream_ca_cert: true,
+        extra_env,
+        ..Default::default()
+    })
+    .await
+    .expect("start proxy with pinning exception");
+
+    let client = harness.proxy_mitm_client().expect("MITM client");
+    let url = harness.mitm_upstream_url("/direct-tls");
+
+    let response = client.get(&url).send().await.expect("pinning bypass GET");
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    assert_eq!(
+        response.text().await.expect("body"),
+        "upstream-tls:/direct-tls"
+    );
+}

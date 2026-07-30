@@ -10,8 +10,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use tokio::sync::watch;
 use tracing::{info, warn};
 
+use crate::acl_api::AclApiState;
 use crate::cache_key::http_cache_key;
 use crate::hierarchy_config::reload_static_peers;
 use crate::http_types::{full, Body};
@@ -19,6 +21,10 @@ use crate::l2_cache::RedisL2Cache;
 use crate::metrics::Metrics;
 use crate::peers::PeerRegistry;
 use crate::pinning::PinningRegistry;
+use crate::runtime_config::{
+    apply_env_map, config_snapshot, read_env_file, schedule_service_restart, write_acl_rules_file,
+    write_env_file, ConfigApplyRequest, ConfigApplyResponse,
+};
 use crate::sharded_cache::HttpL1Cache;
 use crate::upstream::UpstreamClientHandle;
 
@@ -252,6 +258,138 @@ impl ControlApiState {
         }
     }
 
+    fn config_get(&self) -> Response<Body> {
+        match config_snapshot() {
+            Ok(snapshot) => match serde_json::to_string(&snapshot) {
+                Ok(json) => json_response(StatusCode::OK, &json),
+                Err(error) => json_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    &format!(r#"{{"error":"{}"}}"#, escape_json(&error.to_string())),
+                ),
+            },
+            Err(error) => json_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!(r#"{{"error":"{}"}}"#, escape_json(&error)),
+            ),
+        }
+    }
+
+    async fn config_apply(&self, body: Bytes) -> Response<Body> {
+        let request: ConfigApplyRequest = match serde_json::from_slice(&body) {
+            Ok(request) => request,
+            Err(error) => {
+                return json_response(
+                    StatusCode::BAD_REQUEST,
+                    &format!(
+                        r#"{{"error":"invalid config apply payload: {}"}}"#,
+                        escape_json(&error.to_string())
+                    ),
+                );
+            }
+        };
+
+        if request.env.is_empty() {
+            return json_response(
+                StatusCode::BAD_REQUEST,
+                r#"{"error":"env map must not be empty"}"#,
+            );
+        }
+
+        let mut merged = read_env_file().unwrap_or_default();
+        for (key, value) in request.env {
+            if value.is_empty() {
+                merged.remove(&key);
+            } else {
+                merged.insert(key, value);
+            }
+        }
+
+        let env_path = match write_env_file(&merged) {
+            Ok(path) => path,
+            Err(error) => {
+                return json_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    &format!(r#"{{"error":"{}"}}"#, escape_json(&error)),
+                );
+            }
+        };
+
+        apply_env_map(&merged);
+
+        let mut hot_reload = Vec::new();
+
+        if let Some(rules) = &request.acl_rules {
+            let rules_path = merged
+                .get("ACL_RULES_PATH")
+                .cloned()
+                .or_else(|| std::env::var("ACL_RULES_PATH").ok())
+                .unwrap_or_else(|| "./acl-rules.json".to_string());
+            if let Err(error) = write_acl_rules_file(&rules_path, rules) {
+                return json_response(
+                    StatusCode::BAD_REQUEST,
+                    &format!(r#"{{"error":"{}"}}"#, escape_json(&error)),
+                );
+            }
+            merged.insert("ACL_RULES_PATH".to_string(), rules_path);
+            if let Some(acl_api) = &self.acl_api {
+                match acl_api.reload_from_disk() {
+                    Ok(count) => {
+                        hot_reload.push(format!("acl:{count}"));
+                    }
+                    Err(error) => warn!("ACL hot reload after config apply failed: {error}"),
+                }
+            }
+        }
+
+        if self.upstream_tls_reload_payload().is_ok() {
+            hot_reload.push("upstream_tls".to_string());
+        }
+
+        if self.hierarchy_reload_payload().await.is_ok() {
+            hot_reload.push("hierarchy".to_string());
+        }
+
+        let should_restart = request.restart.unwrap_or(true);
+        let restart_status = if should_restart {
+            if let Some(shutdown_tx) = &self.shutdown_tx {
+                schedule_service_restart(shutdown_tx.clone());
+                "scheduled"
+            } else {
+                "unavailable"
+            }
+        } else {
+            "skipped"
+        };
+
+        let message = if should_restart {
+            "Configuration saved; proxy will restart shortly to apply all settings."
+        } else {
+            "Configuration saved and hot-reloaded where supported."
+        };
+
+        info!(
+            env_path = %env_path.display(),
+            hot_reload = ?hot_reload,
+            restart = restart_status,
+            "Configuration applied from admin console"
+        );
+
+        let payload = ConfigApplyResponse {
+            status: "applied",
+            env_path: env_path.display().to_string(),
+            hot_reload,
+            restart: restart_status,
+            message: message.to_string(),
+        };
+        match serde_json::to_string(&payload) {
+            Ok(json) => json_response(StatusCode::OK, &json),
+            Err(error) => json_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!(r#"{{"error":"{}"}}"#, escape_json(&error.to_string())),
+            ),
+        }
+    }
+
     fn agent_policy(&self) -> Response<Body> {
         let dto = serde_json::json!({
             "policy_version": "v0.1.0",
@@ -477,6 +615,8 @@ pub struct ControlApiState {
     trust_ui_dir: Option<std::path::PathBuf>,
     admin_console_dir: Option<std::path::PathBuf>,
     devices: Arc<RwLock<HashMap<String, RegisteredDevice>>>,
+    shutdown_tx: Option<watch::Sender<bool>>,
+    acl_api: Option<Arc<AclApiState>>,
 }
 
 impl ControlApiState {
@@ -542,7 +682,19 @@ impl ControlApiState {
                     }
                 }),
             devices: Arc::new(RwLock::new(HashMap::new())),
+            shutdown_tx: None,
+            acl_api: None,
         }
+    }
+
+    pub fn with_config_apply(
+        mut self,
+        shutdown_tx: watch::Sender<bool>,
+        acl_api: Option<Arc<AclApiState>>,
+    ) -> Self {
+        self.shutdown_tx = Some(shutdown_tx);
+        self.acl_api = acl_api;
+        self
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -636,6 +788,8 @@ impl ControlApiState {
         }
 
         match (method, path) {
+            (&Method::GET, "/api/config") => self.config_get(),
+            (&Method::POST, "/api/config/apply") => self.config_apply(body).await,
             (&Method::GET, "/api/stats") => self.stats(),
             (&Method::POST, "/api/cache/purge") => self.purge(body).await,
             (&Method::GET, "/api/hierarchy/peers") => self.hierarchy_peers().await,
@@ -1634,6 +1788,74 @@ mod tests {
             )
             .await;
         assert_eq!(unsupported_version.status(), StatusCode::NOT_FOUND);
+    }
+
+    static CONFIG_ENV_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    #[tokio::test]
+    async fn config_apply_writes_env_and_schedules_restart() {
+        let _guard = CONFIG_ENV_MUTEX.lock().await;
+        let temp = tempfile::tempdir().unwrap();
+        let env_path = temp.path().join("bsdm-proxy.env");
+        std::env::set_var("CONFIG_ENV_PATH", env_path.to_string_lossy().to_string());
+
+        let metrics = Arc::new(Metrics::new().unwrap());
+        let cache = Arc::new(HttpL1Cache::new(100, 4));
+        let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
+        let state = state_plain(metrics, cache).with_config_apply(shutdown_tx, None);
+
+        let payload = Bytes::from(
+            r#"{"env":{"HTTP_PORT":"3128","METRICS_PORT":"9090","RKN_SYNC_URL":"https://svn.code.sf.net/p/zapret-info/code/dump.csv"},"restart":true}"#,
+        );
+        let resp = state
+            .dispatch(
+                &Method::POST,
+                "/api/config/apply",
+                payload,
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = BodyExt::collect(resp.into_body()).await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "applied");
+        assert_eq!(json["restart"], "scheduled");
+
+        let written = std::fs::read_to_string(&env_path).unwrap();
+        assert!(written.contains("HTTP_PORT=3128"));
+        assert!(written.contains("RKN_SYNC_URL="));
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), shutdown_rx.changed())
+            .await
+            .expect("shutdown signal")
+            .expect("channel open");
+        assert!(*shutdown_rx.borrow());
+
+        std::env::remove_var("CONFIG_ENV_PATH");
+    }
+
+    #[tokio::test]
+    async fn config_get_returns_snapshot() {
+        let _guard = CONFIG_ENV_MUTEX.lock().await;
+        let temp = tempfile::tempdir().unwrap();
+        let env_path = temp.path().join("bsdm-proxy.env");
+        std::fs::write(&env_path, "HTTP_PORT=3128\nCONTROL_API_TOKEN=secret\n").unwrap();
+        std::env::set_var("CONFIG_ENV_PATH", env_path.to_string_lossy().to_string());
+
+        let metrics = Arc::new(Metrics::new().unwrap());
+        let cache = Arc::new(HttpL1Cache::new(100, 4));
+        let state = state_plain(metrics, cache);
+
+        let resp = state
+            .dispatch(&Method::GET, "/api/config", Bytes::new(), &HeaderMap::new())
+            .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = BodyExt::collect(resp.into_body()).await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["env"]["HTTP_PORT"], "3128");
+        assert_eq!(json["env"]["CONTROL_API_TOKEN"], "***");
+
+        std::env::remove_var("CONFIG_ENV_PATH");
     }
 
     #[tokio::test]

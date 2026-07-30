@@ -93,6 +93,29 @@ systemd подхватывает env из `/etc/bsdm-proxy/bsdm-proxy.env` и `c
 
 Метрики и health **не** дублируются в логах — используйте `/metrics` и `/health` на `METRICS_PORT` (по умолчанию `9090`).
 
+## Observability & Policy Decision Sources (`decision_source`)
+
+Каждое политическое решение в BSDM-Proxy маркируется полем **`decision_source`**:
+
+| `decision_source` | Описание источника решения |
+|-------------------|----------------------------|
+| `dns` | Запрос перехвачен и обработан DNS-sinkhole (UDP RPZ / DoH / DoT) |
+| `sni` | Запрос обработан по SNI без TLS-расшифровки (`POLICY_MODE=sni` или проксирование CONNECT) |
+| `mitm` | Запрос прошёл через TLS MITM расшифровку (`POLICY_MODE=full-mitm` / `selective-mitm`) |
+| `pinning-bypass` | TLS MITM расшифровка пропущена из-за совпадения с `pinning_exceptions` |
+| `auth-deny` | Запрос заблокирован на этапе аутентификации |
+
+### Prometheus Метрика:
+```prometheus
+# HELP bsdm_proxy_policy_decision_source_total Total policy decisions by decision source
+# TYPE bsdm_proxy_policy_decision_source_total counter
+bsdm_proxy_policy_decision_source_total{source="mitm"} 4812
+bsdm_proxy_policy_decision_source_total{source="sni"} 1920
+bsdm_proxy_policy_decision_source_total{source="pinning-bypass"} 14
+```
+
+Поле `decision_source` сквозным образом передаётся через `CacheEvent`, сохраняется в ClickHouse (`bsdm.http_cache`), доступно в REST Search API (`/api/search?decision_source=mitm`) и отображается на Grafana дашборде.
+
 ## Просмотр логов
 
 **Docker Compose:**

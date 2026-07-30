@@ -372,7 +372,17 @@ async fn handle_connect_mitm(
     let server_config = match service.cert_cache.server_config_for_domain(&domain).await {
         Ok(config) => config,
         Err(e) => {
-            error!("Failed to build TLS config for {}: {}", domain, e);
+            service
+                .metrics
+                .tls_handshakes_total
+                .with_label_values(&["error"])
+                .inc();
+            error!(
+                domain = %domain,
+                decision_source = "pinning-bypass",
+                bypass_reason = "cert_generation_error",
+                "Failed to build TLS config for {}: {}", domain, e
+            );
             return;
         }
     };

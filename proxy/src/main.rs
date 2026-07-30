@@ -256,22 +256,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let threat_sync = ThreatSyncEngine::new(node_id, None);
 
     let hierarchy_peers = hierarchy.as_ref().map(|m| m.peer_registry());
-    let control_api = Arc::new(ControlApiState::from_env(
-        metrics.clone(),
-        service.http_cache(),
-        l2_cache.clone(),
-        hierarchy_peers,
-        hierarchy_config.use_htcp,
-        service.upstream_client(),
-        #[cfg(feature = "wasm")]
-        service.wasm_hook.clone(),
-        service.casb_engine(),
-        service.dlp_engine(),
-        service.pinning_registry(),
-        auth.clone(),
-        session_store,
-        threat_sync,
-    ));
+    let control_api = Arc::new(
+        ControlApiState::from_env(
+            metrics.clone(),
+            service.http_cache(),
+            l2_cache.clone(),
+            hierarchy_peers,
+            hierarchy_config.use_htcp,
+            service.upstream_client(),
+            #[cfg(feature = "wasm")]
+            service.wasm_hook.clone(),
+            service.casb_engine(),
+            service.dlp_engine(),
+            service.pinning_registry(),
+            auth.clone(),
+            session_store,
+            threat_sync,
+        )
+        .with_config_apply(shutdown_tx.clone(), acl_api.clone()),
+    );
     info!(
         "Control plane API on :{}/api/stats · :{}/api/cache/purge · :{}/api/hierarchy/* · :{}/api/upstream/tls · :{}/api/pinning/exceptions",
         metrics_port, metrics_port, metrics_port, metrics_port, metrics_port

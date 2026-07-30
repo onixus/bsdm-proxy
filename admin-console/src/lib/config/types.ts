@@ -305,7 +305,7 @@ export const defaultFormState: ConfigFormState = {
   ollamaUrl: 'http://127.0.0.1:11434',
   qdrantUrl: 'http://127.0.0.1:6333',
   rknSyncEnabled: false,
-  rknSyncUrl: 'https://raw.githubusercontent.com/zapret-info/z-i/master/dump.csv',
+  rknSyncUrl: 'https://svn.code.sf.net/p/zapret-info/code/dump.csv',
   dohEnabled: false,
   dohBind: '0.0.0.0:8443',
   dotEnabled: false,

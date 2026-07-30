@@ -126,6 +126,9 @@ export function applyEnvToForm(map: Record<string, string>, prev: ConfigFormStat
   if (map.CONTROL_GRPC_BIND) next.controlGrpcBind = map.CONTROL_GRPC_BIND
   if (map.CONTROL_API_TOKEN) next.controlApiToken = map.CONTROL_API_TOKEN
 
+  next.rknSyncEnabled = truthyEnv(map.RKN_SYNC_ENABLED ?? 'false')
+  if (map.RKN_SYNC_URL) next.rknSyncUrl = map.RKN_SYNC_URL
+
   return next
 }
 

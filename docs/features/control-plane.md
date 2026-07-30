@@ -24,6 +24,30 @@ Proxy embeds static UI routing directly into the binary:
 curl -H "Authorization: Bearer $CONTROL_API_TOKEN" ...
 ```
 
+## Runtime configuration (admin console)
+
+Apply settings from **Settings → Save & Apply** without manually copying `.env` files.
+
+| Method | Path | Notes |
+|--------|------|-------|
+| `GET` | `/api/config` | Current env snapshot (`CONFIG_ENV_PATH` or `/etc/bsdm-proxy/bsdm-proxy.env`) |
+| `POST` | `/api/config/apply` | Merge `env` map, optional `acl_rules`, persist, hot-reload, restart |
+
+```bash
+curl -X POST http://127.0.0.1:9090/api/config/apply \
+  -H "Authorization: Bearer $CONTROL_API_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"env":{"HTTP_PORT":"3128","RKN_SYNC_ENABLED":"true"},"restart":true}'
+```
+
+| Variable | Default | Role |
+|----------|---------|------|
+| `CONFIG_ENV_PATH` | `/etc/bsdm-proxy/bsdm-proxy.env` or `./bsdm-proxy.env` | Persisted env file |
+| `CONFIG_RESTART_CMD` | _(empty)_ | Optional shell command before shutdown (e.g. `systemctl restart bsdm-proxy`) |
+| `RKN_SYNC_URL` | SourceForge `dump.csv` mirror | Daily Roskomnadzor registry sync |
+
+When `CONFIG_RESTART_CMD` is unset, the proxy spawns a replacement process with the updated environment, then shuts down gracefully.
+
 ## Stats (Lite JSON)
 
 ```bash

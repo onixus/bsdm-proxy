@@ -21,7 +21,7 @@ fn action_to_str(action: AclAction) -> &'static str {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct AclRulesFile {
+pub struct AclRulesDocument {
     #[serde(default)]
     default_action: Option<String>,
     #[serde(default)]
@@ -35,7 +35,7 @@ pub fn load_acl_engine_from_file(
 ) -> Result<AclEngine, String> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| format!("failed to read ACL rules file: {}", e))?;
-    let file: AclRulesFile = serde_json::from_str(&content)
+    let file: AclRulesDocument = serde_json::from_str(&content)
         .map_err(|e| format!("failed to parse ACL rules JSON: {}", e))?;
 
     let default_action = file
@@ -52,7 +52,7 @@ pub fn load_acl_engine_from_file(
 
 /// Persist current engine state to `ACL_RULES_PATH` JSON.
 pub fn save_acl_engine_to_file(path: &str, engine: &AclEngine) -> Result<(), String> {
-    let file = AclRulesFile {
+    let file = AclRulesDocument {
         default_action: Some(action_to_str(engine.default_action()).to_string()),
         rules: engine.rules().to_vec(),
     };
