@@ -1790,8 +1790,11 @@ mod tests {
         assert_eq!(unsupported_version.status(), StatusCode::NOT_FOUND);
     }
 
+    static CONFIG_ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[tokio::test]
     async fn config_apply_writes_env_and_schedules_restart() {
+        let _guard = CONFIG_ENV_MUTEX.lock().unwrap();
         let temp = tempfile::tempdir().unwrap();
         let env_path = temp.path().join("bsdm-proxy.env");
         std::env::set_var("CONFIG_ENV_PATH", env_path.to_string_lossy().to_string());
@@ -1833,6 +1836,7 @@ mod tests {
 
     #[tokio::test]
     async fn config_get_returns_snapshot() {
+        let _guard = CONFIG_ENV_MUTEX.lock().unwrap();
         let temp = tempfile::tempdir().unwrap();
         let env_path = temp.path().join("bsdm-proxy.env");
         std::fs::write(&env_path, "HTTP_PORT=3128\nCONTROL_API_TOKEN=secret\n").unwrap();
