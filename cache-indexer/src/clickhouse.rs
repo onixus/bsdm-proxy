@@ -58,11 +58,30 @@ impl ClickHouseWriter {
             .into());
         }
 
+        self.apply_schema_migrations().await;
+
         info!(
             "ClickHouse ready: {}.{}, url={}",
             self.config.database, self.config.table, self.config.url
         );
         Ok(())
+    }
+
+    pub(crate) fn schema_migration_queries(database: &str, table: &str) -> Vec<String> {
+        vec![
+            format!("ALTER TABLE {database}.{table} ADD COLUMN IF NOT EXISTS decision_source LowCardinality(Nullable(String))"),
+            format!("ALTER TABLE {database}.{table} ADD COLUMN IF NOT EXISTS bypass_reason Nullable(String)"),
+            format!("ALTER TABLE {database}.{table} ADD COLUMN IF NOT EXISTS acl_rule_id Nullable(String)"),
+            format!("ALTER TABLE {database}.{table} ADD COLUMN IF NOT EXISTS acl_reason Nullable(String)"),
+        ]
+    }
+
+    async fn apply_schema_migrations(&self) {
+        for sql in Self::schema_migration_queries(&self.config.database, &self.config.table) {
+            if let Err(e) = self.query(&sql).await {
+                tracing::debug!("ClickHouse schema migration note: {e}");
+            }
+        }
     }
 
     pub async fn query_with_params(
@@ -160,5 +179,21 @@ mod tests {
         };
         assert_eq!(cfg.database, "bsdm");
         assert_eq!(cfg.table, "http_cache");
+    }
+
+    #[test]
+    fn clickhouse_schema_migration_queries_are_valid() {
+        let queries = ClickHouseWriter::schema_migration_queries("bsdm", "http_cache");
+        assert_eq!(queries.len(), 4);
+        assert!(queries[0]
+            .contains("ALTER TABLE bsdm.http_cache ADD COLUMN IF NOT EXISTS decision_source"));
+        assert!(queries[1]
+            .contains("ALTER TABLE bsdm.http_cache ADD COLUMN IF NOT EXISTS bypass_reason"));
+        assert!(
+            queries[2].contains("ALTER TABLE bsdm.http_cache ADD COLUMN IF NOT EXISTS acl_rule_id")
+        );
+        assert!(
+            queries[3].contains("ALTER TABLE bsdm.http_cache ADD COLUMN IF NOT EXISTS acl_reason")
+        );
     }
 }

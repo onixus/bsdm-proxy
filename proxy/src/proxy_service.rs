@@ -1366,6 +1366,9 @@ impl ProxyService {
         headers: &hyper::HeaderMap,
     ) -> Option<Response<Body>> {
         let api_key = extract_api_key(headers, self.rate_limiter.config());
+        if self.rate_limiter.is_distributed() {
+            self.metrics.distributed_rate_limit_hits_total.inc();
+        }
         let violation = self
             .rate_limiter
             .check(client_ip, username, api_key.as_deref())?;

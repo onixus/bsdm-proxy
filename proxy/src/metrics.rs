@@ -736,4 +736,19 @@ mod tests {
         assert!(out.contains(r#"source="unknown"} 1"#));
         assert!(!out.contains("untrusted-arbitrary-value"));
     }
+
+    #[test]
+    fn rate_limit_metrics_exported() {
+        let m = Metrics::new().unwrap();
+        m.rate_limit_rejected_total.with_label_values(&["ip"]).inc();
+        m.rate_limit_rejected_total
+            .with_label_values(&["api_key"])
+            .inc();
+        m.distributed_rate_limit_hits_total.inc();
+        let out = String::from_utf8(m.export().unwrap()).unwrap();
+        assert!(out.contains("bsdm_proxy_rate_limit_rejected_total"));
+        assert!(out.contains("bsdm_proxy_distributed_rate_limit_hits_total"));
+        assert!(out.contains(r#"type="ip""#));
+        assert!(out.contains(r#"type="api_key""#));
+    }
 }

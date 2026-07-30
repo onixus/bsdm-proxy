@@ -93,6 +93,20 @@ impl SearchApi {
             .and_then(|v| v.parse::<u64>().ok())
             .unwrap_or(now);
 
+        let offset = query
+            .get("offset")
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(0);
+        let order = query
+            .get("order")
+            .map(String::as_str)
+            .unwrap_or("desc")
+            .to_ascii_lowercase();
+        let envelope = query
+            .get("envelope")
+            .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+            .unwrap_or(false);
+
         let format = query.get("format").map(String::as_str).unwrap_or("json");
         let search = SearchQuery {
             from_ts: from,
@@ -101,7 +115,9 @@ impl SearchApi {
             username,
             session_id: session_id.clone(),
             decision_source,
+            offset,
             limit,
+            order,
             session_timeline: !session_id.is_empty(),
         };
 
@@ -116,7 +132,16 @@ impl SearchApi {
         }
 
         let rows: Vec<serde_json::Value> = hits.iter().map(|h| h.to_json()).collect();
-        let json = serde_json::to_string(&rows)?;
+        let json = if envelope {
+            serde_json::to_string(&serde_json::json!({
+                "count": rows.len(),
+                "offset": offset,
+                "limit": limit,
+                "hits": rows,
+            }))?
+        } else {
+            serde_json::to_string(&rows)?
+        };
         Ok((200, "application/json".to_string(), json.into_bytes()))
     }
 
@@ -278,5 +303,25 @@ mod tests {
         assert_eq!(parse_ingest_body(one).unwrap().len(), 1);
         let arr = format!("[{}]", std::str::from_utf8(one).unwrap());
         assert_eq!(parse_ingest_body(arr.as_bytes()).unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn envelope_response_format() {
+        let memory = Arc::new(EventStore::Memory(crate::store::MemoryStore::new(100)));
+        let api = SearchApi::new(memory, SearchApiConfig::from_env());
+
+        let mut query = HashMap::new();
+        query.insert("envelope".to_string(), "true".to_string());
+        query.insert("limit".to_string(), "50".to_string());
+
+        let (status, content_type, body) = api.handle_get(&query).await.unwrap();
+        assert_eq!(status, 200);
+        assert_eq!(content_type, "application/json");
+
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["count"], 0);
+        assert_eq!(json["offset"], 0);
+        assert_eq!(json["limit"], 50);
+        assert!(json["hits"].is_array());
     }
 }

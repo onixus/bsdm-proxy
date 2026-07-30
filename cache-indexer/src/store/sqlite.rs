@@ -110,7 +110,7 @@ impl SqliteStore {
         &self,
         query: &SearchQuery,
     ) -> Result<Vec<SearchHit>, Box<dyn std::error::Error + Send + Sync>> {
-        let order = if query.session_timeline {
+        let order = if query.session_timeline || query.order.eq_ignore_ascii_case("asc") {
             "ts ASC"
         } else {
             "ts DESC"
@@ -126,7 +126,7 @@ impl SqliteStore {
                AND (?5 = '' OR session_id = ?5) \
                AND (?6 = '' OR decision_source = ?6) \
              ORDER BY {order} \
-             LIMIT ?7"
+             LIMIT ?7 OFFSET ?8"
         );
         let conn = self.conn.lock().expect("sqlite lock");
         let mut stmt = conn.prepare(&sql)?;
@@ -139,6 +139,7 @@ impl SqliteStore {
                 query.session_id,
                 query.decision_source,
                 query.limit as i64,
+                query.offset as i64,
             ],
             |row| {
                 Ok(SearchHit {
@@ -280,7 +281,9 @@ mod tests {
                 username: String::new(),
                 session_id: String::new(),
                 decision_source: "mitm".into(),
+                offset: 0,
                 limit: 10,
+                order: "desc".into(),
                 session_timeline: false,
             })
             .unwrap();
@@ -332,7 +335,9 @@ mod tests {
                 username: String::new(),
                 session_id: String::new(),
                 decision_source: "pinning-bypass".into(),
+                offset: 0,
                 limit: 10,
+                order: "desc".into(),
                 session_timeline: false,
             })
             .unwrap();
