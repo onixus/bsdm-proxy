@@ -19,7 +19,9 @@ pub struct SearchQuery {
     pub username: String,
     pub session_id: String,
     pub decision_source: String,
+    pub offset: u32,
     pub limit: u32,
+    pub order: String,
     pub session_timeline: bool,
 }
 
@@ -115,7 +117,7 @@ async fn search_clickhouse(
     query: &SearchQuery,
 ) -> Result<Vec<SearchHit>, Box<dyn std::error::Error + Send + Sync>> {
     let table = format!("{}.{}", writer.database(), writer.table());
-    let order = if query.session_timeline {
+    let order = if query.session_timeline || query.order.eq_ignore_ascii_case("asc") {
         "ts ASC"
     } else {
         "ts DESC"
@@ -132,7 +134,7 @@ async fn search_clickhouse(
            AND (length({{session_id:String}}) = 0 OR session_id = {{session_id:String}}) \
            AND (length({{decision_source:String}}) = 0 OR decision_source = {{decision_source:String}}) \
          ORDER BY {order} \
-         LIMIT {{limit:UInt32}} \
+         LIMIT {{limit:UInt32}} OFFSET {{offset:UInt32}} \
          FORMAT JSONEachRow"
     );
     let params = vec![
@@ -142,6 +144,7 @@ async fn search_clickhouse(
         ("username", query.username.clone()),
         ("session_id", query.session_id.clone()),
         ("decision_source", query.decision_source.clone()),
+        ("offset", query.offset.to_string()),
         ("limit", query.limit.to_string()),
     ];
     let body = writer

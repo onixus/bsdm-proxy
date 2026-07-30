@@ -49,13 +49,17 @@ impl MemoryStore {
             })
             .map(event_to_hit)
             .collect();
-        if query.session_timeline {
+        if query.session_timeline || query.order.eq_ignore_ascii_case("asc") {
             hits.sort_by_key(|h| h.ts);
         } else {
             hits.sort_by_key(|h| std::cmp::Reverse(h.ts));
         }
-        hits.truncate(query.limit as usize);
-        hits
+        let skip = query.offset as usize;
+        let take = query.limit as usize;
+        if skip >= hits.len() {
+            return Vec::new();
+        }
+        hits.into_iter().skip(skip).take(take).collect()
     }
 }
 
@@ -133,7 +137,9 @@ mod tests {
             username: String::new(),
             session_id: String::new(),
             decision_source: String::new(),
+            offset: 0,
             limit: 10,
+            order: "desc".into(),
             session_timeline: false,
         });
         assert_eq!(hits.len(), 1);
@@ -151,7 +157,9 @@ mod tests {
             username: String::new(),
             session_id: String::new(),
             decision_source: String::new(),
+            offset: 0,
             limit: 10,
+            order: "desc".into(),
             session_timeline: true,
         });
         assert_eq!(hits.len(), 2);
@@ -175,7 +183,9 @@ mod tests {
             username: String::new(),
             session_id: String::new(),
             decision_source: "mitm".into(),
+            offset: 0,
             limit: 10,
+            order: "desc".into(),
             session_timeline: false,
         });
         assert_eq!(hits.len(), 1);
@@ -201,7 +211,9 @@ mod tests {
             username: String::new(),
             session_id: String::new(),
             decision_source: String::new(),
+            offset: 0,
             limit: 10,
+            order: "desc".into(),
             session_timeline: false,
         });
         assert_eq!(hits[0].acl_action.as_deref(), Some("deny"));
@@ -210,5 +222,46 @@ mod tests {
             hits[0].acl_reason.as_deref(),
             Some("malware category denied")
         );
+    }
+
+    #[test]
+    fn pagination_and_sorting() {
+        let store = MemoryStore::new(10);
+        store.insert_batch(&[
+            sample("a.com", 10),
+            sample("b.com", 20),
+            sample("c.com", 30),
+        ]);
+
+        let asc_page1 = store.search(&SearchQuery {
+            from_ts: 0,
+            to_ts: 100,
+            domain: String::new(),
+            username: String::new(),
+            session_id: String::new(),
+            decision_source: String::new(),
+            offset: 0,
+            limit: 2,
+            order: "asc".into(),
+            session_timeline: false,
+        });
+        assert_eq!(asc_page1.len(), 2);
+        assert_eq!(asc_page1[0].ts, 10);
+        assert_eq!(asc_page1[1].ts, 20);
+
+        let asc_page2 = store.search(&SearchQuery {
+            from_ts: 0,
+            to_ts: 100,
+            domain: String::new(),
+            username: String::new(),
+            session_id: String::new(),
+            decision_source: String::new(),
+            offset: 2,
+            limit: 2,
+            order: "asc".into(),
+            session_timeline: false,
+        });
+        assert_eq!(asc_page2.len(), 1);
+        assert_eq!(asc_page2[0].ts, 30);
     }
 }
