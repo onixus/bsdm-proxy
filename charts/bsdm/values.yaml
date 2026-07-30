@@ -93,7 +93,7 @@ proxy:
   customDbPath: ""
   # RKN category sync (daily by default)
   rknSyncEnabled: false
-  rknSyncUrl: "https://raw.githubusercontent.com/zapret-info/z-i/master/dump.csv"
+  rknSyncUrl: "https://svn.code.sf.net/p/zapret-info/code/dump.csv"
   rknSyncIntervalSecs: 86400
   rustLog: "info,bsdm_proxy=info"
   shutdownTimeoutSeconds: 30

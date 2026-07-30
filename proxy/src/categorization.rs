@@ -184,8 +184,7 @@ impl Default for CategorizationConfig {
             custom_db_enabled: false,
             custom_db_path: None,
             rkn_sync_enabled: false,
-            rkn_sync_url: "https://raw.githubusercontent.com/zapret-info/z-i/master/dump.csv"
-                .to_string(),
+            rkn_sync_url: crate::runtime_config::DEFAULT_RKN_SYNC_URL.to_string(),
             rkn_sync_interval_secs: 86400,
         }
     }

@@ -234,6 +234,17 @@ impl AclApiState {
         )
     }
 
+    pub fn reload_from_disk(&self) -> Result<usize, String> {
+        let Some(path) = &self.config.rules_path else {
+            return Err("ACL_RULES_PATH is not configured".into());
+        };
+        let loaded = load_acl_engine_from_file(path, self.config.default_action)?;
+        let count = loaded.rule_count();
+        self.engine.replace(loaded);
+        self.invalidate_policy_cache();
+        Ok(count)
+    }
+
     async fn reload_rules(&self) -> Response<Body> {
         let Some(path) = &self.config.rules_path else {
             return json_response(
@@ -242,11 +253,8 @@ impl AclApiState {
             );
         };
 
-        match load_acl_engine_from_file(path, self.config.default_action) {
-            Ok(loaded) => {
-                let count = loaded.rule_count();
-                self.engine.replace(loaded);
-                self.invalidate_policy_cache();
+        match self.reload_from_disk() {
+            Ok(count) => {
                 info!("ACL API: reloaded {} rules from {}", count, path);
                 json_response(
                     StatusCode::OK,

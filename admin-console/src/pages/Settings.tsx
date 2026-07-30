@@ -6,15 +6,17 @@ import {
   Eye,
   FlaskConical,
   RefreshCw,
+  Save,
   ShieldAlert,
   Upload,
   WifiOff,
 } from 'lucide-react'
 import type { ConfigFormState } from '../lib/config/types'
 import { defaultFormState } from '../lib/config/types'
-import { cacheMetadataEstimate } from '../lib/config/collect'
+import { collectConfig, cacheMetadataEstimate } from '../lib/config/collect'
 import { formatEnv, generateAclRules, generateDockerCompose, downloadFile } from '../lib/config/export'
-import { importEnvFile, loadSavedForm, saveFormState } from '../lib/config/import'
+import { importEnvFile, loadSavedForm, saveFormState, applyEnvToForm } from '../lib/config/import'
+import { applyNodeConfig, fetchNodeConfig } from '../api/config'
 import { loadApiSettings, saveApiSettings, type ApiSettings } from '../api/settings'
 import { checkApiHealth, type ApiHealthResult } from '../api/health'
 import { isDemoMode, setDemoMode } from '../api/source'
@@ -62,6 +64,18 @@ export function SettingsPage() {
   const [tab, setTab] = useState<SettingsTab>('general')
   const [preview, setPreview] = useState<{ title: string; content: string } | null>(null)
   const [demoEnabled, setDemoEnabled] = useState(isDemoMode)
+  const [applying, setApplying] = useState(false)
+
+  useEffect(() => {
+    if (isDemoMode()) return
+    fetchNodeConfig()
+      .then((snapshot) => {
+        setForm((prev) => applyEnvToForm(snapshot.env, prev))
+      })
+      .catch(() => {
+        // Control API may be offline; local form state remains usable.
+      })
+  }, [])
 
   const update = useCallback(<K extends keyof ConfigFormState>(key: K, value: ConfigFormState[K]) => {
     setForm((prev) => {
@@ -91,6 +105,26 @@ export function SettingsPage() {
     }
     reader.readAsText(file)
     e.target.value = ''
+  }
+
+  const handleApply = async () => {
+    setApplying(true)
+    try {
+      const env = collectConfig(form)
+      const aclRules = form.aclEnabled ? generateAclRules(form) : null
+      const result = await applyNodeConfig({
+        env,
+        acl_rules: aclRules,
+        restart: true,
+      })
+      saveFormState(form)
+      toast('success', result.message)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to apply configuration'
+      toast('error', message)
+    } finally {
+      setApplying(false)
+    }
   }
 
   return (
@@ -145,6 +179,9 @@ export function SettingsPage() {
       </div>
 
       <div className="flex flex-wrap gap-2">
+        <Button onClick={handleApply} disabled={applying}>
+          <Save className="size-4" /> {applying ? tr.settings.applying : tr.settings.saveApply}
+        </Button>
         <Button onClick={() => setPreview({ title: 'bsdm-proxy.env', content: formatEnv(form) })}>
           <Eye className="size-4" /> {tr.settings.previewEnv}
         </Button>
@@ -436,7 +473,7 @@ function FilteringTab({ form, update, tr }: TabProps) {
             {form.customDbEnabled && <Input label="CUSTOM_DB_PATH" value={form.customDbPath} onChange={(e) => update('customDbPath', e.target.value)} />}
 
             <Checkbox label="RKN_SYNC_ENABLED (Roskomnadzor daily dump)" checked={form.rknSyncEnabled} onChange={(v) => update('rknSyncEnabled', v)} />
-            {form.rknSyncEnabled && <Input label="RKN_SYNC_URL" value={form.rknSyncUrl} onChange={(e) => update('rknSyncUrl', e.target.value)} hint="URL to the Zapret-info CSV dump" />}
+            {form.rknSyncEnabled && <Input label="RKN_SYNC_URL" value={form.rknSyncUrl} onChange={(e) => update('rknSyncUrl', e.target.value)} hint="Zapret-info dump.csv mirror (SourceForge)" />}
           </>
         )}
       </FormSection>
