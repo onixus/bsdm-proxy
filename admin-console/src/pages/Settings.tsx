@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   CheckCircle2,
   CircleDashed,
@@ -61,7 +62,9 @@ export function SettingsPage() {
   const { toast } = useToast()
   const [form, setForm] = useState<ConfigFormState>(() => loadSavedForm())
   const [apiSettings, setApiSettings] = useState<ApiSettings>(() => loadApiSettings())
-  const [tab, setTab] = useState<SettingsTab>('general')
+  const [searchParams] = useSearchParams()
+  const requestedTab = searchParams.get('tab')
+  const [tab, setTab] = useState<SettingsTab>(() => isSettingsTab(requestedTab) ? requestedTab : 'general')
   const [preview, setPreview] = useState<{ title: string; content: string } | null>(null)
   const [demoEnabled, setDemoEnabled] = useState(isDemoMode)
   const [applying, setApplying] = useState(false)
@@ -76,6 +79,10 @@ export function SettingsPage() {
         // Control API may be offline; local form state remains usable.
       })
   }, [])
+
+  useEffect(() => {
+    if (isSettingsTab(requestedTab)) setTab(requestedTab)
+  }, [requestedTab])
 
   const update = useCallback(<K extends keyof ConfigFormState>(key: K, value: ConfigFormState[K]) => {
     setForm((prev) => {
@@ -231,6 +238,10 @@ export function SettingsPage() {
       </Modal>
     </div>
   )
+}
+
+function isSettingsTab(value: string | null): value is SettingsTab {
+  return tabs.some((tab) => tab.id === value)
 }
 
 function LiveNodePanel({ tr }: { tr: any }) {

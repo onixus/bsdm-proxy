@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Make Admin Console mutations fail closed without an in-memory API token, add
+  an explicit read-only banner, and document the console exposure threat model.
 - Reject `POLICY_MODE=full-mitm` in the default `production` deployment profile;
   local development/test use now requires an explicit `ALLOW_FULL_MITM=true` override.
 - Update optional WASM runtime `wasmtime` to 46.0.2 to address
