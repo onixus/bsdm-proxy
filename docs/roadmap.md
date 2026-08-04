@@ -45,8 +45,8 @@ Roadmap определяет порядок работ в рамках стра�
 - [x] Минимальный lab-прототип агента (`examples/agent-spike`, Linux/macOS smoke) + control-plane API (#273, v0.9.2–0.9.6).
 - [x] Доставка политик и регистрация устройств (policy pull/push, enroll, heartbeat, devices, CRL/OCSP lab; Admin `/devices`).
 - [x] RFC 6960 DER OCSP responder + gRPC agent policy product path (`WatchAgentPolicy`).
+- [x] WebSocket policy push (`/api/v1/agent/policy/ws`).
 - [ ] Production multi-OS agent (installers, system proxy) и multi-node shared registry.
-- [ ] WebSocket policy push / multi-node shared registry productization.
 
 ---
 

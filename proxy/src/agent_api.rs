@@ -141,6 +141,95 @@ impl ControlApiState {
         json_response(StatusCode::OK, &body.to_string())
     }
 
+    /// WebSocket policy push (`GET /api/v1/agent/policy/ws` + Upgrade).
+    ///
+    /// Protocol: server sends JSON text frames (full policy document). Client may
+    /// send `{"type":"ping"}` (optional); server replies `{"type":"pong"}`.
+    /// First frame is the current snapshot; later frames on each publish.
+    pub(crate) fn agent_policy_ws_upgrade(
+        &self,
+        req: &mut hyper::Request<hyper::body::Incoming>,
+    ) -> Response<Body> {
+        use futures_util::{SinkExt, StreamExt};
+        use hyper_tungstenite::tungstenite::Message;
+        use std::convert::Infallible;
+
+        let hub = self.policy_hub.clone();
+        let (response, websocket) = match hyper_tungstenite::upgrade(req, None) {
+            Ok(pair) => pair,
+            Err(e) => {
+                return json_response(
+                    StatusCode::BAD_REQUEST,
+                    &serde_json::json!({ "error": format!("websocket upgrade: {e}") }).to_string(),
+                );
+            }
+        };
+
+        tokio::spawn(async move {
+            let mut ws = match websocket.await {
+                Ok(ws) => ws,
+                Err(e) => {
+                    warn!(error = %e, "agent policy websocket handshake failed");
+                    return;
+                }
+            };
+
+            let mut last = hub.snapshot().version;
+            let initial = hub.snapshot();
+            let payload = initial.document.to_string();
+            if ws.send(Message::text(payload)).await.is_err() {
+                return;
+            }
+
+            let notify = hub.notify_handle();
+            let mut ping = tokio::time::interval(Duration::from_secs(20));
+            loop {
+                tokio::select! {
+                    _ = notify.notified() => {
+                        let snap = hub.snapshot();
+                        if snap.version == last {
+                            continue;
+                        }
+                        last = snap.version.clone();
+                        if ws.send(Message::text(snap.document.to_string())).await.is_err() {
+                            break;
+                        }
+                    }
+                    msg = ws.next() => {
+                        match msg {
+                            Some(Ok(Message::Text(t))) => {
+                                if t.contains("ping") {
+                                    let _ = ws
+                                        .send(Message::text(r#"{"type":"pong"}"#))
+                                        .await;
+                                }
+                            }
+                            Some(Ok(Message::Ping(p))) => {
+                                let _ = ws.send(Message::Pong(p)).await;
+                            }
+                            Some(Ok(Message::Close(_))) | None => break,
+                            Some(Ok(_)) => {}
+                            Some(Err(_)) => break,
+                        }
+                    }
+                    _ = ping.tick() => {
+                        if ws
+                            .send(Message::Ping(Bytes::from_static(b"bsdm")))
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+
+        let (parts, body) = response.into_parts();
+        let body = body.map_err(|e: Infallible| match e {}).boxed();
+        Response::from_parts(parts, body)
+    }
+
     /// SSE stream of policy pushes (`text/event-stream`).
     fn agent_policy_stream(&self) -> Response<Body> {
         use http_body_util::channel::Channel;
@@ -566,6 +655,9 @@ impl ControlApiState {
                         "reenrolled": result.reenrolled,
                         "endpoints": {
                             "policy": "/api/v1/agent/policy",
+                            "policy_ws": "/api/v1/agent/policy/ws",
+                            "policy_stream": "/api/v1/agent/policy/stream",
+                            "policy_watch": "/api/v1/agent/policy/watch",
                             "heartbeat": "/api/v1/agent/heartbeat",
                             "events": "/api/v1/agent/events",
                             "crl": "/api/v1/agent/crl",

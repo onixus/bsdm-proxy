@@ -16,6 +16,18 @@ fn urlencoding_minimal(s: &str) -> String {
         .collect()
 }
 
+fn http_to_ws_url(control_plane: &str) -> String {
+    let base = control_plane.trim_end_matches('/');
+    let ws_base = if let Some(rest) = base.strip_prefix("https://") {
+        format!("wss://{rest}")
+    } else if let Some(rest) = base.strip_prefix("http://") {
+        format!("ws://{rest}")
+    } else {
+        base.to_string()
+    };
+    format!("{ws_base}/api/v1/agent/policy/ws")
+}
+
 fn decision_action(decision: &LocalDecision) -> (&'static str, Option<String>) {
     match decision {
         LocalDecision::Allow => ("allow", None),
@@ -171,6 +183,68 @@ impl AgentEngine {
             if let Err(e) = self.send_heartbeat(&client).await {
                 warn!("Heartbeat failed: {e}");
             }
+        }
+    }
+
+    /// WebSocket policy push (`GET /api/v1/agent/policy/ws`).
+    pub async fn watch_policy_ws_loop(&self) {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::connect_async;
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+        use tokio_tungstenite::tungstenite::Message;
+
+        loop {
+            let ws_url = http_to_ws_url(&self.control_plane_url);
+            let mut request = match ws_url.as_str().into_client_request() {
+                Ok(r) => r,
+                Err(e) => {
+                    warn!("policy ws request build: {e}");
+                    tokio::time::sleep(Duration::from_secs(3)).await;
+                    continue;
+                }
+            };
+            if let Some(token) = &self.control_api_token {
+                if let Ok(v) = http::HeaderValue::from_str(&format!("Bearer {token}")) {
+                    request.headers_mut().insert(http::header::AUTHORIZATION, v);
+                }
+            }
+            match connect_async(request).await {
+                Ok((mut ws, _)) => {
+                    info!("Policy WebSocket connected");
+                    while let Some(msg) = ws.next().await {
+                        match msg {
+                            Ok(Message::Text(text)) => {
+                                match serde_json::from_str::<RemotePolicyDto>(&text) {
+                                    Ok(dto) => {
+                                        let mapped = LocalPolicy::from_remote(dto);
+                                        info!(
+                                            policy_version = %mapped.policy_version,
+                                            "Policy push received (websocket)"
+                                        );
+                                        *self.policy.write().await = mapped;
+                                    }
+                                    Err(e) => {
+                                        // pong frames are JSON too — ignore non-policy
+                                        if !text.contains("\"type\"") {
+                                            warn!("policy ws decode: {e}");
+                                        }
+                                    }
+                                }
+                            }
+                            Ok(Message::Ping(p)) => {
+                                let _ = ws.send(Message::Pong(p)).await;
+                            }
+                            Ok(Message::Close(_)) | Err(_) => break,
+                            Ok(_) => {}
+                        }
+                    }
+                    warn!("Policy WebSocket disconnected; reconnecting");
+                }
+                Err(e) => {
+                    warn!("policy ws connect: {e}");
+                }
+            }
+            tokio::time::sleep(Duration::from_secs(2)).await;
         }
     }
 

@@ -13,3 +13,6 @@ tracing-subscriber = { workspace = true }
 reqwest = { workspace = true }
 bsdm-events = { workspace = true }
 rcgen = { version = "0.14", default-features = true, features = ["pem"] }
+tokio-tungstenite = { version = "0.30", default-features = true, features = ["rustls-tls-webpki-roots"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink"] }
+http = "1"

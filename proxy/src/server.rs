@@ -273,7 +273,11 @@ pub async fn metrics_server(
                         }
                     });
 
-                    if let Err(e) = http1::Builder::new().serve_connection(io, service).await {
+                    if let Err(e) = http1::Builder::new()
+                        .serve_connection(io, service)
+                        .with_upgrades()
+                        .await
+                    {
                         error!("Metrics server connection error from {}: {}", addr, e);
                     }
                 });
@@ -409,7 +413,11 @@ pub async fn agent_control_mtls_server(
                         }
                     });
 
-                    if let Err(e) = http1::Builder::new().serve_connection(io, service).await {
+                    if let Err(e) = http1::Builder::new()
+                        .serve_connection(io, service)
+                        .with_upgrades()
+                        .await
+                    {
                         debug!(%addr, "agent mTLS connection closed: {e}");
                     }
                 });

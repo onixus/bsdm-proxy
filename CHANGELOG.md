@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Agent policy WebSocket push (#273)** — `GET /api/v1/agent/policy/ws`
+  (RFC 6455 upgrade); server sends full policy JSON text frames on publish;
+  HTTP/1 upgrades enabled on metrics + mTLS control ports; `agent-spike`
+  `AGENT_POLICY_WS=1` / `--policy-ws`.
+
 ## [0.9.7] - 2026-08-04
 
 Patch release after **0.9.6**: agent **RFC 6960 DER OCSP** and **gRPC policy**

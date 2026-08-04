@@ -20,7 +20,7 @@ Issue tracking: **#273** (agent implementation), **#258** (original spike).
 |---|---|
 | `POST /api/v1/agent/enroll` → `device_token` | Control-plane TLS mutual-auth on primary `:9090` |
 | Optional enroll CSR → client cert (proxy CA) | OCSP stapling on data-plane TLS |
-| `GET /api/v1/agent/policy` pull + watch/SSE push | WebSocket policy push |
+| `GET /api/v1/agent/policy` pull + watch/SSE/**WebSocket** push | |
 | gRPC policy (`Get/Push/WatchAgentPolicy`, feature `grpc`) | mTLS on metrics/admin port |
 | Optional control mTLS port (`CONTROL_MTLS_*`, default `:9443`) | Multi-node shared registry |
 | Agent cert CRL JSON/PEM + lab OCSP JSON + **RFC 6960 DER OCSP** | |
@@ -222,6 +222,9 @@ curl -sS -H "Authorization: Bearer ${DEVICE_TOKEN}" \
 # SSE (curl -N)
 curl -NsS -H "Authorization: Bearer ${DEVICE_TOKEN}" \
   http://127.0.0.1:9090/api/v1/agent/policy/stream
+
+# WebSocket (agent-spike: AGENT_POLICY_WS=1 or --policy-ws)
+# ws://127.0.0.1:9090/api/v1/agent/policy/ws  (Bearer on handshake)
 ```
 
 Pinning reload (`POST /api/pinning/exceptions/reload`) also publishes a push.

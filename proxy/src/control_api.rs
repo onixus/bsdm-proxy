@@ -620,7 +620,19 @@ impl ControlApiState {
         state
     }
 
-    pub async fn handle_request(&self, req: Request<Incoming>) -> Response<Body> {
+    pub async fn handle_request(&self, mut req: Request<Incoming>) -> Response<Body> {
+        // WebSocket policy push must upgrade before body is consumed.
+        let path = req.uri().path();
+        if path == "/api/v1/agent/policy/ws"
+            && req.method() == Method::GET
+            && hyper_tungstenite::is_upgrade_request(&req)
+        {
+            if !self.is_agent_authorized(req.headers()) {
+                return json_response(StatusCode::UNAUTHORIZED, r#"{"error":"unauthorized"}"#);
+            }
+            return self.agent_policy_ws_upgrade(&mut req);
+        }
+
         let (parts, body) = req.into_parts();
         let body = match BodyExt::collect(body).await {
             Ok(collected) => collected.to_bytes(),

@@ -27,9 +27,9 @@ policy and heartbeat endpoints.
   `POST /api/v1/agent/ocsp` (CA-signed, public).
 - Admin Console: supported `/devices` (list, revoke, policy push, events, CRL).
 - Handlers live in `proxy/src/agent_api.rs` (`dispatch_agent`).
-- Policy product push: HTTP long-poll/SSE + optional **gRPC**
+- Policy product push: HTTP long-poll/SSE/**WebSocket** + optional **gRPC**
   `WatchAgentPolicy` / `GetAgentPolicy` / `PushAgentPolicy` (`--features grpc`).
-- Reserved: multi-OS installers, multi-node registry, WebSocket push.
+- Reserved: multi-OS installers, multi-node registry.
 
 ---
 

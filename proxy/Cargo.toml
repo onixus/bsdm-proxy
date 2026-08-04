@@ -70,6 +70,8 @@ der = { version = "0.7", features = ["alloc", "derive", "oid"] }
 x509-cert = { version = "0.2", features = ["std", "pem"] }
 ring = "0.17"
 spki = "0.7"
+hyper-tungstenite = "0.30"
+futures-util = { version = "0.3", features = ["sink"] }
 
 [build-dependencies]
 tonic-build = { version = "0.12", optional = true }
