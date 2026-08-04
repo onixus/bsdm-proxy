@@ -7,15 +7,14 @@ use hyper::header::HeaderValue;
 use hyper::header::{AUTHORIZATION, LOCATION};
 use hyper::{HeaderMap, Method, Request, Response, StatusCode};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::watch;
 use tracing::{info, warn};
 
 use crate::acl_api::AclApiState;
 use crate::cache_key::http_cache_key;
-use crate::device_registry::{self, RegisteredDevice};
+use crate::device_registry::{agent_policy_document, DeviceRegistry, HeartbeatUpdate, RevokeError};
 use crate::hierarchy_config::reload_static_peers;
 use crate::http_types::{full, Body};
 use crate::l2_cache::RedisL2Cache;
@@ -47,6 +46,23 @@ struct AgentHeartbeatDto {
     cert_subject: Option<String>,
     cert_fingerprint: Option<String>,
     trust_score: Option<u8>,
+}
+
+impl From<AgentHeartbeatDto> for HeartbeatUpdate {
+    fn from(hb: AgentHeartbeatDto) -> Self {
+        Self {
+            device_id: hb.device_id,
+            status: hb.status,
+            agent_version: hb.agent_version,
+            policy_version: hb.policy_version,
+            name: hb.name,
+            ip: hb.ip,
+            device_type: hb.device_type,
+            cert_subject: hb.cert_subject,
+            cert_fingerprint: hb.cert_fingerprint,
+            trust_score: hb.trust_score,
+        }
+    }
 }
 
 impl ControlApiState {
@@ -376,27 +392,11 @@ impl ControlApiState {
     }
 
     fn agent_policy(&self) -> Response<Body> {
-        // Agent Contract v0.1 subset: mode + categories from runtime env,
-        // pinning from managed registry, SNI deny patterns from AGENT_SNI_DENY_PATTERNS
-        // (comma-separated; pilot defaults when unset).
-        let sni_deny = agent_sni_deny_patterns();
-        let sni_rules: Vec<serde_json::Value> = sni_deny
-            .iter()
-            .map(|pattern| {
-                serde_json::json!({
-                    "pattern": pattern,
-                    "action": "deny",
-                })
-            })
-            .collect();
-        let dto = serde_json::json!({
-            "policy_version": "v0.1.0",
-            "policy_mode": crate::policy_config::configured_policy_mode().as_str(),
-            "mitm_categories": crate::policy_config::configured_mitm_categories(),
-            "pinning_exceptions": self.pinning_registry.active_domains(),
-            "sni_deny_patterns": sni_deny,
-            "sni_rules": sni_rules,
-        });
+        let dto = agent_policy_document(
+            crate::policy_config::configured_policy_mode().as_str(),
+            &crate::policy_config::configured_mitm_categories(),
+            &self.pinning_registry.active_domains(),
+        );
         json_response(StatusCode::OK, &dto.to_string())
     }
 
@@ -470,155 +470,57 @@ impl ControlApiState {
     }
 
     async fn agent_heartbeat(&self, body: Bytes) -> Response<Body> {
-        match serde_json::from_slice::<AgentHeartbeatDto>(&body) {
-            Ok(hb) => {
-                if hb.device_id.trim().is_empty() {
-                    return json_response(
-                        StatusCode::BAD_REQUEST,
-                        r#"{"error":"device_id must not be empty"}"#,
-                    );
-                }
-                if hb.trust_score.is_some_and(|score| score > 100) {
-                    return json_response(
-                        StatusCode::BAD_REQUEST,
-                        r#"{"error":"trust_score must be between 0 and 100"}"#,
-                    );
-                }
-                let mut devices = self.devices.write().expect("device registry lock");
-                let previous = devices.get(&hb.device_id);
-                let device = RegisteredDevice {
-                    id: hb.device_id.clone(),
-                    name: hb
-                        .name
-                        .filter(|name| !name.trim().is_empty())
-                        .or_else(|| previous.map(|device| device.name.clone()))
-                        .unwrap_or_else(|| hb.device_id.clone()),
-                    ip: hb
-                        .ip
-                        .or_else(|| previous.map(|device| device.ip.clone()))
-                        .unwrap_or_default(),
-                    device_type: hb
-                        .device_type
-                        .filter(|kind| matches!(kind.as_str(), "desktop" | "phone"))
-                        .or_else(|| previous.map(|device| device.device_type.clone()))
-                        .unwrap_or_else(|| "desktop".to_string()),
-                    agent_status: hb.status.unwrap_or_else(|| "healthy".to_string()),
-                    agent_version: hb
-                        .agent_version
-                        .or_else(|| previous.and_then(|device| device.agent_version.clone())),
-                    policy_version: hb
-                        .policy_version
-                        .or_else(|| previous.and_then(|device| device.policy_version.clone())),
-                    cert_subject: hb
-                        .cert_subject
-                        .or_else(|| previous.and_then(|device| device.cert_subject.clone())),
-                    cert_fingerprint: hb
-                        .cert_fingerprint
-                        .or_else(|| previous.and_then(|device| device.cert_fingerprint.clone())),
-                    trust_score: hb
-                        .trust_score
-                        .or_else(|| previous.and_then(|device| device.trust_score)),
-                    last_seen: unix_timestamp(),
-                    revoked: previous.is_some_and(|device| device.revoked),
-                };
-                info!(
-                    device_id = %device.id,
-                    status = %device.agent_status,
-                    agent_version = ?device.agent_version,
-                    "Agent heartbeat received"
+        let hb: AgentHeartbeatDto = match serde_json::from_slice(&body) {
+            Ok(hb) => hb,
+            Err(e) => {
+                return json_response(
+                    StatusCode::BAD_REQUEST,
+                    &format!(
+                        r#"{{"error":"invalid heartbeat payload: {}"}}"#,
+                        escape_json(&e.to_string())
+                    ),
                 );
-                devices.insert(device.id.clone(), device);
-                let persisted = self.persist_devices(&devices);
-                json_response(
-                    StatusCode::OK,
-                    &serde_json::json!({
-                        "status": "acknowledged",
-                        "persisted": persisted,
-                    })
-                    .to_string(),
-                )
             }
-            Err(e) => json_response(
+        };
+        match self.device_registry.apply_heartbeat(hb.into()) {
+            Ok(persisted) => json_response(
+                StatusCode::OK,
+                &serde_json::json!({
+                    "status": "acknowledged",
+                    "persisted": persisted,
+                })
+                .to_string(),
+            ),
+            Err(err) => json_response(
                 StatusCode::BAD_REQUEST,
-                &format!(
-                    r#"{{"error":"invalid heartbeat payload: {}"}}"#,
-                    escape_json(&e.to_string())
-                ),
+                &serde_json::json!({ "error": err.message() }).to_string(),
             ),
         }
     }
 
-    /// Write device map when `AGENT_DEVICES_PATH` is configured. Returns whether
-    /// a durable write was requested and succeeded (false = memory-only or error).
-    fn persist_devices(&self, devices: &HashMap<String, RegisteredDevice>) -> bool {
-        let Some(path) = self.devices_path.as_ref() else {
-            return false;
-        };
-        match device_registry::save(path, devices) {
-            Ok(()) => true,
-            Err(error) => {
-                warn!(
-                    path = %path.display(),
-                    error = %error,
-                    "Failed to persist agent device registry"
-                );
-                false
-            }
-        }
-    }
-
     fn registered_devices(&self) -> Response<Body> {
-        let devices = self.devices.read().expect("device registry lock");
-        let mut rows: Vec<_> = devices
-            .values()
-            .map(|device| {
-                serde_json::json!({
-                    "id": device.id,
-                    "name": device.name,
-                    "ip": device.ip,
-                    "type": device.device_type,
-                    "status": if device.revoked {
-                        "Revoked"
-                    } else if device.agent_status.eq_ignore_ascii_case("healthy") {
-                        "Secured"
-                    } else {
-                        "Flagged"
-                    },
-                    "connection": device.last_seen.to_string(),
-                    "lastSeen": device.last_seen,
-                    "agentStatus": device.agent_status,
-                    "agentVersion": device.agent_version,
-                    "policyVersion": device.policy_version,
-                    "certSubject": device.cert_subject,
-                    "certFingerprint": device.cert_fingerprint,
-                    "trustScore": device.trust_score,
-                })
-            })
-            .collect();
-        rows.sort_by_key(|row| std::cmp::Reverse(row["lastSeen"].as_u64().unwrap_or(0)));
+        let rows = self.device_registry.list_api_rows();
         json_response(StatusCode::OK, &serde_json::Value::Array(rows).to_string())
     }
 
     fn revoke_device(&self, device_id: &str) -> Response<Body> {
-        if device_id.is_empty() || device_id.contains('/') {
-            return json_response(StatusCode::BAD_REQUEST, r#"{"error":"invalid device id"}"#);
+        match self.device_registry.revoke(device_id) {
+            Ok(persisted) => json_response(
+                StatusCode::OK,
+                &serde_json::json!({
+                    "success": true,
+                    "message": format!("Device {device_id} revoked"),
+                    "persisted": persisted,
+                })
+                .to_string(),
+            ),
+            Err(RevokeError::InvalidId) => {
+                json_response(StatusCode::BAD_REQUEST, r#"{"error":"invalid device id"}"#)
+            }
+            Err(RevokeError::NotFound) => {
+                json_response(StatusCode::NOT_FOUND, r#"{"error":"device not found"}"#)
+            }
         }
-        let mut devices = self.devices.write().expect("device registry lock");
-        let Some(device) = devices.get_mut(device_id) else {
-            return json_response(StatusCode::NOT_FOUND, r#"{"error":"device not found"}"#);
-        };
-        device.revoked = true;
-        warn!(device_id, "Device trust revoked");
-        let persisted = self.persist_devices(&devices);
-        json_response(
-            StatusCode::OK,
-            &serde_json::json!({
-                "success": true,
-                "message": format!("Device {device_id} revoked"),
-                "persisted": persisted,
-            })
-            .to_string(),
-        )
     }
 }
 
@@ -644,9 +546,7 @@ pub struct ControlApiState {
     session_store: crate::session_store::GlobalSessionStore,
     threat_sync: crate::threat_sync::ThreatSyncEngine,
     admin_console_dir: Option<std::path::PathBuf>,
-    devices: Arc<RwLock<HashMap<String, RegisteredDevice>>>,
-    /// When set (`AGENT_DEVICES_PATH`), heartbeats/revokes rewrite this JSON file.
-    devices_path: Option<std::path::PathBuf>,
+    device_registry: DeviceRegistry,
     shutdown_tx: Option<watch::Sender<bool>>,
     acl_api: Option<Arc<AclApiState>>,
 }
@@ -704,8 +604,7 @@ impl ControlApiState {
                         None
                     }
                 }),
-            devices: Arc::new(RwLock::new(HashMap::new())),
-            devices_path: None,
+            device_registry: DeviceRegistry::memory_only(),
             shutdown_tx: None,
             acl_api: None,
         }
@@ -758,23 +657,7 @@ impl ControlApiState {
             threat_sync,
         );
         state.fail_closed = crate::security_defaults::control_api_fail_closed();
-        if let Some(path) = device_registry::path_from_env() {
-            match device_registry::load(&path) {
-                Ok(loaded) => {
-                    state.devices = Arc::new(RwLock::new(loaded));
-                    state.devices_path = Some(path);
-                }
-                Err(error) => {
-                    warn!(
-                        path = %path.display(),
-                        error = %error,
-                        "Failed to load AGENT_DEVICES_PATH — continuing with empty in-memory registry"
-                    );
-                    // Still attach the path so future heartbeats can create the file.
-                    state.devices_path = Some(path);
-                }
-            }
-        }
+        state.device_registry = DeviceRegistry::from_env();
         state
     }
 
@@ -1428,21 +1311,6 @@ fn collect_purge_tags(req: &PurgeRequest) -> Vec<String> {
     out
 }
 
-/// Comma-separated SNI deny patterns for Agent Contract policy pull.
-/// Env: `AGENT_SNI_DENY_PATTERNS` (e.g. `*.evil.com,badsite.test`).
-/// Unset → pilot lab defaults so agents have a non-empty offline-safe set.
-fn agent_sni_deny_patterns() -> Vec<String> {
-    match std::env::var("AGENT_SNI_DENY_PATTERNS") {
-        Ok(raw) if !raw.trim().is_empty() => raw
-            .split(',')
-            .map(str::trim)
-            .filter(|part| !part.is_empty())
-            .map(str::to_string)
-            .collect(),
-        _ => vec!["*.evil.com".to_string(), "badsite.test".to_string()],
-    }
-}
-
 fn json_response(status: StatusCode, body: &str) -> Response<Body> {
     Response::builder()
         .status(status)
@@ -1957,7 +1825,7 @@ mod tests {
         let metrics = Arc::new(Metrics::new().unwrap());
         let cache = Arc::new(HttpL1Cache::new(100, 4));
         let mut state = state_plain(metrics.clone(), cache.clone());
-        state.devices_path = Some(path.clone());
+        state.device_registry = DeviceRegistry::with_path(path.clone());
 
         let hb_payload = Bytes::from(
             r#"{"device_id":"persist-001","name":"Persist laptop","status":"healthy","agent_version":"0.1.0","policy_version":"v0.1.0","trust_score":88}"#,
@@ -1976,15 +1844,14 @@ mod tests {
         assert_eq!(v["persisted"], true);
         assert!(path.exists());
 
-        // Simulate process restart: empty map + load from file.
+        // Simulate process restart via file reload.
         let loaded = crate::device_registry::load(&path).unwrap();
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded["persist-001"].name, "Persist laptop");
         assert!(!loaded["persist-001"].revoked);
 
         let mut reloaded = state_plain(metrics, cache);
-        reloaded.devices = Arc::new(RwLock::new(loaded));
-        reloaded.devices_path = Some(path.clone());
+        reloaded.device_registry = DeviceRegistry::from_map(loaded, Some(path.clone()));
 
         let revoke = reloaded
             .dispatch(

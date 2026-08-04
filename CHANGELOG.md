@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Agent control-plane refactor** — `DeviceRegistry` owns inventory +
+  heartbeat/revoke/persist and policy document helpers; `control_api` thin
+  HTTP adapters; `agent-spike` split into `policy` / `engine` / `main` (#273).
+
 ### Added
 
 - **Agent device registry persistence** — `AGENT_DEVICES_PATH` JSON store for
