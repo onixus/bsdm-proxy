@@ -23,7 +23,8 @@ policy and heartbeat endpoints.
 - Policy push: long-poll `/policy/watch`, SSE `/policy/stream`, operator
   `POST /policy/push` (+ pinning reload notify).
 - Agent CRL: JSON + optional X.509 PEM (`/api/v1/agent/crl[.pem]`); mTLS checks CRL.
-- Reserved: OCSP, WebSocket/gRPC push productization.
+- Agent OCSP status (lab JSON): `GET /api/v1/agent/ocsp/status?fingerprint=|&serial=`.
+- Reserved: RFC 6960 DER OCSP responder, WebSocket/gRPC push productization.
 
 ---
 
@@ -71,17 +72,19 @@ by the proxy/agent CA. Plain `METRICS_PORT` stays HTTP for scrapers/Admin.
   is not on a non-revoked enrolled device
 - HTTP Bearer (`device_token` / control token) still applies for API auth
 
-#### Certificate revocation (lab CRL)
+#### Certificate revocation (lab CRL + OCSP status)
 
 - Revoke (`POST /api/v1/devices/{id}/revoke`) clears device token and appends
   `cert_fingerprint` (+ serial when known) to the agent CRL.
 - `GET /api/v1/agent/crl` — JSON list for ops / mTLS fingerprint checks.
 - `GET /api/v1/agent/crl.pem` — CA-signed X.509 CRL when issuer has `CrlSign`.
+- `GET /api/v1/agent/ocsp/status?fingerprint=|&serial=` — lab JSON OCSP-like
+  status: `good` | `revoked` | `unknown` (backed by enroll + CRL; not ASN.1).
 - Durable store: `AGENT_CRL_PATH`. mTLS: `CONTROL_MTLS_CHECK_CRL` (default on).
 
 #### Reserved
 
-- OCSP stapling / responders.
+- Full RFC 6960 binary OCSP / stapling.
 - Forcing mTLS on the primary metrics port (would break Prometheus scrape).
 
 ---

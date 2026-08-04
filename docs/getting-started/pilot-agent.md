@@ -137,6 +137,23 @@ curl -sS -H "Authorization: Bearer ${CONTROL_API_TOKEN}" \
 
 Persist CRL: `AGENT_CRL_PATH=./data/agent-crl.json`.
 
+### OCSP status (lab JSON)
+
+Per-cert status (not full RFC 6960 binary OCSP):
+
+```bash
+# After enroll --mtls (fingerprint from response):
+curl -sS -H "Authorization: Bearer ${CONTROL_API_TOKEN}" \
+  "http://127.0.0.1:9090/api/v1/agent/ocsp/status?fingerprint=${CERT_FP}" | jq .
+
+# By serial:
+curl -sS -H "Authorization: Bearer ${CONTROL_API_TOKEN}" \
+  "http://127.0.0.1:9090/api/v1/agent/ocsp/status?serial=${CERT_SERIAL}" | jq .
+# → status: good | revoked | unknown
+```
+
+Enroll response includes `ocsp_status_url` for convenience.
+
 ### Optional: agent control mTLS port
 
 Plain `:9090` stays HTTP (Prometheus / Admin). Agents can use HTTPS **with

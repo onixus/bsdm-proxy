@@ -17,6 +17,7 @@ use tracing::{info, warn};
 use crate::acl_api::AclApiState;
 use crate::agent_crl::AgentCrl;
 use crate::agent_events::{AgentEventBatch, AgentEventIngestor};
+use crate::agent_ocsp;
 use crate::agent_policy_hub::PolicyHub;
 use crate::cache_key::http_cache_key;
 use crate::device_registry::{
@@ -671,6 +672,49 @@ impl ControlApiState {
         )
     }
 
+    /// Lab OCSP-style status: `?fingerprint=` and/or `?serial=`.
+    fn agent_ocsp_status(&self, query: Option<&str>) -> Response<Body> {
+        let mut fingerprint: Option<String> = None;
+        let mut serial: Option<String> = None;
+        if let Some(q) = query {
+            for pair in q.split('&') {
+                if let Some((k, v)) = pair.split_once('=') {
+                    let v = v.replace("%2F", "/"); // minimal decode
+                    match k {
+                        "fingerprint" if !v.is_empty() => fingerprint = Some(v),
+                        "serial" if !v.is_empty() => serial = Some(v),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        match agent_ocsp::check_status(
+            &self.agent_crl,
+            &self.device_registry,
+            fingerprint.as_deref(),
+            serial.as_deref(),
+        ) {
+            Ok(status) => {
+                let code = match status.status {
+                    agent_ocsp::OcspCertStatus::Good => StatusCode::OK,
+                    agent_ocsp::OcspCertStatus::Revoked => StatusCode::OK,
+                    agent_ocsp::OcspCertStatus::Unknown => StatusCode::OK,
+                };
+                match serde_json::to_string(&status) {
+                    Ok(body) => json_response(code, &body),
+                    Err(e) => json_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        &format!(r#"{{"error":"{e}"}}"#),
+                    ),
+                }
+            }
+            Err(e) => json_response(
+                StatusCode::BAD_REQUEST,
+                &serde_json::json!({ "error": e }).to_string(),
+            ),
+        }
+    }
+
     fn agent_crl_pem(&self) -> Response<Body> {
         let Some(cache) = self.cert_cache.as_ref() else {
             return json_response(
@@ -855,7 +899,11 @@ impl ControlApiState {
                             "heartbeat": "/api/v1/agent/heartbeat",
                             "events": "/api/v1/agent/events",
                             "crl": "/api/v1/agent/crl",
+                            "ocsp": "/api/v1/agent/ocsp/status",
                         },
+                        "ocsp_status_url": cert_fingerprint.as_ref().map(|fp| {
+                            format!("/api/v1/agent/ocsp/status?fingerprint={fp}")
+                        }),
                         "auth": "Bearer device_token for agent endpoints (or CONTROL_API_TOKEN)",
                         "mtls": mtls,
                         "client_cert_pem": client_cert_pem,
@@ -1178,6 +1226,7 @@ impl ControlApiState {
             (&Method::POST, "/api/v1/agent/enroll") => self.agent_enroll(body),
             (&Method::GET, "/api/v1/agent/crl") => self.agent_crl_json(),
             (&Method::GET, "/api/v1/agent/crl.pem") => self.agent_crl_pem(),
+            (&Method::GET, "/api/v1/agent/ocsp/status") => self.agent_ocsp_status(query),
             (&Method::GET, "/api/agent/policy") => {
                 deprecated_agent_alias(self.agent_policy(), "/api/v1/agent/policy")
             }

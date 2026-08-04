@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Agent OCSP status API (#273)** — lab JSON
+  `GET /api/v1/agent/ocsp/status?fingerprint=|&serial=` (`good`/`revoked`/`unknown`)
+  backed by enroll registry + CRL; enroll returns `ocsp_status_url`; not full
+  RFC 6960 DER wire format (documented).
 - **Agent cert CRL (#273)** — fingerprint + serial revocation store
   (`AGENT_CRL_PATH`); revoke adds cert to CRL; `GET /api/v1/agent/crl` (JSON)
   and `GET /api/v1/agent/crl.pem` (CA-signed X.509 when CA allows CrlSign);

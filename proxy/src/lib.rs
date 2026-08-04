@@ -5,6 +5,7 @@ pub mod acl_api;
 pub mod acl_config;
 pub mod agent_crl;
 pub mod agent_events;
+pub mod agent_ocsp;
 pub mod agent_policy_hub;
 pub mod amneziawg;
 pub mod auth;

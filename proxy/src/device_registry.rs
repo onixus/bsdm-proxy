@@ -464,6 +464,49 @@ impl DeviceRegistry {
         })
     }
 
+    /// True if we have ever seen this fingerprint (even if later revoked).
+    pub fn cert_fingerprint_known(&self, fingerprint: &str) -> bool {
+        if fingerprint.is_empty() {
+            return false;
+        }
+        let fp = fingerprint.to_ascii_lowercase();
+        let devices = self.devices.read().expect("device registry lock");
+        devices.values().any(|d| {
+            d.cert_fingerprint
+                .as_ref()
+                .is_some_and(|h| constant_time_eq(h.to_ascii_lowercase().as_bytes(), fp.as_bytes()))
+        })
+    }
+
+    /// True if serial was issued to any enrolled (or revoked) device.
+    pub fn cert_serial_known(&self, serial_hex: &str) -> bool {
+        if serial_hex.is_empty() {
+            return false;
+        }
+        let s = serial_hex.to_ascii_lowercase();
+        let devices = self.devices.read().expect("device registry lock");
+        devices.values().any(|d| {
+            d.cert_serial
+                .as_ref()
+                .is_some_and(|h| constant_time_eq(h.to_ascii_lowercase().as_bytes(), s.as_bytes()))
+        })
+    }
+
+    /// Active (non-revoked) device with matching serial, if any.
+    pub fn cert_serial_valid(&self, serial_hex: &str) -> bool {
+        if serial_hex.is_empty() {
+            return false;
+        }
+        let s = serial_hex.to_ascii_lowercase();
+        let devices = self.devices.read().expect("device registry lock");
+        devices.values().any(|d| {
+            !d.revoked
+                && d.cert_serial.as_ref().is_some_and(|h| {
+                    constant_time_eq(h.to_ascii_lowercase().as_bytes(), s.as_bytes())
+                })
+        })
+    }
+
     /// Revoke device trust. Returns `(persisted, cert_fingerprint, cert_serial)` for CRL.
     pub fn revoke(
         &self,

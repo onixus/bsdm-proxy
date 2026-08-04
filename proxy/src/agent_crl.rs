@@ -113,6 +113,49 @@ impl AgentCrl {
             .any(|e| constant_time_eq(e.fingerprint.to_ascii_lowercase().as_bytes(), fp.as_bytes()))
     }
 
+    pub fn is_serial_revoked(&self, serial_hex: &str) -> bool {
+        if serial_hex.is_empty() {
+            return false;
+        }
+        let s = serial_hex.to_ascii_lowercase();
+        let entries = self.entries.read().expect("crl lock");
+        entries.iter().any(|e| {
+            e.serial_hex
+                .as_ref()
+                .is_some_and(|h| constant_time_eq(h.to_ascii_lowercase().as_bytes(), s.as_bytes()))
+        })
+    }
+
+    pub fn entry_by_fingerprint(&self, fingerprint: &str) -> Option<CrlEntry> {
+        if fingerprint.is_empty() {
+            return None;
+        }
+        let fp = fingerprint.to_ascii_lowercase();
+        let entries = self.entries.read().expect("crl lock");
+        entries
+            .iter()
+            .find(|e| {
+                constant_time_eq(e.fingerprint.to_ascii_lowercase().as_bytes(), fp.as_bytes())
+            })
+            .cloned()
+    }
+
+    pub fn entry_by_serial(&self, serial_hex: &str) -> Option<CrlEntry> {
+        if serial_hex.is_empty() {
+            return None;
+        }
+        let s = serial_hex.to_ascii_lowercase();
+        let entries = self.entries.read().expect("crl lock");
+        entries
+            .iter()
+            .find(|e| {
+                e.serial_hex.as_ref().is_some_and(|h| {
+                    constant_time_eq(h.to_ascii_lowercase().as_bytes(), s.as_bytes())
+                })
+            })
+            .cloned()
+    }
+
     /// Add a revocation entry (idempotent by fingerprint). Returns true if newly added.
     pub fn revoke(
         &self,
