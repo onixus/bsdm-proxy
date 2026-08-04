@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Pilot Basic auth pilot path** — Users file (`BASIC_AUTH_USERS_FILE`),
+  `scripts/gen-basic-auth-user.sh`, `scripts/run-auth-pilot-smoke.sh`, example
+  users JSON, compose mount, and [pilot-auth.md](docs/getting-started/pilot-auth.md)
+  (OIDC reverse-proxy documented as experimental, not day-1 forward SWG).
 - **DLP_ENABLED kill-switch** — Native signature DLP is off by default
   (`DLP_ENABLED=false`/unset); `true` loads built-in patterns. Pilot compose sets
   false so no control-API pattern wipe is required after restart.

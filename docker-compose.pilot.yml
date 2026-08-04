@@ -52,6 +52,10 @@ services:
       ACL_ENABLED: "${ACL_ENABLED:-true}"
       ACL_DEFAULT_ACTION: "${ACL_DEFAULT_ACTION:-allow}"
       AUTH_ENABLED: "${AUTH_ENABLED:-false}"
+      AUTH_BACKEND: "${AUTH_BACKEND:-basic}"
+      AUTH_REALM: "${AUTH_REALM:-BSDM Pilot}"
+      # When AUTH_ENABLED=true, point at a users file (example password: pilot-secret).
+      BASIC_AUTH_USERS_FILE: "${BASIC_AUTH_USERS_FILE:-/etc/bsdm-proxy/basic-auth-users.json}"
       CATEGORIZATION_ENABLED: "${CATEGORIZATION_ENABLED:-false}"
       UT1_ENABLED: "${UT1_ENABLED:-false}"
 
@@ -81,6 +85,8 @@ services:
       DLP_ENABLED: "false"
     volumes:
       - pilot-spill:/var/cache/bsdm-spill
+      # Optional Basic auth users (override host path via bind). Example password: pilot-secret.
+      - ${BASIC_AUTH_USERS_HOST:-./config/basic-auth-users.example.json}:/etc/bsdm-proxy/basic-auth-users.json:ro
     deploy:
       resources:
         limits:

@@ -8,11 +8,13 @@ BSDM-Proxy supports proxy authentication backends for access control.
 
 | Backend | Status | Build feature | Header |
 |---------|--------|---------------|--------|
-| **Basic** | ✅ | `auth-basic` (default) | `Proxy-Authorization: Basic` |
-| **OIDC** | ✅ | `auth-basic` | `Authorization: Bearer <JWT>` / Cookie |
+| **Basic** | ✅ Pilot day-1 | `auth-basic` (default) | `Proxy-Authorization: Basic` |
 | **LDAP** | ✅ | `auth-ldap` | `Basic` (username/password) |
-| **NTLM** | ✅ | `auth-ntlm` | `NTLM` (multi-round) |
-| **Kerberos** | ✅ | `auth-kerberos` | `Negotiate` / SPNEGO (multi-round) |
+| **NTLM** | ✅ Beta | `auth-ntlm` | `NTLM` (multi-round) |
+| **Kerberos** | ✅ Beta | `auth-kerberos` | `Negotiate` / SPNEGO (multi-round) |
+| **OIDC** | ⚠ Experimental reverse-proxy only | default image | Browser OIDC for IAP — **not** forward-proxy `AUTH_BACKEND` |
+
+Pilot runbook (users file, smoke, load-test): [pilot-auth.md](../getting-started/pilot-auth.md).
 
 Build with SSO backends:
 
@@ -24,13 +26,22 @@ cargo build -p bsdm-proxy --features auth-all
 
 ### 1. Basic Authentication
 
-Simple username extraction without external validation.
+Local username/password via `Proxy-Authorization: Basic`.
 
 ```bash
 export AUTH_ENABLED=true
 export AUTH_BACKEND=basic
 export AUTH_REALM="BSDM-Proxy"
+# Required for pilot/production — without this file any credentials are accepted:
+export BASIC_AUTH_USERS_FILE=/etc/bsdm-proxy/basic-auth-users.json
 ```
+
+Users file is JSON array of `{ "username", "password_hash", "role" }` where
+`password_hash` is **SHA-256 hex** of the password. Generate entries with
+`./scripts/gen-basic-auth-user.sh`. Example: `config/basic-auth-users.example.json`
+(password `pilot-secret` — change before production).
+
+Smoke: `./scripts/run-auth-pilot-smoke.sh`.
 
 ### 2. LDAP / Active Directory
 
@@ -177,9 +188,17 @@ services:
 
 Build with `--features auth-all` (or `auth-ntlm,auth-ldap`).
 
+## OIDC note (reverse proxy)
+
+`OIDC_CLIENT_ID` / `OIDC_ISSUER_URL` / … configure the **experimental reverse-proxy
+IAP** path, not `AUTH_BACKEND` for the forward SWG data plane. Frozen for pilot
+day-1; see [project-status.md](../project-status.md) and
+[pilot-auth.md](../getting-started/pilot-auth.md).
+
 ## Roadmap
 
 - [x] NTLM auth — [#44](https://github.com/onixus/bsdm-proxy/issues/44)
 - [x] Kerberos / SPNEGO with keytab
 - [x] LDAP group lookup after NTLM/Kerberos principal resolution
+- [x] Pilot Basic path + users file + smoke ([pilot-auth.md](../getting-started/pilot-auth.md))
 - [ ] Auth Prometheus metrics (`bsdm_proxy_auth_*`)

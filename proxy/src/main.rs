@@ -217,6 +217,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let auth_config = load_auth_config();
     let auth = Some(Arc::new(AuthManager::new(auth_config.clone())));
+    if auth_config.enabled {
+        info!(
+            "Proxy authentication enabled (backend={}, realm={})",
+            auth_config.backend, auth_config.realm
+        );
+        if matches!(auth_config.backend, bsdm_proxy::AuthBackend::Basic) {
+            if auth_config.basic_users_file.is_none() {
+                warn!(
+                    "AUTH_ENABLED with AUTH_BACKEND=basic but BASIC_AUTH_USERS_FILE is unset — \
+                     any Proxy-Authorization credentials will be accepted. For pilot/production \
+                     set BASIC_AUTH_USERS_FILE (see docs/getting-started/pilot-auth.md)"
+                );
+            } else {
+                info!(
+                    "Basic auth users file: {}",
+                    auth_config.basic_users_file.as_deref().unwrap_or("")
+                );
+            }
+        }
+    }
 
     let proxy_policy = ProxyPolicy {
         policy_mode: policy_config.policy_mode,

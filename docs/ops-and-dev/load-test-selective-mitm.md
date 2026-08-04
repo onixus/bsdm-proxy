@@ -84,8 +84,10 @@ CONCURRENT_USERS=100 TEST_DURATION=120 \
 ### C. Auth-enabled pass
 
 ```bash
-# configure Basic auth on proxy, then:
-BASIC_AUTH='pilot:secret' AUTH_ENABLED=true \
+# Proxy: AUTH_ENABLED=true + BASIC_AUTH_USERS_FILE (see pilot-auth.md)
+# Smoke first:
+#   AUTH_USER=pilot AUTH_PASS=… ./scripts/run-auth-pilot-smoke.sh
+BASIC_AUTH='pilot:your-strong-password' \
   ./scripts/run-hybrid-load-test.sh
 ```
 

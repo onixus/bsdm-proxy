@@ -79,6 +79,7 @@ curl -X POST http://127.0.0.1:9090/api/security/dlp \
 - [ ] Control/metrics не торчат в internet (firewall / `METRICS_BIND` / private network) — см. [control-plane-security.md](../ops-and-dev/control-plane-security.md)
 - [ ] `DLP_ENABLED=false` (default) — no post-start DLP wipe required
 - [ ] Backup/restore drill once: `./scripts/drill-backup-restore.sh` (or CA-only with `SKIP_CLICKHOUSE=1`) — [backup-restore.md](../ops-and-dev/backup-restore.md)
+- [ ] If auth is on: `BASIC_AUTH_USERS_FILE` mounted + `./scripts/run-auth-pilot-smoke.sh` green — [pilot-auth.md](pilot-auth.md)
 
 ### B. Hybrid path
 
@@ -159,8 +160,9 @@ export CONTROL_API_TOKEN="$(openssl rand -hex 16)"
 export ACL_API_TOKEN="$(openssl rand -hex 16)"
 export SEARCH_API_TOKEN="$(openssl rand -hex 16)"
 
-# Optional after backend is ready:
+# Optional auth (Basic users file — see pilot-auth.md; example password pilot-secret):
 # export AUTH_ENABLED=true
+# export BASIC_AUTH_USERS_HOST=./config/basic-auth-users.example.json
 # export CATEGORIZATION_ENABLED=true
 # export UT1_ENABLED=true
 

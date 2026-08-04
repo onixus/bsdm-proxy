@@ -1,0 +1,12 @@
+[
+  {
+    "username": "pilot",
+    "password_hash": "ad939580b000f8e506e332bbbc44e2a83e48506b7c702775d106d8cba635bdec",
+    "role": "users"
+  },
+  {
+    "username": "admin",
+    "password_hash": "ad939580b000f8e506e332bbbc44e2a83e48506b7c702775d106d8cba635bdec",
+    "role": "admins"
+  }
+]
