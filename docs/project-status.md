@@ -3,7 +3,7 @@
 Этот документ — единая точка правды о текущем состоянии BSDM-Proxy. Он описывает
 реализованный код, а не целевые возможности из roadmap.
 
-Текущая версия Cargo workspace: **`0.9.5`**. Версию нужно сверять с
+Текущая версия Cargo workspace: **`0.9.6`**. Версию нужно сверять с
 `proxy/Cargo.toml` и остальными workspace-крейтами.
 
 ## Уровни зрелости
@@ -38,10 +38,10 @@
 | Network | eBPF/XDP manager | Experimental (Frozen) | Заморожено. `EBPF_XDP_ENABLED` интерфейс. |
 | Remote access | AmneziaWG sidecar/config API | Experimental (Frozen) | Заморожено. |
 | Cluster | Global sessions, distributed rate limit, threat sync | Experimental (Frozen) | Scaffolding gRPC mesh. |
-| Admin UI | Admin Console (Hybrid core) | Основной | Primary nav: Dashboard, Logs, Analytics, Policies, RPZ, Users, Settings. Live/demo provenance, error/empty states, mutation token gate. |
+| Admin UI | Admin Console (Hybrid core) | Основной | Primary nav: Dashboard, Logs, Analytics, Policies, RPZ, **Devices**, Users, Settings. Live/demo provenance, error/empty states, mutation token gate. |
 | Admin UI | Admin Console experimental routes | Experimental (Frozen) | Deep-links `/wasm`, `/cluster`, `/ai-cache`, `/amneziawg` only — frozen banner, not in primary nav. |
 | UI reference | Standalone Trust-UI | Experimental (Deprecated) | Не запускается по умолчанию; сохранён только как reference для будущего Agent posture. |
-| Agent (Phase C) | Local policy agent spike | Beta (lab) | Enroll, CSR, events, push, mTLS, CRL, **OCSP status JSON**. Multi-OS / DER OCSP reserved. [pilot-agent.md](getting-started/pilot-agent.md). |
+| Agent (Phase C) | Local policy agent spike | Beta (lab) | Enroll, CSR, events, push, mTLS, CRL, lab OCSP JSON, **Admin `/devices`**, `agent_api` extract. Multi-OS / DER OCSP reserved. [pilot-agent.md](getting-started/pilot-agent.md). |
 
 ## Известные ограничения
 

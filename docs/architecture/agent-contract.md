@@ -24,7 +24,10 @@ policy and heartbeat endpoints.
   `POST /policy/push` (+ pinning reload notify).
 - Agent CRL: JSON + optional X.509 PEM (`/api/v1/agent/crl[.pem]`); mTLS checks CRL.
 - Agent OCSP status (lab JSON): `GET /api/v1/agent/ocsp/status?fingerprint=|&serial=`.
-- Reserved: RFC 6960 DER OCSP responder, WebSocket/gRPC push productization.
+- Admin Console: supported `/devices` (list, revoke, policy push, events, CRL).
+- Handlers live in `proxy/src/agent_api.rs` (`dispatch_agent`).
+- Reserved: RFC 6960 DER OCSP responder, WebSocket/gRPC push productization,
+  multi-OS installers, multi-node registry.
 
 ---
 
@@ -59,7 +62,8 @@ policy and heartbeat endpoints.
    (SHA-256 of cert DER), `cert_not_after` when mTLS issued.
 6. Agent uses `Authorization: Bearer <device_token>` on HTTP agent APIs; with
    `CONTROL_MTLS_ENABLED`, also presents the client cert on the mTLS port.
-7. Revoke clears device token hash (cert not on a CRL yet — reserved).
+7. Revoke clears device token hash and appends the cert to the agent CRL when a
+   fingerprint/serial is known.
 
 #### Transport mTLS (optional, separate port)
 

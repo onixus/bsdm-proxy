@@ -1,6 +1,6 @@
 # Roadmap BSDM-Proxy (Hybrid + Agent Architecture)
 
-Текущая версия workspace: **`0.9.1`**.
+Текущая версия workspace: **`0.9.6`**.
 
 Roadmap определяет порядок работ в рамках стратегии **Hybrid Policy (DNS -> SNI -> Selective MITM)** и переход к **On-Device Local Policy Agent**. Фактическая зрелость функционала фиксируется в [матрице статуса](project-status.md).
 
@@ -42,8 +42,10 @@ Roadmap определяет порядок работ в рамках стра�
 
 - [x] Разработка спецификации Agent Contract v0.1 (`docs/architecture/agent-contract.md`).
 - [x] Написание ADR 0005: Local Policy Agent vs Tunnel-First (`docs/adr/0005-local-policy-agent-vs-tunnel-first.md`).
-- [ ] Создание минимального прототипа агента (Minimal Agent Spike) под целевую ОС (Linux/Windows).
-- [ ] Динамическая доставка политик и регистрация устройств через Control Plane API.
+- [x] Минимальный lab-прототип агента (`examples/agent-spike`, Linux/macOS smoke) + control-plane API (#273, v0.9.2–0.9.6).
+- [x] Доставка политик и регистрация устройств (policy pull/push, enroll, heartbeat, devices, CRL/OCSP lab; Admin `/devices`).
+- [ ] Production multi-OS agent (installers, system proxy) и multi-node shared registry.
+- [ ] Wire-format OCSP DER / product WS-gRPC push (beyond long-poll/SSE lab).
 
 ---
 

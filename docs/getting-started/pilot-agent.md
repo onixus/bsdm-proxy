@@ -18,14 +18,17 @@ Issue tracking: **#273** (agent implementation), **#258** (original spike).
 
 | Include | Exclude |
 |---|---|
-| `POST /api/v1/agent/enroll` → `device_token` | Control-plane TLS mutual-auth require |
-| Optional enroll CSR → client cert (proxy CA) | Agent cert CRL / OCSP |
-| `GET /api/v1/agent/policy` pull | Policy push / WebSocket |
-| `POST /api/v1/agent/heartbeat` + `GET /api/v1/devices` | Multi-node shared registry |
-| `POST /api/v1/agent/events` telemetry batch | Durable multi-node event store |
-| Device registry persistence (`AGENT_DEVICES_PATH`) | Multi-OS installers / system proxy |
-| Local SNI deny + pinning bypass + mode | Full UT1 categorization on endpoint |
-| `AGENT_ONCE` / `--once` / `--enroll` smoke | Production IdP binding |
+| `POST /api/v1/agent/enroll` → `device_token` | Control-plane TLS mutual-auth on primary `:9090` |
+| Optional enroll CSR → client cert (proxy CA) | Full RFC 6960 DER OCSP responder |
+| `GET /api/v1/agent/policy` pull + watch/SSE push | Product WS/gRPC push |
+| Optional control mTLS port (`CONTROL_MTLS_*`, default `:9443`) | mTLS on metrics/admin port |
+| Agent cert CRL JSON/PEM + lab OCSP status JSON | Multi-node shared registry |
+| `POST /api/v1/agent/heartbeat` + `GET /api/v1/devices` | Durable multi-node event store |
+| `POST /api/v1/agent/events` telemetry batch | Multi-OS installers / system proxy |
+| Device registry persistence (`AGENT_DEVICES_PATH`) | Full UT1 categorization on endpoint |
+| Admin Console `/devices` (list/revoke/push/CRL) | Production IdP binding |
+| Local SNI deny + pinning bypass + mode | |
+| `AGENT_ONCE` / `--once` / `--enroll` smoke | |
 
 Pilot Hybrid path **does not require** an agent to pass acceptance. This guide
 is for labs that want to exercise Phase C control-plane endpoints early.
