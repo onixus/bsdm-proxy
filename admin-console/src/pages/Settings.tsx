@@ -51,7 +51,7 @@ const tabs: { id: SettingsTab; label: string }[] = [
   { id: 'filtering', label: 'Filtering' },
   { id: 'threat', label: 'Threat / ML' },
   { id: 'network', label: 'Hierarchy / TLS' },
-  { id: 'security', label: 'Rate limit / eBPF / Wasm' },
+  { id: 'security', label: 'Rate limit (+ frozen eBPF/Wasm)' },
   { id: 'events', label: 'Events / Storage' },
   { id: 'api', label: 'Console API' },
 ]
@@ -576,7 +576,11 @@ function SecurityTab({ form, update, tr }: TabProps) {
           <Input label="RATE_LIMIT_MAX_KEYS" type="number" value={form.rateLimitMaxKeys} onChange={(e) => update('rateLimitMaxKeys', e.target.value)} />
         )}
       </FormSection>
-      <FormSection title="eBPF / XDP kernel drop">
+      <FormSection title="eBPF / XDP (Experimental — Frozen)">
+        <p className="text-xs text-text-secondary mb-3">
+          Not part of Hybrid pilot day-1. Leave disabled unless you accept Experimental (Frozen) scope
+          in docs/project-status.md.
+        </p>
         <Checkbox label="EBPF_XDP_ENABLED" checked={form.ebpfXdpEnabled} onChange={(v) => update('ebpfXdpEnabled', v)} hint="Requires CAP_BPF and a supported NIC driver" />
         {form.ebpfXdpEnabled && (
           <FormGrid>
@@ -594,7 +598,10 @@ function SecurityTab({ form, update, tr }: TabProps) {
           </FormGrid>
         )}
       </FormSection>
-      <FormSection title="Wasm request hooks">
+      <FormSection title="Wasm request hooks (Experimental — Frozen)">
+        <p className="text-xs text-text-secondary mb-3">
+          PoC only. Not a pilot security boundary. Prefer ACL / DNS / selective MITM for policy.
+        </p>
         <Checkbox label="WASM_ENABLED" checked={form.wasmEnabled} onChange={(v) => update('wasmEnabled', v)} />
         {form.wasmEnabled && (
           <>

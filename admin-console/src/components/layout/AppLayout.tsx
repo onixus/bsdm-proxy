@@ -1,9 +1,10 @@
 import { useState, useEffect, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { Menu, Search, Command, ShieldAlert, ChevronRight, KeyRound } from 'lucide-react'
+import { Menu, Search, Command, ShieldAlert, ChevronRight, KeyRound, ShieldCheck, FlaskConical } from 'lucide-react'
 import { Sidebar } from './Sidebar'
 import { CommandPalette } from '../ui/CommandPalette'
 import { API_CREDENTIALS_CHANGED_EVENT, hasApiCredentials } from '../../api/settings'
+import { resolveRouteScope } from '../../lib/routeScope'
 
 interface AppLayoutProps {
   children: ReactNode
@@ -27,22 +28,8 @@ export function AppLayout({ children }: AppLayoutProps) {
     return () => window.removeEventListener(API_CREDENTIALS_CHANGED_EVENT, refreshCredentials)
   }, [])
 
-  const routeConfig: Record<string, { title: string; category: string }> = {
-    '/': { title: 'Dashboard', category: 'Monitoring' },
-    '/logs': { title: 'Proxy Logs', category: 'Monitoring' },
-    '/analytics': { title: 'Analytics', category: 'Monitoring' },
-    '/threat-scores': { title: 'Threat Scores', category: 'Monitoring' },
-    '/security': { title: 'Data Security (DLP)', category: 'Security' },
-    '/policies': { title: 'ACL Policies', category: 'Security' },
-    '/rpz': { title: 'RPZ DNS', category: 'Security' },
-    '/wasm': { title: 'Wasm Plugins', category: 'Extensions' },
-    '/cluster': { title: 'Cluster Mesh', category: 'Extensions' },
-    '/ai-cache': { title: 'AI Semantic Cache', category: 'Extensions' },
-    '/users': { title: 'Users', category: 'System' },
-    '/settings': { title: 'Console Settings', category: 'System' },
-  }
-
-  const currentRoute = routeConfig[location.pathname] || { title: 'BSDM Console', category: 'System' }
+  const currentRoute = resolveRouteScope(location.pathname)
+  const isFrozen = currentRoute.maturity === 'frozen'
 
   return (
     <div className="flex min-h-screen bg-surface-0 font-sans">
@@ -71,10 +58,23 @@ export function AppLayout({ children }: AppLayoutProps) {
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-warning/30 bg-warning/10 text-warning text-xs font-semibold">
-              <ShieldAlert className="size-3.5" />
-              <span>Unauthenticated UI</span>
-            </div>
+            {isFrozen && (
+              <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-danger/35 bg-danger/10 text-danger text-xs font-semibold">
+                <FlaskConical className="size-3.5" />
+                <span>Frozen</span>
+              </div>
+            )}
+            {credentialsAttached ? (
+              <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-success/30 bg-success/10 text-success text-xs font-semibold">
+                <ShieldCheck className="size-3.5" />
+                <span>API token attached</span>
+              </div>
+            ) : (
+              <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-warning/30 bg-warning/10 text-warning text-xs font-semibold">
+                <ShieldAlert className="size-3.5" />
+                <span>Read-only (no token)</span>
+              </div>
+            )}
 
             <button
               type="button"

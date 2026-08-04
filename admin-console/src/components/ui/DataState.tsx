@@ -103,3 +103,50 @@ export function PreviewBanner({ feature, children }: { feature: string; children
     </div>
   )
 }
+
+/**
+ * Stronger banner for scope-frozen experimental modules (Hybrid pilot honesty).
+ * Deep links stay available for developers; primary nav never advertises these.
+ */
+export function FrozenModuleBanner({
+  feature,
+  note,
+  children,
+}: {
+  feature: string
+  note?: string
+  children?: ReactNode
+}) {
+  return (
+    <div
+      className="flex items-start gap-3.5 rounded-xl border border-danger/35 bg-danger/5 p-4 shadow-xs"
+      role="status"
+      data-testid="frozen-module-banner"
+    >
+      <div className="flex size-8 items-center justify-center rounded-lg bg-danger/15 text-danger shrink-0">
+        <AlertTriangle className="size-4" />
+      </div>
+      <div className="text-sm min-w-0">
+        <p className="font-semibold text-danger text-base">
+          Experimental — Frozen (not pilot day-1)
+        </p>
+        <p className="mt-0.5 text-text-secondary leading-relaxed">
+          <strong className="text-text-primary">{feature}</strong> is outside the Hybrid pilot
+          operator scope. Numbers and controls below may be mock/local-only and must not be treated
+          as a production security boundary.
+          {note ? (
+            <>
+              {' '}
+              {note}
+            </>
+          ) : null}
+          {children}
+        </p>
+        <p className="mt-2 text-xs text-text-secondary">
+          Maturity matrix: <code className="font-mono">docs/project-status.md</code> · Primary nav
+          only lists supported Hybrid surfaces (Dashboard, Logs, Policies, Settings, …).
+        </p>
+      </div>
+    </div>
+  )
+}

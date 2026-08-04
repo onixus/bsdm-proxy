@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Admin Console Hybrid honesty** — `routeScope` + frozen deep-link shell/banner
+  for `/wasm` `/cluster` `/ai-cache` `/amneziawg`, header read-only vs token
+  badges, Settings eBPF/Wasm marked frozen, Data Security pilot DLP note; core
+  nav maturity raised to Основной in project-status.
 - **Pilot DNS sinkhole day-1** — Base compose UDP `:5353`, DoH/DoT off by default,
   zone bind-mount, `badsite.test` in example RPZ, `scripts/run-dns-pilot-smoke.sh`,
   and [pilot-dns.md](docs/getting-started/pilot-dns.md).

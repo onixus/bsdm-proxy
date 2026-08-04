@@ -116,6 +116,13 @@ export function DataSecurityPage() {
         <p className="text-sm text-text-secondary mt-1">
           {tr.dataSecurity.subtitle}
         </p>
+        <p className="mt-3 rounded-lg border border-border bg-surface-1 px-3 py-2 text-xs text-text-secondary leading-relaxed">
+          <strong className="text-text-primary">Pilot honesty:</strong> native DLP/CASB is{' '}
+          <strong className="text-text-primary">Experimental (Frozen)</strong>. Proxy default is{' '}
+          <code className="font-mono">DLP_ENABLED=false</code> (no built-in body scan). An empty pattern
+          list is expected on pilot day-1 — not a broken API. Mutations need a Console API token
+          (Settings → Console API).
+        </p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

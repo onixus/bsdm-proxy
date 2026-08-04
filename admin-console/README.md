@@ -41,12 +41,16 @@ Agent and is not represented as a working operator feature.
 
 The default sidebar only advertises the supported Hybrid operator paths above.
 Frozen modules remain directly routable for development and compatibility, but
-are intentionally hidden from primary navigation:
+are intentionally hidden from primary navigation and wrapped in a **Frozen**
+banner (`FrozenRouteShell` + `routeScope.ts`):
 
 - `/wasm`
 - `/cluster`
 - `/ai-cache`
 - `/amneziawg`
+
+Header badges: **Read-only (no token)** vs **API token attached**, plus **Frozen**
+on experimental deep-links. Command palette lists supported routes only.
 
 Their product status is defined in [`docs/project-status.md`](../docs/project-status.md).
 

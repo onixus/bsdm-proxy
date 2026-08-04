@@ -16,3 +16,9 @@ test('mutating methods require a non-empty token', () => {
     assert.equal(mutationRequiresCredentials(method, 'session-token'), false)
   }
 })
+
+test('mutation gate matrix matches pilot honesty (no token → block writes)', () => {
+  assert.equal(mutationRequiresCredentials('GET', ''), false)
+  assert.equal(mutationRequiresCredentials('POST', ''), true)
+  assert.equal(mutationRequiresCredentials('DELETE', '  x  '), false)
+})

@@ -38,7 +38,8 @@
 | Network | eBPF/XDP manager | Experimental (Frozen) | Заморожено. `EBPF_XDP_ENABLED` интерфейс. |
 | Remote access | AmneziaWG sidecar/config API | Experimental (Frozen) | Заморожено. |
 | Cluster | Global sessions, distributed rate limit, threat sync | Experimental (Frozen) | Scaffolding gRPC mesh. |
-| Admin UI | Admin Console | Beta | Единственная поддерживаемая операторская UI на `/admin/`; `/` и legacy `/trust` перенаправляются туда. |
+| Admin UI | Admin Console (Hybrid core) | Основной | Primary nav: Dashboard, Logs, Analytics, Policies, RPZ, Users, Settings. Live/demo provenance, error/empty states, mutation token gate. |
+| Admin UI | Admin Console experimental routes | Experimental (Frozen) | Deep-links `/wasm`, `/cluster`, `/ai-cache`, `/amneziawg` only — frozen banner, not in primary nav. |
 | UI reference | Standalone Trust-UI | Experimental (Deprecated) | Не запускается по умолчанию; сохранён только как reference для будущего Agent posture. |
 
 ## Известные ограничения
