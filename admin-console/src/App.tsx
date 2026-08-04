@@ -15,6 +15,7 @@ import { WasmPluginsPage } from './pages/WasmPlugins'
 import { DataSecurityPage } from './pages/DataSecurity'
 import { AmneziaWgPage } from './pages/AmneziaWg'
 import { Users } from './pages/Users'
+import { DevicesPage } from './pages/Devices'
 
 function frozen(page: ReactNode) {
   return <FrozenRouteShell>{page}</FrozenRouteShell>
@@ -33,6 +34,7 @@ export function App() {
           <Route path="/security" element={<DataSecurityPage />} />
           <Route path="/policies" element={<PoliciesPage />} />
           <Route path="/rpz" element={<RpzManagementPage />} />
+          <Route path="/devices" element={<DevicesPage />} />
           <Route path="/users" element={<Users />} />
           <Route path="/settings" element={<SettingsPage />} />
           {/* Frozen experimental deep-links — not in primary nav */}

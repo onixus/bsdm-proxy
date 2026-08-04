@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Agent API module extract** — Agent Contract HTTP handlers moved from
+  monolithic `control_api` into `proxy/src/agent_api.rs` (`dispatch_agent`);
+  same routes/auth (`/api/v1/agent/*`, `/api/v1/devices`).
+- **Admin Console Agent Devices** — supported route `/devices` (nav + i18n):
+  device registry list/revoke, policy snapshot + push, recent events, CRL
+  summary via `admin-console/src/api/agent.ts`.
+
 ### Added
 
 - **Agent OCSP status API (#273)** — lab JSON

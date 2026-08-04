@@ -17,6 +17,7 @@ import {
   ChevronRight,
   Languages,
   ShieldAlert,
+  Laptop,
 } from 'lucide-react'
 import { isDemoMode } from '../../api/source'
 import { APP_VERSION } from '../../lib/build'
@@ -53,6 +54,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         { to: '/security', label: t.nav.security, icon: ShieldAlert },
         { to: '/policies', label: t.nav.policies, icon: Shield },
         { to: '/rpz', label: t.nav.rpz, icon: Radio },
+        { to: '/devices', label: t.nav.devices, icon: Laptop },
       ],
     },
     {

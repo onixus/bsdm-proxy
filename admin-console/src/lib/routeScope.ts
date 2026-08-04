@@ -30,6 +30,12 @@ export const ROUTE_SCOPES: RouteScope[] = [
   },
   { path: '/policies', maturity: 'supported', title: 'ACL Policies', category: 'Security' },
   { path: '/rpz', maturity: 'supported', title: 'RPZ DNS', category: 'Security' },
+  {
+    path: '/devices',
+    maturity: 'supported',
+    title: 'Agent Devices',
+    category: 'Security',
+  },
   { path: '/users', maturity: 'supported', title: 'Users', category: 'System' },
   { path: '/settings', maturity: 'supported', title: 'Console Settings', category: 'System' },
   {

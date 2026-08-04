@@ -3,6 +3,7 @@
 pub mod acl;
 pub mod acl_api;
 pub mod acl_config;
+pub mod agent_api;
 pub mod agent_crl;
 pub mod agent_events;
 pub mod agent_ocsp;
