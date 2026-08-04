@@ -76,6 +76,8 @@ curl -X POST http://127.0.0.1:9090/api/security/dlp \
 - [ ] `GET :8080/health` (indexer) → ok
 - [ ] Experimental profiles **не** указаны в команде запуска
 - [ ] Заданы `CONTROL_API_TOKEN`, `ACL_API_TOKEN`, `SEARCH_API_TOKEN` (не дефолтные пустые в проде)
+- [ ] `CONTROL_API_ALLOW_INSECURE` / `SEARCH_API_ALLOW_INSECURE` **не** `true` на пилоте
+- [ ] Control/metrics не торчат в internet (firewall / `METRICS_BIND` / private network) — см. [control-plane-security.md](../ops-and-dev/control-plane-security.md)
 
 ### B. Hybrid path
 

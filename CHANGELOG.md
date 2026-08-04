@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Control plane & metrics security defaults (#271)** — Production requires
+  `CONTROL_API_TOKEN` (fail closed; lab override `CONTROL_API_ALLOW_INSECURE`),
+  configurable `METRICS_BIND`, optional `METRICS_AUTH_TOKEN` /
+  `METRICS_REQUIRE_AUTH` for scrape, Search API production token gate, pilot
+  compose secret requirements, and
+  [control-plane-security.md](docs/ops-and-dev/control-plane-security.md).
 - **SNI policy invariant verification (#272)** — `POLICY_MODE=sni` hard-gates TLS
   termination (no MITM regardless of `MITM_ENABLED` / categories), with exhaustive
   unit coverage, e2e proof via `decision_source` metrics, and documentation in

@@ -23,11 +23,21 @@ replace backend tokens or network isolation. See
 
 | Variable | Role |
 |----------|------|
-| `CONTROL_API_TOKEN` | Preferred Bearer token for mutating control APIs |
-| `ACL_API_TOKEN` | Fallback token (also used for `/api/acl/*`) |
+| `CONTROL_API_TOKEN` | Preferred Bearer token for control APIs (**required in production**) |
+| `ACL_API_TOKEN` | Dedicated ACL token (falls back to CONTROL) |
+| `CONTROL_API_ALLOW_INSECURE` | Lab only: allow production start without a token (open mutations) |
+| `METRICS_BIND` | Bind host for metrics/control (default `0.0.0.0`; prefer `127.0.0.1` on bare metal) |
+| `METRICS_AUTH_TOKEN` / `METRICS_REQUIRE_AUTH` | Optional Bearer for `GET /metrics` |
 
-`GET /api/stats`, `GET /api/hierarchy/peers`, and `GET /api/upstream/tls` are intentionally unauthenticated (local Lite monitoring).
-`POST /api/cache/purge`, `POST /api/hierarchy/reload`, `POST /api/upstream/tls/reload`, and all `/api/acl/*` require Bearer when a token is configured.
+**Production default (#271):** process refuses to start without `CONTROL_API_TOKEN`
+unless `CONTROL_API_ALLOW_INSECURE=true`. Without a token in fail-closed mode,
+non-public `/api/*` return **401**.
+
+`GET /api/stats`, `GET /api/hierarchy/peers`, and `GET /api/upstream/tls` remain
+intentionally unauthenticated for local monitoring. Health/ready stay open.
+
+Network policy, pilot checklist, and Search API rules:
+[control-plane-security.md](../ops-and-dev/control-plane-security.md).
 
 ```bash
 curl -H "Authorization: Bearer $CONTROL_API_TOKEN" ...

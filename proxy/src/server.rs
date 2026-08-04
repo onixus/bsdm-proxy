@@ -67,7 +67,8 @@ pub async fn metrics_server(
     acl_api: Option<Arc<AclApiState>>,
     control_api: Option<Arc<ControlApiState>>,
 ) {
-    let bind_addr = format!("0.0.0.0:{}", metrics_port);
+    let bind_addr = crate::security_defaults::metrics_bind_addr(metrics_port);
+    let metrics_scrape_token = crate::security_defaults::metrics_auth_token();
     let listener = match TcpListener::bind(&bind_addr).await {
         Ok(l) => l,
         Err(e) => {
@@ -76,7 +77,15 @@ pub async fn metrics_server(
         }
     };
 
-    info!("📊 Metrics server started on {}", bind_addr);
+    info!(
+        "📊 Metrics/control server on {} (scrape auth={})",
+        bind_addr,
+        if metrics_scrape_token.is_some() {
+            "bearer"
+        } else {
+            "open"
+        }
+    );
 
     loop {
         tokio::select! {
@@ -93,6 +102,7 @@ pub async fn metrics_server(
                 let draining = draining.clone();
                 let acl_api = acl_api.clone();
                 let control_api = control_api.clone();
+                let metrics_scrape_token = metrics_scrape_token.clone();
                 tokio::spawn(async move {
                     let io = TokioIo::new(stream);
                     let service = service_fn(move |req: Request<Incoming>| {
@@ -100,6 +110,7 @@ pub async fn metrics_server(
                         let draining = draining.clone();
                         let acl_api = acl_api.clone();
                         let control_api = control_api.clone();
+                        let metrics_scrape_token = metrics_scrape_token.clone();
                         async move {
                             let path = req.uri().path();
                             debug!("Metrics request from {}: {}", addr, path);
@@ -129,6 +140,37 @@ pub async fn metrics_server(
 
                             let response = match path {
                                 "/metrics" => {
+                                    if let Some(expected) = metrics_scrape_token.as_deref() {
+                                        let ok = req
+                                            .headers()
+                                            .get(hyper::header::AUTHORIZATION)
+                                            .and_then(|v| v.to_str().ok())
+                                            .and_then(|v| v.strip_prefix("Bearer "))
+                                            .is_some_and(|token| {
+                                                crate::security_util::constant_time_eq(
+                                                    token.as_bytes(),
+                                                    expected.as_bytes(),
+                                                )
+                                            });
+                                        if !ok {
+                                            return Ok::<_, Infallible>(
+                                                Response::builder()
+                                                    .status(StatusCode::UNAUTHORIZED)
+                                                    .header(
+                                                        "WWW-Authenticate",
+                                                        "Bearer realm=\"metrics\"",
+                                                    )
+                                                    .body(full(Bytes::from_static(
+                                                        b"unauthorized",
+                                                    )))
+                                                    .unwrap_or_else(|_| {
+                                                        Response::new(full(Bytes::from_static(
+                                                            b"unauthorized",
+                                                        )))
+                                                    }),
+                                            );
+                                        }
+                                    }
                                     debug!("Exporting metrics...");
                                     let export_result =
                                         panic::catch_unwind(panic::AssertUnwindSafe(|| metrics.export()));

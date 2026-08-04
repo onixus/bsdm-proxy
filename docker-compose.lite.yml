@@ -25,6 +25,8 @@ services:
       - SQLITE_MAX_ROWS=1000000
       - METRICS_PORT=8080
       - SEARCH_API_ENABLED=true
+      - SEARCH_API_ALLOW_INSECURE=true
+      - DEPLOYMENT_PROFILE=production
       # KAFKA_BROKERS / CLICKHOUSE_* intentionally unset
       - RUST_LOG=info,cache_indexer=info
     volumes:
@@ -64,6 +66,9 @@ services:
       - ACL_ENABLED=false
       - ACL_DEFAULT_ACTION=allow
       - CATEGORIZATION_ENABLED=false
+      # Lab defaults — set CONTROL_API_TOKEN and CONTROL_API_ALLOW_INSECURE=false for pilot.
+      - CONTROL_API_ALLOW_INSECURE=true
+      - METRICS_BIND=0.0.0.0
       - CACHE_CAPACITY=5000
       - CACHE_TTL_SECONDS=3600
       - MAX_CACHE_BODY_SIZE=10485760

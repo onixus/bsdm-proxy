@@ -19,6 +19,8 @@ pub struct AclApiConfig {
     pub default_action: AclAction,
     pub rules_path: Option<String>,
     pub api_token: Option<String>,
+    /// When true and no token is configured, ACL API returns 401 (#271).
+    pub fail_closed: bool,
 }
 
 impl AclApiConfig {
@@ -26,13 +28,16 @@ impl AclApiConfig {
         let default_action = std::env::var("ACL_DEFAULT_ACTION")
             .map(|v| parse_acl_action(&v))
             .unwrap_or(AclAction::Allow);
+        // Prefer dedicated ACL token; fall back to control token so one secret works.
         let api_token = std::env::var("ACL_API_TOKEN")
             .ok()
-            .filter(|t| !t.is_empty());
+            .filter(|t| !t.is_empty())
+            .or_else(crate::security_defaults::control_api_token_from_env);
         Self {
             default_action,
             rules_path,
             api_token,
+            fail_closed: crate::security_defaults::control_api_fail_closed(),
         }
     }
 }
@@ -103,16 +108,16 @@ impl AclApiState {
     }
 
     fn is_authorized(&self, headers: &HeaderMap) -> bool {
-        let Some(expected) = &self.config.api_token else {
-            return true;
-        };
-        headers
-            .get(AUTHORIZATION)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.strip_prefix("Bearer "))
-            .is_some_and(|token| {
-                crate::security_util::constant_time_eq(token.as_bytes(), expected.as_bytes())
-            })
+        match &self.config.api_token {
+            Some(expected) => headers
+                .get(AUTHORIZATION)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.strip_prefix("Bearer "))
+                .is_some_and(|token| {
+                    crate::security_util::constant_time_eq(token.as_bytes(), expected.as_bytes())
+                }),
+            None => !self.config.fail_closed,
+        }
     }
 
     fn invalidate_policy_cache(&self) {
@@ -362,6 +367,7 @@ mod tests {
                 default_action: AclAction::Allow,
                 rules_path: None,
                 api_token: None,
+                fail_closed: false,
             },
             None,
         )
@@ -375,6 +381,7 @@ mod tests {
                 default_action: AclAction::Allow,
                 rules_path: None,
                 api_token: Some("secret-token".to_string()),
+                fail_closed: true,
             },
             None,
         )

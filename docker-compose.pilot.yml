@@ -69,9 +69,14 @@ services:
       PERF_FAST_CACHE_HIT: "false"
       STREAMING_MISS_ENABLED: "true"
 
-      # --- Tokens (set in env; never commit real values) ---
-      CONTROL_API_TOKEN: "${CONTROL_API_TOKEN}"
-      ACL_API_TOKEN: "${ACL_API_TOKEN}"
+      # --- Tokens (required for pilot; never commit real values) ---
+      CONTROL_API_TOKEN: "${CONTROL_API_TOKEN:?set CONTROL_API_TOKEN}"
+      ACL_API_TOKEN: "${ACL_API_TOKEN:?set ACL_API_TOKEN}"
+      # Explicit: pilot must not open mutating APIs without tokens.
+      CONTROL_API_ALLOW_INSECURE: "false"
+      METRICS_BIND: "${METRICS_BIND:-0.0.0.0}"
+      # Optional Prometheus scrape Bearer (or METRICS_REQUIRE_AUTH=true to reuse CONTROL_API_TOKEN)
+      METRICS_AUTH_TOKEN: "${METRICS_AUTH_TOKEN:-}"
     volumes:
       - pilot-spill:/var/cache/bsdm-spill
     deploy:
@@ -83,8 +88,10 @@ services:
   cache-indexer:
     environment:
       SEARCH_API_DEFAULT_DAYS: "5"
-      SEARCH_API_TOKEN: "${SEARCH_API_TOKEN}"
+      SEARCH_API_TOKEN: "${SEARCH_API_TOKEN:?set SEARCH_API_TOKEN}"
       INGEST_API_TOKEN: "${INGEST_API_TOKEN:-}"
+      SEARCH_API_ALLOW_INSECURE: "false"
+      DEPLOYMENT_PROFILE: production
     deploy:
       resources:
         limits:

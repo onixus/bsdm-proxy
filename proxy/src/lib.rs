@@ -41,6 +41,7 @@ pub mod proxy_service;
 pub mod rate_limit;
 pub mod reverse_proxy;
 pub mod runtime_config;
+pub mod security_defaults;
 pub mod security_util;
 pub mod selection;
 pub mod semantic_cache;
@@ -100,6 +101,10 @@ pub use policy_config::{
 pub use proxy_service::{ProxyPolicy, ProxyService};
 pub use rate_limit::{extract_api_key, RateLimitConfig, RateLimitViolation, RateLimiter};
 pub use reverse_proxy::{OidcConfig, ReverseProxyConfig};
+pub use security_defaults::{
+    control_api_fail_closed, control_api_token_from_env, metrics_auth_token, metrics_bind_addr,
+    metrics_bind_host, validate_control_plane_security,
+};
 pub use selection::{parse_strategy, SelectionStrategy};
 pub use semantic_cache::{
     content_cache_key, normalize_llm_body, SemanticCacheConfig, SemanticIndex,

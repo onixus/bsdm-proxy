@@ -599,6 +599,8 @@ pub struct ControlApiState {
     http_cache: Arc<HttpL1Cache>,
     l2_cache: Option<RedisL2Cache>,
     api_token: Option<String>,
+    /// When true and `api_token` is unset, non-public `/api/*` returns 401 (#271).
+    fail_closed: bool,
     started_at: Instant,
     peer_registry: Option<PeerRegistry>,
     hierarchy_use_htcp: bool,
@@ -643,6 +645,8 @@ impl ControlApiState {
             http_cache,
             l2_cache,
             api_token,
+            // Unit tests construct via `new` without env; keep open unless from_env.
+            fail_closed: false,
             started_at: Instant::now(),
             peer_registry,
             hierarchy_use_htcp,
@@ -703,15 +707,8 @@ impl ControlApiState {
         session_store: crate::session_store::GlobalSessionStore,
         threat_sync: crate::threat_sync::ThreatSyncEngine,
     ) -> Self {
-        let api_token = std::env::var("CONTROL_API_TOKEN")
-            .ok()
-            .filter(|t| !t.is_empty())
-            .or_else(|| {
-                std::env::var("ACL_API_TOKEN")
-                    .ok()
-                    .filter(|t| !t.is_empty())
-            });
-        Self::new(
+        let api_token = crate::security_defaults::control_api_token_from_env();
+        let mut state = Self::new(
             metrics,
             http_cache,
             l2_cache,
@@ -727,7 +724,9 @@ impl ControlApiState {
             auth_manager,
             session_store,
             threat_sync,
-        )
+        );
+        state.fail_closed = crate::security_defaults::control_api_fail_closed();
+        state
     }
 
     pub async fn handle_request(&self, req: Request<Incoming>) -> Response<Body> {
@@ -904,18 +903,23 @@ impl ControlApiState {
     }
 
     /// Shared auth check for REST and gRPC (`authorization: Bearer …`).
+    ///
+    /// # Security (#271)
+    /// - Token configured → constant-time Bearer match.
+    /// - No token + `fail_closed` (production default) → deny.
+    /// - No token + open lab mode → allow (legacy / e2e).
     pub fn is_authorized_bearer(&self, bearer: Option<&str>) -> bool {
-        let Some(expected) = &self.api_token else {
-            return true;
-        };
-        bearer.is_some_and(|token| {
-            crate::security_util::constant_time_eq(token.as_bytes(), expected.as_bytes())
-        })
+        match &self.api_token {
+            Some(expected) => bearer.is_some_and(|token| {
+                crate::security_util::constant_time_eq(token.as_bytes(), expected.as_bytes())
+            }),
+            None => !self.fail_closed,
+        }
     }
 
-    /// Whether mutating control RPCs require a Bearer token.
+    /// Whether non-public control RPCs require a Bearer token.
     pub fn auth_required(&self) -> bool {
-        self.api_token.is_some()
+        self.api_token.is_some() || self.fail_closed
     }
 
     pub fn stats_payload(&self) -> StatsResponse {
@@ -1443,6 +1447,33 @@ mod tests {
             crate::session_store::GlobalSessionStore::new(None),
             crate::threat_sync::ThreatSyncEngine::new("test-node".to_string(), None),
         )
+    }
+
+    /// #271: production fail-closed denies mutations when no token is configured.
+    #[tokio::test]
+    async fn fail_closed_denies_mutations_without_token() {
+        let metrics = Arc::new(Metrics::new().unwrap());
+        let cache = Arc::new(HttpL1Cache::new(100, 4));
+        let mut state = state_plain(metrics, cache);
+        state.fail_closed = true;
+        assert!(state.auth_required());
+        assert!(!state.is_authorized_bearer(None));
+
+        let resp = state
+            .dispatch(
+                &Method::POST,
+                "/api/cache/purge",
+                Bytes::from_static(br#"{"all":true}"#),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+        // Public monitoring stays open.
+        let stats = state
+            .dispatch(&Method::GET, "/api/stats", Bytes::new(), &HeaderMap::new())
+            .await;
+        assert_eq!(stats.status(), StatusCode::OK);
     }
 
     #[tokio::test]

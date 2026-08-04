@@ -167,13 +167,26 @@ impl SearchApi {
     }
 }
 
+fn search_api_fail_closed() -> bool {
+    // Mirror proxy control-plane posture: production fails closed unless lab override.
+    let allow_insecure = std::env::var("SEARCH_API_ALLOW_INSECURE")
+        .or_else(|_| std::env::var("CONTROL_API_ALLOW_INSECURE"))
+        .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false);
+    if allow_insecure {
+        return false;
+    }
+    let profile = std::env::var("DEPLOYMENT_PROFILE").unwrap_or_else(|_| "production".to_string());
+    matches!(profile.to_ascii_lowercase().as_str(), "production" | "prod")
+}
+
 fn check_bearer(expected: Option<&str>, auth_header: Option<&str>) -> bool {
-    let Some(expected) = expected else {
-        return true;
-    };
-    auth_header
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .is_some_and(|token| token == expected)
+    match expected {
+        Some(expected) => auth_header
+            .and_then(|v| v.strip_prefix("Bearer "))
+            .is_some_and(|token| token == expected),
+        None => !search_api_fail_closed(),
+    }
 }
 
 fn sanitize_filter(value: &str) -> String {

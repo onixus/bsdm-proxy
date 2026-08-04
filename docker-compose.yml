@@ -119,6 +119,11 @@ services:
       - ACL_AUTO_RELOAD=false
       - CATEGORIZATION_ENABLED=false
       - UT1_ENABLED=false
+      # Control plane: set real secrets for pilot. Lab compose allows insecure open APIs.
+      - CONTROL_API_TOKEN=${CONTROL_API_TOKEN:-}
+      - ACL_API_TOKEN=${ACL_API_TOKEN:-}
+      - CONTROL_API_ALLOW_INSECURE=${CONTROL_API_ALLOW_INSECURE:-true}
+      - METRICS_BIND=${METRICS_BIND:-0.0.0.0}
       - THREAT_SCORE_ENABLED=${THREAT_SCORE_ENABLED:-false}
       - THREAT_SCORE_POLL_URL=${THREAT_SCORE_POLL_URL:-http://ml-worker:8091/api/threat-scores}
       - THREAT_SCORE_POLL_INTERVAL_SECS=${THREAT_SCORE_POLL_INTERVAL_SECS:-60}
@@ -169,6 +174,9 @@ services:
       - CLICKHOUSE_TABLE=http_cache
       - METRICS_PORT=8080
       - SEARCH_API_ENABLED=true
+      - SEARCH_API_TOKEN=${SEARCH_API_TOKEN:-}
+      - SEARCH_API_ALLOW_INSECURE=${SEARCH_API_ALLOW_INSECURE:-true}
+      - DEPLOYMENT_PROFILE=${DEPLOYMENT_PROFILE:-production}
       - RUST_LOG=info,cache_indexer=debug
       - RUST_BACKTRACE=1
     depends_on:

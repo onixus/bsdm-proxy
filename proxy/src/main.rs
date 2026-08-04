@@ -98,6 +98,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let policy_config = load_policy_config();
     let deployment_profile = validate_mitm_policy(policy_config.policy_mode)?;
+    bsdm_proxy::validate_control_plane_security()?;
     info!(
         "TLS policy startup: deployment_profile={}, policy_mode={}, full_mitm_override={}",
         deployment_profile,
@@ -105,6 +106,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::var("ALLOW_FULL_MITM")
             .map(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
             .unwrap_or(false)
+    );
+    info!(
+        "Metrics bind: {} (override with METRICS_BIND; prefer 127.0.0.1 on bare metal)",
+        bsdm_proxy::metrics_bind_addr(metrics_port)
     );
     if policy_config.acl_enabled {
         info!("ACL enabled");
@@ -130,15 +135,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     if acl_api.is_some() {
         info!("ACL REST API enabled on :{}/api/acl/*", metrics_port);
-        if std::env::var("ACL_API_TOKEN")
-            .ok()
-            .filter(|t| !t.is_empty())
-            .is_none()
+        if bsdm_proxy::control_api_token_from_env().is_none()
+            && !bsdm_proxy::control_api_fail_closed()
         {
             warn!(
-                "ACL_API_TOKEN is not set — REST API on :{}/api/acl/* is unauthenticated; \
-                set ACL_API_TOKEN or restrict access to METRICS_PORT",
-                metrics_port
+                "No ACL/CONTROL API token — /api/acl/* is open (lab mode). \
+                 Set CONTROL_API_TOKEN or ACL_API_TOKEN for pilot networks."
             );
         }
     }
@@ -291,10 +293,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     if !control_api.auth_required() {
         warn!(
-            "CONTROL_API_TOKEN is not set — mutating endpoints on :{}/api/cache/purge, \
-             /api/hierarchy/reload, /api/upstream/tls/reload and \
-             /api/pinning/exceptions/reload are unauthenticated; \
-             set CONTROL_API_TOKEN or restrict access to METRICS_PORT",
+            "Control plane auth disabled — mutating endpoints on :{}/api/* are open. \
+             Production requires CONTROL_API_TOKEN (or CONTROL_API_ALLOW_INSECURE=true for lab only).",
             metrics_port
         );
     }

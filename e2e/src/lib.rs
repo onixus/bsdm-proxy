@@ -116,6 +116,8 @@ impl ProxyHarness {
             .env("AUTH_ENABLED", bool_env(config.auth_enabled))
             .env("ACL_ENABLED", bool_env(config.acl_enabled))
             .env("ACL_DEFAULT_ACTION", "allow")
+            // e2e lab: production profile is default; allow open control plane unless tests set tokens.
+            .env("CONTROL_API_ALLOW_INSECURE", "true")
             .env(
                 "CATEGORIZATION_ENABLED",
                 bool_env(config.categorization_enabled),

@@ -76,11 +76,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store = bootstrap_store().await?;
     let backend = store.backend_name();
 
+    let search_cfg = SearchApiConfig::from_env();
+    if search_api_enabled()
+        && search_cfg.api_token.is_none()
+        && !std::env::var("SEARCH_API_ALLOW_INSECURE")
+            .or_else(|_| std::env::var("CONTROL_API_ALLOW_INSECURE"))
+            .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+            .unwrap_or(false)
+        && matches!(
+            std::env::var("DEPLOYMENT_PROFILE")
+                .unwrap_or_else(|_| "production".to_string())
+                .to_ascii_lowercase()
+                .as_str(),
+            "production" | "prod"
+        )
+    {
+        return Err(
+            "SEARCH_API_TOKEN is required when SEARCH_API_ENABLED in production \
+             (set SEARCH_API_TOKEN or SEARCH_API_ALLOW_INSECURE=true for lab only)"
+                .into(),
+        );
+    }
     let search_api = if search_api_enabled() {
-        Some(Arc::new(SearchApi::new(
-            store.clone(),
-            SearchApiConfig::from_env(),
-        )))
+        Some(Arc::new(SearchApi::new(store.clone(), search_cfg)))
     } else {
         None
     };
