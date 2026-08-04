@@ -185,6 +185,11 @@ impl CertCache {
         String::from_utf8_lossy(&self.ca_cert_pem).into_owned()
     }
 
+    /// PKCS#8 DER of the CA private key (for OCSP response signing).
+    pub fn ca_key_pkcs8_der(&self) -> Vec<u8> {
+        self.ca_key.serialize_der()
+    }
+
     /// Issue a server leaf for `name` signed by the proxy CA (sync).
     /// Used for control-plane mTLS when `CONTROL_MTLS_CERT_FILE` is unset.
     pub fn server_identity_pem(&self, name: &str) -> Result<(Vec<u8>, Vec<u8>), String> {

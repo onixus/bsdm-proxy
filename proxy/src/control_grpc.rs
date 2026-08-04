@@ -2,9 +2,15 @@
 //!
 //! Enable at build: `--features grpc`
 //! Enable at runtime: `CONTROL_GRPC_ENABLED=true` (bind `CONTROL_GRPC_BIND`, default `127.0.0.1:50051`).
+//!
+//! Agent policy product path: `GetAgentPolicy`, `PushAgentPolicy`,
+//! `WatchAgentPolicy` (server stream) — same hub as HTTP long-poll/SSE.
 
+use std::pin::Pin;
 use std::sync::Arc;
 
+use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::Stream;
 use tonic::metadata::MetadataMap;
 use tonic::{Request, Response, Status};
 use tracing::info;
@@ -168,6 +174,101 @@ impl ControlPlane for ControlPlaneService {
             })),
             Err(e) => Err(Status::invalid_argument(e)),
         }
+    }
+
+    async fn get_agent_policy(
+        &self,
+        req: Request<Empty>,
+    ) -> Result<Response<AgentPolicyResponse>, Status> {
+        require_auth(&self.state, req.metadata())?;
+        let snap = self.state.policy_hub.snapshot();
+        Ok(Response::new(agent_policy_response(&snap, true)))
+    }
+
+    async fn push_agent_policy(
+        &self,
+        req: Request<PushAgentPolicyRequest>,
+    ) -> Result<Response<AgentPolicyResponse>, Status> {
+        require_auth(&self.state, req.metadata())?;
+        let inner = req.into_inner();
+        let reason = if inner.reason.trim().is_empty() {
+            "grpc-push"
+        } else {
+            inner.reason.trim()
+        };
+        let actor = if inner.actor.trim().is_empty() {
+            "grpc-operator"
+        } else {
+            inner.actor.trim()
+        };
+        let snap = self
+            .state
+            .policy_hub
+            .publish_from_runtime(&self.state.pinning_registry, reason);
+        info!(%actor, version = %snap.version, %reason, "Agent policy push (gRPC)");
+        Ok(Response::new(agent_policy_response(&snap, true)))
+    }
+
+    type WatchAgentPolicyStream =
+        Pin<Box<dyn Stream<Item = Result<AgentPolicyResponse, Status>> + Send + 'static>>;
+
+    async fn watch_agent_policy(
+        &self,
+        req: Request<WatchAgentPolicyRequest>,
+    ) -> Result<Response<Self::WatchAgentPolicyStream>, Status> {
+        require_auth(&self.state, req.metadata())?;
+        let since = req.into_inner().since_version;
+        let hub = self.state.policy_hub.clone();
+        let (tx, rx) = tokio::sync::mpsc::channel(8);
+
+        tokio::spawn(async move {
+            let mut last = since;
+            // Immediate snapshot so clients sync without a separate Get.
+            {
+                let snap = hub.snapshot();
+                let changed = last.is_empty() || last != snap.version;
+                if tx
+                    .send(Ok(agent_policy_response(&snap, changed)))
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+                last = snap.version;
+            }
+            let notify = hub.notify_handle();
+            loop {
+                notify.notified().await;
+                let snap = hub.snapshot();
+                if snap.version == last {
+                    continue;
+                }
+                last = snap.version.clone();
+                if tx
+                    .send(Ok(agent_policy_response(&snap, true)))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+
+        let stream: Self::WatchAgentPolicyStream = Box::pin(ReceiverStream::new(rx));
+        Ok(Response::new(stream))
+    }
+}
+
+fn agent_policy_response(
+    snap: &crate::agent_policy_hub::PolicySnapshot,
+    changed: bool,
+) -> AgentPolicyResponse {
+    AgentPolicyResponse {
+        policy_version: snap.version.clone(),
+        document_json: snap.document.to_string(),
+        pushed_at: snap.pushed_at,
+        reason: snap.reason.clone(),
+        changed,
     }
 }
 

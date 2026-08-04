@@ -44,8 +44,9 @@ Roadmap определяет порядок работ в рамках стра�
 - [x] Написание ADR 0005: Local Policy Agent vs Tunnel-First (`docs/adr/0005-local-policy-agent-vs-tunnel-first.md`).
 - [x] Минимальный lab-прототип агента (`examples/agent-spike`, Linux/macOS smoke) + control-plane API (#273, v0.9.2–0.9.6).
 - [x] Доставка политик и регистрация устройств (policy pull/push, enroll, heartbeat, devices, CRL/OCSP lab; Admin `/devices`).
+- [x] RFC 6960 DER OCSP responder + gRPC agent policy product path (`WatchAgentPolicy`).
 - [ ] Production multi-OS agent (installers, system proxy) и multi-node shared registry.
-- [ ] Wire-format OCSP DER / product WS-gRPC push (beyond long-poll/SSE lab).
+- [ ] WebSocket policy push / multi-node shared registry productization.
 
 ---
 

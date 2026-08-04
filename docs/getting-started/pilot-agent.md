@@ -19,10 +19,11 @@ Issue tracking: **#273** (agent implementation), **#258** (original spike).
 | Include | Exclude |
 |---|---|
 | `POST /api/v1/agent/enroll` → `device_token` | Control-plane TLS mutual-auth on primary `:9090` |
-| Optional enroll CSR → client cert (proxy CA) | Full RFC 6960 DER OCSP responder |
-| `GET /api/v1/agent/policy` pull + watch/SSE push | Product WS/gRPC push |
-| Optional control mTLS port (`CONTROL_MTLS_*`, default `:9443`) | mTLS on metrics/admin port |
-| Agent cert CRL JSON/PEM + lab OCSP status JSON | Multi-node shared registry |
+| Optional enroll CSR → client cert (proxy CA) | OCSP stapling on data-plane TLS |
+| `GET /api/v1/agent/policy` pull + watch/SSE push | WebSocket policy push |
+| gRPC policy (`Get/Push/WatchAgentPolicy`, feature `grpc`) | mTLS on metrics/admin port |
+| Optional control mTLS port (`CONTROL_MTLS_*`, default `:9443`) | Multi-node shared registry |
+| Agent cert CRL JSON/PEM + lab OCSP JSON + **RFC 6960 DER OCSP** | |
 | `POST /api/v1/agent/heartbeat` + `GET /api/v1/devices` | Durable multi-node event store |
 | `POST /api/v1/agent/events` telemetry batch | Multi-OS installers / system proxy |
 | Device registry persistence (`AGENT_DEVICES_PATH`) | Full UT1 categorization on endpoint |
@@ -156,6 +157,24 @@ curl -sS -H "Authorization: Bearer ${CONTROL_API_TOKEN}" \
 ```
 
 Enroll response includes `ocsp_status_url` for convenience.
+
+RFC 6960 DER (public, no Bearer) — body is a binary OCSP request, response is
+CA-signed `application/ocsp-response` (ECDSA P-256 or RSA CA):
+
+```bash
+# After building an OCSP request DER (serial of the agent client cert):
+curl -sS -X POST -H 'Content-Type: application/ocsp-request' \
+  --data-binary @ocsp-req.der \
+  http://127.0.0.1:9090/api/v1/agent/ocsp -o ocsp-resp.der
+# or GET with base64: /api/v1/agent/ocsp?b64=...
+```
+
+### Optional: gRPC policy product path
+
+Build with `--features grpc`, run with `CONTROL_GRPC_ENABLED=true`
+(`CONTROL_GRPC_BIND`, default `127.0.0.1:50051`). RPCs:
+`GetAgentPolicy`, `PushAgentPolicy`, server-stream `WatchAgentPolicy`
+(same hub as HTTP long-poll/SSE). Bearer metadata: `authorization: Bearer …`.
 
 ### Optional: agent control mTLS port
 

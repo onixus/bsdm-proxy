@@ -45,8 +45,13 @@ See also: [control-plane.md](../features/control-plane.md) ·
 | `CONTROL_MTLS_CHECK_CRL` | *on if mTLS enabled* | Reject peer certs listed in agent CRL |
 | `AGENT_CRL_PATH` | *memory-only* | Durable JSON CRL (`fingerprint` + optional `serial`) |
 
-OCSP (lab JSON): `GET /api/v1/agent/ocsp/status?fingerprint=…` or `?serial=…`
-returns `good` / `revoked` / `unknown`. Not a full DER OCSP responder.
+OCSP:
+
+- Lab JSON: `GET /api/v1/agent/ocsp/status?fingerprint=…` or `?serial=…`
+  (`good` / `revoked` / `unknown`, Bearer/agent auth).
+- **RFC 6960 DER**: `POST /api/v1/agent/ocsp` with body
+  `application/ocsp-request` → `application/ocsp-response` (public, CA-signed).
+  Optional `GET /api/v1/agent/ocsp?b64=…`.
 
 ### Agent control mTLS (optional)
 

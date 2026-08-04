@@ -667,6 +667,9 @@ impl ControlApiState {
                 (&Method::GET, "/api/stats")
                     | (&Method::GET, "/api/hierarchy/peers")
                     | (&Method::GET, "/api/upstream/tls")
+                    // RFC 6960 OCSP is intentionally unauthenticated (status only).
+                    | (&Method::POST, "/api/v1/agent/ocsp")
+                    | (&Method::GET, "/api/v1/agent/ocsp")
             );
             if !public_api {
                 let enroll_api = matches!(path, "/api/v1/agent/enroll" | "/api/agent/enroll");

@@ -23,11 +23,13 @@ policy and heartbeat endpoints.
 - Policy push: long-poll `/policy/watch`, SSE `/policy/stream`, operator
   `POST /policy/push` (+ pinning reload notify).
 - Agent CRL: JSON + optional X.509 PEM (`/api/v1/agent/crl[.pem]`); mTLS checks CRL.
-- Agent OCSP status (lab JSON): `GET /api/v1/agent/ocsp/status?fingerprint=|&serial=`.
+- Agent OCSP: lab JSON `GET /api/v1/agent/ocsp/status`; **RFC 6960 DER**
+  `POST /api/v1/agent/ocsp` (CA-signed, public).
 - Admin Console: supported `/devices` (list, revoke, policy push, events, CRL).
 - Handlers live in `proxy/src/agent_api.rs` (`dispatch_agent`).
-- Reserved: RFC 6960 DER OCSP responder, WebSocket/gRPC push productization,
-  multi-OS installers, multi-node registry.
+- Policy product push: HTTP long-poll/SSE + optional **gRPC**
+  `WatchAgentPolicy` / `GetAgentPolicy` / `PushAgentPolicy` (`--features grpc`).
+- Reserved: multi-OS installers, multi-node registry, WebSocket push.
 
 ---
 
@@ -76,19 +78,23 @@ by the proxy/agent CA. Plain `METRICS_PORT` stays HTTP for scrapers/Admin.
   is not on a non-revoked enrolled device
 - HTTP Bearer (`device_token` / control token) still applies for API auth
 
-#### Certificate revocation (lab CRL + OCSP status)
+#### Certificate revocation (CRL + OCSP)
 
 - Revoke (`POST /api/v1/devices/{id}/revoke`) clears device token and appends
   `cert_fingerprint` (+ serial when known) to the agent CRL.
 - `GET /api/v1/agent/crl` — JSON list for ops / mTLS fingerprint checks.
 - `GET /api/v1/agent/crl.pem` — CA-signed X.509 CRL when issuer has `CrlSign`.
 - `GET /api/v1/agent/ocsp/status?fingerprint=|&serial=` — lab JSON OCSP-like
-  status: `good` | `revoked` | `unknown` (backed by enroll + CRL; not ASN.1).
+  status: `good` | `revoked` | `unknown` (backed by enroll + CRL).
+- `POST /api/v1/agent/ocsp` — RFC 6960 DER responder
+  (`Content-Type: application/ocsp-request` → `application/ocsp-response`),
+  CA-signed (ECDSA P-256 or RSA PKCS#1 SHA-256). Unauthenticated (status only).
+  Optional `GET /api/v1/agent/ocsp?b64=` for base64-encoded requests.
 - Durable store: `AGENT_CRL_PATH`. mTLS: `CONTROL_MTLS_CHECK_CRL` (default on).
 
 #### Reserved
 
-- Full RFC 6960 binary OCSP / stapling.
+- OCSP stapling on data-plane TLS.
 - Forcing mTLS on the primary metrics port (would break Prometheus scrape).
 
 ---

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Agent OCSP DER responder (#273)** — RFC 6960
+  `POST /api/v1/agent/ocsp` (`application/ocsp-request` →
+  `application/ocsp-response`), CA-signed (ECDSA P-256 or RSA); optional
+  `GET ?b64=`; public (no Bearer); JSON status API retained at `/ocsp/status`.
+- **gRPC agent policy product path (`--features grpc`)** —
+  `GetAgentPolicy`, `PushAgentPolicy`, server-stream `WatchAgentPolicy` on the
+  existing control gRPC service (same policy hub as HTTP long-poll/SSE).
+
 ## [0.9.6] - 2026-08-04
 
 Patch release after **0.9.5**: agent **CRL + lab OCSP**, control-plane

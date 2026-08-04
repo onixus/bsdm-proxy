@@ -10,7 +10,7 @@ use hyper::header::HeaderValue;
 use hyper::{Method, Response, StatusCode};
 use serde::Deserialize;
 use std::time::Duration;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::agent_events::AgentEventBatch;
 use crate::agent_ocsp;
@@ -84,6 +84,8 @@ impl ControlApiState {
             (&Method::GET, "/api/v1/agent/crl") => self.agent_crl_json(),
             (&Method::GET, "/api/v1/agent/crl.pem") => self.agent_crl_pem(),
             (&Method::GET, "/api/v1/agent/ocsp/status") => self.agent_ocsp_status(query),
+            (&Method::POST, "/api/v1/agent/ocsp") => self.agent_ocsp_der(body),
+            (&Method::GET, "/api/v1/agent/ocsp") => self.agent_ocsp_der_get(query),
             (&Method::GET, "/api/agent/policy") => {
                 deprecated_agent_alias(self.agent_policy(), "/api/v1/agent/policy")
             }
@@ -294,6 +296,50 @@ impl ControlApiState {
             StatusCode::OK,
             &self.agent_crl.to_json_document().to_string(),
         )
+    }
+
+    /// RFC 6960 DER OCSP responder (`POST application/ocsp-request`).
+    fn agent_ocsp_der(&self, body: Bytes) -> Response<Body> {
+        let Some(cache) = self.cert_cache.as_ref() else {
+            let der = agent_ocsp::error_response_der(x509_ocsp::OcspResponseStatus::InternalError);
+            return ocsp_der_response(der);
+        };
+        match agent_ocsp::respond_der(&body, cache, &self.agent_crl, &self.device_registry) {
+            Ok(der) => ocsp_der_response(der),
+            Err(e) => {
+                warn!(error = %e, "OCSP DER request failed");
+                let der =
+                    agent_ocsp::error_response_der(x509_ocsp::OcspResponseStatus::MalformedRequest);
+                ocsp_der_response(der)
+            }
+        }
+    }
+
+    /// RFC 6960 GET with base64 request: `?b64=` (standard or URL-safe).
+    fn agent_ocsp_der_get(&self, query: Option<&str>) -> Response<Body> {
+        let mut b64: Option<String> = None;
+        if let Some(q) = query {
+            for pair in q.split('&') {
+                if let Some((k, v)) = pair.split_once('=') {
+                    if k == "b64" && !v.is_empty() {
+                        b64 = Some(v.to_string());
+                    }
+                }
+            }
+        }
+        let Some(b64) = b64 else {
+            return json_response(
+                StatusCode::BAD_REQUEST,
+                r#"{"error":"GET /api/v1/agent/ocsp requires ?b64= (base64 OCSP request); prefer POST"}"#,
+            );
+        };
+        match agent_ocsp::decode_b64_request(&b64) {
+            Ok(der) => self.agent_ocsp_der(Bytes::from(der)),
+            Err(e) => json_response(
+                StatusCode::BAD_REQUEST,
+                &serde_json::json!({ "error": e }).to_string(),
+            ),
+        }
     }
 
     /// Lab OCSP-style status: `?fingerprint=` and/or `?serial=`.
@@ -523,11 +569,13 @@ impl ControlApiState {
                             "heartbeat": "/api/v1/agent/heartbeat",
                             "events": "/api/v1/agent/events",
                             "crl": "/api/v1/agent/crl",
-                            "ocsp": "/api/v1/agent/ocsp/status",
+                            "ocsp": "/api/v1/agent/ocsp",
+                            "ocsp_status": "/api/v1/agent/ocsp/status",
                         },
                         "ocsp_status_url": cert_fingerprint.as_ref().map(|fp| {
                             format!("/api/v1/agent/ocsp/status?fingerprint={fp}")
                         }),
+                        "ocsp_der_url": "/api/v1/agent/ocsp",
                         "auth": "Bearer device_token for agent endpoints (or CONTROL_API_TOKEN)",
                         "mtls": mtls,
                         "client_cert_pem": client_cert_pem,
@@ -570,4 +618,18 @@ fn deprecated_agent_alias(
             .expect("static successor path must produce a valid Link header"),
     );
     response
+}
+
+fn ocsp_der_response(der: Vec<u8>) -> Response<Body> {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "application/ocsp-response")
+        .header("Cache-Control", "max-age=60, public")
+        .body(full(Bytes::from(der)))
+        .unwrap_or_else(|_| {
+            json_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                r#"{"error":"ocsp response body"}"#,
+            )
+        })
 }

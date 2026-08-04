@@ -13,6 +13,12 @@ service ControlPlane {
   rpc ReloadHierarchy(Empty) returns (HierarchyReloadResponse);
   rpc GetUpstreamTls(Empty) returns (UpstreamTlsSnapshot);
   rpc ReloadUpstreamTls(Empty) returns (UpstreamTlsReloadResponse);
+
+  // Agent Contract policy (product push path; feature `grpc`)
+  rpc GetAgentPolicy(Empty) returns (AgentPolicyResponse);
+  rpc PushAgentPolicy(PushAgentPolicyRequest) returns (AgentPolicyResponse);
+  // Server stream: initial snapshot then each publish until client cancels.
+  rpc WatchAgentPolicy(WatchAgentPolicyRequest) returns (stream AgentPolicyResponse);
 }
 
 message Empty {}
@@ -87,4 +93,23 @@ message UpstreamTlsReloadResponse {
   string status = 1;
   UpstreamTlsSnapshot tls = 2;
   string error = 3;
+}
+
+message WatchAgentPolicyRequest {
+  // Skip events whose policy_version equals this value (empty = send initial).
+  string since_version = 1;
+}
+
+message PushAgentPolicyRequest {
+  string reason = 1;
+  string actor = 2;
+}
+
+message AgentPolicyResponse {
+  string policy_version = 1;
+  // Full Agent Contract policy JSON document.
+  string document_json = 2;
+  uint64 pushed_at = 3;
+  string reason = 4;
+  bool changed = 5;
 }
