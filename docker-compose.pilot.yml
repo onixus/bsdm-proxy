@@ -1,3 +1,16 @@
+# Pilot overlay for Hybrid Policy path (issues #269 / #270).
+#
+# Usage:
+#   export CONTROL_API_TOKEN ACL_API_TOKEN SEARCH_API_TOKEN  # required secrets
+#   ./scripts/gen-ca.sh
+#   docker compose -f docker-compose.yml -f docker-compose.pilot.yml up -d --build
+#
+# Hybrid defaults only. Experimental modules stay behind compose profiles
+# (alerts, ml, icap, experimental-trust-ui) and are NOT enabled by this file.
+#
+# Docs: docs/getting-started/pilot-deployment.md
+#       docs/ops-and-dev/load-test-selective-mitm.md
+
 services:
   zookeeper:
     deploy:
@@ -26,6 +39,23 @@ services:
 
   proxy:
     environment:
+      # --- Hybrid Policy (Phase B pilot) ---
+      DEPLOYMENT_PROFILE: production
+      POLICY_MODE: selective-mitm
+      MITM_ENABLED: "true"
+      MITM_CATEGORIES: malware,phishing,illegal-content
+      # full-mitm is rejected in production unless ALLOW_FULL_MITM=true (do not set)
+      PINNING_EXCEPTIONS_PATH: /etc/bsdm-proxy/pinning-exceptions.json
+      PINNING_AUDIT_LOG_PATH: /var/log/bsdm-proxy/pinning-audit.jsonl
+
+      # --- Core controls ---
+      ACL_ENABLED: "${ACL_ENABLED:-true}"
+      ACL_DEFAULT_ACTION: "${ACL_DEFAULT_ACTION:-allow}"
+      AUTH_ENABLED: "${AUTH_ENABLED:-false}"
+      CATEGORIZATION_ENABLED: "${CATEGORIZATION_ENABLED:-false}"
+      UT1_ENABLED: "${UT1_ENABLED:-false}"
+
+      # --- Capacity (100-user functional pilot) ---
       WORKER_COUNT: "2"
       CACHE_CAPACITY: "20000"
       CACHE_SHARDS: "16"
@@ -38,10 +68,8 @@ services:
       METRICS_SAMPLE_RATE: "10"
       PERF_FAST_CACHE_HIT: "false"
       STREAMING_MISS_ENABLED: "true"
-      AUTH_ENABLED: "${AUTH_ENABLED:-false}"
-      ACL_ENABLED: "${ACL_ENABLED:-true}"
-      CATEGORIZATION_ENABLED: "${CATEGORIZATION_ENABLED:-false}"
-      UT1_ENABLED: "${UT1_ENABLED:-false}"
+
+      # --- Tokens (set in env; never commit real values) ---
       CONTROL_API_TOKEN: "${CONTROL_API_TOKEN}"
       ACL_API_TOKEN: "${ACL_API_TOKEN}"
     volumes:
@@ -63,6 +91,7 @@ services:
           cpus: "0.50"
           memory: 512M
 
+  # Resource caps only for optional profiles — still opt-in via --profile
   alert-worker:
     deploy:
       resources:

@@ -11,7 +11,8 @@ GitHub Wiki является автоматически обновляемым �
 | Документ | Назначение |
 |---|---|
 | [Deployment](getting-started/deployment.md) | Docker Compose, native package и Kubernetes |
-| [Пилот на 100 пользователей](getting-started/pilot-deployment.md) | 12 vCPU / 24 GiB / 200 GB, хранение до 5 суток |
+| [Пилот Hybrid (100 users)](getting-started/pilot-deployment.md) | Selective MITM compose + acceptance checklist (#270) |
+| [Hybrid load-test profile](ops-and-dev/load-test-selective-mitm.md) | 100-user SNI/MITM/DNS probe + results archive (#269) |
 | [Lite mode](getting-started/lite-mode.md) | Proxy + SQLite без Kafka/ClickHouse |
 | [Configuration](ops-and-dev/configuration.md) | Основные переменные окружения |
 

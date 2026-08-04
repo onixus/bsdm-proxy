@@ -5,10 +5,20 @@ on:
     branches: [main]
     paths:
       - 'proxy/**'
+      - 'scripts/run-load-test.sh'
+      - 'scripts/run-hybrid-load-test.sh'
+      - 'scripts/wrk-proxy.lua'
+      - 'docker-compose.lite.yml'
+      - '.github/workflows/load-test.yml'
   pull_request:
     branches: [main]
     paths:
       - 'proxy/**'
+      - 'scripts/run-load-test.sh'
+      - 'scripts/run-hybrid-load-test.sh'
+      - 'scripts/wrk-proxy.lua'
+      - 'docker-compose.lite.yml'
+      - '.github/workflows/load-test.yml'
   workflow_dispatch:
 
 permissions:
@@ -81,6 +91,21 @@ jobs:
           chmod +x ./scripts/run-load-test.sh
           PROXY=http://127.0.0.1:3128 METRICS_URL=http://127.0.0.1:9090 UPSTREAM=http://127.0.0.1:18080 \
             ./scripts/run-load-test.sh
+
+      - name: Run Hybrid Selective-MITM Profile (#269)
+        run: |
+          chmod +x ./scripts/run-hybrid-load-test.sh
+          # CI-friendly duration/users; public upstream may add RTT noise.
+          CONCURRENT_USERS=20 TEST_DURATION=20 \
+          PROXY=http://127.0.0.1:3128 METRICS_URL=http://127.0.0.1:9090 \
+          SNI_URL=http://127.0.0.1:18080/get \
+          MITM_URL=http://127.0.0.1:18080/get \
+          HTTP_URL=http://127.0.0.1:18080/get \
+          WRITE_RESULTS=1 \
+          RESULTS_DIR=/tmp/hybrid-load-results \
+            ./scripts/run-hybrid-load-test.sh
+          echo "=== Hybrid results ==="
+          cat /tmp/hybrid-load-results/latest.md
 
       - name: Run High-Intensity wrk Benchmark
         run: |

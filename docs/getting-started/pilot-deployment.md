@@ -1,41 +1,108 @@
-# Пилот на 100 пользователей
+# Пилот: Hybrid Policy (Selective MITM)
 
-Референсный профиль предназначен для функционального пилота на одном сервере без
-HA. Он не является результатом нагрузочного теста: перед production нужно прогнать
-собственный трафик и проверить latency, CPU, RSS, Kafka lag и ClickHouse merges.
+Референсный **Phase B** профиль для функционального пилота ~100 пользователей
+на одном сервере. Цель — скучный, воспроизводимый подъём **без experimental
+модулей** и без «племенного знания».
 
-## Границы пилота
+Связанные артефакты:
 
-В пилот входят:
+| Артефакт | Назначение |
+|---|---|
+| [`docker-compose.pilot.yml`](../../docker-compose.pilot.yml) | Hybrid defaults + resource caps + 5-day retention |
+| [Load-test profile](../ops-and-dev/load-test-selective-mitm.md) | 100-user Hybrid нагрузка (#269) |
+| [CA lifecycle](../ops-and-dev/ca-lifecycle.md) | Выпуск / ротация MITM CA |
+| [Project status](../project-status.md) | Зрелость функций |
 
-- HTTP/HTTPS forward proxy и MITM;
-- Basic/LDAP authentication, ACL, categorization и rate limiting;
-- L1 cache, mmap spill и optional Redis L2;
-- Kafka, cache-indexer, ClickHouse и Search API;
-- alert-worker и выбранные модели ml-worker;
-- Prometheus, Grafana и Alertmanager;
-- optional DNS sinkhole, DoH/DoT, AWG и local semantic cache.
+Issue tracking: **#270** (этот документ + compose), **#269** (load-test).
 
-Из пилота исключены:
+---
 
-- DLP/CASB enforcement;
-- reverse proxy/OIDC;
-- ICAP и ClamAV;
-- production HA и multi-cluster;
-- обещания production SLA.
+## Что входит в пилот (Hybrid core)
 
-В текущем proxy DLP engine создаётся без отдельного feature switch. Для пилота
-очистите паттерны через control API после каждого рестарта:
+| Компонент | Статус в пилоте |
+|---|---|
+| HTTP/HTTPS forward proxy, CONNECT | **Да** |
+| `POLICY_MODE=selective-mitm` | **Да** (default) |
+| Selective MITM по `MITM_CATEGORIES` | **Да** |
+| SNI path (без расшифровки) | **Да** |
+| ACL | **Да** (`ACL_ENABLED=true` в pilot overlay) |
+| Auth (Basic/LDAP/…) | **Опционально** (`AUTH_ENABLED`) |
+| Categorization / UT1 | **Опционально** (включать после подготовки feeds) |
+| L1 cache + spill | **Да** |
+| Kafka → cache-indexer → ClickHouse → Search API | **Да** (base compose) |
+| Prometheus / Grafana | **Да** |
+| DNS sinkhole / DoH / DoT | **Опционально** (отдельный сервис / profile) |
+| Admin Console `/admin/` | **Да** (если собран в image) |
+
+## Что **не** входит (по умолчанию выключено)
+
+Experimental / frozen scope — **не** поднимать в первом пилоте:
+
+- ICAP / ClamAV (`--profile icap`)
+- AmneziaWG / BSDM Connect
+- eBPF / XDP
+- WASM plugins как security boundary
+- Standalone Trust-UI (`--profile experimental-trust-ui`)
+- Global session / threat-sync multi-node scaffolding
+- DLP/CASB enforcement (engine может существовать в процессе — см. ниже)
+- Production HA / multi-cluster
+
+Alert-worker и ml-worker — **второй шаг** (`--profile alerts` / `ml`), не часть
+«дня 1» Hybrid core.
+
+### DLP workaround
+
+Встроенный DLP engine может создаваться без отдельного `DLP_ENABLED`. Для пилота
+без DLP очистите паттерны после рестарта:
 
 ```bash
 curl -X POST http://127.0.0.1:9090/api/security/dlp \
-  -H 'Authorization: Bearer <CONTROL_API_TOKEN>' \
+  -H "Authorization: Bearer ${CONTROL_API_TOKEN}" \
   -H 'Content-Type: application/json' \
   --data '[]'
 ```
 
-Это временный обходной путь: состояние не сохраняется. До production нужен
-постоянный `DLP_ENABLED=false` либо сохранение пустой конфигурации.
+Состояние не персистится. Production: постоянный выключатель (когда появится) или
+явная пустая конфигурация.
+
+---
+
+## Acceptance criteria (что значит «пилот успешен»)
+
+### A. Stand-up
+
+- [ ] `docker compose -f docker-compose.yml -f docker-compose.pilot.yml up -d --build` поднимает proxy, kafka, clickhouse, cache-indexer, prometheus, grafana
+- [ ] `GET :9090/health` и `GET :9090/ready` → ok
+- [ ] `GET :8080/health` (indexer) → ok
+- [ ] Experimental profiles **не** указаны в команде запуска
+- [ ] Заданы `CONTROL_API_TOKEN`, `ACL_API_TOKEN`, `SEARCH_API_TOKEN` (не дефолтные пустые в проде)
+
+### B. Hybrid path
+
+- [ ] `POLICY_MODE=selective-mitm`, `DEPLOYMENT_PROFILE=production`
+- [ ] `full-mitm` **не** используется (и не проходит без `ALLOW_FULL_MITM`)
+- [ ] MITM CA установлен на тестовых клиентах; `curl --cacert certs/ca.crt -x … https://…` работает
+- [ ] Pinning exceptions registry смонтирован (`PINNING_EXCEPTIONS_PATH`)
+- [ ] В метриках есть `bsdm_proxy_policy_decision_source_total` (после трафика)
+
+### C. Observability
+
+- [ ] События попадают в ClickHouse / Search API (`/api/search?limit=5`)
+- [ ] Prometheus scrape proxy metrics
+- [ ] Retention: ClickHouse pilot TTL 5d, Prometheus `5d`, Kafka ≤ 48h
+
+### D. Load probe
+
+- [ ] Прогнан `./scripts/run-hybrid-load-test.sh` (100 users / ≥30s)
+- [ ] Отчёт в `docs/ops-and-dev/load-test-results/` (или локальный latest.md)
+- [ ] Error rate и latency p95/p99 записаны; proxy не упал
+
+### E. Out of scope explicit
+
+- [ ] ICAP / AWG / eBPF / WASM **не** включены
+- [ ] Agent UI / on-device agent **не** требуется для pass
+
+---
 
 ## Нагрузочная модель
 
@@ -46,72 +113,72 @@ curl -X POST http://127.0.0.1:9090/api/security/dlp \
 | Средняя нагрузка | 3–6 proxy requests/s |
 | Расчётный пик | 50–100 proxy requests/s |
 | События | до 500 000 в сутки |
-| HTTPS MITM | до 100% трафика |
+| HTTPS MITM | **селективно** (категории), не 100% |
 | Рабочий трафик | 100–200 Mbit/s |
-| Кратковременный burst | до 500 Mbit/s |
-| Горячее хранение | не более 5 суток |
+| Горячее хранение | ≤ 5 суток |
 
-Если фактический трафик включает массовые обновления ПО, большие загрузки или
-длительные видеопотоки, главным фактором становится bandwidth и cache spill, а не
-число пользователей.
+Методика и скрипт: [load-test-selective-mitm.md](../ops-and-dev/load-test-selective-mitm.md).
 
-## Ресурсы
+---
+
+## Ресурсы (один Linux-хост)
 
 | Профиль | vCPU | RAM | NVMe | Сеть |
 |---|---:|---:|---:|---:|
 | Минимальный функциональный | 8 | 16 GiB | 150 GB | 1 Gbit/s |
 | **Рекомендуемый** | **12** | **24 GiB** | **200 GB** | **1 Gbit/s** |
-| С запасом для нагрузочного теста | 12–16 | 32 GiB | 250 GB | 1 Gbit/s |
+| С запасом для load-test | 12–16 | 32 GiB | 250 GB | 1 Gbit/s |
 
-Рекомендуемый профиль — **12 vCPU, 24 GiB RAM, 200 GB NVMe** на одном Linux-хосте.
+### Бюджет контейнеров (pilot overlay)
 
-### Бюджет компонентов
+| Компонент | vCPU | RAM |
+|---|---:|---:|
+| proxy | 4 | 4 GiB |
+| ClickHouse | 3 | 6 GiB |
+| Kafka + ZK | ~1.5 | ~3 GiB |
+| cache-indexer | 0.5 | 512 MiB |
+| Prometheus + Grafana | ~1.25 | ~2.5 GiB |
 
-| Компонент | vCPU | RAM | Диск |
-|---|---:|---:|---:|
-| proxy: MITM, auth, ACL, cache | 4 | 4 GiB | 25 GB spill |
-| ClickHouse | 3 | 6 GiB | 40 GB |
-| Kafka + Zookeeper | 1–2 | 2–3 GiB | 20 GB |
-| cache-indexer | 0.5 | 512 MiB | — |
-| alert-worker + ML workers | 1–2 | 2 GiB | 5 GB |
-| Prometheus, Grafana, Alertmanager | 1–2 | 3 GiB | 20 GB |
-| Redis L2, если включён | 1 | 2 GiB | 10 GB |
-| DNS/AWG/local semantic index | 0.5–1 | до 1 GiB | 5 GB |
-| ОС, логи, merges и резерв | — | 3–4 GiB | 50–70 GB |
-
-Redis L2 и Qdrant не обязательны для одного proxy. Для проверки semantic cache
-используйте local index; Qdrant добавляйте только для отдельного сценария приёмки.
+---
 
 ## Compose override
 
-Файл [`docker-compose.pilot.yml`](../../docker-compose.pilot.yml) применяет
-пилотные memory/CPU limits (суммарно 12 vCPU и 18 GiB container memory),
-включает пятидневный Prometheus retention,
-48-часовой Kafka retention, отдельный spill volume и параметры proxy ниже.
+[`docker-compose.pilot.yml`](../../docker-compose.pilot.yml) задаёт:
 
-Перед запуском задайте токены и параметры выбранного auth/categorization backend:
+- Hybrid: `POLICY_MODE=selective-mitm`, `MITM_CATEGORIES`, production profile
+- ACL on by default; auth/categorization off until configured
+- Resource limits (~12 vCPU / ~18 GiB container budget)
+- Prometheus retention 5d, Kafka 48h, ClickHouse pilot TTL SQL
+- Отдельный spill volume
 
 ```bash
-export CONTROL_API_TOKEN='<random-control-token>'
-export ACL_API_TOKEN='<random-acl-token>'
-export SEARCH_API_TOKEN='<random-search-token>'
+export CONTROL_API_TOKEN="$(openssl rand -hex 16)"
+export ACL_API_TOKEN="$(openssl rand -hex 16)"
+export SEARCH_API_TOKEN="$(openssl rand -hex 16)"
 
-# Включайте после настройки backend/users:
-export AUTH_ENABLED=false
-export CATEGORIZATION_ENABLED=false
-export UT1_ENABLED=false
+# Optional after backend is ready:
+# export AUTH_ENABLED=true
+# export CATEGORIZATION_ENABLED=true
+# export UT1_ENABLED=true
+
+./scripts/gen-ca.sh
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.pilot.yml \
+  up -d --build
 ```
 
-Не храните значения токенов в Git или shell history production-хоста.
+Не коммитьте секреты и не кладите токены в shell history production-хоста.
 
-### Конфигурация proxy
-
-Стартовый профиль:
+### Стартовый env proxy (канон)
 
 ```env
+DEPLOYMENT_PROFILE=production
+POLICY_MODE=selective-mitm
 MITM_ENABLED=true
-WORKER_COUNT=2
+MITM_CATEGORIES=malware,phishing,illegal-content
 
+WORKER_COUNT=2
 CACHE_CAPACITY=20000
 CACHE_SHARDS=16
 CACHE_TTL_SECONDS=3600
@@ -122,75 +189,52 @@ MAX_CACHE_BODY_SIZE=4194304
 
 KAFKA_SAMPLE_RATE=0
 METRICS_SAMPLE_RATE=10
-PERF_FAST_CACHE_HIT=false
 STREAMING_MISS_ENABLED=true
 
-AUTH_ENABLED=true
 ACL_ENABLED=true
-CATEGORIZATION_ENABLED=true
+AUTH_ENABLED=false
+CATEGORIZATION_ENABLED=false
 ```
 
-`CACHE_CAPACITY` — общее число записей на процесс proxy. Оно делится между
-`CACHE_SHARDS`, а не умножается на число шардов.
+`CACHE_CAPACITY` — общее число записей L1 на процесс (делится между шардами).
 
-Для cache-indexer задайте `SEARCH_API_DEFAULT_DAYS=5`, чтобы default search
-соответствовал доступному окну данных.
+---
 
-## Хранение не более 5 суток
+## Хранение ≤ 5 суток
 
-Базовая DDL в репозитории имеет более длинный TTL. На новом ClickHouse volume
-pilot override автоматически применяет
-[`pilot_retention.sql`](../../scripts/clickhouse/pilot_retention.sql). Для уже
-инициализированного volume выполните те же команды явно до начала приёмочного
-трафика:
-
-```sql
-ALTER TABLE bsdm.http_cache
-MODIFY TTL ts + INTERVAL 5 DAY;
-
-ALTER TABLE bsdm.entity_features
-MODIFY TTL window_start + INTERVAL 5 DAY;
-
-ALTER TABLE bsdm.ml_scores
-MODIFY TTL scored_at + INTERVAL 5 DAY;
-
-ALTER TABLE bsdm.domain_phishing_features
-MODIFY TTL window_start + INTERVAL 5 DAY;
-
-ALTER TABLE bsdm.beacon_pair_features
-MODIFY TTL window_start + INTERVAL 5 DAY;
-```
+Pilot overlay монтирует
+[`pilot_retention.sql`](../../scripts/clickhouse/pilot_retention.sql) на **новый**
+volume. Для уже инициализированного ClickHouse примените TTL вручную (см. SQL в
+том же файле) до приёмочного трафика.
 
 Дополнительно:
 
-- Kafka retention: 24–48 часов;
-- Prometheus: `--storage.tsdb.retention.time=5d`;
-- Docker logs: ротация 10 MiB × 3 файла;
-- Redis: `maxmemory 2gb` и `maxmemory-policy allkeys-lfu`;
-- spill: отдельный каталог с лимитом 25–30 GB.
+- Kafka retention 24–48h
+- Prometheus `--storage.tsdb.retention.time=5d`
+- spill: отдельный volume, лимит 25–30 GB на хосте
 
-При уже накопленных данных `MATERIALIZE TTL` может создать заметную нагрузку.
-Выполняйте его в окно обслуживания или дождитесь фонового удаления.
-ClickHouse TTL удаляет данные фоновыми merges и не гарантирует физическое
-удаление ровно на границе пяти суток. Если пять дней — жёсткое compliance
-ограничение, контролируйте самые старые строки и добавьте плановый
-`DROP PARTITION` для дневных partitions.
+---
 
-## Запуск и приёмка
-
-Базовый analytics stack:
+## Запуск и smoke
 
 ```bash
-./scripts/gen-ca.sh
-docker compose \
-  -f docker-compose.yml \
-  -f docker-compose.pilot.yml \
-  up -d --build
 docker compose -f docker-compose.yml -f docker-compose.pilot.yml ps
+
+curl -fsS http://127.0.0.1:9090/health
+curl -fsS http://127.0.0.1:9090/ready
+curl --cacert certs/ca.crt -x http://127.0.0.1:3128 https://httpbin.org/get
+curl -fsS 'http://127.0.0.1:8123/?query=SELECT+count()+FROM+bsdm.http_cache'
+curl -fsS 'http://127.0.0.1:8080/api/search?limit=5' \
+  -H "Authorization: Bearer ${SEARCH_API_TOKEN}"
 ```
 
-Alert-worker требует непустой `ALERT_WEBHOOK_URL`. Добавляйте alerting и одну
-ML-модель только после запуска базового стека:
+Load probe:
+
+```bash
+CONCURRENT_USERS=100 TEST_DURATION=60 ./scripts/run-hybrid-load-test.sh
+```
+
+### Второй шаг (не день 1)
 
 ```bash
 export ALERT_WEBHOOK_URL='https://siem.example.invalid/bsdm'
@@ -202,42 +246,19 @@ docker compose \
   up -d --build
 ```
 
-После старта очистите DLP patterns командой из раздела
-[«Границы пилота»](#границы-пилота) и проверьте ответ `[]` через
-`GET /api/security/dlp`:
-
-```bash
-curl http://127.0.0.1:9090/api/security/dlp \
-  -H "Authorization: Bearer ${CONTROL_API_TOKEN}"
-```
-
-Проверки:
-
-```bash
-curl http://127.0.0.1:9090/health
-curl http://127.0.0.1:9090/ready
-curl --cacert certs/ca.crt -x http://127.0.0.1:3128 https://httpbin.org/get
-curl 'http://127.0.0.1:8123/?query=SELECT+count()+FROM+bsdm.http_cache'
-curl 'http://127.0.0.1:8080/api/search?limit=5'
-```
-
-Для полного ML-набора запускайте отдельный `ml-worker` на каждую модель. В первом
-пилоте достаточно одной модели и alert-worker; остальные добавляйте по очереди,
-измеряя длительность запросов ClickHouse.
+---
 
 ## Критерии пересмотра сайзинга
 
-Увеличивайте ресурсы или разделяйте data/analytics plane, если выполняется хотя бы
-одно условие:
+Увеличивайте ресурсы или разделяйте plane, если:
 
-- CPU proxy выше 70% более 15 минут;
-- host RAM выше 80% или начинается swap;
+- CPU proxy > 70% более 15 минут;
+- host RAM > 80% или swap;
 - Kafka consumer lag растёт непрерывно;
-- ClickHouse merges не успевают завершаться;
-- p95 добавленной proxy latency выходит за установленный SLO;
-- рабочий трафик стабильно выше 300 Mbit/s;
-- cache spill заполняет более 70% выделенного диска.
+- ClickHouse merges не успевают;
+- p95 добавленной latency выше вашего SLO;
+- стабильный трафик > 300 Mbit/s;
+- spill > 70% выделенного диска.
 
 Следующий шаг после успешного пилота — две реплики proxy и отдельный analytics
-host. Это решение принимается по измерениям, а не линейным умножением числа
-пользователей.
+host (по измерениям, не по линейному масштабу «×N пользователей»).

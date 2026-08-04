@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Hybrid pilot load-test profile (#269)** — Reproducible
+  `scripts/run-hybrid-load-test.sh` with latency p50/p95/p99, error rate,
+  `decision_source` deltas, markdown results under
+  `docs/ops-and-dev/load-test-results/`, methodology in
+  `docs/ops-and-dev/load-test-selective-mitm.md`, and a CI hybrid job in
+  `.github/workflows/load-test.yml`.
+- **Pilot readiness compose + acceptance (#270)** — `docker-compose.pilot.yml`
+  Hybrid defaults (`POLICY_MODE=selective-mitm`, ACL on, experimental modules
+  opt-in only) and rewritten acceptance checklist in
+  `docs/getting-started/pilot-deployment.md`.
+
 ### Security
 
 - Add two-phase CA rotation tooling with key-permission validation, archived
