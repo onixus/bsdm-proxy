@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.7] - 2026-08-04
+
+Patch release after **0.9.6**: agent **RFC 6960 DER OCSP** and **gRPC policy**
+product path (Get/Push/Watch) (#273).
+
 ### Added
 
 - **Agent OCSP DER responder (#273)** — RFC 6960
