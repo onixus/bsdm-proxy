@@ -52,9 +52,9 @@
    требуется `STREAMING_MISS_ENABLED=false`.
 5. Reverse proxy/OIDC, eBPF control path и AmneziaWG control integration считаются
    experimental независимо от отметок в исторических release notes.
-6. Встроенный DLP engine создаётся при старте proxy без отдельного `DLP_ENABLED`.
-   Для пилота без DLP нужен постоянный выключатель или пустой набор паттернов,
-   установленный через control API.
+6. Native DLP выключен по умолчанию (`DLP_ENABLED=false` / unset). Для lab-оценки
+   сигнатур: `DLP_ENABLED=true`. Runtime: `POST /api/security/dlp` с `[]` очищает
+   паттерны (требует Bearer); состояние не персистится между рестартами.
 7. `GlobalSessionStore`, Redis rate-limit path и `ThreatSyncEngine` добавлены как
    scaffolding. Текущий `main.rs` создаёт session/threat stores без Redis, а
    proxy request path не вызывает distributed rate-limit check. Название

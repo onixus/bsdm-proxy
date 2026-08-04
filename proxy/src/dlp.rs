@@ -23,36 +23,99 @@ impl std::error::Error for DlpViolation {}
 struct DlpState {
     ac: AhoCorasick,
     patterns: Vec<(String, String)>,
+    enabled: bool,
 }
 
 /// DLP Engine configured with patterns to detect data leaks.
+///
+/// # Enablement (`DLP_ENABLED`)
+/// Experimental native DLP is **off by default** (`DLP_ENABLED=false` / unset).
+/// Set `DLP_ENABLED=true` to load the built-in signature set at startup.
+/// Patterns can still be changed at runtime via control API (`POST /api/security/dlp`).
 #[derive(Clone)]
 pub struct DlpEngine {
     state: Arc<ArcSwap<DlpState>>,
 }
 
+fn env_flag(name: &str) -> bool {
+    std::env::var(name)
+        .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false)
+}
+
+fn empty_state() -> DlpState {
+    let ac = AhoCorasick::builder()
+        .build(Vec::<&str>::new())
+        .expect("empty AhoCorasick");
+    DlpState {
+        ac,
+        patterns: vec![],
+        enabled: false,
+    }
+}
+
+fn default_patterns() -> Vec<(String, String)> {
+    vec![
+        ("sk-ant-api".into(), "Anthropic API Key".into()),
+        ("sk-proj-".into(), "OpenAI Project Key".into()),
+        ("ghp_".into(), "GitHub Personal Access Token".into()),
+        ("xoxb-".into(), "Slack Bot Token".into()),
+        ("BEGIN RSA PRIVATE KEY".into(), "RSA Private Key".into()),
+        (
+            "BEGIN OPENSSH PRIVATE KEY".into(),
+            "OpenSSH Private Key".into(),
+        ),
+    ]
+}
+
+fn state_from_patterns(patterns: Vec<(String, String)>) -> DlpState {
+    if patterns.is_empty() {
+        return empty_state();
+    }
+    let ac = AhoCorasick::builder()
+        .match_kind(MatchKind::Standard)
+        .build(patterns.iter().map(|(k, _)| k))
+        .expect("Failed to build DLP AhoCorasick automaton");
+    DlpState {
+        ac,
+        patterns,
+        enabled: true,
+    }
+}
+
 impl DlpEngine {
-    pub fn new() -> Self {
-        let patterns: Vec<(String, String)> = vec![
-            ("sk-ant-api".into(), "Anthropic API Key".into()),
-            ("sk-proj-".into(), "OpenAI Project Key".into()),
-            ("ghp_".into(), "GitHub Personal Access Token".into()),
-            ("xoxb-".into(), "Slack Bot Token".into()),
-            ("BEGIN RSA PRIVATE KEY".into(), "RSA Private Key".into()),
-            (
-                "BEGIN OPENSSH PRIVATE KEY".into(),
-                "OpenSSH Private Key".into(),
-            ),
-        ];
-
-        let ac = AhoCorasick::builder()
-            .match_kind(MatchKind::Standard)
-            .build(patterns.iter().map(|(k, _)| k))
-            .expect("Failed to build DLP AhoCorasick automaton");
-
-        Self {
-            state: Arc::new(ArcSwap::from_pointee(DlpState { ac, patterns })),
+    /// Construct from environment: `DLP_ENABLED=true` loads built-in signatures.
+    pub fn from_env() -> Self {
+        if env_flag("DLP_ENABLED") {
+            Self::with_default_patterns()
+        } else {
+            Self::disabled()
         }
+    }
+
+    /// Always-on engine with built-in signature set (tests / explicit enable).
+    pub fn with_default_patterns() -> Self {
+        Self {
+            state: Arc::new(ArcSwap::from_pointee(state_from_patterns(default_patterns()))),
+        }
+    }
+
+    /// No patterns, scan is a no-op. Preferred pilot default.
+    pub fn disabled() -> Self {
+        Self {
+            state: Arc::new(ArcSwap::from_pointee(empty_state())),
+        }
+    }
+
+    /// Back-compat alias: historically `new()` always loaded default patterns.
+    /// Prefer [`from_env`] / [`disabled`] / [`with_default_patterns`].
+    pub fn new() -> Self {
+        Self::from_env()
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        let s = self.state.load();
+        s.enabled && !s.patterns.is_empty()
     }
 
     pub fn get_patterns(&self) -> Vec<(String, String)> {
@@ -60,27 +123,16 @@ impl DlpEngine {
     }
 
     pub fn set_patterns(&self, new_patterns: Vec<(String, String)>) {
-        if new_patterns.is_empty() {
-            let ac = AhoCorasick::builder().build(Vec::<&str>::new()).unwrap();
-            self.state.store(Arc::new(DlpState {
-                ac,
-                patterns: vec![],
-            }));
-            return;
-        }
-        let ac = AhoCorasick::builder()
-            .match_kind(MatchKind::Standard)
-            .build(new_patterns.iter().map(|(k, _)| k))
-            .expect("Failed to build DLP AhoCorasick automaton");
-        self.state.store(Arc::new(DlpState {
-            ac,
-            patterns: new_patterns,
-        }));
+        self.state
+            .store(Arc::new(state_from_patterns(new_patterns)));
     }
 
-    /// Scans a byte chunk for DLP violations.
+    /// Scans a byte chunk for DLP violations. No-op when disabled / empty.
     pub fn scan_chunk(&self, chunk: &[u8]) -> Option<DlpViolation> {
         let state = self.state.load();
+        if !state.enabled || state.patterns.is_empty() {
+            return None;
+        }
         if let Some(mat) = state.ac.find(chunk) {
             let p = &state.patterns[mat.pattern()];
             return Some(DlpViolation {
@@ -94,9 +146,10 @@ impl DlpEngine {
 
 impl Default for DlpEngine {
     fn default() -> Self {
-        Self::new()
+        Self::from_env()
     }
 }
+
 pin_project_lite::pin_project! {
     /// A hyper Body wrapper that scans streamed chunks for DLP violations.
     pub struct DlpBodyStream<B> {
@@ -158,5 +211,33 @@ where
 
     fn size_hint(&self) -> http_body::SizeHint {
         self.inner.size_hint()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn disabled_engine_does_not_match() {
+        let engine = DlpEngine::disabled();
+        assert!(!engine.is_enabled());
+        assert!(engine.scan_chunk(b"sk-ant-api-xxx").is_none());
+    }
+
+    #[test]
+    fn default_patterns_detect_signature() {
+        let engine = DlpEngine::with_default_patterns();
+        assert!(engine.is_enabled());
+        let v = engine.scan_chunk(b"header sk-ant-api-123 footer").unwrap();
+        assert_eq!(v.detail, "sk-ant-api");
+    }
+
+    #[test]
+    fn set_patterns_empty_disables_scan() {
+        let engine = DlpEngine::with_default_patterns();
+        engine.set_patterns(vec![]);
+        assert!(!engine.is_enabled());
+        assert!(engine.scan_chunk(b"sk-ant-api-xxx").is_none());
     }
 }

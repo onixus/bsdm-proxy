@@ -34,3 +34,6 @@ scripts/__pycache__/
 __pycache__/
 dist/
 admin-console/node_modules/
+
+# Local backup drill output
+backups/

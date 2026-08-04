@@ -50,20 +50,19 @@ Experimental / frozen scope — **не** поднимать в первом пи
 Alert-worker и ml-worker — **второй шаг** (`--profile alerts` / `ml`), не часть
 «дня 1» Hybrid core.
 
-### DLP workaround
+### DLP
 
-Встроенный DLP engine может создаваться без отдельного `DLP_ENABLED`. Для пилота
-без DLP очистите паттерны после рестарта:
+Pilot overlay sets **`DLP_ENABLED=false`** (default in code as well). No control-API
+wipe is required on restart. To evaluate experimental signatures in a lab only:
 
 ```bash
+export DLP_ENABLED=true
+# optional runtime clear (not persisted):
 curl -X POST http://127.0.0.1:9090/api/security/dlp \
   -H "Authorization: Bearer ${CONTROL_API_TOKEN}" \
   -H 'Content-Type: application/json' \
   --data '[]'
 ```
-
-Состояние не персистится. Production: постоянный выключатель (когда появится) или
-явная пустая конфигурация.
 
 ---
 
@@ -78,6 +77,8 @@ curl -X POST http://127.0.0.1:9090/api/security/dlp \
 - [ ] Заданы `CONTROL_API_TOKEN`, `ACL_API_TOKEN`, `SEARCH_API_TOKEN` (не дефолтные пустые в проде)
 - [ ] `CONTROL_API_ALLOW_INSECURE` / `SEARCH_API_ALLOW_INSECURE` **не** `true` на пилоте
 - [ ] Control/metrics не торчат в internet (firewall / `METRICS_BIND` / private network) — см. [control-plane-security.md](../ops-and-dev/control-plane-security.md)
+- [ ] `DLP_ENABLED=false` (default) — no post-start DLP wipe required
+- [ ] Backup/restore drill once: `./scripts/drill-backup-restore.sh` (or CA-only with `SKIP_CLICKHOUSE=1`) — [backup-restore.md](../ops-and-dev/backup-restore.md)
 
 ### B. Hybrid path
 

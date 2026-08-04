@@ -1,4 +1,4 @@
-.PHONY: help setup rotate-ca-drill build run run-lite test lint docker-lite docker-full docker-down install package clean
+.PHONY: help setup rotate-ca-drill backup-drill build run run-lite test lint docker-lite docker-full docker-down install package clean
 
 # Default target
 help:
@@ -9,6 +9,7 @@ help:
 	@echo "Targets:"
 	@echo "  setup         Generate CA certificates for MITM"
 	@echo "  rotate-ca-drill  Run an offline CA rotation rehearsal"
+	@echo "  backup-drill  CA archive restore + optional ClickHouse backup/restore"
 	@echo "  build         Build all workspace members in release mode"
 	@echo "  run           Run the proxy locally (default features)"
 	@echo "  run-lite      Run the proxy locally (lite mode, no Kafka)"
@@ -28,6 +29,9 @@ setup:
 
 rotate-ca-drill:
 	./scripts/test-ca-rotation.sh
+
+backup-drill:
+	./scripts/drill-backup-restore.sh
 
 build:
 	cargo build --release --workspace

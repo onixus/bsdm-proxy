@@ -597,7 +597,7 @@ impl ProxyService {
             #[cfg(feature = "wasm")]
             wasm_hook,
             icap,
-            dlp_engine: Arc::new(crate::dlp::DlpEngine::new()),
+            dlp_engine: Arc::new(crate::dlp::DlpEngine::from_env()),
             casb_engine: Arc::new(crate::casb::CasbEngine::new()),
             reverse_proxy_config,
         }

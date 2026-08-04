@@ -84,7 +84,14 @@ Run the offline drill without touching the active `certs/` directory:
 
 ```bash
 make rotate-ca-drill
+# Combined CA + optional ClickHouse backup/restore drill:
+./scripts/drill-backup-restore.sh
+# CA-only:
+SKIP_CLICKHOUSE=1 ./scripts/drill-backup-restore.sh
 ```
+
+Analytics backup/restore (ClickHouse Native dumps) is documented in
+[backup-restore.md](backup-restore.md).
 
 The drill creates a temporary initial CA, prepares and validates a new CA,
 confirms that a world-readable key is rejected, activates the new pair, verifies

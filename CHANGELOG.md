@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **DLP_ENABLED kill-switch** — Native signature DLP is off by default
+  (`DLP_ENABLED=false`/unset); `true` loads built-in patterns. Pilot compose sets
+  false so no control-API pattern wipe is required after restart.
+- **Backup & restore runbook** — ClickHouse Native dump/restore scripts,
+  CA archive rollback path, and combined drill
+  (`scripts/drill-backup-restore.sh`, [docs/ops-and-dev/backup-restore.md](docs/ops-and-dev/backup-restore.md)).
+
 ## [0.9.0] - 2026-08-04
 
 Release **0.9.0**. Pilot-hardening cut on the Hybrid Policy path: production

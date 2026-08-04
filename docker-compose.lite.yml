@@ -69,6 +69,7 @@ services:
       # Lab defaults — set CONTROL_API_TOKEN and CONTROL_API_ALLOW_INSECURE=false for pilot.
       - CONTROL_API_ALLOW_INSECURE=true
       - METRICS_BIND=0.0.0.0
+      - DLP_ENABLED=false
       - CACHE_CAPACITY=5000
       - CACHE_TTL_SECONDS=3600
       - MAX_CACHE_BODY_SIZE=10485760

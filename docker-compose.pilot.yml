@@ -77,6 +77,8 @@ services:
       METRICS_BIND: "${METRICS_BIND:-0.0.0.0}"
       # Optional Prometheus scrape Bearer (or METRICS_REQUIRE_AUTH=true to reuse CONTROL_API_TOKEN)
       METRICS_AUTH_TOKEN: "${METRICS_AUTH_TOKEN:-}"
+      # Experimental DLP off for pilot day-1 (persistent kill-switch; no control-API wipe needed).
+      DLP_ENABLED: "false"
     volumes:
       - pilot-spill:/var/cache/bsdm-spill
     deploy:

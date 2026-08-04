@@ -148,6 +148,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mitm_enabled = std::env::var("MITM_ENABLED")
         .map(|v| !matches!(v.to_ascii_lowercase().as_str(), "0" | "false" | "no"))
         .unwrap_or(true);
+    let dlp_enabled = std::env::var("DLP_ENABLED")
+        .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false);
+    if dlp_enabled {
+        info!("Native DLP signatures enabled (DLP_ENABLED=true; experimental)");
+    } else {
+        info!("Native DLP disabled (DLP_ENABLED unset/false — pilot default)");
+    }
 
     let cert_cache = CertCache::load_for_startup(mitm_enabled).await?;
     #[cfg(feature = "kafka")]
