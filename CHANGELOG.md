@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-08-04
+
+Patch release after **0.9.2**: Phase C agent control-plane telemetry and
+identity — events batch, device enroll token, optional mTLS CSR client certs.
+
 ### Added
 
 - **Agent mTLS CSR enroll (#273)** — optional `csr_pem` on
