@@ -32,7 +32,14 @@ export function LogsPage() {
   const [username, setUsername] = useState('')
   const [days, setDays] = useState('7')
   const [limit, setLimit] = useState('200')
-  const [query, setQuery] = useState({ domain: searchParams.get('q') ?? '', username: '', days: 7, limit: 200 })
+  const [decisionSource, setDecisionSource] = useState(searchParams.get('decision_source') ?? 'all')
+  const [query, setQuery] = useState({
+    domain: searchParams.get('q') ?? '',
+    username: '',
+    days: 7,
+    limit: 200,
+    decision_source: searchParams.get('decision_source') ?? '',
+  })
 
   // Client-side filters (instant).
   const [filters, setFilters] = useState<LogFilters>(emptyLogFilters)
@@ -48,6 +55,7 @@ export function LogsPage() {
         domain: query.domain || undefined,
         username: query.username || undefined,
         session_id: sessionFilter ?? undefined,
+        decision_source: query.decision_source || undefined,
         days: query.days,
         limit: query.limit,
       }),
@@ -62,6 +70,10 @@ export function LogsPage() {
 
   const methods = useMemo(() => distinct(enriched.map((l) => l.method?.toUpperCase())), [enriched])
   const cacheStatuses = useMemo(() => distinct(enriched.map((l) => l.cache_status)), [enriched])
+  const decisionSources = useMemo(
+    () => distinct(enriched.map((l) => l.decision_source).filter(Boolean) as string[]),
+    [enriched],
+  )
 
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const pageRows = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
@@ -69,8 +81,18 @@ export function LogsPage() {
   const submit = () => {
     setPage(0)
     setSessionFilter(null)
-    setQuery({ domain, username, days: Number(days) || 7, limit: Number(limit) || 200 })
-    setSearchParams(domain ? { q: domain } : {})
+    const ds = decisionSource === 'all' ? '' : decisionSource
+    setQuery({
+      domain,
+      username,
+      days: Number(days) || 7,
+      limit: Number(limit) || 200,
+      decision_source: ds,
+    })
+    const next: Record<string, string> = {}
+    if (domain) next.q = domain
+    if (ds) next.decision_source = ds
+    setSearchParams(next)
   }
 
   const updateFilter = <K extends keyof LogFilters>(key: K, value: LogFilters[K]) => {
@@ -242,6 +264,24 @@ export function LogsPage() {
             { value: 'acl', label: tr.logs.aclBlocked },
             { value: 'ml', label: tr.logs.mlBlocked },
             { value: 'threat', label: tr.logs.threatBlocked },
+          ]}
+        />
+        <Select
+          label="decision_source"
+          value={decisionSource}
+          onChange={(e) => {
+            setDecisionSource(e.target.value)
+            updateFilter('decisionSource', e.target.value === 'all' ? 'all' : e.target.value)
+          }}
+          options={[
+            { value: 'all', label: 'All paths (dns/sni/mitm/…)' },
+            { value: 'dns', label: 'dns' },
+            { value: 'sni', label: 'sni' },
+            { value: 'mitm', label: 'mitm' },
+            { value: 'pinning-bypass', label: 'pinning-bypass' },
+            ...decisionSources
+              .filter((s) => !['dns', 'sni', 'mitm', 'pinning-bypass'].includes(s.toLowerCase()))
+              .map((s) => ({ value: s, label: s })),
           ]}
         />
       </div>

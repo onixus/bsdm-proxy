@@ -82,6 +82,7 @@ curl -X POST http://127.0.0.1:9090/api/security/dlp \
 - [ ] If auth is on: `BASIC_AUTH_USERS_FILE` mounted + `./scripts/run-auth-pilot-smoke.sh` green — [pilot-auth.md](pilot-auth.md)
 - [ ] DNS: `./scripts/run-dns-pilot-smoke.sh` green (blocked.test / badsite.test / example.com) — [pilot-dns.md](pilot-dns.md)
 - [ ] Admin Console: primary nav only Hybrid pages; frozen routes show Frozen banner; mutations blocked without token (Settings → Console API)
+- [ ] Observability: Dashboard decision_source bar + Logs filter; optional alert-worker pilot pack ([pilot-alerts.md](pilot-alerts.md))
 
 ### B. Hybrid path
 

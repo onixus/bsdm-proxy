@@ -14,6 +14,8 @@ export interface TrafficLog {
   session_id?: string
   parent_event_id?: string
   redirect_url?: string
+  /** Hybrid policy path: dns | sni | mitm | pinning-bypass | … */
+  decision_source?: string
 }
 
 export type BlockReason = 'acl' | 'ml' | 'threat' | 'none'
@@ -38,6 +40,8 @@ export interface SearchParams {
   domain?: string
   username?: string
   session_id?: string
+  /** Server-side Hybrid path filter when Search API supports it. */
+  decision_source?: string
   days?: number
   limit?: number
 }
@@ -48,6 +52,7 @@ export async function searchLogs(params: SearchParams): Promise<Sourced<TrafficL
   if (params.domain) qs.set('domain', params.domain)
   if (params.username) qs.set('username', params.username)
   if (params.session_id) qs.set('session_id', params.session_id)
+  if (params.decision_source) qs.set('decision_source', params.decision_source)
   if (params.days) qs.set('days', String(params.days))
   qs.set('limit', String(params.limit ?? 100))
 
@@ -66,6 +71,7 @@ export interface LogFilters {
   method: string
   cacheStatus: string
   blockReason: string
+  decisionSource: string
 }
 
 export const emptyLogFilters: LogFilters = {
@@ -74,6 +80,7 @@ export const emptyLogFilters: LogFilters = {
   method: 'all',
   cacheStatus: 'all',
   blockReason: 'all',
+  decisionSource: 'all',
 }
 
 export function applyLogFilters(logs: EnrichedLog[], f: LogFilters): EnrichedLog[] {
@@ -86,6 +93,10 @@ export function applyLogFilters(logs: EnrichedLog[], f: LogFilters): EnrichedLog
     if (f.method !== 'all' && (log.method ?? '').toUpperCase() !== f.method) return false
     if (f.cacheStatus !== 'all' && (log.cache_status ?? '') !== f.cacheStatus) return false
     if (f.blockReason !== 'all' && log.blockReason !== f.blockReason) return false
+    if (f.decisionSource !== 'all') {
+      const src = (log.decision_source ?? '').toLowerCase()
+      if (src !== f.decisionSource.toLowerCase()) return false
+    }
     return true
   })
 }
@@ -95,12 +106,12 @@ function mockLogs(): TrafficLog[] {
   const now = Math.floor(Date.now() / 1000)
   const sessions = ['sess-a1', 'sess-b7', 'sess-c3']
   const rows: TrafficLog[] = [
-    { ts: now - 120, client_ip: '10.0.1.42', domain: 'evil-phish.example', url: 'https://evil-phish.example/login', method: 'GET', status: 403, cache_status: 'DENIED', username: 'jdoe', event_id: 'evt-001', session_id: sessions[0] },
-    { ts: now - 180, client_ip: '10.0.1.42', domain: 'login-redirect.example', url: 'https://login-redirect.example/go', method: 'GET', status: 302, cache_status: 'MISS', username: 'jdoe', event_id: 'evt-000', session_id: sessions[0], redirect_url: 'https://evil-phish.example/login' },
-    { ts: now - 300, client_ip: '10.0.1.88', domain: 'httpbin.org', url: 'https://httpbin.org/get', method: 'GET', status: 200, cache_status: 'HIT', username: 'asmith', event_id: 'evt-002', session_id: sessions[1] },
-    { ts: now - 600, client_ip: '10.0.1.42', domain: 'c2-beacon.malware', url: 'https://c2-beacon.malware/pulse', method: 'POST', status: 403, cache_status: 'DENIED', event_id: 'evt-003', session_id: sessions[0], parent_event_id: 'evt-001' },
-    { ts: now - 900, client_ip: '192.168.0.15', domain: 'github.com', url: 'https://github.com/onixus/bsdm-proxy', method: 'GET', status: 200, cache_status: 'MISS', event_id: 'evt-004', session_id: sessions[2] },
-    { ts: now - 1100, client_ip: '10.0.1.88', domain: 'api.example.com', url: 'https://api.example.com/v1/data', method: 'POST', status: 500, cache_status: 'BYPASS', username: 'asmith', event_id: 'evt-005', session_id: sessions[1] },
+    { ts: now - 120, client_ip: '10.0.1.42', domain: 'evil-phish.example', url: 'https://evil-phish.example/login', method: 'GET', status: 403, cache_status: 'DENIED', username: 'jdoe', event_id: 'evt-001', session_id: sessions[0], decision_source: 'mitm' },
+    { ts: now - 180, client_ip: '10.0.1.42', domain: 'login-redirect.example', url: 'https://login-redirect.example/go', method: 'GET', status: 302, cache_status: 'MISS', username: 'jdoe', event_id: 'evt-000', session_id: sessions[0], redirect_url: 'https://evil-phish.example/login', decision_source: 'sni' },
+    { ts: now - 300, client_ip: '10.0.1.88', domain: 'httpbin.org', url: 'https://httpbin.org/get', method: 'GET', status: 200, cache_status: 'HIT', username: 'asmith', event_id: 'evt-002', session_id: sessions[1], decision_source: 'sni' },
+    { ts: now - 600, client_ip: '10.0.1.42', domain: 'c2-beacon.malware', url: 'https://c2-beacon.malware/pulse', method: 'POST', status: 403, cache_status: 'DENIED', event_id: 'evt-003', session_id: sessions[0], parent_event_id: 'evt-001', decision_source: 'mitm' },
+    { ts: now - 900, client_ip: '192.168.0.15', domain: 'github.com', url: 'https://github.com/onixus/bsdm-proxy', method: 'GET', status: 200, cache_status: 'MISS', event_id: 'evt-004', session_id: sessions[2], decision_source: 'pinning-bypass' },
+    { ts: now - 1100, client_ip: '10.0.1.88', domain: 'api.example.com', url: 'https://api.example.com/v1/data', method: 'POST', status: 500, cache_status: 'BYPASS', username: 'asmith', event_id: 'evt-005', session_id: sessions[1], decision_source: 'sni' },
   ]
   return rows
 }

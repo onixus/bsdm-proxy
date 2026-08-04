@@ -43,6 +43,8 @@ export interface Telemetry {
   cacheStatus: Record<string, number>
   /** Cumulative ACL decisions by action. */
   aclDecisions: Record<string, number>
+  /** Hybrid policy decision_source counters (dns | sni | mitm | pinning-bypass | …). */
+  decisionSources: Record<string, number>
   /** Top upstream hosts by cumulative request count. */
   topUpstreams: { host: string; requests: number; errors: number }[]
   totalRequests: number
@@ -105,6 +107,7 @@ export async function fetchTelemetry(): Promise<Sourced<Telemetry>> {
     let statusClasses: Record<string, number> = {}
     let cacheStatus: Record<string, number> = {}
     let aclDecisions: Record<string, number> = {}
+    let decisionSources: Record<string, number> = {}
     let topUpstreams: Telemetry['topUpstreams'] = []
     let totalRequests = stats.cache.hits + stats.cache.misses + stats.cache.bypasses
     let cacheEvictions = 0
@@ -139,6 +142,9 @@ export async function fetchTelemetry(): Promise<Sourced<Telemetry>> {
       statusClasses = groupByStatusClass(s)
       cacheStatus = Object.fromEntries(groupByLabel(s, 'bsdm_proxy_requests_total', 'cache_status'))
       aclDecisions = Object.fromEntries(groupByLabel(s, 'bsdm_proxy_acl_decisions_total', 'action'))
+      decisionSources = Object.fromEntries(
+        groupByLabel(s, 'bsdm_proxy_policy_decision_source_total', 'source'),
+      )
       topUpstreams = upstreamTable(s)
       cacheEvictions = sumMetric(s, 'bsdm_proxy_cache_evictions_total')
       rateLimitRejected = sumMetric(s, 'bsdm_proxy_rate_limit_rejected_total')
@@ -160,6 +166,7 @@ export async function fetchTelemetry(): Promise<Sourced<Telemetry>> {
       statusClasses,
       cacheStatus,
       aclDecisions,
+      decisionSources,
       topUpstreams,
       totalRequests,
       cacheEvictions,
@@ -217,6 +224,7 @@ function demoTelemetry(): Telemetry {
     statusClasses: { '2xx': 118_204, '3xx': 6_120, '4xx': 4_890, '5xx': 386 },
     cacheStatus: { HIT: 112_400, MISS: 16_400, BYPASS: 2_100, DENIED: 3_400 },
     aclDecisions: { allow: 126_300, deny: 3_400 },
+    decisionSources: { sni: 98_000, mitm: 12_500, dns: 4_200, 'pinning-bypass': 800 },
     topUpstreams: [
       { host: 'cdn.example.com', requests: 48_200, errors: 12 },
       { host: 'api.example.com', requests: 22_100, errors: 96 },

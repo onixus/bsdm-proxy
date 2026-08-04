@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Pilot observability pack** — Admin Console Dashboard `decision_source` mix,
+  Logs server/client filter for Hybrid paths, pilot alert-worker rule subset
+  (`config/pilot-alert.env.example`, [pilot-alerts.md](docs/getting-started/pilot-alerts.md)).
+
 ## [0.9.1] - 2026-08-04
 
 Patch release after **0.9.0**: complete Phase B pilot ops — backup/restore

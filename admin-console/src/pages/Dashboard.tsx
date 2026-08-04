@@ -108,6 +108,30 @@ export function DashboardPage() {
         </div>
       )}
 
+      {t && (
+        <Panel
+          title="Hybrid decision_source (dns / sni / mitm / pin)"
+          icon={ShieldCheck}
+          action={
+            <Link to="/logs" className="text-xs font-semibold text-accent hover:underline">
+              Open logs
+            </Link>
+          }
+        >
+          {Object.keys(t.decisionSources).length === 0 ? (
+            <EmptyState message="Счётчики decision_source появятся после HTTPS/DNS трафика через proxy (bsdm_proxy_policy_decision_source_total)." />
+          ) : (
+            <>
+              <SegmentBar segments={decisionSourceSegments(t.decisionSources)} />
+              <p className="mt-3 text-xs text-text-secondary">
+                Grafana: panel «Policy Decision Sources» · metric{' '}
+                <code className="font-mono">bsdm_proxy_policy_decision_source_total</code>
+              </p>
+            </>
+          )}
+        </Panel>
+      )}
+
       <div className="grid gap-6 lg:grid-cols-3">
         {t && (
           <Panel title="Топ целевых серверов (Upstream Hosts)" icon={Flame}>
@@ -275,6 +299,26 @@ function cacheSegments(cache: Record<string, number>): Segment[] {
     (a, b) => (order.indexOf(a[0]) + 99) - (order.indexOf(b[0]) + 99) || b[1] - a[1],
   )
   return entries.map(([label, value]) => ({ label, value, color: cacheStatusColor(label) }))
+}
+
+/** Hybrid policy path mix — colors stable across polls. */
+function decisionSourceSegments(sources: Record<string, number>): Segment[] {
+  const palette: Record<string, string> = {
+    dns: seriesColor(3),
+    sni: seriesColor(0),
+    mitm: seriesColor(1),
+    'pinning-bypass': seriesColor(5),
+    'auth-deny': STATUS_VARS.critical,
+    bypass: seriesColor(6),
+  }
+  const order = ['dns', 'sni', 'mitm', 'pinning-bypass', 'auth-deny', 'bypass']
+  return Object.entries(sources)
+    .sort((a, b) => (order.indexOf(a[0]) + 99) - (order.indexOf(b[0]) + 99) || b[1] - a[1])
+    .map(([label, value]) => ({
+      label,
+      value,
+      color: palette[label] ?? seriesColor(4),
+    }))
 }
 
 function entityQuery(entityId: string): string {

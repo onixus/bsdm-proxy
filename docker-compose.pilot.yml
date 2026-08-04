@@ -119,7 +119,12 @@ services:
           memory: 256M
 
   # Resource caps only for optional profiles — still opt-in via --profile
+  # Pilot alert pack: see config/pilot-alert.env.example + docs/getting-started/pilot-alerts.md
   alert-worker:
+    environment:
+      ALERT_RULES: "${ALERT_RULES:-blocked_burst,domain_burst,off_hours_threat}"
+      ALERT_BLOCKED_BURST_THRESHOLD: "${ALERT_BLOCKED_BURST_THRESHOLD:-10}"
+      ALERT_DOMAIN_BURST_THRESHOLD: "${ALERT_DOMAIN_BURST_THRESHOLD:-80}"
     deploy:
       resources:
         limits:
