@@ -1,4 +1,5 @@
 import { resolveApiSettings } from './settings'
+import { mutationRequiresCredentials } from './mutationGuard'
 
 export class ApiError extends Error {
   status: number
@@ -16,25 +17,36 @@ export interface RequestOptions {
   signal?: AbortSignal
 }
 
+export const MUTATION_CREDENTIALS_REQUIRED_MESSAGE =
+  'API credentials are required for mutating requests. Open Settings → Console API and attach a token for this browser tab.'
+
+export function requireMutationCredentials(method: string, token: string): void {
+  if (mutationRequiresCredentials(method, token)) {
+    throw new ApiError(MUTATION_CREDENTIALS_REQUIRED_MESSAGE, 401)
+  }
+}
+
 export async function apiFetch<T>(
   path: string,
   options: RequestOptions & { method?: string; body?: unknown } = {},
 ): Promise<T> {
   const base = options.baseUrl ?? ''
   const url = `${base}${path}`
+  const method = options.method ?? 'GET'
+  const token = options.token ?? ''
+  requireMutationCredentials(method, token)
   const headers: Record<string, string> = {
     Accept: 'application/json',
   }
   if (options.body !== undefined) {
     headers['Content-Type'] = 'application/json'
   }
-  const token = options.token ?? ''
   if (token) {
     headers.Authorization = `Bearer ${token}`
   }
 
   const res = await fetch(url, {
-    method: options.method ?? 'GET',
+    method,
     headers,
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
     signal: options.signal,

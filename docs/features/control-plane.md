@@ -10,6 +10,11 @@ Proxy embeds static UI routing directly into the binary:
 - **Admin Console**: Available at `http://127.0.0.1:9090/admin/` (or via reverse proxy).
 - **Trust-UI**: Available at `http://127.0.0.1:9090/trust/` (end-user posture & policy portal).
 
+The Admin Console runs in read-only safety mode until an API token is attached
+for the current browser tab. This UI guard is defense in depth and does not
+replace backend tokens or network isolation. See
+[Admin Console security model](admin-console-security.md).
+
 ## Auth
 
 | Variable | Role |

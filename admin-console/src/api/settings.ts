@@ -27,6 +27,7 @@ export interface ResolvedApiSettings {
 }
 
 const STORAGE_KEY = 'bsdm-admin-api-settings'
+export const API_CREDENTIALS_CHANGED_EVENT = 'bsdm-api-credentials-changed'
 
 const defaults: ApiSettings = {
   connectionMode: 'single',
@@ -95,6 +96,13 @@ export function saveApiSettings(settings: ApiSettings): void {
     controlToken: settings.controlToken,
   }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(apiSettingsForStorage(settings)))
+  window.dispatchEvent(new CustomEvent(API_CREDENTIALS_CHANGED_EVENT))
+}
+
+export function hasApiCredentials(settings: ApiSettings = loadApiSettings()): boolean {
+  const resolved = resolveApiSettings(settings)
+  return [resolved.searchToken, resolved.aclToken, resolved.mlToken, resolved.controlToken]
+    .some((token) => token.trim().length > 0)
 }
 
 /**

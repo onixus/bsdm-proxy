@@ -104,6 +104,12 @@ in memory for the current browser tab only. When APIs are unreachable, the
 console shows an explicit service error unless the operator has deliberately
 enabled demo mode.
 
+Without an attached API token the console operates in **read-only safety
+mode**. The shared HTTP client rejects every POST, PUT, PATCH, and DELETE before
+the request reaches the network. The persistent shell banner links directly to
+Settings → Console API, where an operator can attach a token for the current
+tab.
+
 ## Identity and version
 
 The shell identifies itself as a **local, unauthenticated console** until a real
@@ -114,6 +120,9 @@ requests; they do not create a UI identity.
 The displayed product version is injected at build time from
 [`proxy/Cargo.toml`](../proxy/Cargo.toml), the same manifest used to build the
 proxy binary.
+
+The console exposure threat model and deployment requirements are documented
+in [`docs/features/admin-console-security.md`](../docs/features/admin-console-security.md).
 
 ## UI/UX deliverables
 
