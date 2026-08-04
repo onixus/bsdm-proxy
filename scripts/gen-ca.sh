@@ -6,22 +6,40 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CERT_DIR="${ROOT}/certs"
 FORCE=false
 
-for arg in "$@"; do
-  case "$arg" in
+while [[ $# -gt 0 ]]; do
+  case "$1" in
     --force|-f) FORCE=true ;;
+    --cert-dir)
+      [[ $# -ge 2 ]] || { echo "error: --cert-dir requires a path" >&2; exit 2; }
+      CERT_DIR="$2"
+      shift
+      ;;
     -h|--help)
-      echo "Usage: $0 [--force]"
+      echo "Usage: $0 [--force] [--cert-dir PATH]"
       echo "  Writes ${CERT_DIR}/ca.key and ca.crt (4096-bit RSA, 10y)."
       exit 0
       ;;
+    *)
+      echo "error: unknown argument: $1" >&2
+      exit 2
+      ;;
   esac
+  shift
 done
 
+umask 077
 mkdir -p "${CERT_DIR}"
+chmod 700 "${CERT_DIR}"
 
-if [[ -f "${CERT_DIR}/ca.key" && -f "${CERT_DIR}/ca.crt" && "${FORCE}" != true ]]; then
-  echo "CA already exists at ${CERT_DIR}/ (use --force to regenerate)"
-  exit 0
+if [[ -e "${CERT_DIR}/ca.key" || -e "${CERT_DIR}/ca.crt" ]]; then
+  if [[ -f "${CERT_DIR}/ca.key" && -f "${CERT_DIR}/ca.crt" && "${FORCE}" != true ]]; then
+    echo "CA already exists at ${CERT_DIR}/ (use --force to regenerate)"
+    exit 0
+  fi
+  if [[ "${FORCE}" != true ]]; then
+    echo "error: incomplete CA pair exists at ${CERT_DIR}/; inspect it and use --force to replace both files" >&2
+    exit 1
+  fi
 fi
 
 if ! command -v openssl >/dev/null 2>&1; then
@@ -29,7 +47,6 @@ if ! command -v openssl >/dev/null 2>&1; then
   exit 1
 fi
 
-umask 077
 openssl genrsa -out "${CERT_DIR}/ca.key" 4096
 openssl req -new -x509 -days 3650 -key "${CERT_DIR}/ca.key" -out "${CERT_DIR}/ca.crt" \
   -subj "/C=RU/ST=Moscow/L=Moscow/O=BSDM/CN=BSDM Root CA"

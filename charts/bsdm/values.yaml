@@ -53,7 +53,7 @@ spill:
 
 mitm:
   enabled: true
-  existingSecret: ""          # if set, mount /certs from secret keys ca.crt, ca.key
+  existingSecret: ""          # mounted 0440 (root:fsGroup); never world-readable
   certMountPath: /certs
 
 acl:
