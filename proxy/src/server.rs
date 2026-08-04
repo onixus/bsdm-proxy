@@ -288,6 +288,133 @@ pub async fn metrics_server(
     }
 }
 
+/// HTTPS agent control plane with **required** client certificates.
+///
+/// Separate from plain `metrics_server` so Prometheus/Admin Console keep using
+/// `METRICS_PORT` without mTLS. Enable with `CONTROL_MTLS_ENABLED=true`.
+pub async fn agent_control_mtls_server(
+    control_api: Arc<ControlApiState>,
+    server_config: Arc<rustls::ServerConfig>,
+    bind: String,
+    require_enrolled_fingerprint: bool,
+    mut shutdown_rx: watch::Receiver<bool>,
+) {
+    let listener = match TcpListener::bind(&bind).await {
+        Ok(l) => l,
+        Err(e) => {
+            error!("Failed to bind agent control mTLS on {bind}: {e}");
+            return;
+        }
+    };
+    let acceptor = TlsAcceptor::from(server_config);
+    info!(
+        %bind,
+        require_enrolled_fingerprint,
+        "Agent control mTLS listening (client certificate required)"
+    );
+
+    loop {
+        tokio::select! {
+            accept_result = listener.accept() => {
+                let (stream, addr) = match accept_result {
+                    Ok(conn) => conn,
+                    Err(e) => {
+                        error!("agent mTLS accept error: {e}");
+                        continue;
+                    }
+                };
+                let acceptor = acceptor.clone();
+                let control_api = control_api.clone();
+                tokio::spawn(async move {
+                    let tls_stream = match acceptor.accept(stream).await {
+                        Ok(s) => s,
+                        Err(e) => {
+                            warn!(%addr, "agent mTLS handshake failed: {e}");
+                            return;
+                        }
+                    };
+
+                    // Leaf client cert fingerprint (enroll stores the same value).
+                    let peer_fp = {
+                        let (_, conn) = tls_stream.get_ref();
+                        conn.peer_certificates()
+                            .and_then(|certs| certs.first())
+                            .map(|c| crate::control_mtls::cert_fingerprint_sha256(c.as_ref()))
+                    };
+
+                    if require_enrolled_fingerprint {
+                        match &peer_fp {
+                            Some(fp) if control_api.cert_fingerprint_enrolled(fp) => {}
+                            Some(fp) => {
+                                warn!(%addr, %fp, "client cert not enrolled / revoked — closing");
+                                return;
+                            }
+                            None => {
+                                warn!(%addr, "no peer certificate after mTLS handshake");
+                                return;
+                            }
+                        }
+                    }
+
+                    let io = TokioIo::new(tls_stream);
+                    let peer_fp_hdr = peer_fp.clone();
+                    let service = service_fn(move |mut req: Request<Incoming>| {
+                        let control_api = control_api.clone();
+                        let peer_fp_hdr = peer_fp_hdr.clone();
+                        async move {
+                            if let Some(fp) = peer_fp_hdr.as_ref() {
+                                if let Ok(v) = hyper::header::HeaderValue::from_str(fp) {
+                                    req.headers_mut().insert("x-bsdm-client-cert-fp", v);
+                                }
+                            }
+                            let path = req.uri().path();
+                            // Agent + health only on this port (not full Admin Console).
+                            if path == "/health" || path == "/ready" {
+                                return Ok::<_, Infallible>(
+                                    Response::builder()
+                                        .status(StatusCode::OK)
+                                        .header("Content-Type", "application/json")
+                                        .body(full(Bytes::from_static(b"{\"status\":\"ok\",\"mtls\":true}")))
+                                        .unwrap_or_else(|_| {
+                                            Response::new(full(Bytes::from_static(b"ok")))
+                                        }),
+                                );
+                            }
+                            if path.starts_with("/api/v1/agent/")
+                                || path.starts_with("/api/agent/")
+                                || path == "/api/v1/devices"
+                                || path.starts_with("/api/v1/devices/")
+                            {
+                                return Ok::<_, Infallible>(control_api.handle_request(req).await);
+                            }
+                            Ok::<_, Infallible>(
+                                Response::builder()
+                                    .status(StatusCode::NOT_FOUND)
+                                    .body(full(Bytes::from_static(
+                                        b"use this port for /api/v1/agent/* only",
+                                    )))
+                                    .unwrap_or_else(|_| {
+                                        Response::new(full(Bytes::from_static(b"404")))
+                                    }),
+                            )
+                        }
+                    });
+
+                    if let Err(e) = http1::Builder::new().serve_connection(io, service).await {
+                        debug!(%addr, "agent mTLS connection closed: {e}");
+                    }
+                });
+            }
+            changed = shutdown_rx.changed() => {
+                if changed.is_ok() && *shutdown_rx.borrow() {
+                    info!("Agent control mTLS server stopping");
+                    break;
+                }
+            }
+        }
+    }
+}
+
 pub async fn wait_shutdown_signal() {
     let ctrl_c = async {
         if let Err(e) = signal::ctrl_c().await {

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Agent control mTLS transport** — optional HTTPS listener
+  (`CONTROL_MTLS_ENABLED`, default bind `:9443`) requiring client certificates
+  signed by the proxy CA; plain metrics/control port unchanged; optional
+  `CONTROL_MTLS_REQUIRE_ENROLLED` fingerprint check against device registry;
+  docs in control-plane-security + pilot-agent (#273).
+
 ## [0.9.3] - 2026-08-04
 
 Patch release after **0.9.2**: Phase C agent control-plane telemetry and

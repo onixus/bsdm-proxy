@@ -36,6 +36,40 @@ See also: [control-plane.md](../features/control-plane.md) ·
 | `METRICS_REQUIRE_AUTH` | `false` | If true, reuse `CONTROL_API_TOKEN` for scrape auth |
 | `SEARCH_API_TOKEN` | *unset* | Bearer for Search API |
 | `SEARCH_API_ALLOW_INSECURE` | *unset* (inherits CONTROL insecure) | Lab open search |
+| `CONTROL_MTLS_ENABLED` | `false` | HTTPS agent API with **required** client cert |
+| `CONTROL_MTLS_BIND` | `0.0.0.0:9443` | Agent mTLS listen address |
+| `CONTROL_MTLS_CERT_FILE` / `KEY_FILE` | *auto* | Server leaf; unset → CA-signed `CONTROL_MTLS_SERVER_NAME` |
+| `CONTROL_MTLS_CLIENT_CA_FILE` | `./certs/ca.crt` or CertCache CA | Trust store for client certs |
+| `CONTROL_MTLS_SERVER_NAME` | `control.bsdm.local` | SAN/CN for auto server cert |
+| `CONTROL_MTLS_REQUIRE_ENROLLED` | `false` | Peer cert fingerprint must match enrolled device |
+
+### Agent control mTLS (optional)
+
+Plain `METRICS_PORT` stays HTTP for Prometheus and Admin Console. Agents that
+enrolled with CSR (`client_cert_pem` + private key) can use a **separate**
+HTTPS port that **requires** a client certificate signed by the proxy CA:
+
+```bash
+export CONTROL_MTLS_ENABLED=true
+export CONTROL_MTLS_BIND=0.0.0.0:9443
+# optional: pin server leaf files; otherwise auto-issued from MITM CA
+# export CONTROL_MTLS_CERT_FILE=./certs/control.crt
+# export CONTROL_MTLS_KEY_FILE=./certs/control.key
+export CONTROL_MTLS_CLIENT_CA_FILE=./certs/ca.crt
+# optional: only accept certs whose fingerprint was stored at enroll
+export CONTROL_MTLS_REQUIRE_ENROLLED=true
+```
+
+```bash
+# After --enroll --mtls produced DEVICE_CERT / DEVICE_KEY / CA:
+curl -fsS --cacert ca.crt --cert device.crt --key device.key \
+  https://control.bsdm.local:9443/api/v1/agent/policy \
+  -H "Authorization: Bearer $DEVICE_TOKEN" \
+  --resolve control.bsdm.local:9443:127.0.0.1
+```
+
+Paths on the mTLS port: `/api/v1/agent/*`, `/api/v1/devices*`, `/health`.
+Other control APIs remain on plain `METRICS_PORT` with Bearer auth.
 
 ### Production rules
 

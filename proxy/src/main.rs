@@ -4,15 +4,15 @@ use auth_config::load_auth_config;
 #[cfg(feature = "kafka")]
 use bsdm_proxy::KafkaEventPipeline;
 use bsdm_proxy::{
-    bind_http_listeners, build_hierarchy_manager, ensure_private_spill_dir, handle_connection,
-    htcp_peer_port, htcp_server_bind_addr, http_cache_key, icp_server_bind_addr,
-    load_hierarchy_config, load_policy_config, metrics_server, policy_config::reload_acl_engine,
-    run_peer_discovery, should_start_htcp_server, should_start_icp_server, validate_mitm_policy,
-    wait_shutdown_signal, AclAction, AuthManager, CacheConfig, CertCache, ControlApiState,
-    GlobalSessionStore, HtcpServer, HttpEventPipeline, IcpServer, L2CacheConfig, Metrics,
-    PeerDiscoveryConfig, PerfConfig, PolicyCacheConfig, PolicyDecisionCache, ProxyPolicy,
-    ProxyService, RateLimitConfig, RedisL2Cache, ThreatScoreCache, ThreatScoreConfig,
-    ThreatSyncEngine, UpstreamTlsConfig,
+    agent_control_mtls_server, bind_http_listeners, build_hierarchy_manager,
+    ensure_private_spill_dir, handle_connection, htcp_peer_port, htcp_server_bind_addr,
+    http_cache_key, icp_server_bind_addr, load_hierarchy_config, load_policy_config,
+    metrics_server, policy_config::reload_acl_engine, run_peer_discovery, should_start_htcp_server,
+    should_start_icp_server, validate_mitm_policy, wait_shutdown_signal, AclAction, AuthManager,
+    CacheConfig, CertCache, ControlApiState, GlobalSessionStore, HtcpServer, HttpEventPipeline,
+    IcpServer, L2CacheConfig, Metrics, PeerDiscoveryConfig, PerfConfig, PolicyCacheConfig,
+    PolicyDecisionCache, ProxyPolicy, ProxyService, RateLimitConfig, RedisL2Cache,
+    ThreatScoreCache, ThreatScoreConfig, ThreatSyncEngine, UpstreamTlsConfig,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -275,6 +275,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let kafka_for_control = kafka_pipeline.clone();
     let http_for_control = http_pipeline.clone();
     let cert_cache_for_control = cert_cache.clone();
+    let cert_cache_for_mtls = cert_cache.clone();
 
     let service = Arc::new(ProxyService::new(
         cert_cache,
@@ -346,6 +347,44 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         acl_api,
         Some(control_api.clone()),
     ));
+
+    // Optional agent HTTPS+mTLS port (keeps METRICS_PORT plain for Prometheus/Admin).
+    {
+        let mtls_cfg = bsdm_proxy::control_mtls::ControlMtlsConfig::from_env();
+        if mtls_cfg.enabled {
+            if let Err(e) = mtls_cfg.validate() {
+                return Err(format!("CONTROL_MTLS config invalid: {e}").into());
+            }
+            match bsdm_proxy::control_mtls::build_mtls_server_config(
+                &cert_cache_for_mtls,
+                &mtls_cfg,
+            ) {
+                Ok(server_config) => {
+                    let api = control_api.clone();
+                    let bind = mtls_cfg.bind.clone();
+                    let require_enrolled = mtls_cfg.require_enrolled_fingerprint;
+                    let shutdown_rx_mtls = shutdown_rx.clone();
+                    tokio::spawn(async move {
+                        agent_control_mtls_server(
+                            api,
+                            server_config,
+                            bind,
+                            require_enrolled,
+                            shutdown_rx_mtls,
+                        )
+                        .await;
+                    });
+                }
+                Err(e) => {
+                    return Err(format!("CONTROL_MTLS enabled but TLS config failed: {e}").into());
+                }
+            }
+        } else {
+            info!(
+                "Agent control mTLS disabled (set CONTROL_MTLS_ENABLED=true; bind CONTROL_MTLS_BIND)"
+            );
+        }
+    }
 
     #[cfg(feature = "grpc")]
     {

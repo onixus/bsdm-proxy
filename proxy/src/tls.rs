@@ -182,6 +182,32 @@ impl CertCache {
         String::from_utf8_lossy(&self.ca_cert_pem).into_owned()
     }
 
+    /// Issue a server leaf for `name` signed by the proxy CA (sync).
+    /// Used for control-plane mTLS when `CONTROL_MTLS_CERT_FILE` is unset.
+    pub fn server_identity_pem(&self, name: &str) -> Result<(Vec<u8>, Vec<u8>), String> {
+        let key_pair = KeyPair::generate().map_err(|e| format!("server key: {e}"))?;
+        let mut params =
+            CertificateParams::new(vec![name.to_string()]).map_err(|e| format!("params: {e}"))?;
+        params.distinguished_name = DistinguishedName::new();
+        params.distinguished_name.push(DnType::CommonName, name);
+        params
+            .distinguished_name
+            .push(DnType::OrganizationName, "BSDM Control");
+        params.key_usages = vec![
+            KeyUsagePurpose::DigitalSignature,
+            KeyUsagePurpose::KeyEncipherment,
+        ];
+        params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+        let issuer = self.issuer().map_err(|e| format!("issuer: {e}"))?;
+        let cert = params
+            .signed_by(&key_pair, &issuer)
+            .map_err(|e| format!("sign server leaf: {e}"))?;
+        Ok((
+            cert.pem().into_bytes(),
+            key_pair.serialize_pem().into_bytes(),
+        ))
+    }
+
     /// Sign an agent client certificate from a PEM CSR (Agent Contract mTLS enroll).
     ///
     /// Subject/SAN are **bound by the control plane** to `device_id` /

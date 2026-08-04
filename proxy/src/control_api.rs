@@ -1115,6 +1115,11 @@ impl ControlApiState {
         self.device_registry.device_token_valid(bearer)
     }
 
+    /// Whether a client-cert fingerprint matches a non-revoked enrolled device.
+    pub fn cert_fingerprint_enrolled(&self, fingerprint: &str) -> bool {
+        self.device_registry.cert_fingerprint_valid(fingerprint)
+    }
+
     /// Whether non-public control RPCs require a Bearer token.
     pub fn auth_required(&self) -> bool {
         self.api_token.is_some() || self.fail_closed

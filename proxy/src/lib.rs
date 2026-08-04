@@ -19,6 +19,7 @@ pub mod categorization;
 pub mod control_api;
 #[cfg(feature = "grpc")]
 pub mod control_grpc;
+pub mod control_mtls;
 pub mod device_registry;
 pub mod dlp;
 pub mod ebpf;
@@ -111,7 +112,9 @@ pub use selection::{parse_strategy, SelectionStrategy};
 pub use semantic_cache::{
     content_cache_key, normalize_llm_body, SemanticCacheConfig, SemanticIndex,
 };
-pub use server::{handle_connection, metrics_server, wait_shutdown_signal};
+pub use server::{
+    agent_control_mtls_server, handle_connection, metrics_server, wait_shutdown_signal,
+};
 pub use session::{SessionCorrelation, SessionCorrelator};
 pub use session_store::GlobalSessionStore;
 pub use sharded_cache::HttpL1Cache;

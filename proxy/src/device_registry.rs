@@ -436,6 +436,21 @@ impl DeviceRegistry {
         })
     }
 
+    /// True if `fingerprint` (SHA-256 hex of client cert DER) matches a non-revoked enroll.
+    pub fn cert_fingerprint_valid(&self, fingerprint: &str) -> bool {
+        if fingerprint.is_empty() {
+            return false;
+        }
+        let fp = fingerprint.to_ascii_lowercase();
+        let devices = self.devices.read().expect("device registry lock");
+        devices.values().any(|d| {
+            !d.revoked
+                && d.cert_fingerprint.as_ref().is_some_and(|h| {
+                    constant_time_eq(h.to_ascii_lowercase().as_bytes(), fp.as_bytes())
+                })
+        })
+    }
+
     pub fn revoke(&self, device_id: &str) -> Result<bool, RevokeError> {
         if device_id.is_empty() || device_id.contains('/') {
             return Err(RevokeError::InvalidId);

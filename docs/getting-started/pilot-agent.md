@@ -122,6 +122,33 @@ cargo run -p agent-spike -- --once
 
 Revoke invalidates the token: `POST /api/v1/devices/{id}/revoke`.
 
+### Optional: agent control mTLS port
+
+Plain `:9090` stays HTTP (Prometheus / Admin). Agents can use HTTPS **with
+required client certificate** on a second port:
+
+```bash
+# proxy
+export CONTROL_MTLS_ENABLED=true
+export CONTROL_MTLS_BIND=0.0.0.0:9443
+export CONTROL_MTLS_CLIENT_CA_FILE=./certs/ca.crt
+# optional: fingerprint must match enroll registry
+# export CONTROL_MTLS_REQUIRE_ENROLLED=true
+```
+
+```bash
+# After --enroll --mtls saved PEMs:
+curl -fsS --cacert ca.crt --cert device.crt --key device.key \
+  --resolve control.bsdm.local:9443:127.0.0.1 \
+  https://control.bsdm.local:9443/health
+curl -fsS --cacert ca.crt --cert device.crt --key device.key \
+  --resolve control.bsdm.local:9443:127.0.0.1 \
+  -H "Authorization: Bearer $DEVICE_TOKEN" \
+  https://control.bsdm.local:9443/api/v1/agent/policy
+```
+
+Details: [control-plane-security.md](../ops-and-dev/control-plane-security.md).
+
 ## Run continuous spike
 
 ```bash

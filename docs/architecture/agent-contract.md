@@ -19,8 +19,8 @@ policy and heartbeat endpoints.
   `GET /api/v1/devices`, revoke.
 - Spike client: enroll (`--mtls` for CSR), policy, evaluate, events, heartbeat
   ([pilot-agent.md](../getting-started/pilot-agent.md)).
-- Reserved: mutual-TLS *transport* enforcement on control plane (client cert
-  required at TLS layer), policy push.
+- Optional transport: `CONTROL_MTLS_ENABLED` HTTPS port requiring client cert.
+- Reserved: policy push, CRL/OCSP.
 
 ---
 
@@ -53,15 +53,26 @@ policy and heartbeat endpoints.
    - CSR subject is **not** trusted as identity
 5. Response includes `client_cert_pem`, `ca_cert_pem`, `cert_fingerprint`
    (SHA-256 of cert DER), `cert_not_after` when mTLS issued.
-6. Agent uses `Authorization: Bearer <device_token>` for HTTP agent APIs.
-   Client cert is for future mTLS transport / local trust stores.
+6. Agent uses `Authorization: Bearer <device_token>` on HTTP agent APIs; with
+   `CONTROL_MTLS_ENABLED`, also presents the client cert on the mTLS port.
 7. Revoke clears device token hash (cert not on a CRL yet — reserved).
+
+#### Transport mTLS (optional, separate port)
+
+When `CONTROL_MTLS_ENABLED=true`, a dedicated HTTPS listener
+(`CONTROL_MTLS_BIND`, default `:9443`) **requires** a client certificate signed
+by the proxy/agent CA. Plain `METRICS_PORT` stays HTTP for scrapers/Admin.
+
+- Paths: `/api/v1/agent/*`, `/api/v1/devices*`, `/health`
+- Optional `CONTROL_MTLS_REQUIRE_ENROLLED=true` rejects certs whose fingerprint
+  is not on a non-revoked enrolled device
+- HTTP Bearer (`device_token` / control token) still applies for API auth
 
 #### Reserved
 
-- Control-plane TLS requiring client certificates (mutual auth at transport).
 - Certificate revocation lists / OCSP for agent certs.
 - Policy push stream.
+- Forcing mTLS on the primary metrics port (would break Prometheus scrape).
 
 ---
 
