@@ -423,6 +423,8 @@ services:
         reservations:
           memory: 512M
 
+  # Hybrid first hop (Core). UDP :5353 on host → :53 in container.
+  # Day-1 pilot: UDP only (DoH/DoT off unless TLS certs provided).
   dns-sinkhole:
     build:
       context: .
@@ -434,13 +436,20 @@ services:
       - "5353:53/udp"
       - "8092:8092"
     environment:
+      - DNS_SINKHOLE_ENABLED=${DNS_SINKHOLE_ENABLED:-true}
       - DNS_SINKHOLE_BIND=0.0.0.0:53
       - DNS_SINKHOLE_UPSTREAM=${DNS_SINKHOLE_UPSTREAM:-1.1.1.1:53}
       - DNS_SINKHOLE_ZONE_PATH=/etc/bsdm-proxy/blocklist.rpz
       - DNS_SINKHOLE_ACTION=${DNS_SINKHOLE_ACTION:-sinkhole}
       - DNS_SINKHOLE_A=${DNS_SINKHOLE_A:-127.0.0.1}
+      - DNS_SINKHOLE_DOH_ENABLED=${DNS_SINKHOLE_DOH_ENABLED:-false}
+      - DNS_SINKHOLE_DOT_ENABLED=${DNS_SINKHOLE_DOT_ENABLED:-false}
+      - DNS_SINKHOLE_TLS_CERT=${DNS_SINKHOLE_TLS_CERT:-}
+      - DNS_SINKHOLE_TLS_KEY=${DNS_SINKHOLE_TLS_KEY:-}
       - METRICS_PORT=8092
       - RUST_LOG=info,dns_sinkhole=info
+    volumes:
+      - ${DNS_ZONE_HOST:-./examples/dns/blocklist.rpz}:/etc/bsdm-proxy/blocklist.rpz:ro
     networks:
       - bsdm-net
     restart: unless-stopped
@@ -450,6 +459,7 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
+      start_period: 5s
     deploy:
       resources:
         limits:

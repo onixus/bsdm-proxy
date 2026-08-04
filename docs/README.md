@@ -13,6 +13,7 @@ GitHub Wiki является автоматически обновляемым �
 | [Deployment](getting-started/deployment.md) | Docker Compose, native package и Kubernetes |
 | [Пилот Hybrid (100 users)](getting-started/pilot-deployment.md) | Selective MITM compose + acceptance checklist (#270) |
 | [Pilot authentication](getting-started/pilot-auth.md) | Basic users file, smoke, OIDC out-of-scope note |
+| [Pilot DNS sinkhole](getting-started/pilot-dns.md) | UDP first hop :5353, dig smoke, load-test DNS share |
 | [Hybrid load-test profile](ops-and-dev/load-test-selective-mitm.md) | 100-user SNI/MITM/DNS probe + results archive (#269) |
 | [Control plane security](ops-and-dev/control-plane-security.md) | Tokens, bind, network policy for pilot (#271) |
 | [Backup & restore](ops-and-dev/backup-restore.md) | ClickHouse dumps + CA archive rollback drill |

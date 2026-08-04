@@ -4,6 +4,7 @@ $TTL 300
 
 ; Policy blocks → sinkhole A/AAAA or NXDOMAIN (DNS_SINKHOLE_ACTION)
 blocked.test.           CNAME .
+badsite.test.           CNAME .
 *.evil.example.         CNAME .
 
 ; Explicit sinkhole address for one name

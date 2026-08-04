@@ -3,6 +3,7 @@
 Reproducible Hybrid pilot profile for ~100 concurrent users.
 
 **Related:** [Pilot deployment](../getting-started/pilot-deployment.md) ·
+[Pilot DNS](../getting-started/pilot-dns.md) ·
 [`scripts/run-hybrid-load-test.sh`](../../scripts/run-hybrid-load-test.sh) ·
 results under [`load-test-results/`](load-test-results/).
 
@@ -10,9 +11,9 @@ results under [`load-test-results/`](load-test-results/).
 
 ## Goals
 
-1. Exercise the recommended Hybrid path: **SNI-first + Selective MITM + optional DNS**.
+1. Exercise the recommended Hybrid path: **SNI-first + Selective MITM + DNS** (pilot day-1 UDP sinkhole).
 2. Produce **latency (p50/p95/p99)**, **error rate**, **decision_source mix**, and **proxy RPS**.
-3. Be re-runnable from a laptop or CI (lite stack) and from a full pilot compose.
+3. Be re-runnable from a laptop or CI (lite stack) and from a full pilot compose (+ DNS smoke).
 
 This is a **pilot capacity probe**, not a vendor-grade SLA certification.
 
@@ -24,7 +25,7 @@ This is a **pilot capacity probe**, not a vendor-grade SLA certification.
 |---|---|---|
 | **80%** | SNI / non-MITM HTTPS (or HTTP fallback) | `SNI_URL` (default `https://httpbin.org/get`) |
 | **15%** | Selective MITM candidate | `MITM_URL` (default `https://httpbin.org/anything/phishing`) |
-| **5%** | DNS sinkhole | `dig @DNS_HOST -p DNS_PORT DNS_QNAME` |
+| **5%** | DNS sinkhole (UDP :5353) | `dig @DNS_HOST -p DNS_PORT DNS_QNAME` — smoke: [pilot-dns.md](../getting-started/pilot-dns.md) |
 
 Percentages are client-side dice rolls (`PCT_SNI` / `PCT_MITM` / `PCT_DNS`).  
 Actual **policy** mix is read from Prometheus counters:
@@ -62,6 +63,7 @@ docker compose -f docker-compose.lite.yml up -d --build
 # wait for health
 curl -fsS http://127.0.0.1:9090/health
 
+# DNS share needs dig + sinkhole (full compose). Lite has no DNS — 5% share degrades.
 CONCURRENT_USERS=50 TEST_DURATION=30 \
   ./scripts/run-hybrid-load-test.sh
 ```
@@ -76,6 +78,9 @@ export SEARCH_API_TOKEN="$(openssl rand -hex 16)"
 ./scripts/gen-ca.sh
 docker compose -f docker-compose.yml -f docker-compose.pilot.yml up -d --build
 
+./scripts/run-dns-pilot-smoke.sh   # dig @127.0.0.1 -p 5353
+
+DNS_HOST=127.0.0.1 DNS_PORT=5353 DNS_QNAME=badsite.test \
 CONCURRENT_USERS=100 TEST_DURATION=120 \
   RESULTS_DIR=docs/ops-and-dev/load-test-results \
   ./scripts/run-hybrid-load-test.sh

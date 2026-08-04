@@ -106,6 +106,18 @@ services:
           cpus: "0.50"
           memory: 512M
 
+  # DNS first hop (Hybrid day-1): UDP sinkhole with pilot resource cap.
+  dns-sinkhole:
+    environment:
+      DNS_SINKHOLE_ENABLED: "${DNS_SINKHOLE_ENABLED:-true}"
+      DNS_SINKHOLE_DOH_ENABLED: "${DNS_SINKHOLE_DOH_ENABLED:-false}"
+      DNS_SINKHOLE_DOT_ENABLED: "${DNS_SINKHOLE_DOT_ENABLED:-false}"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+
   # Resource caps only for optional profiles — still opt-in via --profile
   alert-worker:
     deploy:

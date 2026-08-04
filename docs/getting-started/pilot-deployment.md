@@ -31,7 +31,7 @@ Issue tracking: **#270** (этот документ + compose), **#269** (load-t
 | L1 cache + spill | **Да** |
 | Kafka → cache-indexer → ClickHouse → Search API | **Да** (base compose) |
 | Prometheus / Grafana | **Да** |
-| DNS sinkhole / DoH / DoT | **Опционально** (отдельный сервис / profile) |
+| DNS sinkhole (UDP) | **Да (day-1)** — сервис `dns-sinkhole` в base compose, host **:5353**; DoH/DoT off by default ([pilot-dns.md](pilot-dns.md)) |
 | Admin Console `/admin/` | **Да** (если собран в image) |
 
 ## Что **не** входит (по умолчанию выключено)
@@ -80,6 +80,7 @@ curl -X POST http://127.0.0.1:9090/api/security/dlp \
 - [ ] `DLP_ENABLED=false` (default) — no post-start DLP wipe required
 - [ ] Backup/restore drill once: `./scripts/drill-backup-restore.sh` (or CA-only with `SKIP_CLICKHOUSE=1`) — [backup-restore.md](../ops-and-dev/backup-restore.md)
 - [ ] If auth is on: `BASIC_AUTH_USERS_FILE` mounted + `./scripts/run-auth-pilot-smoke.sh` green — [pilot-auth.md](pilot-auth.md)
+- [ ] DNS: `./scripts/run-dns-pilot-smoke.sh` green (blocked.test / badsite.test / example.com) — [pilot-dns.md](pilot-dns.md)
 
 ### B. Hybrid path
 

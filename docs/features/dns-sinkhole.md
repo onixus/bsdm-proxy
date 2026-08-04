@@ -23,7 +23,7 @@ Clients point DHCP/DoH stub / container `dns:` at this service. The HTTPS proxy 
 | RPZ-lite zone file + plain domain list | ✅ |
 | Sinkhole A/AAAA or NXDOMAIN | ✅ |
 | Forward to upstream resolver | ✅ |
-| Compose profile `dns-sinkhole` | ✅ |
+| Compose service `dns-sinkhole` (base stack, host :5353) | ✅ |
 | DoH (`/dns-query` :8443) / DoT (TCP/853 TLS) listeners | ✅ (RFC 8484 / RFC 7858 base64url & 2-byte framing) |
 | Admin Console RPZ & Query Simulator | ✅ (`/rpz`) |
 | DNSSEC validation | ❌ not implemented |
@@ -86,9 +86,16 @@ malware.example
 ## Compose
 
 ```bash
-docker compose --profile dns-sinkhole up -d --build dns-sinkhole
-# Clients / other containers: dns: ["dns-sinkhole"]  or publish 53/udp
+# Base service (no profile). Pilot overlay optional:
+docker compose -f docker-compose.yml -f docker-compose.pilot.yml up -d --build dns-sinkhole
+
+# Host: UDP 5353 → container 53; health/metrics :8092
+# Day-1: DoH/DoT disabled unless DNS_SINKHOLE_DOH_ENABLED / DOT + TLS certs
+
+./scripts/run-dns-pilot-smoke.sh
 ```
+
+Pilot day-1 runbook: [pilot-dns.md](../getting-started/pilot-dns.md).
 
 ## Relation to proxy
 

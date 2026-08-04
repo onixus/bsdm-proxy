@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Pilot DNS sinkhole day-1** — Base compose UDP `:5353`, DoH/DoT off by default,
+  zone bind-mount, `badsite.test` in example RPZ, `scripts/run-dns-pilot-smoke.sh`,
+  and [pilot-dns.md](docs/getting-started/pilot-dns.md).
 - **Pilot Basic auth pilot path** — Users file (`BASIC_AUTH_USERS_FILE`),
   `scripts/gen-basic-auth-user.sh`, `scripts/run-auth-pilot-smoke.sh`, example
   users JSON, compose mount, and [pilot-auth.md](docs/getting-started/pilot-auth.md)
