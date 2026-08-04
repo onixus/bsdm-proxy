@@ -174,6 +174,7 @@ E2E:
 | [Pilot deployment](docs/getting-started/pilot-deployment.md) | 100 пользователей, TTL 5 дней |
 | [Capacity planning](docs/architecture/capacity-planning.md) | Формулы и масштабирование |
 | [Configuration](docs/ops-and-dev/configuration.md) | Переменные окружения |
+| [CA lifecycle](docs/ops-and-dev/ca-lifecycle.md) | Хранение, ротация и аварийный отзыв MITM CA |
 | [Architecture](docs/architecture/overview.md) | Компоненты и потоки |
 | [Roadmap](docs/roadmap.md) | Стратегия развития |
 | [Documentation maintenance](docs/maintenance.md) | Правила и Wiki sync |

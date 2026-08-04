@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Add two-phase CA rotation tooling with key-permission validation, archived
+  rollback material, an automated offline rotation drill, and emergency guidance.
 - Make Admin Console mutations fail closed without an in-memory API token, add
   an explicit read-only banner, and document the console exposure threat model.
 - Reject `POLICY_MODE=full-mitm` in the default `production` deployment profile;

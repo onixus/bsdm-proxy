@@ -118,6 +118,7 @@ spec:
         - name: mitm-certs
           secret:
             secretName: {{ .Values.mitm.existingSecret }}
+            defaultMode: 0440
         {{- end }}
         {{- if and .Values.acl.enabled .Values.acl.existingConfigMap }}
         - name: acl-rules

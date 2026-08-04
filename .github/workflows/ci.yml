@@ -22,6 +22,9 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v4
 
+      - name: Run CA rotation drill
+        run: ./scripts/test-ca-rotation.sh
+
       - name: Setup Rust environment
         uses: ./.github/actions/setup-rust
         with:

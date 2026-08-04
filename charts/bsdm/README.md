@@ -35,6 +35,9 @@ kubectl create secret generic bsdm-mitm-ca -n bsdm-proxy \
 ```
 
 Set `mitm.existingSecret: bsdm-mitm-ca` in values.
+The chart mounts Secret files read-only with mode `0440`; the pod `fsGroup` grants
+the non-root proxy process access without making CA material world-readable. See
+the [CA lifecycle and rotation guide](../../docs/ops-and-dev/ca-lifecycle.md).
 
 ## Values
 
