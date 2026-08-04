@@ -110,6 +110,8 @@ services:
       - MITM_CATEGORIES=malware,phishing,illegal-content
       - PINNING_EXCEPTIONS_PATH=/etc/bsdm-proxy/pinning-exceptions.json
       - PINNING_AUDIT_LOG_PATH=/var/log/bsdm-proxy/pinning-audit.jsonl
+      # Agent Phase C device inventory (survives restart); empty path = memory-only
+      - AGENT_DEVICES_PATH=${AGENT_DEVICES_PATH:-/var/lib/bsdm-proxy/agent-devices.json}
       - MITM_ENABLED=true
       - AUTH_ENABLED=false
       - SHUTDOWN_TIMEOUT_SECONDS=30
@@ -141,6 +143,7 @@ services:
       - ./config/acl-rules.example.json:/etc/bsdm-proxy/acl-rules.json:ro
       - ./config/pinning-exceptions.example.json:/etc/bsdm-proxy/pinning-exceptions.json:ro
       - pinning-audit:/var/log/bsdm-proxy
+      - agent-devices:/var/lib/bsdm-proxy
     tty: true
     stdin_open: true
     restart: unless-stopped
@@ -484,4 +487,6 @@ volumes:
   alertmanager-data:
     driver: local
   pinning-audit:
+    driver: local
+  agent-devices:
     driver: local

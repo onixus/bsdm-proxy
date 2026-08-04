@@ -77,6 +77,10 @@ policy and heartbeat endpoints.
 - The proxy keeps the latest heartbeat for each device in its runtime registry.
   `GET /api/v1/devices` exposes only those observed devices; it does not create
   placeholder inventory.
+- When `AGENT_DEVICES_PATH` is set, the registry is loaded at process start and
+  rewritten after each successful heartbeat or revoke (atomic JSON file).
+  Unset → memory-only (lost on restart). Heartbeat/revoke responses include
+  `"persisted": true|false`.
 
 ### 3.2 Telemetry Ingestion (`POST /api/v1/agent/events`)
 - Batched events logged locally and shipped back to ClickHouse event pipeline via Control Plane API.

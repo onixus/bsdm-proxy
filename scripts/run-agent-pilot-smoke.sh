@@ -81,6 +81,22 @@ if ! echo "${devices_json}" | grep -q "${DEVICE_ID}"; then
 fi
 echo "✅ Device registered in GET /api/v1/devices"
 
+# Optional: durable registry when AGENT_DEVICES_PATH is configured on proxy
+if [[ -n "${EXPECT_PERSISTED:-}" ]]; then
+  # Re-run a direct heartbeat and check persisted flag (requires jq-less grep)
+  hb="$(
+    curl -fsS --max-time "$TIMEOUT" "${AUTH_HEADER[@]}" \
+      -H 'Content-Type: application/json' \
+      -d "{\"device_id\":\"${DEVICE_ID}\",\"status\":\"healthy\",\"agent_version\":\"0.1.0\"}" \
+      "${CONTROL_PLANE_URL}/api/v1/agent/heartbeat" || true
+  )"
+  if ! echo "${hb}" | grep -q '"persisted"[[:space:]]*:[[:space:]]*true'; then
+    echo "❌ EXPECT_PERSISTED set but heartbeat persisted!=true: ${hb}" >&2
+    exit 1
+  fi
+  echo "✅ Heartbeat persisted=true (AGENT_DEVICES_PATH active)"
+fi
+
 echo "============================================================"
 echo " Agent pilot smoke PASSED"
 echo "============================================================"

@@ -18,6 +18,7 @@ pub mod categorization;
 pub mod control_api;
 #[cfg(feature = "grpc")]
 pub mod control_grpc;
+pub mod device_registry;
 pub mod dlp;
 pub mod ebpf;
 pub mod hierarchy;

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Agent device registry persistence** — `AGENT_DEVICES_PATH` JSON store for
+  `/api/v1/devices` (load on boot, atomic rewrite on heartbeat/revoke,
+  `"persisted"` in responses); compose volume `agent-devices`; module
+  `device_registry` + unit coverage (#273).
 - **Pilot ML one-model path** — documented UEBA (`ueba_zscore_v0`) pilot:
   `config/pilot-ml.env.example`, [pilot-ml.md](docs/getting-started/pilot-ml.md),
   `scripts/run-ml-pilot-smoke.sh`, pilot compose defaults for ml-worker

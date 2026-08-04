@@ -15,6 +15,7 @@ use tracing::{info, warn};
 
 use crate::acl_api::AclApiState;
 use crate::cache_key::http_cache_key;
+use crate::device_registry::{self, RegisteredDevice};
 use crate::hierarchy_config::reload_static_peers;
 use crate::http_types::{full, Body};
 use crate::l2_cache::RedisL2Cache;
@@ -32,22 +33,6 @@ use crate::upstream::UpstreamClientHandle;
 struct DlpPatternDto {
     pub pattern: String,
     pub description: String,
-}
-
-#[derive(Clone, Debug)]
-struct RegisteredDevice {
-    id: String,
-    name: String,
-    ip: String,
-    device_type: String,
-    agent_status: String,
-    agent_version: Option<String>,
-    policy_version: Option<String>,
-    cert_subject: Option<String>,
-    cert_fingerprint: Option<String>,
-    trust_score: Option<u8>,
-    last_seen: u64,
-    revoked: bool,
 }
 
 #[derive(Deserialize)]
@@ -543,7 +528,15 @@ impl ControlApiState {
                     "Agent heartbeat received"
                 );
                 devices.insert(device.id.clone(), device);
-                json_response(StatusCode::OK, r#"{"status":"acknowledged"}"#)
+                let persisted = self.persist_devices(&devices);
+                json_response(
+                    StatusCode::OK,
+                    &serde_json::json!({
+                        "status": "acknowledged",
+                        "persisted": persisted,
+                    })
+                    .to_string(),
+                )
             }
             Err(e) => json_response(
                 StatusCode::BAD_REQUEST,
@@ -552,6 +545,25 @@ impl ControlApiState {
                     escape_json(&e.to_string())
                 ),
             ),
+        }
+    }
+
+    /// Write device map when `AGENT_DEVICES_PATH` is configured. Returns whether
+    /// a durable write was requested and succeeded (false = memory-only or error).
+    fn persist_devices(&self, devices: &HashMap<String, RegisteredDevice>) -> bool {
+        let Some(path) = self.devices_path.as_ref() else {
+            return false;
+        };
+        match device_registry::save(path, devices) {
+            Ok(()) => true,
+            Err(error) => {
+                warn!(
+                    path = %path.display(),
+                    error = %error,
+                    "Failed to persist agent device registry"
+                );
+                false
+            }
         }
     }
 
@@ -597,11 +609,13 @@ impl ControlApiState {
         };
         device.revoked = true;
         warn!(device_id, "Device trust revoked");
+        let persisted = self.persist_devices(&devices);
         json_response(
             StatusCode::OK,
             &serde_json::json!({
                 "success": true,
                 "message": format!("Device {device_id} revoked"),
+                "persisted": persisted,
             })
             .to_string(),
         )
@@ -631,6 +645,8 @@ pub struct ControlApiState {
     threat_sync: crate::threat_sync::ThreatSyncEngine,
     admin_console_dir: Option<std::path::PathBuf>,
     devices: Arc<RwLock<HashMap<String, RegisteredDevice>>>,
+    /// When set (`AGENT_DEVICES_PATH`), heartbeats/revokes rewrite this JSON file.
+    devices_path: Option<std::path::PathBuf>,
     shutdown_tx: Option<watch::Sender<bool>>,
     acl_api: Option<Arc<AclApiState>>,
 }
@@ -689,6 +705,7 @@ impl ControlApiState {
                     }
                 }),
             devices: Arc::new(RwLock::new(HashMap::new())),
+            devices_path: None,
             shutdown_tx: None,
             acl_api: None,
         }
@@ -741,6 +758,23 @@ impl ControlApiState {
             threat_sync,
         );
         state.fail_closed = crate::security_defaults::control_api_fail_closed();
+        if let Some(path) = device_registry::path_from_env() {
+            match device_registry::load(&path) {
+                Ok(loaded) => {
+                    state.devices = Arc::new(RwLock::new(loaded));
+                    state.devices_path = Some(path);
+                }
+                Err(error) => {
+                    warn!(
+                        path = %path.display(),
+                        error = %error,
+                        "Failed to load AGENT_DEVICES_PATH — continuing with empty in-memory registry"
+                    );
+                    // Still attach the path so future heartbeats can create the file.
+                    state.devices_path = Some(path);
+                }
+            }
+        }
         state
     }
 
@@ -1813,6 +1847,8 @@ mod tests {
         let body = BodyExt::collect(resp.into_body()).await.unwrap().to_bytes();
         let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(v["status"], "acknowledged");
+        // Memory-only by default (no AGENT_DEVICES_PATH).
+        assert_eq!(v["persisted"], false);
 
         let devices = state
             .dispatch(
@@ -1843,6 +1879,12 @@ mod tests {
             )
             .await;
         assert_eq!(revoked.status(), StatusCode::OK);
+        let body = BodyExt::collect(revoked.into_body())
+            .await
+            .unwrap()
+            .to_bytes();
+        let revoked_body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(revoked_body["persisted"], false);
         let devices = state
             .dispatch(
                 &Method::GET,
@@ -1900,6 +1942,70 @@ mod tests {
             )
             .await;
         assert_eq!(unsupported_version.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn agent_devices_persist_across_reload() {
+        let dir = std::env::temp_dir().join(format!(
+            "bsdm-agent-devices-{}-{}",
+            std::process::id(),
+            unix_timestamp()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("devices.json");
+
+        let metrics = Arc::new(Metrics::new().unwrap());
+        let cache = Arc::new(HttpL1Cache::new(100, 4));
+        let mut state = state_plain(metrics.clone(), cache.clone());
+        state.devices_path = Some(path.clone());
+
+        let hb_payload = Bytes::from(
+            r#"{"device_id":"persist-001","name":"Persist laptop","status":"healthy","agent_version":"0.1.0","policy_version":"v0.1.0","trust_score":88}"#,
+        );
+        let resp = state
+            .dispatch(
+                &Method::POST,
+                "/api/v1/agent/heartbeat",
+                hb_payload,
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = BodyExt::collect(resp.into_body()).await.unwrap().to_bytes();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["persisted"], true);
+        assert!(path.exists());
+
+        // Simulate process restart: empty map + load from file.
+        let loaded = crate::device_registry::load(&path).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded["persist-001"].name, "Persist laptop");
+        assert!(!loaded["persist-001"].revoked);
+
+        let mut reloaded = state_plain(metrics, cache);
+        reloaded.devices = Arc::new(RwLock::new(loaded));
+        reloaded.devices_path = Some(path.clone());
+
+        let revoke = reloaded
+            .dispatch(
+                &Method::POST,
+                "/api/v1/devices/persist-001/revoke",
+                Bytes::new(),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(revoke.status(), StatusCode::OK);
+        let body = BodyExt::collect(revoke.into_body())
+            .await
+            .unwrap()
+            .to_bytes();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["persisted"], true);
+
+        let again = crate::device_registry::load(&path).unwrap();
+        assert!(again["persist-001"].revoked);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     static CONFIG_ENV_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());

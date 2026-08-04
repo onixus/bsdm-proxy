@@ -20,6 +20,7 @@ Issue tracking: **#273** (agent implementation), **#258** (original spike).
 |---|---|
 | `GET /api/v1/agent/policy` pull | mTLS enroll (`POST /api/v1/agent/enroll`) |
 | `POST /api/v1/agent/heartbeat` + `GET /api/v1/devices` | Policy push / WebSocket |
+| Device registry persistence (`AGENT_DEVICES_PATH`) | Multi-node shared registry |
 | Local SNI deny + pinning bypass + mode | Full UT1 categorization on endpoint |
 | `AGENT_ONCE` / `--once` smoke | Windows/macOS installers, system proxy |
 | Bearer `CONTROL_API_TOKEN` | Device cert identity |
@@ -38,6 +39,54 @@ is for labs that want to exercise Phase C control-plane endpoints early.
    returns real domains (see `config/pinning-exceptions.example.json`).
 4. Optional: `AGENT_SNI_DENY_PATTERNS=*.evil.com,badsite.test` on the **proxy**
    process (defaults match if unset).
+5. Optional but **recommended for pilot**: `AGENT_DEVICES_PATH` so inventory
+   survives proxy restart (compose default:
+   `/var/lib/bsdm-proxy/agent-devices.json` on volume `agent-devices`).
+
+---
+
+## Device registry persistence
+
+Without `AGENT_DEVICES_PATH`, devices live only in memory and disappear on
+restart. With the path set:
+
+1. Control plane **loads** JSON at start (`version: 1`, array of devices).
+2. Each successful heartbeat / revoke **rewrites** the file atomically.
+3. API responses include `"persisted": true|false`.
+
+```bash
+# Host / cargo:
+export AGENT_DEVICES_PATH=./data/agent-devices.json
+
+# Compose: already set + named volume agent-devices
+docker compose up -d proxy
+# After smoke heartbeat:
+# docker compose exec proxy cat /var/lib/bsdm-proxy/agent-devices.json
+```
+
+File shape:
+
+```json
+{
+  "version": 1,
+  "devices": [
+    {
+      "id": "laptop-pilot-001",
+      "name": "Pilot laptop",
+      "ip": "",
+      "device_type": "desktop",
+      "agent_status": "healthy",
+      "agent_version": "0.1.0",
+      "policy_version": "v0.1.0",
+      "trust_score": 90,
+      "last_seen": 1720000000,
+      "revoked": false
+    }
+  ]
+}
+```
+
+Cap: 10 000 devices. Missing file → empty registry (created on first heartbeat).
 
 ---
 

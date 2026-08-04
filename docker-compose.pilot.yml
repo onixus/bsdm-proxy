@@ -47,6 +47,8 @@ services:
       # full-mitm is rejected in production unless ALLOW_FULL_MITM=true (do not set)
       PINNING_EXCEPTIONS_PATH: /etc/bsdm-proxy/pinning-exceptions.json
       PINNING_AUDIT_LOG_PATH: /var/log/bsdm-proxy/pinning-audit.jsonl
+      # Optional agent inventory file (base compose mounts agent-devices volume)
+      AGENT_DEVICES_PATH: "${AGENT_DEVICES_PATH:-/var/lib/bsdm-proxy/agent-devices.json}"
 
       # --- Core controls ---
       ACL_ENABLED: "${ACL_ENABLED:-true}"
