@@ -113,8 +113,10 @@ pub async fn metrics_server(
                             if let Some(api) = &control_api {
                                 if path.starts_with("/api/")
                                     || path == "/"
-                                    || path.starts_with("/trust")
-                                    || path.starts_with("/admin")
+                                    || path == "/trust"
+                                    || path.starts_with("/trust/")
+                                    || path == "/admin"
+                                    || path.starts_with("/admin/")
                                     || path.starts_with("/assets")
                                     || path.ends_with(".svg")
                                     || path.ends_with(".png")

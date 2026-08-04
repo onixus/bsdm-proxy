@@ -29,6 +29,7 @@ security-модулями.
 | Detection | alert-worker, UEBA/phishing/beacon ML, threat-score write-back |
 | Extensions | DNS sinkhole/DoH/DoT, semantic cache, WASM, ICAP, AWG |
 | Operations | REST/gRPC control plane, Prometheus, Helm, systemd packaging |
+| Operator UI | Admin Console at `/admin/` (single supported UI) |
 
 Большинство optional/experimental-компонентов выключено по умолчанию. Исключения,
 включая встроенные DLP-паттерны, перечислены в
@@ -171,6 +172,7 @@ E2E:
 | [Project status](docs/project-status.md) | Зрелость и ограничения функций |
 | [Agent contract](docs/architecture/agent-contract.md) | Протокол взаимодействия локального агента v0.1 |
 | [ADR 0005: Hybrid Policy Agent](docs/adr/0005-local-policy-agent-vs-tunnel-first.md) | Архитектурное решение гибридной фильтрации |
+| [ADR 0006: Single Operator Console](docs/adr/0006-single-operator-console.md) | Единая поддерживаемая операторская UI |
 | [Pilot deployment](docs/getting-started/pilot-deployment.md) | 100 пользователей, TTL 5 дней |
 | [Capacity planning](docs/architecture/capacity-planning.md) | Формулы и масштабирование |
 | [Configuration](docs/ops-and-dev/configuration.md) | Переменные окружения |

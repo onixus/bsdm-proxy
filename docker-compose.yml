@@ -307,6 +307,7 @@ services:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:9093/-/healthy || exit 1"]
 
   trust-ui:
+    profiles: ["experimental-trust-ui"]
     build:
       context: .
       dockerfile: Dockerfile

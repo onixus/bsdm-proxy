@@ -205,7 +205,7 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 CMD ["dns-sinkhole"]
 
 # ============================================================
-# Trust-UI web console (Vite + React 19 + Tailwind v4)
+# Experimental legacy Trust-UI reference (not part of default deployments)
 # ============================================================
 FROM node:22-alpine AS trust-ui-builder
 WORKDIR /app

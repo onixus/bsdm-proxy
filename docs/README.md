@@ -66,6 +66,7 @@ GitHub Wiki является автоматически обновляемым �
 - [ADR 0003: ML feature store](adr/0003-ml-worker-feature-store.md)
 - [ADR 0004: DNS sinkhole](adr/0004-dns-sinkhole-sidecar.md)
 - [ADR 0005: Local policy agent](adr/0005-local-policy-agent-vs-tunnel-first.md)
+- [ADR 0006: One supported operator console](adr/0006-single-operator-console.md)
 - [Roadmap](roadmap.md)
 - [Release notes (v0.8.0)](releases/v0.8.0.md)
 

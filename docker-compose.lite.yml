@@ -112,6 +112,7 @@ services:
     restart: unless-stopped
 
   trust-ui:
+    profiles: ["experimental-trust-ui"]
     build:
       context: .
       dockerfile: Dockerfile
