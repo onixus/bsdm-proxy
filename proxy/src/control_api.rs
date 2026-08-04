@@ -8,7 +8,9 @@ use hyper::header::{AUTHORIZATION, LOCATION};
 use hyper::{HeaderMap, Method, Request, Response, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::Instant;
+#[cfg(test)]
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::watch;
 use tracing::{info, warn};
 
@@ -1334,6 +1336,7 @@ fn deprecated_agent_alias(
     response
 }
 
+#[cfg(test)]
 fn unix_timestamp() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

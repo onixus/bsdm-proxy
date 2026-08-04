@@ -7,32 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
+## [0.9.2] - 2026-08-04
 
-- **Agent control-plane refactor** — `DeviceRegistry` owns inventory +
-  heartbeat/revoke/persist and policy document helpers; `control_api` thin
-  HTTP adapters; `agent-spike` split into `policy` / `engine` / `main` (#273).
+Patch release after **0.9.1**: pilot observability pack, Phase C agent lab path
+(policy pull, durable device registry, refactor), and one-model ML pilot docs.
 
 ### Added
 
-- **Agent device registry persistence** — `AGENT_DEVICES_PATH` JSON store for
-  `/api/v1/devices` (load on boot, atomic rewrite on heartbeat/revoke,
-  `"persisted"` in responses); compose volume `agent-devices`; module
-  `device_registry` + unit coverage (#273).
+- **Agent Phase C lab path (#273)** — `agent-spike` policy pull + local evaluate
+  + enriched heartbeat (`--once` / smoke); control plane
+  `sni_rules` / `sni_deny_patterns` (`AGENT_SNI_DENY_PATTERNS`);
+  **device registry persistence** via `AGENT_DEVICES_PATH` (compose volume
+  `agent-devices`, `"persisted"` in responses);
+  [pilot-agent.md](docs/getting-started/pilot-agent.md),
+  `scripts/run-agent-pilot-smoke.sh`.
 - **Pilot ML one-model path** — documented UEBA (`ueba_zscore_v0`) pilot:
   `config/pilot-ml.env.example`, [pilot-ml.md](docs/getting-started/pilot-ml.md),
-  `scripts/run-ml-pilot-smoke.sh`, pilot compose defaults for ml-worker
-  (min_requests/poll/write-back); proxy threat-score remains opt-in enrich-only.
-- **Agent Phase C spike (policy pull)** — `agent-spike` pulls
-  `GET /api/v1/agent/policy`, maps SNI deny + pinning + mode to local evaluate,
-  posts enriched heartbeat (`policy_version`, device inventory fields), supports
-  `--once` / `AGENT_ONCE` for pilot smoke; control plane returns
-  `sni_rules` / `sni_deny_patterns` (`AGENT_SNI_DENY_PATTERNS`); docs
-  [pilot-agent.md](docs/getting-started/pilot-agent.md) and
-  `scripts/run-agent-pilot-smoke.sh` (#273).
+  `scripts/run-ml-pilot-smoke.sh`, pilot compose defaults for ml-worker;
+  proxy threat-score remains opt-in enrich-only.
 - **Pilot observability pack** — Admin Console Dashboard `decision_source` mix,
   Logs server/client filter for Hybrid paths, pilot alert-worker rule subset
   (`config/pilot-alert.env.example`, [pilot-alerts.md](docs/getting-started/pilot-alerts.md)).
+
+### Changed
+
+- **Agent control-plane structure** — `DeviceRegistry` owns inventory +
+  heartbeat/revoke/persist and policy document helpers; `control_api` thin
+  HTTP adapters; `agent-spike` split into `policy` / `engine` / `main`.
 
 ## [0.9.1] - 2026-08-04
 
