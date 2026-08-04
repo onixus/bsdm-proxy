@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-04
+
+Release **0.9.0**. Pilot-hardening cut on the Hybrid Policy path: production
+control-plane auth defaults, SNI never-MITM invariant, Admin Console as the sole
+operator UI, CA rotation tooling, decision-source observability, managed pinning
+exceptions, Search API pagination, and reproducible 100-user load-test/pilot
+compose profiles.
+
 ### Added
 
 - **Control plane & metrics security defaults (#271)** — Production requires
@@ -29,34 +37,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Hybrid defaults (`POLICY_MODE=selective-mitm`, ACL on, experimental modules
   opt-in only) and rewritten acceptance checklist in
   `docs/getting-started/pilot-deployment.md`.
+- **Policy decision-source observability** — Bounded Prometheus counters,
+  structured decision logs, Grafana breakdowns, and Search API filtering for
+  `dns`, `sni`, `mitm`, and `pinning-bypass`, including compatible SQLite and
+  ClickHouse schema upgrades.
+- **Managed Certificate Pinning exceptions** — Validated, hot-reloadable JSON
+  registry, authenticated Control API reload, append-only JSONL audit trail,
+  expiry support, and a safe operator procedure while retaining the legacy
+  `PINNING_EXCEPTIONS` startup fallback.
+- **Search API pagination and sorting** — REST Search API pagination/sorting and
+  ClickHouse schema migration/compatibility checks.
+- **Two-phase CA rotation tooling** — Key-permission validation, archived
+  rollback material, automated offline rotation drill, and emergency guidance.
 
 ### Security
 
-- Add two-phase CA rotation tooling with key-permission validation, archived
-  rollback material, an automated offline rotation drill, and emergency guidance.
 - Make Admin Console mutations fail closed without an in-memory API token, add
   an explicit read-only banner, and document the console exposure threat model.
 - Reject `POLICY_MODE=full-mitm` in the default `production` deployment profile;
   local development/test use now requires an explicit `ALLOW_FULL_MITM=true` override.
 - Update optional WASM runtime `wasmtime` to 46.0.2 to address
   RUSTSEC-2026-0222 and RUSTSEC-2026-0223.
+- Align default documented proxy port examples with `HTTP_PORT=3128`.
 
 ### Changed
 
 - Make Admin Console the only supported operator UI, redirect legacy `/trust`
   entry points to `/admin/`, and move standalone Trust-UI behind an explicit
   experimental Compose profile.
-
-### Added
-
-- **Policy decision-source observability** — Added bounded Prometheus counters,
-  structured decision logs, Grafana breakdowns, and Search API filtering for
-  `dns`, `sni`, `mitm`, and `pinning-bypass`, including compatible SQLite and
-  ClickHouse schema upgrades.
-- **Managed Certificate Pinning exceptions** — Added a validated, hot-reloadable
-  JSON registry, authenticated Control API reload, append-only JSONL audit trail,
-  expiry support, and a safe operator procedure while retaining the legacy
-  `PINNING_EXCEPTIONS` startup fallback.
 
 ## [0.8.0] - 2026-07-27
 

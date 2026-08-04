@@ -3,13 +3,13 @@
 [![Build Status](https://github.com/onixus/bsdm-proxy/actions/workflows/rust.yml/badge.svg)](https://github.com/onixus/bsdm-proxy/actions/workflows/rust.yml)
 [![E2E Tests](https://github.com/onixus/bsdm-proxy/actions/workflows/e2e.yml/badge.svg)](https://github.com/onixus/bsdm-proxy/actions/workflows/e2e.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.8.0-blue.svg)](https://github.com/onixus/bsdm-proxy/releases)
+[![Version](https://img.shields.io/badge/version-0.9.0-blue.svg)](https://github.com/onixus/bsdm-proxy/releases)
 
 BSDM-Proxy — кеширующий HTTP/HTTPS forward proxy на Rust с MITM TLS,
 аутентификацией, ACL, категоризацией, аналитикой трафика и опциональными
 security-модулями.
 
-Текущая версия workspace: **`0.8.0`**.
+Текущая версия workspace: **`0.9.0`**.
 
 > Проект содержит функции разной зрелости. Перед развёртыванием прочитайте
 > [матрицу статуса](docs/project-status.md): наличие кода или UI не означает
