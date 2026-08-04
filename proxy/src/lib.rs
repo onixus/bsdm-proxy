@@ -94,7 +94,9 @@ pub use pipeline::{dispatch_cache_event, new_event_id, HttpEventPipeline};
 #[cfg(feature = "kafka")]
 pub use pipeline::{flush_kafka, KafkaEventPipeline};
 pub use policy_cache::{PolicyCacheConfig, PolicyDecisionCache};
-pub use policy_config::{load_policy_config, PolicyConfig, PolicyMode};
+pub use policy_config::{
+    load_policy_config, validate_mitm_policy, DeploymentProfile, PolicyConfig, PolicyMode,
+};
 pub use proxy_service::{ProxyPolicy, ProxyService};
 pub use rate_limit::{extract_api_key, RateLimitConfig, RateLimitViolation, RateLimiter};
 pub use reverse_proxy::{OidcConfig, ReverseProxyConfig};
