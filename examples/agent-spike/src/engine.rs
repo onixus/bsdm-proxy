@@ -46,6 +46,7 @@ pub struct AgentEngine {
 }
 
 impl AgentEngine {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         device_id: String,
         device_name: String,

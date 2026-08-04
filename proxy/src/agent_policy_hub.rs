@@ -102,8 +102,7 @@ impl PolicyHub {
         loop {
             let snap = self.snapshot();
             let changed = match since {
-                None => true,
-                Some(v) if v.is_empty() => true,
+                None | Some("") => true,
                 Some(v) => v != snap.version,
             };
             if changed {
