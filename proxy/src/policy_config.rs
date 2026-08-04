@@ -15,6 +15,42 @@ pub enum PolicyMode {
     FullMitm,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeploymentProfile {
+    Production,
+    Development,
+    Test,
+}
+
+impl DeploymentProfile {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DeploymentProfile::Production => "production",
+            DeploymentProfile::Development => "development",
+            DeploymentProfile::Test => "test",
+        }
+    }
+}
+
+impl std::str::FromStr for DeploymentProfile {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_str() {
+            "production" | "prod" => Ok(DeploymentProfile::Production),
+            "development" | "dev" => Ok(DeploymentProfile::Development),
+            "test" => Ok(DeploymentProfile::Test),
+            other => Err(format!("Unknown deployment profile: {other}")),
+        }
+    }
+}
+
+impl std::fmt::Display for DeploymentProfile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 impl PolicyMode {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -122,6 +158,42 @@ pub fn configured_policy_mode() -> PolicyMode {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(PolicyMode::SelectiveMitm)
+}
+
+pub fn validate_mitm_policy(policy_mode: PolicyMode) -> Result<DeploymentProfile, String> {
+    let deployment_profile = std::env::var("DEPLOYMENT_PROFILE")
+        .unwrap_or_else(|_| "production".to_string())
+        .parse::<DeploymentProfile>()?;
+    let allow_full_mitm = env_flag("ALLOW_FULL_MITM");
+
+    validate_mitm_policy_values(policy_mode, deployment_profile, allow_full_mitm)?;
+    Ok(deployment_profile)
+}
+
+fn validate_mitm_policy_values(
+    policy_mode: PolicyMode,
+    deployment_profile: DeploymentProfile,
+    allow_full_mitm: bool,
+) -> Result<(), String> {
+    if policy_mode != PolicyMode::FullMitm {
+        return Ok(());
+    }
+
+    if deployment_profile == DeploymentProfile::Production {
+        return Err(
+            "POLICY_MODE=full-mitm is forbidden with DEPLOYMENT_PROFILE=production; use selective-mitm or sni"
+                .to_string(),
+        );
+    }
+
+    if !allow_full_mitm {
+        return Err(
+            "POLICY_MODE=full-mitm requires ALLOW_FULL_MITM=true in development or test environments"
+                .to_string(),
+        );
+    }
+
+    Ok(())
 }
 
 pub fn configured_mitm_categories() -> Vec<String> {
@@ -232,5 +304,43 @@ mod tests {
         );
         assert_eq!("full".parse::<PolicyMode>().unwrap(), PolicyMode::FullMitm);
         assert!("invalid".parse::<PolicyMode>().is_err());
+    }
+
+    #[test]
+    fn full_mitm_is_forbidden_in_production_even_with_override() {
+        assert!(validate_mitm_policy_values(
+            PolicyMode::FullMitm,
+            DeploymentProfile::Production,
+            true
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn full_mitm_requires_explicit_non_production_override() {
+        assert!(validate_mitm_policy_values(
+            PolicyMode::FullMitm,
+            DeploymentProfile::Development,
+            false
+        )
+        .is_err());
+        assert!(validate_mitm_policy_values(
+            PolicyMode::FullMitm,
+            DeploymentProfile::Development,
+            true
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn selective_and_sni_modes_are_allowed_in_all_profiles() {
+        for profile in [
+            DeploymentProfile::Production,
+            DeploymentProfile::Development,
+            DeploymentProfile::Test,
+        ] {
+            assert!(validate_mitm_policy_values(PolicyMode::SelectiveMitm, profile, false).is_ok());
+            assert!(validate_mitm_policy_values(PolicyMode::Sni, profile, false).is_ok());
+        }
     }
 }

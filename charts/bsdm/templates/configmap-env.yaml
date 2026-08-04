@@ -8,6 +8,8 @@ metadata:
 data:
   HTTP_PORT: {{ .Values.service.proxyPort | quote }}
   METRICS_PORT: {{ .Values.service.metricsPort | quote }}
+  DEPLOYMENT_PROFILE: {{ .Values.proxy.deploymentProfile | quote }}
+  POLICY_MODE: {{ .Values.proxy.policyMode | quote }}
   WORKER_COUNT: {{ .Values.proxy.workerCount | quote }}
   CACHE_CAPACITY: {{ .Values.proxy.cacheCapacity | quote }}
   CACHE_SHARDS: {{ .Values.proxy.cacheShards | quote }}

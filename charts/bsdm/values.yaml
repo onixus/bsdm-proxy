@@ -66,6 +66,8 @@ acl:
 
 # Proxy environment — maps to packaging/config/bsdm-proxy.env.example
 proxy:
+  deploymentProfile: production
+  policyMode: selective-mitm
   workerCount: 1
   cacheCapacity: 10000
   cacheShards: 16

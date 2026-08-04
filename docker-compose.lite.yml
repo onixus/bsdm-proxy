@@ -54,6 +54,7 @@ services:
     environment:
       - HTTP_PORT=3128
       - METRICS_PORT=9090
+      - DEPLOYMENT_PROFILE=production
       - POLICY_MODE=selective-mitm
       - MITM_CATEGORIES=malware,phishing,illegal-content
       - PINNING_EXCEPTIONS_PATH=/etc/bsdm-proxy/pinning-exceptions.json

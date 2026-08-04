@@ -12,7 +12,9 @@ native install находятся в `packaging/config/*.env.example`; Compose �
 |---|---:|---|
 | `HTTP_PORT` | `3128` | Proxy listener |
 | `METRICS_PORT` | `9090` | Health, metrics и REST control |
+| `DEPLOYMENT_PROFILE` | `production` | Профиль запуска (`production`, `development`, `test`); production запрещает `full-mitm` |
 | `POLICY_MODE` | `selective-mitm` | Режим политики (`selective-mitm`, `sni`, `full-mitm`) |
+| `ALLOW_FULL_MITM` | `false` | Дополнительное подтверждение для `full-mitm`; действует только в development/test |
 | `MITM_CATEGORIES` | `malware,phishing,illegal-content` | Категории доменов для терминирования TLS в selective-mitm |
 | `PINNING_EXCEPTIONS_PATH` | unset | Управляемый JSON-реестр Certificate Pinning exceptions |
 | `PINNING_AUDIT_LOG_PATH` | `<registry>.audit.jsonl` | Append-only audit trail изменений реестра |
@@ -23,6 +25,18 @@ native install находятся в `packaging/config/*.env.example`; Compose �
 | `RUST_LOG` | component-specific | tracing filter |
 | `TCP_SNDBUF_BYTES` | `524288` | Client socket send buffer; `0` не меняет |
 | `HTTP_PRESERVE_HEADER_CASE` | `true` | Preserve/title-case HTTP/1 headers |
+
+`full-mitm` предназначен только для локальной диагностики. Он отклоняется при
+`DEPLOYMENT_PROFILE=production`, даже если задан `ALLOW_FULL_MITM=true`. Для
+явного debug-запуска нужны обе настройки:
+
+```bash
+DEPLOYMENT_PROFILE=development POLICY_MODE=full-mitm ALLOW_FULL_MITM=true \
+  cargo run -p bsdm-proxy --bin proxy
+```
+
+В production используйте `selective-mitm` и управляйте расшифровкой через
+`MITM_CATEGORIES`, либо `sni` для полного отключения TLS-терминирования.
 
 ## L1 cache
 

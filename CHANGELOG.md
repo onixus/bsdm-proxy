@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Reject `POLICY_MODE=full-mitm` in the default `production` deployment profile;
+  local development/test use now requires an explicit `ALLOW_FULL_MITM=true` override.
+
 ### Added
 
 - **Policy decision-source observability** — Added bounded Prometheus counters,

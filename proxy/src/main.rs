@@ -7,11 +7,12 @@ use bsdm_proxy::{
     bind_http_listeners, build_hierarchy_manager, ensure_private_spill_dir, handle_connection,
     htcp_peer_port, htcp_server_bind_addr, http_cache_key, icp_server_bind_addr,
     load_hierarchy_config, load_policy_config, metrics_server, policy_config::reload_acl_engine,
-    run_peer_discovery, should_start_htcp_server, should_start_icp_server, wait_shutdown_signal,
-    AclAction, AuthManager, CacheConfig, CertCache, ControlApiState, GlobalSessionStore,
-    HtcpServer, HttpEventPipeline, IcpServer, L2CacheConfig, Metrics, PeerDiscoveryConfig,
-    PerfConfig, PolicyCacheConfig, PolicyDecisionCache, ProxyPolicy, ProxyService, RateLimitConfig,
-    RedisL2Cache, ThreatScoreCache, ThreatScoreConfig, ThreatSyncEngine, UpstreamTlsConfig,
+    run_peer_discovery, should_start_htcp_server, should_start_icp_server, validate_mitm_policy,
+    wait_shutdown_signal, AclAction, AuthManager, CacheConfig, CertCache, ControlApiState,
+    GlobalSessionStore, HtcpServer, HttpEventPipeline, IcpServer, L2CacheConfig, Metrics,
+    PeerDiscoveryConfig, PerfConfig, PolicyCacheConfig, PolicyDecisionCache, ProxyPolicy,
+    ProxyService, RateLimitConfig, RedisL2Cache, ThreatScoreCache, ThreatScoreConfig,
+    ThreatSyncEngine, UpstreamTlsConfig,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -96,6 +97,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or(9090);
 
     let policy_config = load_policy_config();
+    let deployment_profile = validate_mitm_policy(policy_config.policy_mode)?;
+    info!(
+        "TLS policy startup: deployment_profile={}, policy_mode={}, full_mitm_override={}",
+        deployment_profile,
+        policy_config.policy_mode,
+        std::env::var("ALLOW_FULL_MITM")
+            .map(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+            .unwrap_or(false)
+    );
     if policy_config.acl_enabled {
         info!("ACL enabled");
     }
