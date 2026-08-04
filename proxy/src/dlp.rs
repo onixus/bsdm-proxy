@@ -96,7 +96,9 @@ impl DlpEngine {
     /// Always-on engine with built-in signature set (tests / explicit enable).
     pub fn with_default_patterns() -> Self {
         Self {
-            state: Arc::new(ArcSwap::from_pointee(state_from_patterns(default_patterns()))),
+            state: Arc::new(ArcSwap::from_pointee(state_from_patterns(
+                default_patterns(),
+            ))),
         }
     }
 

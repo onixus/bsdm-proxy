@@ -49,7 +49,11 @@ pub fn control_api_token_from_env() -> Option<String> {
     std::env::var("CONTROL_API_TOKEN")
         .ok()
         .filter(|t| !t.is_empty())
-        .or_else(|| std::env::var("ACL_API_TOKEN").ok().filter(|t| !t.is_empty()))
+        .or_else(|| {
+            std::env::var("ACL_API_TOKEN")
+                .ok()
+                .filter(|t| !t.is_empty())
+        })
 }
 
 /// Validate control-plane token posture at process start.

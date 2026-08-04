@@ -324,8 +324,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("🚀 BSDM Minimal Local Policy Agent Spike (Phase C, Issue #258/#273)");
 
     let device_id = std::env::var("DEVICE_ID").unwrap_or_else(|_| "dev-mac-001".to_string());
-    let device_name =
-        std::env::var("DEVICE_NAME").unwrap_or_else(|_| format!("agent-{device_id}"));
+    let device_name = std::env::var("DEVICE_NAME").unwrap_or_else(|_| format!("agent-{device_id}"));
     let device_type = std::env::var("DEVICE_TYPE").unwrap_or_else(|_| "desktop".to_string());
     let device_ip = std::env::var("DEVICE_IP").ok().filter(|s| !s.is_empty());
     let control_plane_url =

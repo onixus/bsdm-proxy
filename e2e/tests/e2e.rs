@@ -324,8 +324,7 @@ async fn e2e_mitm_https_with_self_signed_ca() {
         .await
         .expect("metrics body");
     assert!(
-        metrics.contains("bsdm_proxy_policy_decision_source_total")
-            && metrics.contains("mitm"),
+        metrics.contains("bsdm_proxy_policy_decision_source_total") && metrics.contains("mitm"),
         "full-mitm CONNECT should record decision_source=mitm"
     );
 }
@@ -364,7 +363,11 @@ async fn e2e_policy_mode_sni_never_terminates_tls() {
 
     let client = harness.proxy_mitm_client().expect("HTTPS client via proxy");
     let url = harness.mitm_upstream_url("/sni-mode-no-mitm");
-    let response = client.get(&url).send().await.expect("HTTPS GET via sni mode");
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .expect("HTTPS GET via sni mode");
     assert_eq!(response.status(), reqwest::StatusCode::OK);
     assert_eq!(
         response.text().await.expect("body"),
@@ -380,10 +383,26 @@ async fn e2e_policy_mode_sni_never_terminates_tls() {
         .await
         .expect("metrics after body");
 
-    let mitm_before = metric_counter(&metrics_before, "bsdm_proxy_policy_decision_source_total", "mitm");
-    let mitm_after = metric_counter(&metrics_after, "bsdm_proxy_policy_decision_source_total", "mitm");
-    let sni_before = metric_counter(&metrics_before, "bsdm_proxy_policy_decision_source_total", "sni");
-    let sni_after = metric_counter(&metrics_after, "bsdm_proxy_policy_decision_source_total", "sni");
+    let mitm_before = metric_counter(
+        &metrics_before,
+        "bsdm_proxy_policy_decision_source_total",
+        "mitm",
+    );
+    let mitm_after = metric_counter(
+        &metrics_after,
+        "bsdm_proxy_policy_decision_source_total",
+        "mitm",
+    );
+    let sni_before = metric_counter(
+        &metrics_before,
+        "bsdm_proxy_policy_decision_source_total",
+        "sni",
+    );
+    let sni_after = metric_counter(
+        &metrics_after,
+        "bsdm_proxy_policy_decision_source_total",
+        "sni",
+    );
 
     assert_eq!(
         mitm_after, mitm_before,
