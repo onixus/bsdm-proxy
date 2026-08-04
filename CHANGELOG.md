@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Agent cert CRL (#273)** — fingerprint + serial revocation store
+  (`AGENT_CRL_PATH`); revoke adds cert to CRL; `GET /api/v1/agent/crl` (JSON)
+  and `GET /api/v1/agent/crl.pem` (CA-signed X.509 when CA allows CrlSign);
+  mTLS `CONTROL_MTLS_CHECK_CRL` (default on when mTLS enabled).
+
 ## [0.9.5] - 2026-08-04
 
 Patch release after **0.9.4**: agent **policy push** (long-poll, SSE, operator

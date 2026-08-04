@@ -297,6 +297,7 @@ pub async fn agent_control_mtls_server(
     server_config: Arc<rustls::ServerConfig>,
     bind: String,
     require_enrolled_fingerprint: bool,
+    check_crl: bool,
     mut shutdown_rx: watch::Receiver<bool>,
 ) {
     let listener = match TcpListener::bind(&bind).await {
@@ -342,6 +343,12 @@ pub async fn agent_control_mtls_server(
                             .map(|c| crate::control_mtls::cert_fingerprint_sha256(c.as_ref()))
                     };
 
+                    if let Some(fp) = &peer_fp {
+                        if check_crl && control_api.cert_fingerprint_revoked(fp) {
+                            warn!(%addr, %fp, "client cert on agent CRL — closing");
+                            return;
+                        }
+                    }
                     if require_enrolled_fingerprint {
                         match &peer_fp {
                             Some(fp) if control_api.cert_fingerprint_enrolled(fp) => {}
@@ -384,6 +391,8 @@ pub async fn agent_control_mtls_server(
                                 || path.starts_with("/api/agent/")
                                 || path == "/api/v1/devices"
                                 || path.starts_with("/api/v1/devices/")
+                                || path == "/api/v1/agent/crl"
+                                || path == "/api/v1/agent/crl.pem"
                             {
                                 return Ok::<_, Infallible>(control_api.handle_request(req).await);
                             }

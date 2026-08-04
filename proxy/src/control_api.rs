@@ -15,6 +15,7 @@ use tokio::sync::watch;
 use tracing::{info, warn};
 
 use crate::acl_api::AclApiState;
+use crate::agent_crl::AgentCrl;
 use crate::agent_events::{AgentEventBatch, AgentEventIngestor};
 use crate::agent_policy_hub::PolicyHub;
 use crate::cache_key::http_cache_key;
@@ -635,21 +636,71 @@ impl ControlApiState {
 
     fn revoke_device(&self, device_id: &str) -> Response<Body> {
         match self.device_registry.revoke(device_id) {
-            Ok(persisted) => json_response(
-                StatusCode::OK,
-                &serde_json::json!({
-                    "success": true,
-                    "message": format!("Device {device_id} revoked"),
-                    "persisted": persisted,
-                })
-                .to_string(),
-            ),
+            Ok((persisted, fingerprint, serial)) => {
+                let crl_added = self.agent_crl.revoke(
+                    device_id,
+                    fingerprint.as_deref(),
+                    serial.as_deref(),
+                    "cessationOfOperation",
+                );
+                json_response(
+                    StatusCode::OK,
+                    &serde_json::json!({
+                        "success": true,
+                        "message": format!("Device {device_id} revoked"),
+                        "persisted": persisted,
+                        "crl_added": crl_added,
+                        "cert_fingerprint": fingerprint,
+                    })
+                    .to_string(),
+                )
+            }
             Err(RevokeError::InvalidId) => {
                 json_response(StatusCode::BAD_REQUEST, r#"{"error":"invalid device id"}"#)
             }
             Err(RevokeError::NotFound) => {
                 json_response(StatusCode::NOT_FOUND, r#"{"error":"device not found"}"#)
             }
+        }
+    }
+
+    fn agent_crl_json(&self) -> Response<Body> {
+        json_response(
+            StatusCode::OK,
+            &self.agent_crl.to_json_document().to_string(),
+        )
+    }
+
+    fn agent_crl_pem(&self) -> Response<Body> {
+        let Some(cache) = self.cert_cache.as_ref() else {
+            return json_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                r#"{"error":"CA not loaded; cannot sign X.509 CRL (use GET /api/v1/agent/crl JSON)"}"#,
+            );
+        };
+        let entries = self.agent_crl.list();
+        let revoked: Vec<(String, u64)> = entries
+            .iter()
+            .filter_map(|e| e.serial_hex.as_ref().map(|s| (s.clone(), e.revoked_at)))
+            .collect();
+        match cache.sign_agent_crl_pem(&revoked, self.agent_crl.crl_number()) {
+            Ok(pem) => Response::builder()
+                .status(StatusCode::OK)
+                .header("Content-Type", "application/x-pem-file")
+                .header("Content-Disposition", "inline; filename=\"agent-crl.pem\"")
+                .body(full(Bytes::from(pem)))
+                .unwrap_or_else(|_| {
+                    json_response(StatusCode::INTERNAL_SERVER_ERROR, r#"{"error":"crl body"}"#)
+                }),
+            Err(e) => json_response(
+                StatusCode::BAD_REQUEST,
+                &serde_json::json!({
+                    "error": format!("X.509 CRL sign failed: {e}"),
+                    "hint": "JSON CRL is always available at GET /api/v1/agent/crl",
+                    "json_count": self.agent_crl.list().len(),
+                })
+                .to_string(),
+            ),
         }
     }
 
@@ -736,6 +787,7 @@ impl ControlApiState {
         let mut cert_not_after = None;
         let mut cert_subject = None;
         let mut cert_fingerprint = None;
+        let mut cert_serial = None;
 
         if let Some(csr) = dto
             .csr_pem
@@ -763,6 +815,7 @@ impl ControlApiState {
                     cert_not_after = Some(signed.not_after_unix);
                     cert_subject = Some(signed.subject);
                     cert_fingerprint = Some(signed.fingerprint_sha256);
+                    cert_serial = Some(signed.serial_hex);
                 }
                 Err(e) => {
                     return json_response(
@@ -783,6 +836,7 @@ impl ControlApiState {
             device_type: dto.device_type,
             cert_subject: cert_subject.clone(),
             cert_fingerprint: cert_fingerprint.clone(),
+            cert_serial: cert_serial.clone(),
         }) {
             Ok(result) => {
                 let mtls = client_cert_pem.is_some();
@@ -800,12 +854,14 @@ impl ControlApiState {
                             "policy": "/api/v1/agent/policy",
                             "heartbeat": "/api/v1/agent/heartbeat",
                             "events": "/api/v1/agent/events",
+                            "crl": "/api/v1/agent/crl",
                         },
                         "auth": "Bearer device_token for agent endpoints (or CONTROL_API_TOKEN)",
                         "mtls": mtls,
                         "client_cert_pem": client_cert_pem,
                         "ca_cert_pem": ca_cert_pem,
                         "cert_subject": cert_subject,
+                        "cert_serial": cert_serial,
                         "cert_fingerprint": cert_fingerprint,
                         "cert_not_after": cert_not_after,
                         "note": if mtls {
@@ -853,6 +909,7 @@ pub struct ControlApiState {
     admin_console_dir: Option<std::path::PathBuf>,
     device_registry: DeviceRegistry,
     agent_events: AgentEventIngestor,
+    agent_crl: AgentCrl,
     policy_hub: PolicyHub,
     /// Bootstrap token for `POST /api/v1/agent/enroll` (`AGENT_ENROLL_TOKEN`).
     /// Falls back to control `api_token` when unset.
@@ -919,6 +976,7 @@ impl ControlApiState {
                 }),
             device_registry: DeviceRegistry::memory_only(),
             agent_events: AgentEventIngestor::memory_only(),
+            agent_crl: AgentCrl::memory_only(),
             policy_hub,
             enroll_token: None,
             cert_cache: None,
@@ -995,6 +1053,7 @@ impl ControlApiState {
         );
         state.fail_closed = crate::security_defaults::control_api_fail_closed();
         state.device_registry = DeviceRegistry::from_env();
+        state.agent_crl = AgentCrl::from_env();
         state.policy_hub = PolicyHub::from_runtime(&state.pinning_registry);
         state.enroll_token = std::env::var("AGENT_ENROLL_TOKEN")
             .ok()
@@ -1117,6 +1176,8 @@ impl ControlApiState {
             (&Method::POST, "/api/v1/agent/events") => self.agent_events_ingest(body),
             (&Method::GET, "/api/v1/agent/events/recent") => self.agent_events_recent(),
             (&Method::POST, "/api/v1/agent/enroll") => self.agent_enroll(body),
+            (&Method::GET, "/api/v1/agent/crl") => self.agent_crl_json(),
+            (&Method::GET, "/api/v1/agent/crl.pem") => self.agent_crl_pem(),
             (&Method::GET, "/api/agent/policy") => {
                 deprecated_agent_alias(self.agent_policy(), "/api/v1/agent/policy")
             }
@@ -1266,6 +1327,11 @@ impl ControlApiState {
     /// Whether a client-cert fingerprint matches a non-revoked enrolled device.
     pub fn cert_fingerprint_enrolled(&self, fingerprint: &str) -> bool {
         self.device_registry.cert_fingerprint_valid(fingerprint)
+    }
+
+    /// Whether fingerprint is on the agent CRL.
+    pub fn cert_fingerprint_revoked(&self, fingerprint: &str) -> bool {
+        self.agent_crl.is_fingerprint_revoked(fingerprint)
     }
 
     /// Whether non-public control RPCs require a Bearer token.

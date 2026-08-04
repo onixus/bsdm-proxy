@@ -5,8 +5,10 @@ use chrono::Datelike;
 use hyper::body::Incoming;
 use hyper::Request;
 use rcgen::{
-    BasicConstraints, CertificateParams, CertificateSigningRequestParams, DistinguishedName,
-    DnType, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair, KeyUsagePurpose, SanType,
+    date_time_ymd, BasicConstraints, CertificateParams, CertificateRevocationListParams,
+    CertificateSigningRequestParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose, IsCa,
+    Issuer, KeyIdMethod, KeyPair, KeyUsagePurpose, RevocationReason, RevokedCertParams, SanType,
+    SerialNumber,
 };
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::ServerConfig;
@@ -101,6 +103,7 @@ impl CertCache {
         ca_params.key_usages = vec![
             KeyUsagePurpose::KeyCertSign,
             KeyUsagePurpose::DigitalSignature,
+            KeyUsagePurpose::CrlSign,
         ];
         ca_params.distinguished_name = DistinguishedName::new();
         ca_params
@@ -260,6 +263,11 @@ impl CertCache {
         params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
         params.is_ca = IsCa::NoCa;
 
+        // Stable serial for CRL (big-endian hex of random u64).
+        let serial_u64 = rand::random::<u64>() | 1;
+        params.serial_number = Some(SerialNumber::from(serial_u64));
+        let serial_hex = format!("{serial_u64:016x}");
+
         // Validity window via rcgen helpers (avoid depending on `time` crate directly).
         let days = validity_days.clamp(1, 825);
         let now = chrono::Utc::now();
@@ -286,9 +294,61 @@ impl CertCache {
             ca_cert_pem: self.ca_cert_pem(),
             subject,
             fingerprint_sha256,
+            serial_hex,
             not_after_unix: end.timestamp().max(0) as u64,
             validity_days: days,
         })
+    }
+
+    /// Build a CA-signed X.509 CRL PEM for revoked agent serials.
+    ///
+    /// Requires issuer key usage to allow CRL signing (in-memory CA includes
+    /// `CrlSign`; file CAs without it return an error — use JSON CRL instead).
+    pub fn sign_agent_crl_pem(
+        &self,
+        revoked: &[(String, u64)],
+        crl_number: u64,
+    ) -> Result<String, String> {
+        // (serial_hex, revoked_at_unix)
+        let now = chrono::Utc::now();
+        let this_update = date_time_ymd(now.year(), now.month() as u8, now.day().max(1) as u8);
+        let next = now + chrono::Duration::days(7);
+        let next_update = date_time_ymd(next.year(), next.month() as u8, next.day().max(1) as u8);
+
+        let mut revoked_certs = Vec::with_capacity(revoked.len());
+        for (serial_hex, revoked_at) in revoked {
+            let serial_bytes = hex::decode(serial_hex.trim())
+                .map_err(|e| format!("invalid serial hex {serial_hex}: {e}"))?;
+            if serial_bytes.is_empty() {
+                continue;
+            }
+            let revoked_dt = chrono::DateTime::from_timestamp(*revoked_at as i64, 0).unwrap_or(now);
+            let revocation_time = date_time_ymd(
+                revoked_dt.year(),
+                revoked_dt.month() as u8,
+                revoked_dt.day().max(1) as u8,
+            );
+            revoked_certs.push(RevokedCertParams {
+                serial_number: SerialNumber::from(serial_bytes),
+                revocation_time,
+                reason_code: Some(RevocationReason::CessationOfOperation),
+                invalidity_date: None,
+            });
+        }
+
+        let params = CertificateRevocationListParams {
+            this_update,
+            next_update,
+            crl_number: SerialNumber::from(crl_number.max(1)),
+            issuing_distribution_point: None,
+            revoked_certs,
+            key_identifier_method: KeyIdMethod::Sha256,
+        };
+        let issuer = self.issuer().map_err(|e| format!("CA issuer: {e}"))?;
+        let crl = params
+            .signed_by(&issuer)
+            .map_err(|e| format!("sign CRL: {e}"))?;
+        crl.pem().map_err(|e| format!("CRL PEM: {e}"))
     }
 }
 
@@ -299,6 +359,8 @@ pub struct AgentClientCert {
     pub ca_cert_pem: String,
     pub subject: String,
     pub fingerprint_sha256: String,
+    /// Certificate serial as lowercase hex (for X.509 CRL entries).
+    pub serial_hex: String,
     pub not_after_unix: u64,
     pub validity_days: u32,
 }
@@ -456,7 +518,14 @@ mod tests {
         assert!(signed.client_cert_pem.contains("BEGIN CERTIFICATE"));
         assert!(signed.ca_cert_pem.contains("BEGIN CERTIFICATE"));
         assert_eq!(signed.fingerprint_sha256.len(), 64);
+        assert_eq!(signed.serial_hex.len(), 16);
         assert!(signed.subject.contains("laptop-mtls-001"));
         assert!(signed.not_after_unix > 0);
+
+        // X.509 CRL with this serial
+        let pem = cache
+            .sign_agent_crl_pem(&[(signed.serial_hex.clone(), 1_700_000_000)], 2)
+            .unwrap();
+        assert!(pem.contains("X509 CRL") || pem.contains("BEGIN X509 CRL"));
     }
 }

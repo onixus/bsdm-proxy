@@ -42,6 +42,8 @@ See also: [control-plane.md](../features/control-plane.md) ·
 | `CONTROL_MTLS_CLIENT_CA_FILE` | `./certs/ca.crt` or CertCache CA | Trust store for client certs |
 | `CONTROL_MTLS_SERVER_NAME` | `control.bsdm.local` | SAN/CN for auto server cert |
 | `CONTROL_MTLS_REQUIRE_ENROLLED` | `false` | Peer cert fingerprint must match enrolled device |
+| `CONTROL_MTLS_CHECK_CRL` | *on if mTLS enabled* | Reject peer certs listed in agent CRL |
+| `AGENT_CRL_PATH` | *memory-only* | Durable JSON CRL (`fingerprint` + optional `serial`) |
 
 ### Agent control mTLS (optional)
 

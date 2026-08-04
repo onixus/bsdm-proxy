@@ -22,7 +22,8 @@ policy and heartbeat endpoints.
 - Optional transport: `CONTROL_MTLS_ENABLED` HTTPS port requiring client cert.
 - Policy push: long-poll `/policy/watch`, SSE `/policy/stream`, operator
   `POST /policy/push` (+ pinning reload notify).
-- Reserved: CRL/OCSP, WebSocket/gRPC push productization.
+- Agent CRL: JSON + optional X.509 PEM (`/api/v1/agent/crl[.pem]`); mTLS checks CRL.
+- Reserved: OCSP, WebSocket/gRPC push productization.
 
 ---
 
@@ -70,10 +71,17 @@ by the proxy/agent CA. Plain `METRICS_PORT` stays HTTP for scrapers/Admin.
   is not on a non-revoked enrolled device
 - HTTP Bearer (`device_token` / control token) still applies for API auth
 
+#### Certificate revocation (lab CRL)
+
+- Revoke (`POST /api/v1/devices/{id}/revoke`) clears device token and appends
+  `cert_fingerprint` (+ serial when known) to the agent CRL.
+- `GET /api/v1/agent/crl` — JSON list for ops / mTLS fingerprint checks.
+- `GET /api/v1/agent/crl.pem` — CA-signed X.509 CRL when issuer has `CrlSign`.
+- Durable store: `AGENT_CRL_PATH`. mTLS: `CONTROL_MTLS_CHECK_CRL` (default on).
+
 #### Reserved
 
-- Certificate revocation lists / OCSP for agent certs.
-- Policy push stream.
+- OCSP stapling / responders.
 - Forcing mTLS on the primary metrics port (would break Prometheus scrape).
 
 ---

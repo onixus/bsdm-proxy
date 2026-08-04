@@ -36,6 +36,9 @@ pub struct RegisteredDevice {
     pub cert_subject: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cert_fingerprint: Option<String>,
+    /// Client cert serial (hex) for X.509 CRL when issued via CSR enroll.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cert_serial: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trust_score: Option<u8>,
     pub last_seen: u64,
@@ -78,6 +81,7 @@ impl RegisteredDevice {
             "policyVersion": self.policy_version,
             "certSubject": self.cert_subject,
             "certFingerprint": self.cert_fingerprint,
+            "certSerial": self.cert_serial,
             "trustScore": self.trust_score,
             "platform": self.platform,
             "userIdentity": self.user_identity,
@@ -99,6 +103,7 @@ pub struct EnrollRequest {
     pub device_type: Option<String>,
     pub cert_subject: Option<String>,
     pub cert_fingerprint: Option<String>,
+    pub cert_serial: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -112,6 +117,7 @@ pub struct EnrollResult {
     pub reenrolled: bool,
     pub cert_subject: Option<String>,
     pub cert_fingerprint: Option<String>,
+    pub cert_serial: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -298,6 +304,7 @@ impl DeviceRegistry {
             cert_fingerprint: hb
                 .cert_fingerprint
                 .or_else(|| previous.and_then(|d| d.cert_fingerprint.clone())),
+            cert_serial: previous.and_then(|d| d.cert_serial.clone()),
             trust_score: hb
                 .trust_score
                 .or_else(|| previous.and_then(|d| d.trust_score)),
@@ -386,6 +393,10 @@ impl DeviceRegistry {
                 .cert_fingerprint
                 .filter(|s| !s.trim().is_empty())
                 .or_else(|| previous.as_ref().and_then(|d| d.cert_fingerprint.clone())),
+            cert_serial: req
+                .cert_serial
+                .filter(|s| !s.trim().is_empty())
+                .or_else(|| previous.as_ref().and_then(|d| d.cert_serial.clone())),
             trust_score: previous.as_ref().and_then(|d| d.trust_score),
             last_seen: now,
             revoked: false,
@@ -400,6 +411,7 @@ impl DeviceRegistry {
         };
         let cert_subject = device.cert_subject.clone();
         let cert_fingerprint = device.cert_fingerprint.clone();
+        let cert_serial = device.cert_serial.clone();
         info!(
             device_id = %device.id,
             platform = %platform,
@@ -418,6 +430,7 @@ impl DeviceRegistry {
             reenrolled,
             cert_subject,
             cert_fingerprint,
+            cert_serial,
         })
     }
 
@@ -451,7 +464,11 @@ impl DeviceRegistry {
         })
     }
 
-    pub fn revoke(&self, device_id: &str) -> Result<bool, RevokeError> {
+    /// Revoke device trust. Returns `(persisted, cert_fingerprint, cert_serial)` for CRL.
+    pub fn revoke(
+        &self,
+        device_id: &str,
+    ) -> Result<(bool, Option<String>, Option<String>), RevokeError> {
         if device_id.is_empty() || device_id.contains('/') {
             return Err(RevokeError::InvalidId);
         }
@@ -461,8 +478,11 @@ impl DeviceRegistry {
         };
         device.revoked = true;
         device.device_token_hash = None;
+        let fp = device.cert_fingerprint.clone();
+        let serial = device.cert_serial.clone();
         warn!(device_id, "Device trust revoked");
-        Ok(self.persist_locked(&devices))
+        let persisted = self.persist_locked(&devices);
+        Ok((persisted, fp, serial))
     }
 
     /// Devices sorted by `last_seen` descending (API list order).
@@ -662,6 +682,7 @@ mod tests {
             policy_version: Some("v0.1.0".into()),
             cert_subject: None,
             cert_fingerprint: None,
+            cert_serial: None,
             trust_score: Some(90),
             last_seen: unix_now(),
             revoked: false,
@@ -760,7 +781,7 @@ mod tests {
         assert_eq!(rows[0]["agentVersion"], "0.1.0");
         assert_eq!(rows[0]["status"], "Flagged");
 
-        assert!(reg.revoke("d1").unwrap());
+        assert!(reg.revoke("d1").unwrap().0);
         let rows = reg.list_api_rows();
         assert_eq!(rows[0]["status"], "Revoked");
 
@@ -831,6 +852,7 @@ mod tests {
                 device_type: Some("desktop".into()),
                 cert_subject: None,
                 cert_fingerprint: None,
+                cert_serial: None,
             })
             .unwrap();
         assert!(result.device_token.starts_with(TOKEN_PREFIX));
@@ -852,6 +874,7 @@ mod tests {
                 device_type: None,
                 cert_subject: None,
                 cert_fingerprint: None,
+                cert_serial: None,
             }),
             Err(EnrollError::Revoked)
         ));

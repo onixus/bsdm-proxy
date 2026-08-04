@@ -120,7 +120,22 @@ export DEVICE_TOKEN=bsdmagent_…
 cargo run -p agent-spike -- --once
 ```
 
-Revoke invalidates the token: `POST /api/v1/devices/{id}/revoke`.
+Revoke invalidates the token and adds the client cert to the **CRL**:
+
+```bash
+curl -sS -X POST -H "Authorization: Bearer ${CONTROL_API_TOKEN}" \
+  http://127.0.0.1:9090/api/v1/devices/${DEVICE_ID}/revoke
+
+# Fingerprint list (ops)
+curl -sS -H "Authorization: Bearer ${CONTROL_API_TOKEN}" \
+  http://127.0.0.1:9090/api/v1/agent/crl | jq .
+
+# Optional X.509 CRL PEM (needs CA with CrlSign — in-memory CA / compatible files)
+curl -sS -H "Authorization: Bearer ${CONTROL_API_TOKEN}" \
+  http://127.0.0.1:9090/api/v1/agent/crl.pem
+```
+
+Persist CRL: `AGENT_CRL_PATH=./data/agent-crl.json`.
 
 ### Optional: agent control mTLS port
 

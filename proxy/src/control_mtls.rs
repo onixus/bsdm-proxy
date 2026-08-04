@@ -28,6 +28,8 @@ pub struct ControlMtlsConfig {
     pub server_name: String,
     /// If true, peer cert SHA-256 must match an enrolled non-revoked device.
     pub require_enrolled_fingerprint: bool,
+    /// If true (default when mTLS enabled), reject fingerprints on the agent CRL.
+    pub check_crl: bool,
 }
 
 impl ControlMtlsConfig {
@@ -41,6 +43,12 @@ impl ControlMtlsConfig {
         let server_name = std::env::var("CONTROL_MTLS_SERVER_NAME")
             .unwrap_or_else(|_| "control.bsdm.local".to_string());
         let require_enrolled_fingerprint = env_flag("CONTROL_MTLS_REQUIRE_ENROLLED");
+        // Default: check CRL when mTLS is on, unless explicitly disabled.
+        let check_crl = if std::env::var("CONTROL_MTLS_CHECK_CRL").is_ok() {
+            env_flag("CONTROL_MTLS_CHECK_CRL")
+        } else {
+            enabled
+        };
         Self {
             enabled,
             bind,
@@ -49,6 +57,7 @@ impl ControlMtlsConfig {
             client_ca_file,
             server_name,
             require_enrolled_fingerprint,
+            check_crl,
         }
     }
 
@@ -217,6 +226,7 @@ mod tests {
             client_ca_file: None,
             server_name: "x".into(),
             require_enrolled_fingerprint: false,
+            check_crl: false,
         };
         assert!(cfg.validate().is_ok());
     }
@@ -234,6 +244,7 @@ mod tests {
             client_ca_file: None,
             server_name: "control.test.local".into(),
             require_enrolled_fingerprint: false,
+            check_crl: true,
         };
         let server = build_mtls_server_config(&cache, &cfg).unwrap();
         assert!(!server.alpn_protocols.is_empty());

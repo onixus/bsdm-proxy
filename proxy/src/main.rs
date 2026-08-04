@@ -363,6 +363,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let api = control_api.clone();
                     let bind = mtls_cfg.bind.clone();
                     let require_enrolled = mtls_cfg.require_enrolled_fingerprint;
+                    let check_crl = mtls_cfg.check_crl;
                     let shutdown_rx_mtls = shutdown_rx.clone();
                     tokio::spawn(async move {
                         agent_control_mtls_server(
@@ -370,6 +371,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             server_config,
                             bind,
                             require_enrolled,
+                            check_crl,
                             shutdown_rx_mtls,
                         )
                         .await;
