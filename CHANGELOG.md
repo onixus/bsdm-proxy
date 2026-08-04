@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-08-04
+
+Patch release after **0.9.0**: complete Phase B pilot ops — backup/restore
+drills, DLP kill-switch, Basic auth pilot path, DNS sinkhole day-1, and Admin
+Console Hybrid honesty (frozen experimental deep-links).
+
 ### Added
 
 - **Admin Console Hybrid honesty** — `routeScope` + frozen deep-link shell/banner
@@ -26,6 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Backup & restore runbook** — ClickHouse Native dump/restore scripts,
   CA archive rollback path, and combined drill
   (`scripts/drill-backup-restore.sh`, [docs/ops-and-dev/backup-restore.md](docs/ops-and-dev/backup-restore.md)).
+
+### Fixed
+
+- **Cargo.lock for workspace 0.9.x** — lockfile package metadata kept in sync so
+  Docker `cargo build --locked` / GHCR publish succeed after version bumps.
 
 ## [0.9.0] - 2026-08-04
 

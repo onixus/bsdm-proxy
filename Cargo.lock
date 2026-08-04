@@ -69,7 +69,7 @@ dependencies = [
 
 [[package]]
 name = "alert-worker"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "chrono",
  "hex",
@@ -429,7 +429,7 @@ dependencies = [
 
 [[package]]
 name = "bsdm-events"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "chrono",
  "serde",
@@ -438,7 +438,7 @@ dependencies = [
 
 [[package]]
 name = "bsdm-proxy"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "aho-corasick",
  "arc-swap",
@@ -543,7 +543,7 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "cache-indexer"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "bsdm-events",
  "bytes",
@@ -1058,7 +1058,7 @@ dependencies = [
 
 [[package]]
 name = "dns-sinkhole"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "base64",
  "bytes",
@@ -2149,7 +2149,7 @@ dependencies = [
 
 [[package]]
 name = "ml-worker"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "chrono",
  "prometheus",

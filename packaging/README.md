@@ -2,7 +2,7 @@
 
 Установка из готового release-архива. Общая документация: [README.md](../README.md) · [docs/README.md](../docs/README.md)
 
-**Текущая версия пакета:** `0.9.0`. Имя архива вычисляется из версии
+**Текущая версия пакета:** `0.9.1`. Имя архива вычисляется из версии
 `proxy/Cargo.toml`; итоговое значение всегда проверяйте в `dist/`.
 
 ## Contents
@@ -22,8 +22,8 @@
 ## Quick start
 
 ```bash
-tar xzf bsdm-proxy-0.9.0-linux-x86_64.tar.gz
-cd bsdm-proxy-0.9.0-linux-x86_64
+tar xzf bsdm-proxy-0.9.1-linux-x86_64.tar.gz
+cd bsdm-proxy-0.9.1-linux-x86_64
 sudo ./install.sh --create-user --systemd
 ```
 

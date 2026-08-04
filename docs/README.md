@@ -73,6 +73,7 @@ GitHub Wiki является автоматически обновляемым �
 - [ADR 0005: Local policy agent](adr/0005-local-policy-agent-vs-tunnel-first.md)
 - [ADR 0006: One supported operator console](adr/0006-single-operator-console.md)
 - [Roadmap](roadmap.md)
+- [Release notes (v0.9.1)](releases/v0.9.1.md)
 - [Release notes (v0.9.0)](releases/v0.9.0.md)
 - [Release notes (v0.8.0)](releases/v0.8.0.md)
 
