@@ -83,6 +83,7 @@ curl -X POST http://127.0.0.1:9090/api/security/dlp \
 - [ ] DNS: `./scripts/run-dns-pilot-smoke.sh` green (blocked.test / badsite.test / example.com) — [pilot-dns.md](pilot-dns.md)
 - [ ] Admin Console: primary nav only Hybrid pages; frozen routes show Frozen banner; mutations blocked without token (Settings → Console API)
 - [ ] Observability: Dashboard decision_source bar + Logs filter; optional alert-worker pilot pack ([pilot-alerts.md](pilot-alerts.md))
+- [ ] Optional Phase C lab: `./scripts/run-agent-pilot-smoke.sh` green — [pilot-agent.md](pilot-agent.md)
 
 ### B. Hybrid path
 
@@ -107,7 +108,7 @@ curl -X POST http://127.0.0.1:9090/api/security/dlp \
 ### E. Out of scope explicit
 
 - [ ] ICAP / AWG / eBPF / WASM **не** включены
-- [ ] Agent UI / on-device agent **не** требуется для pass
+- [ ] Agent UI / production multi-OS agent **не** требуется для pass (lab spike optional — [pilot-agent.md](pilot-agent.md))
 
 ---
 

@@ -391,11 +391,26 @@ impl ControlApiState {
     }
 
     fn agent_policy(&self) -> Response<Body> {
+        // Agent Contract v0.1 subset: mode + categories from runtime env,
+        // pinning from managed registry, SNI deny patterns from AGENT_SNI_DENY_PATTERNS
+        // (comma-separated; pilot defaults when unset).
+        let sni_deny = agent_sni_deny_patterns();
+        let sni_rules: Vec<serde_json::Value> = sni_deny
+            .iter()
+            .map(|pattern| {
+                serde_json::json!({
+                    "pattern": pattern,
+                    "action": "deny",
+                })
+            })
+            .collect();
         let dto = serde_json::json!({
             "policy_version": "v0.1.0",
             "policy_mode": crate::policy_config::configured_policy_mode().as_str(),
             "mitm_categories": crate::policy_config::configured_mitm_categories(),
             "pinning_exceptions": self.pinning_registry.active_domains(),
+            "sni_deny_patterns": sni_deny,
+            "sni_rules": sni_rules,
         });
         json_response(StatusCode::OK, &dto.to_string())
     }
@@ -1379,6 +1394,21 @@ fn collect_purge_tags(req: &PurgeRequest) -> Vec<String> {
     out
 }
 
+/// Comma-separated SNI deny patterns for Agent Contract policy pull.
+/// Env: `AGENT_SNI_DENY_PATTERNS` (e.g. `*.evil.com,badsite.test`).
+/// Unset → pilot lab defaults so agents have a non-empty offline-safe set.
+fn agent_sni_deny_patterns() -> Vec<String> {
+    match std::env::var("AGENT_SNI_DENY_PATTERNS") {
+        Ok(raw) if !raw.trim().is_empty() => raw
+            .split(',')
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+            .map(str::to_string)
+            .collect(),
+        _ => vec!["*.evil.com".to_string(), "badsite.test".to_string()],
+    }
+}
+
 fn json_response(status: StatusCode, body: &str) -> Response<Body> {
     Response::builder()
         .status(status)
@@ -1760,6 +1790,12 @@ mod tests {
         let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(v["policy_version"], "v0.1.0");
         assert_eq!(v["policy_mode"], "selective-mitm");
+        assert!(v["pinning_exceptions"].is_array());
+        assert!(v["sni_deny_patterns"].is_array());
+        assert!(!v["sni_deny_patterns"].as_array().unwrap().is_empty());
+        assert!(v["sni_rules"].is_array());
+        assert_eq!(v["sni_rules"][0]["action"], "deny");
+        assert!(v["sni_rules"][0]["pattern"].as_str().is_some());
 
         // Canonical versioned heartbeat endpoint.
         let hb_payload = Bytes::from(

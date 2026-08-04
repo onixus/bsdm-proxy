@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Agent Phase C spike (policy pull)** — `agent-spike` pulls
+  `GET /api/v1/agent/policy`, maps SNI deny + pinning + mode to local evaluate,
+  posts enriched heartbeat (`policy_version`, device inventory fields), supports
+  `--once` / `AGENT_ONCE` for pilot smoke; control plane returns
+  `sni_rules` / `sni_deny_patterns` (`AGENT_SNI_DENY_PATTERNS`); docs
+  [pilot-agent.md](docs/getting-started/pilot-agent.md) and
+  `scripts/run-agent-pilot-smoke.sh` (#273).
 - **Pilot observability pack** — Admin Console Dashboard `decision_source` mix,
   Logs server/client filter for Hybrid paths, pilot alert-worker rule subset
   (`config/pilot-alert.env.example`, [pilot-alerts.md](docs/getting-started/pilot-alerts.md)).

@@ -13,9 +13,12 @@ policy and heartbeat endpoints.
 
 ### Implementation status
 
-- Implemented: `GET /api/v1/agent/policy`,
+- Implemented: `GET /api/v1/agent/policy` (mode, `mitm_categories`,
+  `pinning_exceptions`, `sni_deny_patterns` / `sni_rules`),
   `POST /api/v1/agent/heartbeat`, `GET /api/v1/devices`, and
   `POST /api/v1/devices/{device_id}/revoke`.
+- Spike client: `examples/agent-spike` (policy pull + local evaluate + heartbeat;
+  pilot smoke in [pilot-agent.md](../getting-started/pilot-agent.md)).
 - Reserved by this contract: `POST /api/v1/agent/enroll`,
   `POST /api/v1/agent/events`, and policy push.
 
@@ -41,18 +44,22 @@ policy and heartbeat endpoints.
 - **Response Payload**:
   ```json
   {
-    "policy_version": "2026-07-29T10:00:00Z",
+    "policy_version": "v0.1.0",
     "policy_mode": "selective-mitm",
     "mitm_categories": ["malware", "phishing", "illegal-content"],
+    "pinning_exceptions": [".slack.com", ".teams.microsoft.com", ".zoom.us"],
+    "sni_deny_patterns": ["*.evil.com", "badsite.test"],
     "sni_rules": [
-      { "pattern": "*.evil.com", "action": "deny" }
-    ],
-    "dns_sinkhole": {
-      "enabled": true,
-      "rpz_version": "v1.4.2"
-    }
+      { "pattern": "*.evil.com", "action": "deny" },
+      { "pattern": "badsite.test", "action": "deny" }
+    ]
   }
   ```
+
+  **Current control-plane sources:** `policy_mode` / `mitm_categories` from
+  proxy env; `pinning_exceptions` from the managed pinning registry; SNI deny
+  from `AGENT_SNI_DENY_PATTERNS` (comma-separated) or pilot defaults.
+  `dns_sinkhole` / RPZ version is reserved (not yet in this payload).
 
 ### 2.2 Policy Push (WebSocket / gRPC Stream)
 - Control plane notifies agents when policy version changes.
