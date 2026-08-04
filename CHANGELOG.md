@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-08-04
+
+Patch release after **0.9.3**: optional agent control-plane **mTLS transport**
+listener (client certificates required on a dedicated port).
+
 ### Added
 
 - **Agent control mTLS transport** — optional HTTPS listener
