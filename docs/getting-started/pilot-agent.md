@@ -18,12 +18,14 @@ Issue tracking: **#273** (agent implementation), **#258** (original spike).
 
 | Include | Exclude |
 |---|---|
-| `GET /api/v1/agent/policy` pull | mTLS enroll (`POST /api/v1/agent/enroll`) |
-| `POST /api/v1/agent/heartbeat` + `GET /api/v1/devices` | Policy push / WebSocket |
-| Device registry persistence (`AGENT_DEVICES_PATH`) | Multi-node shared registry |
+| `POST /api/v1/agent/enroll` → `device_token` | Control-plane TLS mutual-auth require |
+| Optional enroll CSR → client cert (proxy CA) | Agent cert CRL / OCSP |
+| `GET /api/v1/agent/policy` pull | Policy push / WebSocket |
+| `POST /api/v1/agent/heartbeat` + `GET /api/v1/devices` | Multi-node shared registry |
+| `POST /api/v1/agent/events` telemetry batch | Durable multi-node event store |
+| Device registry persistence (`AGENT_DEVICES_PATH`) | Multi-OS installers / system proxy |
 | Local SNI deny + pinning bypass + mode | Full UT1 categorization on endpoint |
-| `AGENT_ONCE` / `--once` smoke | Windows/macOS installers, system proxy |
-| Bearer `CONTROL_API_TOKEN` | Device cert identity |
+| `AGENT_ONCE` / `--once` / `--enroll` smoke | Production IdP binding |
 
 Pilot Hybrid path **does not require** an agent to pass acceptance. This guide
 is for labs that want to exercise Phase C control-plane endpoints early.
@@ -90,11 +92,41 @@ Cap: 10 000 devices. Missing file → empty registry (created on first heartbe
 
 ---
 
+## Enroll (lab device token)
+
+```bash
+export CONTROL_PLANE_URL=http://127.0.0.1:9090
+# Preferred bootstrap secret (falls back to CONTROL_API_TOKEN if unset):
+export AGENT_ENROLL_TOKEN=enroll-lab-secret
+# Or: export CONTROL_API_TOKEN=replace-me
+
+export DEVICE_ID=laptop-pilot-001
+export DEVICE_NAME="Pilot laptop"
+export DEVICE_PLATFORM=macos   # linux | macos | windows
+export DEVICE_TYPE=desktop
+
+# Prints DEVICE_TOKEN=bsdmagent_… once — store it for later runs
+cargo run -p agent-spike -- --enroll --once
+
+# mTLS: generate keypair + CSR, receive client_cert_pem + ca_cert_pem
+cargo run -p agent-spike -- --enroll --mtls --once
+# Also prints DEVICE_KEY_PEM_* / DEVICE_CERT_PEM_* / CA_CERT_PEM_* blocks
+```
+
+Re-use without re-enroll:
+
+```bash
+export DEVICE_TOKEN=bsdmagent_…
+cargo run -p agent-spike -- --once
+```
+
+Revoke invalidates the token: `POST /api/v1/devices/{id}/revoke`.
+
 ## Run continuous spike
 
 ```bash
 export CONTROL_PLANE_URL=http://127.0.0.1:9090
-export CONTROL_API_TOKEN=replace-me   # required when production auth is on
+export CONTROL_API_TOKEN=replace-me   # or DEVICE_TOKEN after enroll
 export DEVICE_ID=laptop-pilot-001
 export DEVICE_NAME="Pilot laptop"
 export DEVICE_TYPE=desktop            # desktop | phone
@@ -105,9 +137,10 @@ cargo run -p agent-spike
 
 On start the agent:
 
-1. Pulls `GET /api/v1/agent/policy` (falls back to offline defaults if down).
-2. Evaluates sample domains with `decision_source=local-agent`.
-3. Loops: policy pull + enriched heartbeat every `HEARTBEAT_INTERVAL_SECS`.
+1. Enrolls when `DEVICE_TOKEN` is unset (or `--enroll` / `AGENT_ENROLL=1`).
+2. Pulls `GET /api/v1/agent/policy` (falls back to offline defaults if down).
+3. Evaluates sample domains + posts events (`decision_source=local-agent`).
+4. Loops: policy pull + enriched heartbeat every `HEARTBEAT_INTERVAL_SECS`.
 
 ---
 
@@ -124,8 +157,9 @@ What it checks:
 
 1. `GET /health` on the control plane.
 2. `GET /api/v1/agent/policy` returns `policy_mode` + `sni_rules` / patterns.
-3. `agent-spike --once` pulls policy, evaluates domains, posts heartbeat.
+3. `agent-spike --once` pulls policy, evaluates domains, posts **events** + heartbeat.
 4. `GET /api/v1/devices` lists the smoke `device_id`.
+5. `GET /api/v1/agent/events/recent` contains at least one event for the device.
 
 Manual once-mode:
 

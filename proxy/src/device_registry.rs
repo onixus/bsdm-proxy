@@ -4,7 +4,9 @@
 //! (`AGENT_DEVICES_PATH`). Heartbeats merge into the map; revoke marks
 //! devices; both rewrite the file when persistence is configured.
 
+use crate::security_util::constant_time_eq;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
@@ -16,6 +18,7 @@ use tracing::{info, warn};
 const FILE_VERSION: u32 = 1;
 const MAX_DEVICES: usize = 10_000;
 const POLICY_VERSION: &str = "v0.1.0";
+const TOKEN_PREFIX: &str = "bsdmagent_";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RegisteredDevice {
@@ -38,6 +41,19 @@ pub struct RegisteredDevice {
     pub last_seen: u64,
     #[serde(default)]
     pub revoked: bool,
+    /// OS platform from enroll: `linux` | `macos` | `windows`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform: Option<String>,
+    /// User identity (UPN / email) from enroll — not verified without IdP.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_identity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enrolled_at: Option<u64>,
+    /// SHA-256 hex of device Bearer token (plaintext returned only at enroll).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_token_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capabilities: Vec<String>,
 }
 
 impl RegisteredDevice {
@@ -63,7 +79,55 @@ impl RegisteredDevice {
             "certSubject": self.cert_subject,
             "certFingerprint": self.cert_fingerprint,
             "trustScore": self.trust_score,
+            "platform": self.platform,
+            "userIdentity": self.user_identity,
+            "enrolledAt": self.enrolled_at,
+            "enrolled": self.device_token_hash.is_some() || self.enrolled_at.is_some(),
+            "capabilities": self.capabilities,
         })
+    }
+}
+
+/// Enroll request (device_token always; optional mTLS fields after CSR sign).
+#[derive(Debug, Clone)]
+pub struct EnrollRequest {
+    pub device_id: Option<String>,
+    pub platform: String,
+    pub name: Option<String>,
+    pub user_identity: Option<String>,
+    pub capabilities: Vec<String>,
+    pub device_type: Option<String>,
+    pub cert_subject: Option<String>,
+    pub cert_fingerprint: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct EnrollResult {
+    pub device_id: String,
+    /// Plaintext device Bearer — shown once; only the hash is stored.
+    pub device_token: String,
+    pub platform: String,
+    pub enrolled_at: u64,
+    pub persisted: bool,
+    pub reenrolled: bool,
+    pub cert_subject: Option<String>,
+    pub cert_fingerprint: Option<String>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum EnrollError {
+    InvalidPlatform,
+    EmptyDeviceId,
+    Revoked,
+}
+
+impl EnrollError {
+    pub fn message(&self) -> &'static str {
+        match self {
+            EnrollError::InvalidPlatform => "platform must be linux|macos|windows",
+            EnrollError::EmptyDeviceId => "device_id must not be empty when provided",
+            EnrollError::Revoked => "device is revoked; clear revoke before re-enroll",
+        }
     }
 }
 
@@ -239,6 +303,12 @@ impl DeviceRegistry {
                 .or_else(|| previous.and_then(|d| d.trust_score)),
             last_seen: unix_now(),
             revoked: previous.is_some_and(|d| d.revoked),
+            // Preserve enroll metadata across heartbeats.
+            platform: previous.and_then(|d| d.platform.clone()),
+            user_identity: previous.and_then(|d| d.user_identity.clone()),
+            enrolled_at: previous.and_then(|d| d.enrolled_at),
+            device_token_hash: previous.and_then(|d| d.device_token_hash.clone()),
+            capabilities: previous.map(|d| d.capabilities.clone()).unwrap_or_default(),
         };
         info!(
             device_id = %device.id,
@@ -250,6 +320,122 @@ impl DeviceRegistry {
         Ok(self.persist_locked(&devices))
     }
 
+    /// Lab enroll: issue a device Bearer token (mTLS reserved).
+    pub fn enroll(&self, req: EnrollRequest) -> Result<EnrollResult, EnrollError> {
+        let platform = req.platform.to_ascii_lowercase();
+        if !matches!(platform.as_str(), "linux" | "macos" | "windows") {
+            return Err(EnrollError::InvalidPlatform);
+        }
+        let device_id = match req.device_id {
+            Some(id) => {
+                let id = id.trim().to_string();
+                if id.is_empty() || id.contains('/') {
+                    return Err(EnrollError::EmptyDeviceId);
+                }
+                id
+            }
+            None => format!("dev-{}", hex::encode(rand::random::<u128>().to_be_bytes())),
+        };
+
+        let mut devices = self.devices.write().expect("device registry lock");
+        if let Some(existing) = devices.get(&device_id) {
+            if existing.revoked {
+                return Err(EnrollError::Revoked);
+            }
+        }
+        let reenrolled = devices.contains_key(&device_id);
+        let previous = devices.get(&device_id).cloned();
+        let now = unix_now();
+        let plaintext = generate_device_token();
+        let token_hash = hash_device_token(&plaintext);
+        let name = req
+            .name
+            .filter(|n| !n.trim().is_empty())
+            .or_else(|| previous.as_ref().map(|d| d.name.clone()))
+            .unwrap_or_else(|| device_id.clone());
+        let device_type = req
+            .device_type
+            .filter(|k| matches!(k.as_str(), "desktop" | "phone"))
+            .or_else(|| previous.as_ref().map(|d| d.device_type.clone()))
+            .unwrap_or_else(|| "desktop".to_string());
+        let capabilities = if req.capabilities.is_empty() {
+            previous
+                .as_ref()
+                .map(|d| d.capabilities.clone())
+                .unwrap_or_else(|| vec!["local-proxy".into()])
+        } else {
+            req.capabilities
+        };
+
+        let device = RegisteredDevice {
+            id: device_id.clone(),
+            name,
+            ip: previous.as_ref().map(|d| d.ip.clone()).unwrap_or_default(),
+            device_type,
+            agent_status: previous
+                .as_ref()
+                .map(|d| d.agent_status.clone())
+                .unwrap_or_else(|| "healthy".into()),
+            agent_version: previous.as_ref().and_then(|d| d.agent_version.clone()),
+            policy_version: previous.as_ref().and_then(|d| d.policy_version.clone()),
+            cert_subject: req
+                .cert_subject
+                .filter(|s| !s.trim().is_empty())
+                .or_else(|| previous.as_ref().and_then(|d| d.cert_subject.clone())),
+            cert_fingerprint: req
+                .cert_fingerprint
+                .filter(|s| !s.trim().is_empty())
+                .or_else(|| previous.as_ref().and_then(|d| d.cert_fingerprint.clone())),
+            trust_score: previous.as_ref().and_then(|d| d.trust_score),
+            last_seen: now,
+            revoked: false,
+            platform: Some(platform.clone()),
+            user_identity: req
+                .user_identity
+                .filter(|u| !u.trim().is_empty())
+                .or_else(|| previous.as_ref().and_then(|d| d.user_identity.clone())),
+            enrolled_at: Some(now),
+            device_token_hash: Some(token_hash),
+            capabilities,
+        };
+        let cert_subject = device.cert_subject.clone();
+        let cert_fingerprint = device.cert_fingerprint.clone();
+        info!(
+            device_id = %device.id,
+            platform = %platform,
+            reenrolled,
+            has_client_cert = cert_fingerprint.is_some(),
+            "Agent device enrolled"
+        );
+        devices.insert(device.id.clone(), device);
+        let persisted = self.persist_locked(&devices);
+        Ok(EnrollResult {
+            device_id,
+            device_token: plaintext,
+            platform,
+            enrolled_at: now,
+            persisted,
+            reenrolled,
+            cert_subject,
+            cert_fingerprint,
+        })
+    }
+
+    /// Constant-time check that `token` matches a non-revoked enrolled device.
+    pub fn device_token_valid(&self, token: &str) -> bool {
+        if token.is_empty() {
+            return false;
+        }
+        let hash = hash_device_token(token);
+        let devices = self.devices.read().expect("device registry lock");
+        devices.values().any(|d| {
+            !d.revoked
+                && d.device_token_hash
+                    .as_ref()
+                    .is_some_and(|h| constant_time_eq(h.as_bytes(), hash.as_bytes()))
+        })
+    }
+
     pub fn revoke(&self, device_id: &str) -> Result<bool, RevokeError> {
         if device_id.is_empty() || device_id.contains('/') {
             return Err(RevokeError::InvalidId);
@@ -259,6 +445,7 @@ impl DeviceRegistry {
             return Err(RevokeError::NotFound);
         };
         device.revoked = true;
+        device.device_token_hash = None;
         warn!(device_id, "Device trust revoked");
         Ok(self.persist_locked(&devices))
     }
@@ -434,6 +621,17 @@ fn unix_now() -> u64 {
         .as_secs()
 }
 
+fn generate_device_token() -> String {
+    let mut raw = [0u8; 32];
+    raw.copy_from_slice(&rand::random::<[u8; 32]>());
+    format!("{TOKEN_PREFIX}{}", hex::encode(raw))
+}
+
+pub fn hash_device_token(token: &str) -> String {
+    let digest = Sha256::digest(token.as_bytes());
+    hex::encode(digest)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -452,6 +650,11 @@ mod tests {
             trust_score: Some(90),
             last_seen: unix_now(),
             revoked: false,
+            platform: None,
+            user_identity: None,
+            enrolled_at: None,
+            device_token_hash: None,
+            capabilities: vec![],
         }
     }
 
@@ -598,5 +801,44 @@ mod tests {
         assert!(doc["sni_rules"].is_array());
         assert_eq!(doc["sni_rules"][0]["action"], "deny");
         assert_eq!(doc["pinning_exceptions"][0], ".slack.com");
+    }
+
+    #[test]
+    fn enroll_issues_token_and_validates() {
+        let reg = DeviceRegistry::memory_only();
+        let result = reg
+            .enroll(EnrollRequest {
+                device_id: Some("enroll-1".into()),
+                platform: "macos".into(),
+                name: Some("Mac".into()),
+                user_identity: Some("alice@corp".into()),
+                capabilities: vec!["local-proxy".into()],
+                device_type: Some("desktop".into()),
+                cert_subject: None,
+                cert_fingerprint: None,
+            })
+            .unwrap();
+        assert!(result.device_token.starts_with(TOKEN_PREFIX));
+        assert!(reg.device_token_valid(&result.device_token));
+        assert!(!reg.device_token_valid("bsdmagent_wrong"));
+        let rows = reg.list_api_rows();
+        assert_eq!(rows[0]["platform"], "macos");
+        assert_eq!(rows[0]["enrolled"], true);
+
+        reg.revoke("enroll-1").unwrap();
+        assert!(!reg.device_token_valid(&result.device_token));
+        assert!(matches!(
+            reg.enroll(EnrollRequest {
+                device_id: Some("enroll-1".into()),
+                platform: "macos".into(),
+                name: None,
+                user_identity: None,
+                capabilities: vec![],
+                device_type: None,
+                cert_subject: None,
+                cert_fingerprint: None,
+            }),
+            Err(EnrollError::Revoked)
+        ));
     }
 }

@@ -1,15 +1,17 @@
 //! TLS MITM support: dynamic certificate generation and CONNECT interception.
 
 use bytes::Bytes;
+use chrono::Datelike;
 use hyper::body::Incoming;
 use hyper::Request;
 use rcgen::{
-    BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, Issuer, KeyPair,
-    KeyUsagePurpose,
+    BasicConstraints, CertificateParams, CertificateSigningRequestParams, DistinguishedName,
+    DnType, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair, KeyUsagePurpose, SanType,
 };
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::ServerConfig;
 use rustls_pemfile::certs;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::sync::Arc;
@@ -174,6 +176,105 @@ impl CertCache {
         cache.insert(domain_arc, cert_pair.clone());
         Ok(cert_pair)
     }
+
+    /// PEM of the configured MITM/agent CA certificate.
+    pub fn ca_cert_pem(&self) -> String {
+        String::from_utf8_lossy(&self.ca_cert_pem).into_owned()
+    }
+
+    /// Sign an agent client certificate from a PEM CSR (Agent Contract mTLS enroll).
+    ///
+    /// Subject/SAN are **bound by the control plane** to `device_id` /
+    /// `user_identity` / `platform` — CSR subject is not trusted as identity.
+    pub fn sign_agent_client_csr(
+        &self,
+        csr_pem: &str,
+        device_id: &str,
+        user_identity: Option<&str>,
+        platform: &str,
+        validity_days: u32,
+    ) -> Result<AgentClientCert, String> {
+        if device_id.trim().is_empty() {
+            return Err("device_id required for client cert".into());
+        }
+        let csr = CertificateSigningRequestParams::from_pem(csr_pem.trim())
+            .map_err(|e| format!("invalid CSR: {e}"))?;
+
+        let mut params = CertificateParams::default();
+        params.distinguished_name = DistinguishedName::new();
+        params
+            .distinguished_name
+            .push(DnType::CommonName, device_id);
+        params
+            .distinguished_name
+            .push(DnType::OrganizationName, "BSDM Agent");
+        params
+            .distinguished_name
+            .push(DnType::OrganizationalUnitName, platform);
+        if let Some(upn) = user_identity.filter(|u| !u.trim().is_empty()) {
+            // Prefer RFC822 SAN when identity looks like an email; otherwise CN-only.
+            if upn.contains('@') {
+                let email = upn
+                    .try_into()
+                    .map_err(|e| format!("user_identity email SAN: {e}"))?;
+                params.subject_alt_names.push(SanType::Rfc822Name(email));
+            }
+        }
+        // URI SAN: stable device identity reference (not a network endpoint).
+        let device_uri = format!("urn:bsdm:device:{device_id}");
+        let uri = device_uri
+            .as_str()
+            .try_into()
+            .map_err(|e| format!("device URI SAN: {e}"))?;
+        params.subject_alt_names.push(SanType::URI(uri));
+        params.key_usages = vec![
+            KeyUsagePurpose::DigitalSignature,
+            KeyUsagePurpose::KeyEncipherment,
+        ];
+        params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
+        params.is_ca = IsCa::NoCa;
+
+        // Validity window via rcgen helpers (avoid depending on `time` crate directly).
+        let days = validity_days.clamp(1, 825);
+        let now = chrono::Utc::now();
+        let start = now - chrono::Duration::minutes(5);
+        let end = now + chrono::Duration::days(i64::from(days));
+        params.not_before =
+            rcgen::date_time_ymd(start.year(), start.month() as u8, start.day().max(1) as u8);
+        params.not_after =
+            rcgen::date_time_ymd(end.year(), end.month() as u8, end.day().max(1) as u8);
+
+        let csr_params = CertificateSigningRequestParams {
+            params,
+            public_key: csr.public_key,
+        };
+        let issuer = self.issuer().map_err(|e| format!("CA issuer: {e}"))?;
+        let cert = csr_params
+            .signed_by(&issuer)
+            .map_err(|e| format!("sign client cert: {e}"))?;
+        let cert_pem = cert.pem();
+        let fingerprint_sha256 = hex::encode(Sha256::digest(cert.der()));
+        let subject = format!("CN={device_id}, OU={platform}, O=BSDM Agent");
+        Ok(AgentClientCert {
+            client_cert_pem: cert_pem,
+            ca_cert_pem: self.ca_cert_pem(),
+            subject,
+            fingerprint_sha256,
+            not_after_unix: end.timestamp().max(0) as u64,
+            validity_days: days,
+        })
+    }
+}
+
+/// Client certificate bundle returned from agent mTLS enroll.
+#[derive(Debug, Clone)]
+pub struct AgentClientCert {
+    pub client_cert_pem: String,
+    pub ca_cert_pem: String,
+    pub subject: String,
+    pub fingerprint_sha256: String,
+    pub not_after_unix: u64,
+    pub validity_days: u32,
 }
 
 fn build_server_config(
@@ -301,5 +402,35 @@ mod tests {
             .block_on(cache.server_config_for_domain("test.example.com"))
             .unwrap();
         assert!(!config.ignore_client_order);
+    }
+
+    #[test]
+    fn signs_agent_client_cert_from_csr() {
+        let ca_key = KeyPair::generate().unwrap();
+        let cache = CertCache::from_pem(ca_key.serialize_pem().as_bytes(), b"").unwrap();
+
+        let agent_key = KeyPair::generate().unwrap();
+        let mut csr_params = CertificateParams::new(Vec::<String>::new()).unwrap();
+        csr_params.distinguished_name = DistinguishedName::new();
+        csr_params
+            .distinguished_name
+            .push(DnType::CommonName, "csr-placeholder");
+        let csr = csr_params.serialize_request(&agent_key).unwrap();
+        let csr_pem = csr.pem().unwrap();
+
+        let signed = cache
+            .sign_agent_client_csr(
+                &csr_pem,
+                "laptop-mtls-001",
+                Some("alice@corp.example"),
+                "macos",
+                90,
+            )
+            .unwrap();
+        assert!(signed.client_cert_pem.contains("BEGIN CERTIFICATE"));
+        assert!(signed.ca_cert_pem.contains("BEGIN CERTIFICATE"));
+        assert_eq!(signed.fingerprint_sha256.len(), 64);
+        assert!(signed.subject.contains("laptop-mtls-001"));
+        assert!(signed.not_after_unix > 0);
     }
 }

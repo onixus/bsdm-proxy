@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Agent mTLS CSR enroll (#273)** — optional `csr_pem` on
+  `POST /api/v1/agent/enroll`; control plane signs ClientAuth cert with proxy
+  CA (`CertCache`), binds CN/URI SAN to `device_id` + platform; returns
+  `client_cert_pem` / `ca_cert_pem` / fingerprint; `agent-spike --mtls`.
+- **Agent enroll lab path (#273)** — `POST /api/v1/agent/enroll` issues
+  `device_token` (SHA-256 hashed on device registry); auth via
+  `AGENT_ENROLL_TOKEN` or `CONTROL_API_TOKEN`; agent endpoints accept
+  device Bearer or control token; revoke clears hash; `agent-spike --enroll`.
+- **Agent events telemetry (#273)** — `POST /api/v1/agent/events` batch ingest
+  (validate, `local-agent` metrics, optional Kafka/HTTP enqueue as `CacheEvent`),
+  lab `GET /api/v1/agent/events/recent` ring buffer; `agent-spike` posts decisions
+  after evaluate; smoke + contract docs.
+
 ## [0.9.2] - 2026-08-04
 
 Patch release after **0.9.1**: pilot observability pack, Phase C agent lab path

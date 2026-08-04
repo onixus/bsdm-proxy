@@ -38,6 +38,7 @@ name = "agent-spike"
 version = "0.1.0"
 dependencies = [
  "bsdm-events",
+ "rcgen",
  "reqwest 0.13.4",
  "serde",
  "serde_json",

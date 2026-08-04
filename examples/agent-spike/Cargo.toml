@@ -12,3 +12,4 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 reqwest = { workspace = true }
 bsdm-events = { workspace = true }
+rcgen = { version = "0.14", default-features = true, features = ["pem"] }

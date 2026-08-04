@@ -15,19 +15,26 @@ use tokio::sync::watch;
 use tracing::{info, warn};
 
 use crate::acl_api::AclApiState;
+use crate::agent_events::{AgentEventBatch, AgentEventIngestor};
 use crate::cache_key::http_cache_key;
-use crate::device_registry::{agent_policy_document, DeviceRegistry, HeartbeatUpdate, RevokeError};
+use crate::device_registry::{
+    agent_policy_document, DeviceRegistry, EnrollError, EnrollRequest, HeartbeatUpdate, RevokeError,
+};
 use crate::hierarchy_config::reload_static_peers;
 use crate::http_types::{full, Body};
 use crate::l2_cache::RedisL2Cache;
 use crate::metrics::Metrics;
 use crate::peers::PeerRegistry;
 use crate::pinning::PinningRegistry;
+use crate::pipeline::HttpEventPipeline;
+#[cfg(feature = "kafka")]
+use crate::pipeline::KafkaEventPipeline;
 use crate::runtime_config::{
     apply_env_map, config_snapshot, read_env_file, schedule_service_restart, write_acl_rules_file,
     write_env_file, ConfigApplyRequest, ConfigApplyResponse,
 };
 use crate::sharded_cache::HttpL1Cache;
+use crate::tls::CertCache;
 use crate::upstream::UpstreamClientHandle;
 
 #[derive(Serialize, Deserialize)]
@@ -524,6 +531,181 @@ impl ControlApiState {
             }
         }
     }
+
+    fn agent_events_ingest(&self, body: Bytes) -> Response<Body> {
+        let batch: AgentEventBatch = match serde_json::from_slice(&body) {
+            Ok(batch) => batch,
+            Err(e) => {
+                return json_response(
+                    StatusCode::BAD_REQUEST,
+                    &format!(
+                        r#"{{"error":"invalid events payload: {}"}}"#,
+                        escape_json(&e.to_string())
+                    ),
+                );
+            }
+        };
+        match self.agent_events.ingest(batch, &self.metrics) {
+            Ok(report) => json_response(
+                StatusCode::OK,
+                &serde_json::json!({
+                    "status": "accepted",
+                    "accepted": report.accepted,
+                    "enqueued": report.enqueued,
+                })
+                .to_string(),
+            ),
+            Err(err) => json_response(
+                StatusCode::BAD_REQUEST,
+                &serde_json::json!({ "error": err.message() }).to_string(),
+            ),
+        }
+    }
+
+    fn agent_events_recent(&self) -> Response<Body> {
+        let rows = self.agent_events.recent_snapshot(50);
+        json_response(
+            StatusCode::OK,
+            &serde_json::json!({ "events": rows }).to_string(),
+        )
+    }
+
+    fn agent_enroll(&self, body: Bytes) -> Response<Body> {
+        #[derive(Deserialize)]
+        struct EnrollDto {
+            #[serde(default)]
+            device_id: Option<String>,
+            platform: String,
+            #[serde(default)]
+            name: Option<String>,
+            #[serde(default)]
+            user_identity: Option<String>,
+            #[serde(default)]
+            capabilities: Vec<String>,
+            #[serde(default)]
+            device_type: Option<String>,
+            /// Optional PEM CSR for mTLS client certificate issuance.
+            #[serde(default)]
+            csr_pem: Option<String>,
+            /// Client cert validity in days (default 90, max 825).
+            #[serde(default)]
+            cert_validity_days: Option<u32>,
+        }
+        let dto: EnrollDto = match serde_json::from_slice(&body) {
+            Ok(dto) => dto,
+            Err(e) => {
+                return json_response(
+                    StatusCode::BAD_REQUEST,
+                    &format!(
+                        r#"{{"error":"invalid enroll payload: {}"}}"#,
+                        escape_json(&e.to_string())
+                    ),
+                );
+            }
+        };
+
+        let device_id_hint = dto
+            .device_id
+            .clone()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| format!("dev-{}", hex::encode(rand::random::<u64>().to_be_bytes())));
+
+        let mut client_cert_pem = None;
+        let mut ca_cert_pem = None;
+        let mut cert_not_after = None;
+        let mut cert_subject = None;
+        let mut cert_fingerprint = None;
+
+        if let Some(csr) = dto
+            .csr_pem
+            .as_ref()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+        {
+            let Some(cache) = self.cert_cache.as_ref() else {
+                return json_response(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    r#"{"error":"CSR provided but CA not loaded on control plane"}"#,
+                );
+            };
+            let days = dto.cert_validity_days.unwrap_or(90);
+            match cache.sign_agent_client_csr(
+                &csr,
+                &device_id_hint,
+                dto.user_identity.as_deref(),
+                &dto.platform,
+                days,
+            ) {
+                Ok(signed) => {
+                    client_cert_pem = Some(signed.client_cert_pem);
+                    ca_cert_pem = Some(signed.ca_cert_pem);
+                    cert_not_after = Some(signed.not_after_unix);
+                    cert_subject = Some(signed.subject);
+                    cert_fingerprint = Some(signed.fingerprint_sha256);
+                }
+                Err(e) => {
+                    return json_response(
+                        StatusCode::BAD_REQUEST,
+                        &serde_json::json!({ "error": format!("CSR sign failed: {e}") })
+                            .to_string(),
+                    );
+                }
+            }
+        }
+
+        match self.device_registry.enroll(EnrollRequest {
+            device_id: Some(device_id_hint),
+            platform: dto.platform,
+            name: dto.name,
+            user_identity: dto.user_identity,
+            capabilities: dto.capabilities,
+            device_type: dto.device_type,
+            cert_subject: cert_subject.clone(),
+            cert_fingerprint: cert_fingerprint.clone(),
+        }) {
+            Ok(result) => {
+                let mtls = client_cert_pem.is_some();
+                json_response(
+                    StatusCode::OK,
+                    &serde_json::json!({
+                        "status": "enrolled",
+                        "device_id": result.device_id,
+                        "device_token": result.device_token,
+                        "platform": result.platform,
+                        "enrolled_at": result.enrolled_at,
+                        "persisted": result.persisted,
+                        "reenrolled": result.reenrolled,
+                        "endpoints": {
+                            "policy": "/api/v1/agent/policy",
+                            "heartbeat": "/api/v1/agent/heartbeat",
+                            "events": "/api/v1/agent/events",
+                        },
+                        "auth": "Bearer device_token for agent endpoints (or CONTROL_API_TOKEN)",
+                        "mtls": mtls,
+                        "client_cert_pem": client_cert_pem,
+                        "ca_cert_pem": ca_cert_pem,
+                        "cert_subject": cert_subject,
+                        "cert_fingerprint": cert_fingerprint,
+                        "cert_not_after": cert_not_after,
+                        "note": if mtls {
+                            "device_token issued; client cert signed by proxy CA (ClientAuth EKU)"
+                        } else {
+                            "device_token issued; omit csr_pem for token-only enroll, or send CSR for mTLS cert"
+                        },
+                    })
+                    .to_string(),
+                )
+            }
+            Err(EnrollError::Revoked) => json_response(
+                StatusCode::CONFLICT,
+                &serde_json::json!({ "error": EnrollError::Revoked.message() }).to_string(),
+            ),
+            Err(err) => json_response(
+                StatusCode::BAD_REQUEST,
+                &serde_json::json!({ "error": err.message() }).to_string(),
+            ),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -549,6 +731,12 @@ pub struct ControlApiState {
     threat_sync: crate::threat_sync::ThreatSyncEngine,
     admin_console_dir: Option<std::path::PathBuf>,
     device_registry: DeviceRegistry,
+    agent_events: AgentEventIngestor,
+    /// Bootstrap token for `POST /api/v1/agent/enroll` (`AGENT_ENROLL_TOKEN`).
+    /// Falls back to control `api_token` when unset.
+    enroll_token: Option<String>,
+    /// CA used to sign agent client certs from CSR (shared MITM CA by default).
+    cert_cache: Option<CertCache>,
     shutdown_tx: Option<watch::Sender<bool>>,
     acl_api: Option<Arc<AclApiState>>,
 }
@@ -607,9 +795,18 @@ impl ControlApiState {
                     }
                 }),
             device_registry: DeviceRegistry::memory_only(),
+            agent_events: AgentEventIngestor::memory_only(),
+            enroll_token: None,
+            cert_cache: None,
             shutdown_tx: None,
             acl_api: None,
         }
+    }
+
+    /// Attach CertCache so enroll can sign mTLS client certificates from CSR.
+    pub fn with_cert_cache(mut self, cert_cache: CertCache) -> Self {
+        self.cert_cache = Some(cert_cache);
+        self
     }
 
     pub fn with_config_apply(
@@ -619,6 +816,20 @@ impl ControlApiState {
     ) -> Self {
         self.shutdown_tx = Some(shutdown_tx);
         self.acl_api = acl_api;
+        self
+    }
+
+    /// Attach Kafka and/or HTTP event pipelines so agent telemetry can reach CH.
+    pub fn with_event_pipelines(
+        mut self,
+        #[cfg(feature = "kafka")] kafka: Option<Arc<KafkaEventPipeline>>,
+        http: Option<Arc<HttpEventPipeline>>,
+    ) -> Self {
+        self.agent_events = AgentEventIngestor::with_pipelines(
+            #[cfg(feature = "kafka")]
+            kafka,
+            http,
+        );
         self
     }
 
@@ -660,6 +871,10 @@ impl ControlApiState {
         );
         state.fail_closed = crate::security_defaults::control_api_fail_closed();
         state.device_registry = DeviceRegistry::from_env();
+        state.enroll_token = std::env::var("AGENT_ENROLL_TOKEN")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
         state
     }
 
@@ -691,8 +906,22 @@ impl ControlApiState {
                     | (&Method::GET, "/api/hierarchy/peers")
                     | (&Method::GET, "/api/upstream/tls")
             );
-            if !public_api && !self.is_authorized(headers) {
-                return json_response(StatusCode::UNAUTHORIZED, r#"{"error":"unauthorized"}"#);
+            if !public_api {
+                let enroll_api = matches!(path, "/api/v1/agent/enroll" | "/api/agent/enroll");
+                let agent_api = path.starts_with("/api/v1/agent/")
+                    || path.starts_with("/api/agent/")
+                    || path == "/api/v1/devices"
+                    || path.starts_with("/api/v1/devices/");
+                let authorized = if enroll_api {
+                    self.is_enroll_authorized(headers)
+                } else if agent_api {
+                    self.is_agent_authorized(headers)
+                } else {
+                    self.is_authorized(headers)
+                };
+                if !authorized {
+                    return json_response(StatusCode::UNAUTHORIZED, r#"{"error":"unauthorized"}"#);
+                }
             }
         }
 
@@ -737,11 +966,20 @@ impl ControlApiState {
             (&Method::POST, "/api/pinning/exceptions/reload") => self.pinning_reload(body),
             (&Method::GET, "/api/v1/agent/policy") => self.agent_policy(),
             (&Method::POST, "/api/v1/agent/heartbeat") => self.agent_heartbeat(body).await,
+            (&Method::POST, "/api/v1/agent/events") => self.agent_events_ingest(body),
+            (&Method::GET, "/api/v1/agent/events/recent") => self.agent_events_recent(),
+            (&Method::POST, "/api/v1/agent/enroll") => self.agent_enroll(body),
             (&Method::GET, "/api/agent/policy") => {
                 deprecated_agent_alias(self.agent_policy(), "/api/v1/agent/policy")
             }
             (&Method::POST, "/api/agent/heartbeat") => {
                 deprecated_agent_alias(self.agent_heartbeat(body).await, "/api/v1/agent/heartbeat")
+            }
+            (&Method::POST, "/api/agent/events") => {
+                deprecated_agent_alias(self.agent_events_ingest(body), "/api/v1/agent/events")
+            }
+            (&Method::POST, "/api/agent/enroll") => {
+                deprecated_agent_alias(self.agent_enroll(body), "/api/v1/agent/enroll")
             }
             #[cfg(feature = "wasm")]
             (&Method::POST, "/api/wasm/reload") => self.wasm_reload(),
@@ -828,12 +1066,15 @@ impl ControlApiState {
         }
     }
 
-    fn is_authorized(&self, headers: &HeaderMap) -> bool {
-        let bearer = headers
+    fn extract_bearer<'a>(&self, headers: &'a HeaderMap) -> Option<&'a str> {
+        headers
             .get(AUTHORIZATION)
             .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.strip_prefix("Bearer "));
-        self.is_authorized_bearer(bearer)
+            .and_then(|v| v.strip_prefix("Bearer "))
+    }
+
+    fn is_authorized(&self, headers: &HeaderMap) -> bool {
+        self.is_authorized_bearer(self.extract_bearer(headers))
     }
 
     /// Shared auth check for REST and gRPC (`authorization: Bearer …`).
@@ -849,6 +1090,29 @@ impl ControlApiState {
             }),
             None => !self.fail_closed,
         }
+    }
+
+    /// Enroll bootstrap: `AGENT_ENROLL_TOKEN` if set, else control API token / open lab.
+    fn is_enroll_authorized(&self, headers: &HeaderMap) -> bool {
+        let bearer = self.extract_bearer(headers);
+        if let Some(expected) = &self.enroll_token {
+            return bearer.is_some_and(|token| {
+                crate::security_util::constant_time_eq(token.as_bytes(), expected.as_bytes())
+            });
+        }
+        self.is_authorized_bearer(bearer)
+    }
+
+    /// Agent contract endpoints: control token **or** enrolled device token.
+    fn is_agent_authorized(&self, headers: &HeaderMap) -> bool {
+        if self.is_authorized(headers) {
+            return true;
+        }
+        let Some(bearer) = self.extract_bearer(headers) else {
+            // Open lab when no control token and not fail-closed.
+            return self.api_token.is_none() && !self.fail_closed;
+        };
+        self.device_registry.device_token_valid(bearer)
     }
 
     /// Whether non-public control RPCs require a Bearer token.
@@ -1679,7 +1943,7 @@ mod tests {
     async fn agent_policy_and_heartbeat_endpoints() {
         let metrics = Arc::new(Metrics::new().unwrap());
         let cache = Arc::new(HttpL1Cache::new(100, 4));
-        let state = state_plain(metrics, cache);
+        let mut state = state_plain(metrics, cache);
 
         // Canonical versioned policy endpoint.
         let resp = state
@@ -1721,6 +1985,110 @@ mod tests {
         // Memory-only by default (no AGENT_DEVICES_PATH).
         assert_eq!(v["persisted"], false);
 
+        // Enroll → device_token (lab path).
+        let enroll_payload = Bytes::from(
+            r#"{"device_id":"laptop-001","platform":"macos","name":"Alice laptop","user_identity":"alice@corp"}"#,
+        );
+        let resp = state
+            .dispatch(
+                &Method::POST,
+                "/api/v1/agent/enroll",
+                enroll_payload,
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = BodyExt::collect(resp.into_body()).await.unwrap().to_bytes();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["status"], "enrolled");
+        assert!(v["device_token"]
+            .as_str()
+            .unwrap()
+            .starts_with("bsdmagent_"));
+        assert_eq!(v["mtls"], false);
+
+        // mTLS enroll: CSR → client cert when CA is attached.
+        let ca_key = rcgen::KeyPair::generate().unwrap();
+        let cache =
+            crate::tls::CertCache::from_pem(ca_key.serialize_pem().as_bytes(), b"").unwrap();
+        state.cert_cache = Some(cache);
+        let agent_key = rcgen::KeyPair::generate().unwrap();
+        let mut csr_params = rcgen::CertificateParams::new(Vec::<String>::new()).unwrap();
+        csr_params.distinguished_name = rcgen::DistinguishedName::new();
+        csr_params
+            .distinguished_name
+            .push(rcgen::DnType::CommonName, "ignored-csr-cn");
+        let csr_pem = csr_params
+            .serialize_request(&agent_key)
+            .unwrap()
+            .pem()
+            .unwrap();
+        let enroll_mtls = serde_json::json!({
+            "device_id": "laptop-mtls",
+            "platform": "linux",
+            "name": "MTLS box",
+            "user_identity": "bob@corp",
+            "csr_pem": csr_pem,
+            "cert_validity_days": 30
+        });
+        let resp = state
+            .dispatch(
+                &Method::POST,
+                "/api/v1/agent/enroll",
+                Bytes::from(enroll_mtls.to_string()),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = BodyExt::collect(resp.into_body()).await.unwrap().to_bytes();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["mtls"], true);
+        assert!(v["client_cert_pem"]
+            .as_str()
+            .unwrap()
+            .contains("BEGIN CERTIFICATE"));
+        assert!(v["ca_cert_pem"]
+            .as_str()
+            .unwrap()
+            .contains("BEGIN CERTIFICATE"));
+        assert_eq!(v["cert_fingerprint"].as_str().unwrap().len(), 64);
+
+        // Telemetry batch + recent ring buffer.
+        let events_payload = Bytes::from(
+            r#"{"device_id":"laptop-001","events":[{"domain":"badsite.test","action":"deny","decision_source":"local-agent","reason":"sni"},{"domain":"slack.com","action":"bypass"}]}"#,
+        );
+        let resp = state
+            .dispatch(
+                &Method::POST,
+                "/api/v1/agent/events",
+                events_payload,
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = BodyExt::collect(resp.into_body()).await.unwrap().to_bytes();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["status"], "accepted");
+        assert_eq!(v["accepted"], 2);
+        assert_eq!(v["enqueued"], 0);
+
+        let recent = state
+            .dispatch(
+                &Method::GET,
+                "/api/v1/agent/events/recent",
+                Bytes::new(),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(recent.status(), StatusCode::OK);
+        let body = BodyExt::collect(recent.into_body())
+            .await
+            .unwrap()
+            .to_bytes();
+        let recent: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(recent["events"].as_array().unwrap().len(), 2);
+        assert_eq!(recent["events"][0]["domain"], "slack.com");
+
         let devices = state
             .dispatch(
                 &Method::GET,
@@ -1735,11 +2103,24 @@ mod tests {
             .unwrap()
             .to_bytes();
         let devices: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(devices[0]["id"], "laptop-001");
-        assert_eq!(devices[0]["name"], "Alice laptop");
-        assert_eq!(devices[0]["status"], "Secured");
-        assert_eq!(devices[0]["trustScore"], 97);
-        assert!(devices[0]["lastSeen"].as_u64().unwrap() > 0);
+        let alice = devices
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["id"] == "laptop-001")
+            .expect("laptop-001 present");
+        assert_eq!(alice["name"], "Alice laptop");
+        assert_eq!(alice["status"], "Secured");
+        assert_eq!(alice["trustScore"], 97);
+        assert!(alice["lastSeen"].as_u64().unwrap() > 0);
+        assert!(
+            devices
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|d| d["id"] == "laptop-mtls"),
+            "mtls enroll device listed"
+        );
 
         let revoked = state
             .dispatch(

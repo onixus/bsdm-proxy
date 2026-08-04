@@ -270,6 +270,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         threat_score_cache.clone().spawn_poll_task();
     }
 
+    // Clone pipeline handles for control-plane agent event ingest before move into ProxyService.
+    #[cfg(feature = "kafka")]
+    let kafka_for_control = kafka_pipeline.clone();
+    let http_for_control = http_pipeline.clone();
+    let cert_cache_for_control = cert_cache.clone();
+
     let service = Arc::new(ProxyService::new(
         cert_cache,
         cache_config.clone(),
@@ -313,6 +319,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             session_store,
             threat_sync,
         )
+        .with_event_pipelines(
+            #[cfg(feature = "kafka")]
+            kafka_for_control,
+            http_for_control,
+        )
+        .with_cert_cache(cert_cache_for_control)
         .with_config_apply(shutdown_tx.clone(), acl_api.clone()),
     );
     info!(

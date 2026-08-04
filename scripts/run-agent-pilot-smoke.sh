@@ -56,16 +56,20 @@ echo "✅ GET /api/v1/agent/policy"
 
 export CONTROL_PLANE_URL
 export CONTROL_API_TOKEN
+export AGENT_ENROLL_TOKEN="${AGENT_ENROLL_TOKEN:-${CONTROL_API_TOKEN}}"
 export DEVICE_ID
 export DEVICE_NAME="${DEVICE_NAME:-Smoke Agent}"
 export DEVICE_TYPE="${DEVICE_TYPE:-desktop}"
+export DEVICE_PLATFORM="${DEVICE_PLATFORM:-linux}"
 export AGENT_ONCE=1
+# Force enroll so smoke validates token path (unset any leftover DEVICE_TOKEN)
+unset DEVICE_TOKEN || true
 
-if ! cargo run -q -p agent-spike -- --once; then
-  echo "❌ agent-spike --once failed" >&2
+if ! cargo run -q -p agent-spike -- --enroll --once; then
+  echo "❌ agent-spike --enroll --once failed" >&2
   exit 1
 fi
-echo "✅ agent-spike once-mode (policy pull + heartbeat)"
+echo "✅ agent-spike enroll + once-mode (policy + events + heartbeat)"
 
 devices_json="$(
   curl -fsS --max-time "$TIMEOUT" "${AUTH_HEADER[@]}" \
@@ -80,6 +84,24 @@ if ! echo "${devices_json}" | grep -q "${DEVICE_ID}"; then
   exit 1
 fi
 echo "✅ Device registered in GET /api/v1/devices"
+
+recent_json="$(
+  curl -fsS --max-time "$TIMEOUT" "${AUTH_HEADER[@]}" \
+    "${CONTROL_PLANE_URL}/api/v1/agent/events/recent" || true
+)"
+if [[ -z "${recent_json}" ]]; then
+  echo "❌ GET /api/v1/agent/events/recent failed" >&2
+  exit 1
+fi
+if ! echo "${recent_json}" | grep -q "${DEVICE_ID}"; then
+  echo "❌ Device ${DEVICE_ID} not in events/recent: ${recent_json}" >&2
+  exit 1
+fi
+if ! echo "${recent_json}" | grep -q 'local-agent\|"action"'; then
+  echo "❌ events/recent missing agent event fields: ${recent_json}" >&2
+  exit 1
+fi
+echo "✅ GET /api/v1/agent/events/recent has agent telemetry"
 
 # Optional: durable registry when AGENT_DEVICES_PATH is configured on proxy
 if [[ -n "${EXPECT_PERSISTED:-}" ]]; then

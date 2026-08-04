@@ -6,14 +6,16 @@ Minimal on-device SWG Local Policy Agent per **Agent Contract v0.1**
 
 ## What it does
 
-1. **Policy pull** — `GET /api/v1/agent/policy` (mode, MITM categories, pinning
+1. **Enroll** — `POST /api/v1/agent/enroll` → `device_token`; optional `--mtls`
+   CSR → client cert + CA PEM.
+2. **Policy pull** — `GET /api/v1/agent/policy` (mode, MITM categories, pinning
    exceptions, SNI deny patterns / `sni_rules`). Offline defaults if pull fails.
-2. **Local evaluation** — SNI deny, certificate-pinning bypass, selective MITM
+3. **Local evaluation** — SNI deny, certificate-pinning bypass, selective MITM
    heuristic; logs `decision_source = "local-agent"`.
-3. **Heartbeat** — `POST /api/v1/agent/heartbeat` with `device_id`, `name`,
-   `device_type`, `policy_version`, `agent_version`, `trust_score`.
+4. **Events** — `POST /api/v1/agent/events` batch of local decisions.
+5. **Heartbeat** — `POST /api/v1/agent/heartbeat` with inventory fields.
 
-Not included: mTLS enroll, events batch, policy push, OS system-proxy install.
+Not included: mTLS CSR, policy push, OS system-proxy install.
 
 ## Run
 
@@ -34,7 +36,12 @@ AGENT_ONCE=1 cargo run -p agent-spike -- --once
 | Variable | Default | Purpose |
 |---|---|---|
 | `CONTROL_PLANE_URL` | `http://127.0.0.1:9090` | Metrics/control base URL |
-| `CONTROL_API_TOKEN` | _(empty)_ | Bearer for production fail-closed control plane |
+| `CONTROL_API_TOKEN` | _(empty)_ | Operator Bearer / enroll fallback |
+| `AGENT_ENROLL_TOKEN` | falls back to control token | Bootstrap secret for enroll only |
+| `DEVICE_TOKEN` | _(empty)_ | Post-enroll agent Bearer (`bsdmagent_…`) |
+| `DEVICE_PLATFORM` | host OS | `linux` \| `macos` \| `windows` |
+| `AGENT_ENROLL` / `--enroll` | auto if no `DEVICE_TOKEN` | Force enroll |
+| `AGENT_MTLS` / `--mtls` | off | Enroll with CSR (needs proxy CA) |
 | `DEVICE_ID` | `dev-mac-001` | Stable device id |
 | `DEVICE_NAME` | `agent-{DEVICE_ID}` | Display name in `/api/v1/devices` |
 | `DEVICE_TYPE` | `desktop` | `desktop` \| `phone` |
