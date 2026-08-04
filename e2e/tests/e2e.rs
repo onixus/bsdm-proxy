@@ -289,10 +289,17 @@ async fn e2e_upstream_tls_accepts_test_ca() {
 #[tokio::test]
 async fn e2e_mitm_https_with_self_signed_ca() {
     let _guard = proxy_test_guard().await;
+    let mut extra_env = std::collections::HashMap::new();
+    // Force full MITM so this test actually exercises TLS termination (not tunnel).
+    extra_env.insert("POLICY_MODE".to_string(), "full-mitm".to_string());
+    extra_env.insert("DEPLOYMENT_PROFILE".to_string(), "test".to_string());
+    extra_env.insert("ALLOW_FULL_MITM".to_string(), "true".to_string());
+
     let harness = ProxyHarness::start(HarnessConfig {
         mitm_enabled: true,
         https_upstream_port: Some(8443),
         upstream_ca_cert: true,
+        extra_env,
         ..Default::default()
     })
     .await
@@ -307,6 +314,115 @@ async fn e2e_mitm_https_with_self_signed_ca() {
         response.text().await.expect("body"),
         "upstream-tls:/mitm-test"
     );
+
+    let metrics = reqwest::Client::new()
+        .get(harness.metrics_url("/metrics"))
+        .send()
+        .await
+        .expect("metrics")
+        .text()
+        .await
+        .expect("metrics body");
+    assert!(
+        metrics.contains("bsdm_proxy_policy_decision_source_total")
+            && metrics.contains("mitm"),
+        "full-mitm CONNECT should record decision_source=mitm"
+    );
+}
+
+/// #272: POLICY_MODE=sni must tunnel HTTPS — never TLS-terminate even with MITM_ENABLED.
+#[tokio::test]
+async fn e2e_policy_mode_sni_never_terminates_tls() {
+    let _guard = proxy_test_guard().await;
+    let mut extra_env = std::collections::HashMap::new();
+    extra_env.insert("POLICY_MODE".to_string(), "sni".to_string());
+    extra_env.insert("DEPLOYMENT_PROFILE".to_string(), "production".to_string());
+    // Even with MITM flag + categories that would decrypt under selective-mitm:
+    extra_env.insert(
+        "MITM_CATEGORIES".to_string(),
+        "malware,phishing,illegal-content".to_string(),
+    );
+
+    let harness = ProxyHarness::start(HarnessConfig {
+        mitm_enabled: true,
+        https_upstream_port: Some(8445),
+        upstream_ca_cert: true,
+        extra_env,
+        ..Default::default()
+    })
+    .await
+    .expect("start proxy POLICY_MODE=sni");
+
+    let metrics_before = reqwest::Client::new()
+        .get(harness.metrics_url("/metrics"))
+        .send()
+        .await
+        .expect("metrics before")
+        .text()
+        .await
+        .expect("metrics before body");
+
+    let client = harness.proxy_mitm_client().expect("HTTPS client via proxy");
+    let url = harness.mitm_upstream_url("/sni-mode-no-mitm");
+    let response = client.get(&url).send().await.expect("HTTPS GET via sni mode");
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    assert_eq!(
+        response.text().await.expect("body"),
+        "upstream-tls:/sni-mode-no-mitm"
+    );
+
+    let metrics_after = reqwest::Client::new()
+        .get(harness.metrics_url("/metrics"))
+        .send()
+        .await
+        .expect("metrics after")
+        .text()
+        .await
+        .expect("metrics after body");
+
+    let mitm_before = metric_counter(&metrics_before, "bsdm_proxy_policy_decision_source_total", "mitm");
+    let mitm_after = metric_counter(&metrics_after, "bsdm_proxy_policy_decision_source_total", "mitm");
+    let sni_before = metric_counter(&metrics_before, "bsdm_proxy_policy_decision_source_total", "sni");
+    let sni_after = metric_counter(&metrics_after, "bsdm_proxy_policy_decision_source_total", "sni");
+
+    assert_eq!(
+        mitm_after, mitm_before,
+        "POLICY_MODE=sni must not increment decision_source=mitm (before={mitm_before} after={mitm_after})"
+    );
+    assert!(
+        sni_after > sni_before,
+        "POLICY_MODE=sni CONNECT should record decision_source=sni (before={sni_before} after={sni_after})"
+    );
+
+    // Runtime surface: /api/config (or health-adjacent) should advertise sni if exposed.
+    let config = reqwest::Client::new()
+        .get(harness.metrics_url("/api/config"))
+        .send()
+        .await;
+    if let Ok(resp) = config {
+        if resp.status().is_success() {
+            if let Ok(v) = resp.json::<serde_json::Value>().await {
+                if let Some(mode) = v.get("policy_mode").and_then(|m| m.as_str()) {
+                    assert_eq!(mode, "sni", "runtime policy_mode must report sni");
+                }
+            }
+        }
+    }
+}
+
+fn metric_counter(body: &str, name: &str, source: &str) -> f64 {
+    // Match: bsdm_proxy_policy_decision_source_total{source="mitm"} 1
+    let needle = format!("{name}{{source=\"{source}\"}}");
+    for line in body.lines() {
+        if line.starts_with(&needle) || line.contains(&needle) {
+            if let Some(val) = line.split_whitespace().last() {
+                if let Ok(n) = val.parse::<f64>() {
+                    return n;
+                }
+            }
+        }
+    }
+    0.0
 }
 
 #[tokio::test]

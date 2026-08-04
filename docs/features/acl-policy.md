@@ -18,6 +18,27 @@ Flexible access control system for BSDM-Proxy with multiple rule types, policy r
 - ✅ **Priority system** - Fine-grained control
 - ✅ **Actions** - Allow, Deny, Redirect
 
+## Hybrid `POLICY_MODE` and TLS termination
+
+| Mode | Env value | TLS termination (MITM) |
+|---|---|---|
+| Selective MITM (default) | `selective-mitm` | Only when host categories intersect `MITM_CATEGORIES` |
+| SNI-only | `sni` | **Never** — CONNECT is always a pure tunnel |
+| Full MITM | `full-mitm` | All HTTPS MITM ports (blocked in `DEPLOYMENT_PROFILE=production` unless `ALLOW_FULL_MITM=true`) |
+
+### Invariant (#272)
+
+`POLICY_MODE=sni` must **never** terminate TLS:
+
+1. Classified first in `classify_tls_policy_decision` (category / pinning / `MITM_ENABLED` cannot override).
+2. `ProxyService::tls_policy_decision` short-circuits in SNI mode before categorization.
+3. CONNECT path uses `handle_connect_tunnel` when `tls_decision.mitm == false`.
+4. Automated coverage:
+   - unit: `policy_mode_sni_never_sets_mitm_true` in `proxy/src/proxy_service.rs`
+   - e2e: `e2e_policy_mode_sni_never_terminates_tls` (asserts `decision_source=mitm` does not increase)
+
+Startup logs `TLS policy startup: … policy_mode=…`. Runtime: control API exposes `policy_mode` (see [control-plane](control-plane.md)).
+
 ## Rule Types
 
 ### 1. Domain Rules

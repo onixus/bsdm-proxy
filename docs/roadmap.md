@@ -23,6 +23,7 @@ Roadmap определяет порядок работ в рамках стра�
 - [x] Селективный MITM по списку категорий (`MITM_CATEGORIES=malware,phishing,illegal-content`).
 - [x] Изменение порта прокси по умолчанию с `1488` на `3128`.
 - [x] Расширенная наблюдаемость исключений (`decision_source` = `dns | sni | mitm | pinning-bypass`).
+- [x] Верификация инварианта `POLICY_MODE=sni` never terminates TLS (unit + e2e + docs, #272).
 
 ---
 

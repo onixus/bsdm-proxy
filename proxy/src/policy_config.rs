@@ -8,10 +8,19 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::{info, warn};
 
+/// Hybrid TLS / inspection policy for CONNECT handling.
+///
+/// # SNI mode invariant (#272)
+/// [`PolicyMode::Sni`] never performs TLS termination. MITM is reserved for
+/// [`PolicyMode::SelectiveMitm`] (category match) and [`PolicyMode::FullMitm`]
+/// (all MITM ports; production-gated).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PolicyMode {
+    /// ClientHello / SNI only — pure CONNECT tunnel, no decrypt.
     Sni,
+    /// Decrypt only when host categories hit `MITM_CATEGORIES`.
     SelectiveMitm,
+    /// Decrypt all MITM-eligible ports (not allowed in production by default).
     FullMitm,
 }
 

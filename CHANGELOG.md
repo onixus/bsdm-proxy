@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **SNI policy invariant verification (#272)** — `POLICY_MODE=sni` hard-gates TLS
+  termination (no MITM regardless of `MITM_ENABLED` / categories), with exhaustive
+  unit coverage, e2e proof via `decision_source` metrics, and documentation in
+  `docs/features/acl-policy.md`.
 - **Hybrid pilot load-test profile (#269)** — Reproducible
   `scripts/run-hybrid-load-test.sh` with latency p50/p95/p99, error rate,
   `decision_source` deltas, markdown results under

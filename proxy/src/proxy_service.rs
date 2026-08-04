@@ -68,12 +68,27 @@ pub(crate) struct TlsPolicyDecision {
     pub bypass_reason: Option<&'static str>,
 }
 
+/// Classify whether CONNECT should terminate TLS (MITM) for a domain.
+///
+/// # Invariant (#272)
+/// `PolicyMode::Sni` **never** returns `mitm: true`, regardless of
+/// `mitm_enabled`, pinning, or selective-category hints. Callers must still
+/// skip MITM for non-TLS ports via [`crate::tls::should_mitm_port`].
 fn classify_tls_policy_decision(
     mitm_enabled: bool,
     pinned: bool,
     policy_mode: crate::policy_config::PolicyMode,
     selective_mitm: bool,
 ) -> TlsPolicyDecision {
+    // Hard gate: SNI-only mode is pure tunnel — no TLS termination path.
+    // Evaluated first so category hints cannot override the mode.
+    if policy_mode == crate::policy_config::PolicyMode::Sni {
+        return TlsPolicyDecision {
+            mitm: false,
+            decision_source: "sni",
+            bypass_reason: Some("policy_mode_sni"),
+        };
+    }
     if !mitm_enabled {
         return TlsPolicyDecision {
             mitm: false,
@@ -89,11 +104,6 @@ fn classify_tls_policy_decision(
         };
     }
     match policy_mode {
-        crate::policy_config::PolicyMode::Sni => TlsPolicyDecision {
-            mitm: false,
-            decision_source: "sni",
-            bypass_reason: Some("policy_mode_sni"),
-        },
         crate::policy_config::PolicyMode::FullMitm => TlsPolicyDecision {
             mitm: true,
             decision_source: "mitm",
@@ -107,6 +117,12 @@ fn classify_tls_policy_decision(
             } else {
                 Some("category_not_selected_for_mitm")
             },
+        },
+        // Defensive: Sni is handled at the top of this function.
+        crate::policy_config::PolicyMode::Sni => TlsPolicyDecision {
+            mitm: false,
+            decision_source: "sni",
+            bypass_reason: Some("policy_mode_sni"),
         },
     }
 }
@@ -384,6 +400,28 @@ pub struct ProxyService {
 
 impl ProxyService {
     pub(crate) fn tls_policy_decision(&self, domain: &str) -> TlsPolicyDecision {
+        // SNI mode: never evaluate categories or MITM enablement for termination.
+        if self.policy_mode == crate::policy_config::PolicyMode::Sni {
+            let decision = classify_tls_policy_decision(
+                self.mitm_enabled,
+                false,
+                crate::policy_config::PolicyMode::Sni,
+                false,
+            );
+            debug_assert!(!decision.mitm, "POLICY_MODE=sni must never terminate TLS");
+            self.metrics
+                .record_policy_decision_source(decision.decision_source);
+            info!(
+                domain = %domain,
+                policy_mode = %self.policy_mode,
+                decision_source = decision.decision_source,
+                mitm = false,
+                bypass_reason = decision.bypass_reason.unwrap_or("none"),
+                "TLS policy decision"
+            );
+            return decision;
+        }
+
         let pinned = self.pinning_registry.matches(domain);
 
         let selective_mitm = if self.mitm_enabled
@@ -2772,6 +2810,29 @@ mod decision_source_tests {
                 classify_tls_policy_decision(enabled, pinned, mode, selective_mitm),
                 expected
             );
+        }
+    }
+
+    /// #272: POLICY_MODE=sni never terminates TLS — exhaustive flag combinations.
+    #[test]
+    fn policy_mode_sni_never_sets_mitm_true() {
+        for mitm_enabled in [false, true] {
+            for pinned in [false, true] {
+                for selective_mitm in [false, true] {
+                    let d = classify_tls_policy_decision(
+                        mitm_enabled,
+                        pinned,
+                        PolicyMode::Sni,
+                        selective_mitm,
+                    );
+                    assert!(
+                        !d.mitm,
+                        "Sni mode mitm=true for enabled={mitm_enabled} pinned={pinned} selective={selective_mitm}"
+                    );
+                    assert_eq!(d.decision_source, "sni");
+                    assert_eq!(d.bypass_reason, Some("policy_mode_sni"));
+                }
+            }
         }
     }
 
