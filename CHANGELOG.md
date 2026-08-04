@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Reject `POLICY_MODE=full-mitm` in the default `production` deployment profile;
   local development/test use now requires an explicit `ALLOW_FULL_MITM=true` override.
+- Update optional WASM runtime `wasmtime` to 46.0.2 to address
+  RUSTSEC-2026-0222 and RUSTSEC-2026-0223.
 
 ### Added
 
