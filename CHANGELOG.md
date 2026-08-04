@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-08-04
+
+Patch release after **0.9.4**: agent **policy push** (long-poll, SSE, operator
+notify) so on-device agents pick up policy changes without waiting for the
+heartbeat pull cycle.
+
 ### Added
 
 - **Agent policy push (#273)** — versioned policy hub; long-poll
