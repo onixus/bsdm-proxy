@@ -4,7 +4,7 @@ use bytes::Bytes;
 use http_body_util::BodyExt;
 use hyper::body::Incoming;
 use hyper::header::HeaderValue;
-use hyper::header::AUTHORIZATION;
+use hyper::header::{AUTHORIZATION, LOCATION};
 use hyper::{HeaderMap, Method, Request, Response, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -612,7 +612,6 @@ pub struct ControlApiState {
     awg_server: Arc<tokio::sync::RwLock<crate::amneziawg::AwgServerConfig>>,
     session_store: crate::session_store::GlobalSessionStore,
     threat_sync: crate::threat_sync::ThreatSyncEngine,
-    trust_ui_dir: Option<std::path::PathBuf>,
     admin_console_dir: Option<std::path::PathBuf>,
     devices: Arc<RwLock<HashMap<String, RegisteredDevice>>>,
     shutdown_tx: Option<watch::Sender<bool>>,
@@ -659,17 +658,6 @@ impl ControlApiState {
             )),
             session_store,
             threat_sync,
-            trust_ui_dir: std::env::var("TRUST_UI_DIR")
-                .ok()
-                .map(std::path::PathBuf::from)
-                .or_else(|| {
-                    let p = std::path::PathBuf::from("./trust-ui/dist");
-                    if p.exists() {
-                        Some(p)
-                    } else {
-                        None
-                    }
-                }),
             admin_console_dir: std::env::var("ADMIN_CONSOLE_DIR")
                 .ok()
                 .map(std::path::PathBuf::from)
@@ -840,17 +828,29 @@ impl ControlApiState {
             return json_response(StatusCode::BAD_REQUEST, r#"{"error":"invalid path"}"#);
         }
 
-        let base_dir = if path.starts_with("/admin") {
-            self.admin_console_dir
-                .clone()
-                .unwrap_or_else(|| std::path::PathBuf::from("./admin-console/dist"))
-        } else {
-            self.trust_ui_dir
-                .clone()
-                .unwrap_or_else(|| std::path::PathBuf::from("./trust-ui/dist"))
-        };
+        // Admin Console is the canonical operator surface. Keep legacy entry
+        // points as redirects so existing bookmarks converge on one UI.
+        if path == "/" || path == "/admin" || path == "/trust" || path.starts_with("/trust/") {
+            return Response::builder()
+                .status(StatusCode::PERMANENT_REDIRECT)
+                .header(LOCATION, "/admin/")
+                .body(full(Bytes::new()))
+                .unwrap_or_else(|_| {
+                    json_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        r#"{"error":"internal error"}"#,
+                    )
+                });
+        }
 
-        let relative_path = path.trim_start_matches('/');
+        let base_dir = self
+            .admin_console_dir
+            .clone()
+            .unwrap_or_else(|| std::path::PathBuf::from("./admin-console/dist"));
+
+        let relative_path = path
+            .strip_prefix("/admin/")
+            .unwrap_or_else(|| path.trim_start_matches('/'));
         let target = if relative_path.is_empty() {
             base_dir.join("index.html")
         } else {
@@ -1662,6 +1662,51 @@ mod tests {
 
         let resp_null = state.serve_static_ui("/index.html\0.png").await;
         assert_eq!(resp_null.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn legacy_ui_entries_redirect_to_admin_console() {
+        let metrics = Arc::new(Metrics::new().unwrap());
+        let cache = Arc::new(HttpL1Cache::new(100, 4));
+        let state = state_plain(metrics, cache);
+
+        for path in ["/", "/admin", "/trust", "/trust/", "/trust/devices"] {
+            let resp = state.serve_static_ui(path).await;
+            assert_eq!(resp.status(), StatusCode::PERMANENT_REDIRECT, "{path}");
+            assert_eq!(resp.headers().get(LOCATION).unwrap(), "/admin/", "{path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn admin_console_serves_prefixed_routes_and_assets() {
+        let metrics = Arc::new(Metrics::new().unwrap());
+        let cache = Arc::new(HttpL1Cache::new(100, 4));
+        let mut state = state_plain(metrics, cache);
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("assets")).unwrap();
+        std::fs::write(dir.path().join("index.html"), "admin-index").unwrap();
+        std::fs::write(dir.path().join("assets/app.js"), "admin-asset").unwrap();
+        state.admin_console_dir = Some(dir.path().to_path_buf());
+
+        let index = state.serve_static_ui("/admin/").await;
+        assert_eq!(index.status(), StatusCode::OK);
+        assert_eq!(
+            BodyExt::collect(index.into_body())
+                .await
+                .unwrap()
+                .to_bytes(),
+            "admin-index"
+        );
+
+        let asset = state.serve_static_ui("/admin/assets/app.js").await;
+        assert_eq!(asset.status(), StatusCode::OK);
+        assert_eq!(
+            BodyExt::collect(asset.into_body())
+                .await
+                .unwrap()
+                .to_bytes(),
+            "admin-asset"
+        );
     }
 
     #[tokio::test]

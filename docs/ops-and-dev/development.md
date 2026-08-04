@@ -292,7 +292,7 @@ ls scripts/archive/
 | Workflow | Trigger | Description |
 |----------|---------|-------------|
 | [ci.yml](../../.github/workflows/ci.yml) | push/PR → main | fmt, clippy, build, tests (unit + e2e + smoke), cargo-audit |
-| [trust-ui.yml](../../.github/workflows/trust-ui.yml) | push/PR → main | npm build & typecheck for trust-ui |
+| [trust-ui.yml](../../.github/workflows/trust-ui.yml) | push/PR → main | build-check experimental/deprecated Trust-UI reference |
 | [admin-console.yml](../../.github/workflows/admin-console.yml) | push/PR → main | npm lint & build for admin-console |
 | [load-test.yml](../../.github/workflows/load-test.yml) | push/PR → main | wrk high-intensity load test |
 | [release.yml](../../.github/workflows/release.yml) | push tag `v*` / manual | test, build packages, GitHub Release |

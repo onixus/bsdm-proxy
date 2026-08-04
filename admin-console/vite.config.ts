@@ -15,10 +15,10 @@ const bearerHeaders = (token: string | undefined) =>
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  base: '/admin/',
   define: {
     __APP_VERSION__: JSON.stringify(appVersion),
   },
-  base: '/',
   server: {
     port: 5173,
     proxy: {

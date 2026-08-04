@@ -2,6 +2,10 @@
 
 Unified **single pane of glass** for BSDM-Proxy: monitoring dashboard, traffic logs with explainable ML decisions, ACL policies, and configuration export.
 
+This is the only supported operator UI. The canonical embedded entry point is
+`/admin/`; `/` and legacy `/trust` paths redirect there. See
+[ADR 0006](../docs/adr/0006-single-operator-console.md).
+
 Replaces the legacy static [`web-config/`](../web-config/) generator with a modern React SPA.
 
 ## Stack
@@ -30,6 +34,11 @@ Replaces the legacy static [`web-config/`](../web-config/) generator with a mode
 | `/users` | Basic-auth user management |
 | `/settings` | Live node state + config generator (cache, auth, filtering, threat/ML, hierarchy/TLS, rate-limit/eBPF/Wasm, events) |
 
+These pages replace the supported overlap with the former standalone Trust-UI:
+Dashboard owns node/security posture, Logs owns the recent decision stream, and
+Threat Scores owns ML posture. Endpoint inventory remains deferred with the
+Agent and is not represented as a working operator feature.
+
 The default sidebar only advertises the supported Hybrid operator paths above.
 Frozen modules remain directly routable for development and compatibility, but
 are intentionally hidden from primary navigation:
@@ -56,7 +65,7 @@ shown on the core Policies workflow.
 cd admin-console
 npm install
 npm run dev
-# → http://127.0.0.1:5173
+# → http://127.0.0.1:5173/admin/
 ```
 
 ### Production build
@@ -67,11 +76,9 @@ npm run preview
 # static output in dist/
 ```
 
-Serve `dist/` behind nginx or embed in your deployment. Example:
-
-```bash
-docker run -d -p 8080:80 -v $(pwd)/admin-console/dist:/usr/share/nginx/html:ro nginx:alpine
-```
+The production bundle uses `/admin/` as its asset and router base. Serve it on
+that path with an SPA fallback to `/admin/index.html`, or let BSDM-Proxy serve
+`dist/` through native UI routing.
 
 ## API integration
 

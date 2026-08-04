@@ -31,8 +31,8 @@ bsdm-proxy/
 ├── bsdm-events/            # Shared event schema
 ├── bsdm-wasm-sdk/          # WASM SDK
 ├── e2e/                    # Integration test harness
-├── admin-console/          # React SPA управления (`/admin/`)
-├── trust-ui/               # End-user Trust portal SPA (`/trust/`)
+├── admin-console/          # Поддерживаемая operator SPA (`/admin/`)
+├── trust-ui/               # Experimental/deprecated posture reference
 ├── charts/bsdm/            # Helm chart
 ├── packaging/              # systemd package и env examples
 ├── config/                 # ACL examples
@@ -59,7 +59,9 @@ bsdm-proxy/
 | `docker-compose.ha.yml` | HA lab sketch |
 | `docker-compose.awg.yml` | Experimental AWG sidecar |
 
-Основной Compose включает `dns-sinkhole` в базовом стеке; профили опциональных компонентов: `alerts`, `ml`, `icap`.
+Основной Compose включает `dns-sinkhole` в базовом стеке; профили опциональных
+компонентов: `alerts`, `ml`, `icap`. Legacy Trust-UI запускается только явным
+профилем `experimental-trust-ui`; поддерживаемая операторская UI — Admin Console.
 
 ## Конфигурация и данные
 

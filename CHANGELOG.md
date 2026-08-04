@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Update optional WASM runtime `wasmtime` to 46.0.2 to address
   RUSTSEC-2026-0222 and RUSTSEC-2026-0223.
 
+### Changed
+
+- Make Admin Console the only supported operator UI, redirect legacy `/trust`
+  entry points to `/admin/`, and move standalone Trust-UI behind an explicit
+  experimental Compose profile.
+
 ### Added
 
 - **Policy decision-source observability** — Added bounded Prometheus counters,
