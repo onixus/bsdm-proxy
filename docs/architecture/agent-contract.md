@@ -20,7 +20,9 @@ policy and heartbeat endpoints.
 - Spike client: enroll (`--mtls` for CSR), policy, evaluate, events, heartbeat
   ([pilot-agent.md](../getting-started/pilot-agent.md)).
 - Optional transport: `CONTROL_MTLS_ENABLED` HTTPS port requiring client cert.
-- Reserved: policy push, CRL/OCSP.
+- Policy push: long-poll `/policy/watch`, SSE `/policy/stream`, operator
+  `POST /policy/push` (+ pinning reload notify).
+- Reserved: CRL/OCSP, WebSocket/gRPC push productization.
 
 ---
 
@@ -100,8 +102,16 @@ by the proxy/agent CA. Plain `METRICS_PORT` stays HTTP for scrapers/Admin.
   from `AGENT_SNI_DENY_PATTERNS` (comma-separated) or pilot defaults.
   `dns_sinkhole` / RPZ version is reserved (not yet in this payload).
 
-### 2.2 Policy Push (WebSocket / gRPC Stream)
-- Control plane notifies agents when policy version changes.
+### 2.2 Policy Push (lab: long-poll + SSE)
+
+- **`GET /api/v1/agent/policy/watch?since={version}&timeout_secs=30`** — long-poll
+  until `policy_version` changes (or timeout; response includes `changed` bool).
+- **`GET /api/v1/agent/policy/stream`** — SSE (`text/event-stream`); events
+  `policy` with full JSON document; comment pings every ~15s.
+- **`POST /api/v1/agent/policy/push`** — operator rebuild from env + pinning and
+  notify subscribers (`reason`, `actor` optional). Also fired after pinning
+  exception reload.
+- `policy_version` is a content-derived `v` + hex prefix (advances on each push).
 
 ---
 

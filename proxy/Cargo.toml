@@ -16,7 +16,7 @@ hyper-util = { version = "0.1", features = ["full"] }
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 http-body = "1"
-http-body-util = "0.1"
+http-body-util = { version = "0.1", features = ["channel"] }
 quick_cache = "0.7"
 redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
 rand = "0.9"

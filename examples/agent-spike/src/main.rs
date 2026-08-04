@@ -130,6 +130,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         agent_clone.run_heartbeat_loop().await;
     });
 
+    // Optional policy push long-poll (default on).
+    let policy_push = !matches!(
+        std::env::var("AGENT_POLICY_PUSH").as_deref(),
+        Ok("0") | Ok("false") | Ok("FALSE") | Ok("no") | Ok("off")
+    ) && !std::env::args().any(|a| a == "--no-policy-push");
+    if policy_push {
+        let agent_watch = agent.clone();
+        let timeout_secs: u64 = std::env::var("AGENT_POLICY_WATCH_SECS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(25);
+        tokio::spawn(async move {
+            agent_watch.watch_policy_loop(timeout_secs).await;
+        });
+        info!(timeout_secs, "Policy push watch loop enabled");
+    }
+
     info!("Agent spike running. Press Ctrl+C to exit.");
     tokio::signal::ctrl_c().await?;
     info!("Agent spike shutdown.");

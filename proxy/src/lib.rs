@@ -4,6 +4,7 @@ pub mod acl;
 pub mod acl_api;
 pub mod acl_config;
 pub mod agent_events;
+pub mod agent_policy_hub;
 pub mod amneziawg;
 pub mod auth;
 #[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]

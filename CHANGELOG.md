@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Agent policy push (#273)** — versioned policy hub; long-poll
+  `GET /api/v1/agent/policy/watch`, SSE `GET /api/v1/agent/policy/stream`,
+  operator `POST /api/v1/agent/policy/push`; auto-push on pinning reload;
+  `agent-spike` watch loop (`AGENT_POLICY_PUSH`, default on).
+
 ## [0.9.4] - 2026-08-04
 
 Patch release after **0.9.3**: optional agent control-plane **mTLS transport**

@@ -149,6 +149,29 @@ curl -fsS --cacert ca.crt --cert device.crt --key device.key \
 
 Details: [control-plane-security.md](../ops-and-dev/control-plane-security.md).
 
+### Policy push (long-poll)
+
+Agents default to watching for policy updates (disable with
+`AGENT_POLICY_PUSH=0` or `--no-policy-push`):
+
+```bash
+# Operator: rebuild + notify all watchers
+curl -sS -X POST -H "Authorization: Bearer ${CONTROL_API_TOKEN}" \
+  -H 'Content-Type: application/json' \
+  --data '{"reason":"pinning-update","actor":"ops"}' \
+  http://127.0.0.1:9090/api/v1/agent/policy/push
+
+# Agent long-poll (or rely on spike watch loop)
+curl -sS -H "Authorization: Bearer ${DEVICE_TOKEN}" \
+  "http://127.0.0.1:9090/api/v1/agent/policy/watch?since=vOLD&timeout_secs=30"
+
+# SSE (curl -N)
+curl -NsS -H "Authorization: Bearer ${DEVICE_TOKEN}" \
+  http://127.0.0.1:9090/api/v1/agent/policy/stream
+```
+
+Pinning reload (`POST /api/pinning/exceptions/reload`) also publishes a push.
+
 ## Run continuous spike
 
 ```bash

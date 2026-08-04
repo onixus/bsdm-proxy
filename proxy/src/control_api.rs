@@ -8,7 +8,7 @@ use hyper::header::{AUTHORIZATION, LOCATION};
 use hyper::{HeaderMap, Method, Request, Response, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 #[cfg(test)]
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::watch;
@@ -16,9 +16,10 @@ use tracing::{info, warn};
 
 use crate::acl_api::AclApiState;
 use crate::agent_events::{AgentEventBatch, AgentEventIngestor};
+use crate::agent_policy_hub::PolicyHub;
 use crate::cache_key::http_cache_key;
 use crate::device_registry::{
-    agent_policy_document, DeviceRegistry, EnrollError, EnrollRequest, HeartbeatUpdate, RevokeError,
+    DeviceRegistry, EnrollError, EnrollRequest, HeartbeatUpdate, RevokeError,
 };
 use crate::hierarchy_config::reload_static_peers;
 use crate::http_types::{full, Body};
@@ -401,12 +402,127 @@ impl ControlApiState {
     }
 
     fn agent_policy(&self) -> Response<Body> {
-        let dto = agent_policy_document(
-            crate::policy_config::configured_policy_mode().as_str(),
-            &crate::policy_config::configured_mitm_categories(),
-            &self.pinning_registry.active_domains(),
-        );
-        json_response(StatusCode::OK, &dto.to_string())
+        let snap = self.policy_hub.snapshot();
+        json_response(StatusCode::OK, &snap.document.to_string())
+    }
+
+    /// Long-poll until policy_version changes (`?since=&timeout_secs=`).
+    async fn agent_policy_watch(&self, query: Option<&str>) -> Response<Body> {
+        let mut since: Option<String> = None;
+        let mut timeout_secs: u64 = 30;
+        if let Some(q) = query {
+            for pair in q.split('&') {
+                if let Some((k, v)) = pair.split_once('=') {
+                    match k {
+                        "since" => {
+                            if !v.is_empty() {
+                                since = Some(v.to_string());
+                            }
+                        }
+                        "timeout_secs" => {
+                            if let Ok(n) = v.parse::<u64>() {
+                                timeout_secs = n.clamp(1, 120);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        let (snap, changed) = self
+            .policy_hub
+            .wait_change(since.as_deref(), Duration::from_secs(timeout_secs))
+            .await;
+        let mut body = snap.document;
+        body["changed"] = serde_json::Value::Bool(changed);
+        body["timeout"] = serde_json::Value::Bool(!changed);
+        json_response(StatusCode::OK, &body.to_string())
+    }
+
+    /// SSE stream of policy pushes (`text/event-stream`).
+    fn agent_policy_stream(&self) -> Response<Body> {
+        use http_body_util::channel::Channel;
+        use std::convert::Infallible;
+
+        let hub = self.policy_hub.clone();
+        let (mut tx, body) = Channel::<Bytes, Infallible>::new(8);
+        tokio::spawn(async move {
+            // Immediate snapshot so clients sync without a separate pull.
+            let mut last = hub.snapshot().version;
+            let initial = hub.snapshot();
+            let data = format!("event: policy\ndata: {}\n\n", initial.document);
+            if tx.send_data(Bytes::from(data)).await.is_err() {
+                return;
+            }
+            let notify = hub.notify_handle();
+            let mut ping = tokio::time::interval(Duration::from_secs(15));
+            loop {
+                tokio::select! {
+                    _ = notify.notified() => {
+                        let snap = hub.snapshot();
+                        if snap.version == last {
+                            continue;
+                        }
+                        last = snap.version.clone();
+                        let data = format!("event: policy\ndata: {}\n\n", snap.document);
+                        if tx.send_data(Bytes::from(data)).await.is_err() {
+                            break;
+                        }
+                    }
+                    _ = ping.tick() => {
+                        if tx.send_data(Bytes::from_static(b": ping\n\n")).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+
+        let boxed = body.map_err(|e: Infallible| match e {}).boxed();
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "text/event-stream")
+            .header("Cache-Control", "no-cache")
+            .header("Connection", "keep-alive")
+            .body(boxed)
+            .unwrap_or_else(|_| {
+                json_response(StatusCode::INTERNAL_SERVER_ERROR, r#"{"error":"sse body"}"#)
+            })
+    }
+
+    /// Operator: rebuild policy from env+pinning and notify subscribers.
+    fn agent_policy_push(&self, body: Bytes) -> Response<Body> {
+        #[derive(Deserialize)]
+        struct PushDto {
+            #[serde(default)]
+            reason: Option<String>,
+            #[serde(default)]
+            actor: Option<String>,
+        }
+        let dto: PushDto = serde_json::from_slice(&body).unwrap_or(PushDto {
+            reason: None,
+            actor: None,
+        });
+        let reason = dto
+            .reason
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "manual-push".into());
+        let actor = dto.actor.unwrap_or_else(|| "operator".into());
+        let snap = self
+            .policy_hub
+            .publish_from_runtime(&self.pinning_registry, &reason);
+        info!(%actor, version = %snap.version, %reason, "Agent policy push");
+        json_response(
+            StatusCode::OK,
+            &serde_json::json!({
+                "status": "pushed",
+                "policy_version": snap.version,
+                "reason": snap.reason,
+                "pushed_at": snap.pushed_at,
+                "document": snap.document,
+            })
+            .to_string(),
+        )
     }
 
     fn pinning_exceptions(&self) -> Response<Body> {
@@ -454,6 +570,11 @@ impl ControlApiState {
                     removed = report.removed.len(),
                     updated = report.updated.len(),
                     "Certificate pinning exceptions reloaded"
+                );
+                // Push refreshed agent policy so subscribers pick up new pinning.
+                let _ = self.policy_hub.publish_from_runtime(
+                    &self.pinning_registry,
+                    &format!("pinning-reload:{}", request.reason),
                 );
                 match serde_json::to_string(&report) {
                     Ok(payload) => json_response(StatusCode::OK, &payload),
@@ -732,6 +853,7 @@ pub struct ControlApiState {
     admin_console_dir: Option<std::path::PathBuf>,
     device_registry: DeviceRegistry,
     agent_events: AgentEventIngestor,
+    policy_hub: PolicyHub,
     /// Bootstrap token for `POST /api/v1/agent/enroll` (`AGENT_ENROLL_TOKEN`).
     /// Falls back to control `api_token` when unset.
     enroll_token: Option<String>,
@@ -761,6 +883,7 @@ impl ControlApiState {
         session_store: crate::session_store::GlobalSessionStore,
         threat_sync: crate::threat_sync::ThreatSyncEngine,
     ) -> Self {
+        let policy_hub = PolicyHub::from_runtime(&pinning_registry);
         Self {
             metrics,
             http_cache,
@@ -796,6 +919,7 @@ impl ControlApiState {
                 }),
             device_registry: DeviceRegistry::memory_only(),
             agent_events: AgentEventIngestor::memory_only(),
+            policy_hub,
             enroll_token: None,
             cert_cache: None,
             shutdown_tx: None,
@@ -871,6 +995,7 @@ impl ControlApiState {
         );
         state.fail_closed = crate::security_defaults::control_api_fail_closed();
         state.device_registry = DeviceRegistry::from_env();
+        state.policy_hub = PolicyHub::from_runtime(&state.pinning_registry);
         state.enroll_token = std::env::var("AGENT_ENROLL_TOKEN")
             .ok()
             .map(|s| s.trim().to_string())
@@ -887,14 +1012,34 @@ impl ControlApiState {
                 Bytes::new()
             }
         };
-        self.dispatch(&parts.method, parts.uri.path(), body, &parts.headers)
-            .await
+        let query = parts.uri.query().map(|s| s.to_string());
+        self.dispatch_with_query(
+            &parts.method,
+            parts.uri.path(),
+            query.as_deref(),
+            body,
+            &parts.headers,
+        )
+        .await
     }
 
+    #[cfg(test)]
     async fn dispatch(
         &self,
         method: &Method,
         path: &str,
+        body: Bytes,
+        headers: &HeaderMap,
+    ) -> Response<Body> {
+        self.dispatch_with_query(method, path, None, body, headers)
+            .await
+    }
+
+    async fn dispatch_with_query(
+        &self,
+        method: &Method,
+        path: &str,
+        query: Option<&str>,
         body: Bytes,
         headers: &HeaderMap,
     ) -> Response<Body> {
@@ -965,6 +1110,9 @@ impl ControlApiState {
             (&Method::GET, "/api/pinning/exceptions") => self.pinning_exceptions(),
             (&Method::POST, "/api/pinning/exceptions/reload") => self.pinning_reload(body),
             (&Method::GET, "/api/v1/agent/policy") => self.agent_policy(),
+            (&Method::GET, "/api/v1/agent/policy/watch") => self.agent_policy_watch(query).await,
+            (&Method::GET, "/api/v1/agent/policy/stream") => self.agent_policy_stream(),
+            (&Method::POST, "/api/v1/agent/policy/push") => self.agent_policy_push(body),
             (&Method::POST, "/api/v1/agent/heartbeat") => self.agent_heartbeat(body).await,
             (&Method::POST, "/api/v1/agent/events") => self.agent_events_ingest(body),
             (&Method::GET, "/api/v1/agent/events/recent") => self.agent_events_recent(),
@@ -1962,7 +2110,11 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let body = BodyExt::collect(resp.into_body()).await.unwrap().to_bytes();
         let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(v["policy_version"], "v0.1.0");
+        let policy_version = v["policy_version"].as_str().unwrap().to_string();
+        assert!(
+            policy_version.starts_with('v'),
+            "policy_version={policy_version}"
+        );
         assert_eq!(v["policy_mode"], "selective-mitm");
         assert!(v["pinning_exceptions"].is_array());
         assert!(v["sni_deny_patterns"].is_array());
@@ -1970,6 +2122,33 @@ mod tests {
         assert!(v["sni_rules"].is_array());
         assert_eq!(v["sni_rules"][0]["action"], "deny");
         assert!(v["sni_rules"][0]["pattern"].as_str().is_some());
+
+        // Policy push + long-poll watch.
+        let push = state
+            .dispatch(
+                &Method::POST,
+                "/api/v1/agent/policy/push",
+                Bytes::from(r#"{"reason":"unit-test","actor":"test"}"#),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(push.status(), StatusCode::OK);
+        let body = BodyExt::collect(push.into_body()).await.unwrap().to_bytes();
+        let push_v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(push_v["status"], "pushed");
+        let new_version = push_v["policy_version"].as_str().unwrap().to_string();
+        assert_ne!(new_version, policy_version);
+
+        let watch = state
+            .dispatch(
+                &Method::GET,
+                "/api/v1/agent/policy/watch",
+                Bytes::new(),
+                &HeaderMap::new(),
+            )
+            .await;
+        // dispatch helper has no query; watch with since=None returns current immediately as changed
+        assert_eq!(watch.status(), StatusCode::OK);
 
         // Canonical versioned heartbeat endpoint.
         let hb_payload = Bytes::from(
@@ -2155,7 +2334,13 @@ mod tests {
             .unwrap()
             .to_bytes();
         let devices: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(devices[0]["status"], "Revoked");
+        let alice = devices
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["id"] == "laptop-001")
+            .expect("laptop-001 after revoke");
+        assert_eq!(alice["status"], "Revoked");
 
         // Unversioned v0.1 paths remain aliases for existing agents.
         let legacy_policy = state

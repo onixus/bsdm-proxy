@@ -42,6 +42,9 @@ AGENT_ONCE=1 cargo run -p agent-spike -- --once
 | `DEVICE_PLATFORM` | host OS | `linux` \| `macos` \| `windows` |
 | `AGENT_ENROLL` / `--enroll` | auto if no `DEVICE_TOKEN` | Force enroll |
 | `AGENT_MTLS` / `--mtls` | off | Enroll with CSR (needs proxy CA) |
+| `AGENT_POLICY_PUSH` | on | Long-poll policy watch (`0` to disable) |
+| `AGENT_POLICY_WATCH_SECS` | `25` | Watch timeout between polls |
+| `--no-policy-push` | | Disable watch loop |
 | `DEVICE_ID` | `dev-mac-001` | Stable device id |
 | `DEVICE_NAME` | `agent-{DEVICE_ID}` | Display name in `/api/v1/devices` |
 | `DEVICE_TYPE` | `desktop` | `desktop` \| `phone` |

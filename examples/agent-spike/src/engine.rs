@@ -6,6 +6,16 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
+/// Minimal query-encoding for policy_version (hex/v-prefixed alnum).
+fn urlencoding_minimal(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => c.to_string(),
+            _ => format!("%{:02X}", c as u8),
+        })
+        .collect()
+}
+
 fn decision_action(decision: &LocalDecision) -> (&'static str, Option<String>) {
     match decision {
         LocalDecision::Allow => ("allow", None),
@@ -159,6 +169,46 @@ impl AgentEngine {
             }
             if let Err(e) = self.send_heartbeat(&client).await {
                 warn!("Heartbeat failed: {e}");
+            }
+        }
+    }
+
+    /// Long-poll policy push (`GET /api/v1/agent/policy/watch?since=&timeout_secs=`).
+    pub async fn watch_policy_loop(&self, timeout_secs: u64) {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(timeout_secs + 10))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+        loop {
+            let since = self.policy_version().await;
+            let url = format!(
+                "{}/api/v1/agent/policy/watch?since={}&timeout_secs={}",
+                self.control_plane_url.trim_end_matches('/'),
+                urlencoding_minimal(&since),
+                timeout_secs.max(5)
+            );
+            let request = self.apply_auth(client.get(&url));
+            match request.send().await {
+                Ok(resp) if resp.status().is_success() => {
+                    match resp.json::<RemotePolicyDto>().await {
+                        Ok(dto) => {
+                            let mapped = LocalPolicy::from_remote(dto);
+                            if mapped.policy_version != since {
+                                info!(
+                                    policy_version = %mapped.policy_version,
+                                    "Policy push received (watch)"
+                                );
+                                *self.policy.write().await = mapped;
+                            }
+                        }
+                        Err(e) => warn!("policy watch decode: {e}"),
+                    }
+                }
+                Ok(resp) => warn!("policy watch HTTP {}", resp.status()),
+                Err(e) => {
+                    warn!("policy watch transport: {e}");
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
             }
         }
     }

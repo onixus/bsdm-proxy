@@ -41,7 +41,7 @@
 | Admin UI | Admin Console (Hybrid core) | Основной | Primary nav: Dashboard, Logs, Analytics, Policies, RPZ, Users, Settings. Live/demo provenance, error/empty states, mutation token gate. |
 | Admin UI | Admin Console experimental routes | Experimental (Frozen) | Deep-links `/wasm`, `/cluster`, `/ai-cache`, `/amneziawg` only — frozen banner, not in primary nav. |
 | UI reference | Standalone Trust-UI | Experimental (Deprecated) | Не запускается по умолчанию; сохранён только как reference для будущего Agent posture. |
-| Agent (Phase C) | Local policy agent spike | Beta (lab) | Enroll + CSR certs + events; optional **control mTLS port** (`CONTROL_MTLS_*`). Multi-OS / policy push / CRL reserved. [pilot-agent.md](getting-started/pilot-agent.md). |
+| Agent (Phase C) | Local policy agent spike | Beta (lab) | Enroll, CSR, events, **policy push** (watch/SSE), optional control mTLS. Multi-OS / CRL reserved. [pilot-agent.md](getting-started/pilot-agent.md). |
 
 ## Известные ограничения
 
