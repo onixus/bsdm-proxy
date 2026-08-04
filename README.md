@@ -53,7 +53,7 @@ flowchart LR
 
 | Компонент | Порт | Назначение |
 |---|---:|---|
-| proxy | 1488 | HTTP proxy / CONNECT |
+| proxy | 3128 | HTTP proxy / CONNECT |
 | proxy control | 9090 | `/health`, `/ready`, `/metrics`, REST control API |
 | cache-indexer | 8080 | `/health`, `/metrics`, `/api/search` |
 | ICP | 3130/udp | cache hierarchy, opt-in |
@@ -77,7 +77,7 @@ docker compose -f docker-compose.lite.yml up -d --build
 
 curl http://127.0.0.1:9090/health
 curl --cacert certs/ca.crt \
-  -x http://127.0.0.1:1488 \
+  -x http://127.0.0.1:3128 \
   https://httpbin.org/get
 curl 'http://127.0.0.1:8080/api/search?limit=5'
 ```

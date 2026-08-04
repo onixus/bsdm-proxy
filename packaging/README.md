@@ -53,7 +53,7 @@ set +a
 
 | Service | Default port |
 |---------|--------------|
-| Proxy HTTP/HTTPS | 1488 |
+| Proxy HTTP/HTTPS | 3128 |
 | ICP (UDP, if `HIERARCHY_ENABLED=true`) | 3130 |
 | Metrics / health | 9090 |
 | cache-indexer admin / Search API | 8080 |

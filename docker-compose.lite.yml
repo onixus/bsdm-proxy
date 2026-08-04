@@ -4,7 +4,7 @@
 # Usage:
 #   ./scripts/gen-ca.sh
 #   docker compose -f docker-compose.lite.yml up -d --build
-#   curl --cacert certs/ca.crt -x http://127.0.0.1:1488 https://httpbin.org/get
+#   curl --cacert certs/ca.crt -x http://127.0.0.1:3128 https://httpbin.org/get
 #   curl 'http://127.0.0.1:8080/api/search?limit=5'
 #
 # Docs: docs/getting-started/lite-mode.md · docs/roadmap.md

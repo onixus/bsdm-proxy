@@ -32,8 +32,8 @@ Grafana. Опциональные сервисы запускаются свои
 
 ```bash
 curl http://127.0.0.1:9090/health
-curl -x http://127.0.0.1:1488 http://httpbin.org/get
-curl --cacert certs/ca.crt -x http://127.0.0.1:1488 https://httpbin.org/uuid
+curl -x http://127.0.0.1:3128 http://httpbin.org/get
+curl --cacert certs/ca.crt -x http://127.0.0.1:3128 https://httpbin.org/uuid
 ```
 
 ## Lite и локальная разработка
