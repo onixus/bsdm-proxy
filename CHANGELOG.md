@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Pilot ML one-model path** — documented UEBA (`ueba_zscore_v0`) pilot:
+  `config/pilot-ml.env.example`, [pilot-ml.md](docs/getting-started/pilot-ml.md),
+  `scripts/run-ml-pilot-smoke.sh`, pilot compose defaults for ml-worker
+  (min_requests/poll/write-back); proxy threat-score remains opt-in enrich-only.
 - **Agent Phase C spike (policy pull)** — `agent-spike` pulls
   `GET /api/v1/agent/policy`, maps SNI deny + pinning + mode to local evaluate,
   posts enriched heartbeat (`policy_version`, device inventory fields), supports

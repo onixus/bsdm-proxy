@@ -84,6 +84,7 @@ curl -X POST http://127.0.0.1:9090/api/security/dlp \
 - [ ] Admin Console: primary nav only Hybrid pages; frozen routes show Frozen banner; mutations blocked without token (Settings → Console API)
 - [ ] Observability: Dashboard decision_source bar + Logs filter; optional alert-worker pilot pack ([pilot-alerts.md](pilot-alerts.md))
 - [ ] Optional Phase C lab: `./scripts/run-agent-pilot-smoke.sh` green — [pilot-agent.md](pilot-agent.md)
+- [ ] Optional day-2+ ML: `--profile ml` + `./scripts/run-ml-pilot-smoke.sh` — [pilot-ml.md](pilot-ml.md)
 
 ### B. Hybrid path
 

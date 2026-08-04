@@ -28,6 +28,9 @@ Proxy (opt-in `THREAT_SCORE_ENABLED=true`) polls `/api/threat-scores` in backgro
 
 ## Quick start
 
+Pilot one-model path (UEBA, smoke, honesty): [pilot-ml.md](../getting-started/pilot-ml.md)
+· env pack [`config/pilot-ml.env.example`](../../config/pilot-ml.env.example).
+
 ```bash
 # Apply DDL (also mounted in docker-compose)
 clickhouse-client --multiquery < scripts/clickhouse/ml_features.sql
@@ -39,6 +42,8 @@ CLICKHOUSE_URL=http://127.0.0.1:8123 \
   cargo run -p ml-worker --release
 
 docker compose --profile ml up -d --build ml-worker
+# Pilot overlay (gentler min_requests / poll):
+# docker compose -f docker-compose.yml -f docker-compose.pilot.yml --profile ml up -d ml-worker
 ```
 
 ### Offline baseline artifact (optional)

@@ -131,7 +131,16 @@ services:
           cpus: "0.50"
           memory: 512M
 
+  # Pilot one-model path: UEBA only — see config/pilot-ml.env.example + pilot-ml.md
   ml-worker:
+    environment:
+      ML_MODEL: "${ML_MODEL:-ueba_zscore_v0}"
+      ML_ENTITY_TYPES: "${ML_ENTITY_TYPES:-client_ip}"
+      ML_MIN_REQUESTS: "${ML_MIN_REQUESTS:-5}"
+      ML_POLL_INTERVAL_SECS: "${ML_POLL_INTERVAL_SECS:-60}"
+      ML_WRITEBACK_ENABLED: "${ML_WRITEBACK_ENABLED:-true}"
+      ML_WRITEBACK_MIN_SCORE: "${ML_WRITEBACK_MIN_SCORE:-0.5}"
+      ML_BASELINE_MIN_SAMPLES: "${ML_BASELINE_MIN_SAMPLES:-20}"
     deploy:
       resources:
         limits:

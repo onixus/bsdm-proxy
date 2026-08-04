@@ -28,7 +28,7 @@
 | Аутентификация | LDAP, NTLM, Kerberos | Beta | Требуют соответствующей Cargo feature и интеграционного стенда. |
 | Аналитика | Kafka → cache-indexer → ClickHouse, Search API | Основной | Срок хранения задаётся TTL ClickHouse. Поля `dlp_violation` и `casb_alert` поддерживаются в схеме. |
 | Detection | alert-worker | Beta | Запросы правил выполняются периодически; нужен контроль ClickHouse latency. |
-| ML | UEBA, phishing, beacon, threat-score write-back | Beta | Один процесс `ml-worker` обслуживает одну выбранную модель. |
+| ML | UEBA, phishing, beacon, threat-score write-back | Beta | Один процесс `ml-worker` = одна модель. Пилот: UEBA `ueba_zscore_v0` + write-back ([pilot-ml.md](getting-started/pilot-ml.md)); proxy `THREAT_SCORE_*` opt-in, block off. |
 | DNS | DNS Sinkhole + RPZ (Core component) | Основной | Включает DoH (`/dns-query`) и DoT (TCP/853) шлюзы шифрованного DNS. |
 | AI cache | Exact LLM POST cache, local/Qdrant near-hit | Beta | Поддерживает векторный бэкенд Qdrant (`SEMANTIC_VECTOR_BACKEND=qdrant`) и квотирование по API ключам. |
 | Extensions | WASM request hook | Experimental (Frozen) | Заморожено. PoC hook с fuel limits. |

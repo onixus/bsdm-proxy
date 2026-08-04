@@ -72,8 +72,8 @@ Optional later: `high_entropy_domain`, `beacon_periodic` (more ML/noise).
 
 ---
 
-## Out of scope (Horizon 2)
+## Out of scope (Horizon 2 alerts)
 
 - Full SIEM productization
 - Multi-node threat-sync alerts
-- Un-freezing ML as day-1 (optional one-model path is separate)
+- ML scoring — separate day-2+ path: [pilot-ml.md](pilot-ml.md) (one model / UEBA)
