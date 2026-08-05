@@ -25,10 +25,11 @@ Issue tracking: **#273** (agent implementation), **#258** (original spike).
 | Optional control mTLS port (`CONTROL_MTLS_*`, default `:9443`) | |
 | Agent cert CRL JSON/PEM + lab OCSP JSON + **RFC 6960 DER OCSP** | |
 | `POST /api/v1/agent/heartbeat` + `GET /api/v1/devices` | Durable multi-node event store |
-| `POST /api/v1/agent/events` telemetry batch | Multi-OS installers / system proxy |
+| `POST /api/v1/agent/events` telemetry batch | MDM/GPO silent fleet packaging |
 | Device registry persistence (`AGENT_DEVICES_PATH`) | Full UT1 categorization on endpoint |
 | Admin Console `/devices` (list/revoke/push/CRL) | Production IdP binding |
 | Multi-node Redis devices + CRL (optional) | Full multi-cluster mesh productization |
+| Multi-OS pilot installers + system proxy hooks | Notarized/signed enterprise packages |
 | Local SNI deny + pinning bypass + mode | |
 | `AGENT_ONCE` / `--once` / `--enroll` smoke | |
 
@@ -206,6 +207,29 @@ Build with `--features grpc`, run with `CONTROL_GRPC_ENABLED=true`
 (`CONTROL_GRPC_BIND`, default `127.0.0.1:50051`). RPCs:
 `GetAgentPolicy`, `PushAgentPolicy`, server-stream `WatchAgentPolicy`
 (same hub as HTTP long-poll/SSE). Bearer metadata: `authorization: Bearer …`.
+
+### Multi-OS pilot install + system proxy
+
+Pilot packaging for the spike (not MDM product packaging):
+
+```bash
+cargo build -p agent-spike --release
+
+# Linux
+sudo ./packaging/agent/install-linux.sh
+# macOS
+sudo ./packaging/agent/install-macos.sh
+# Windows (elevated PowerShell)
+# .\packaging\agent\install-windows.ps1
+
+# Point OS at data-plane proxy (default 127.0.0.1:3128)
+bsdm-agent --set-system-proxy
+bsdm-agent --clear-system-proxy
+# Session-scoped (set on start, clear on exit):
+AGENT_MANAGE_SYSTEM_PROXY=1 bsdm-agent
+```
+
+Details: [packaging/agent/README.md](../../packaging/agent/README.md).
 
 ### Optional: agent control mTLS port
 

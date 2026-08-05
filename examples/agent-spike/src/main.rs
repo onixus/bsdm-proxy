@@ -1,8 +1,10 @@
 //! Minimal On-Device Local Policy Agent Spike (Phase C, Issue #258 / #273)
 //! Implements Agent Contract v0.1: Enroll, Policy Fetch, Local Evaluate, Events, Heartbeat.
+//! Optional multi-OS system-proxy apply/clear for pilot installers.
 
 mod engine;
 mod policy;
+mod system_proxy;
 
 use engine::{demo_evaluate, AgentEngine};
 use std::sync::Arc;
@@ -16,6 +18,10 @@ fn env_flag(name: &str) -> bool {
     )
 }
 
+fn has_arg(flag: &str) -> bool {
+    std::env::args().any(|a| a == flag)
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
@@ -26,6 +32,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     info!("🚀 BSDM Minimal Local Policy Agent Spike (Phase C, Issue #258/#273)");
+
+    // Standalone system-proxy commands (installers use these).
+    let dry_run = env_flag("SYSTEM_PROXY_DRY_RUN") || has_arg("--dry-run");
+    if has_arg("--set-system-proxy") || env_flag("AGENT_SET_SYSTEM_PROXY") {
+        let ep = system_proxy::ProxyEndpoint::from_env();
+        match system_proxy::set_system_proxy(&ep, dry_run) {
+            Ok(msg) => {
+                info!(%msg, platform = system_proxy::platform_tag(), "System proxy applied");
+                println!("{msg}");
+                return Ok(());
+            }
+            Err(e) => return Err(format!("set-system-proxy: {e}").into()),
+        }
+    }
+    if has_arg("--clear-system-proxy") || env_flag("AGENT_CLEAR_SYSTEM_PROXY") {
+        match system_proxy::clear_system_proxy(dry_run) {
+            Ok(msg) => {
+                info!(%msg, platform = system_proxy::platform_tag(), "System proxy cleared");
+                println!("{msg}");
+                return Ok(());
+            }
+            Err(e) => return Err(format!("clear-system-proxy: {e}").into()),
+        }
+    }
 
     let device_id = std::env::var("DEVICE_ID").unwrap_or_else(|_| "dev-mac-001".to_string());
     let device_name = std::env::var("DEVICE_NAME").unwrap_or_else(|_| format!("agent-{device_id}"));
@@ -155,8 +185,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // Optional: point OS at data-plane proxy for the lifetime of this process.
+    let manage_proxy = env_flag("AGENT_MANAGE_SYSTEM_PROXY") || has_arg("--manage-system-proxy");
+    if manage_proxy {
+        let ep = system_proxy::ProxyEndpoint::from_env();
+        match system_proxy::set_system_proxy(&ep, false) {
+            Ok(msg) => info!(%msg, "System proxy enabled for agent session"),
+            Err(e) => warn!("Could not set system proxy (continuing): {e}"),
+        }
+    }
+
     info!("Agent spike running. Press Ctrl+C to exit.");
     tokio::signal::ctrl_c().await?;
+
+    if manage_proxy {
+        match system_proxy::clear_system_proxy(false) {
+            Ok(msg) => info!(%msg, "System proxy cleared on shutdown"),
+            Err(e) => warn!("Could not clear system proxy on shutdown: {e}"),
+        }
+    }
     info!("Agent spike shutdown.");
     Ok(())
 }

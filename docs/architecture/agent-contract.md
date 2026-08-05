@@ -33,7 +33,9 @@ policy and heartbeat endpoints.
   staple; `TLS_OCSP_STAPLING`, default on) — distinct from agent client OCSP API.
 - **Multi-node registry**: Redis write-through for devices + CRL
   (`AGENT_DEVICES_REDIS_URL` / `AGENT_DEVICES_REDIS` + `REDIS_URL`).
-- Reserved: multi-OS installers / system proxy.
+- **Multi-OS pilot install**: `packaging/agent/*` + system-proxy hooks on the
+  spike (`--set-system-proxy`); not full MDM product packaging.
+- Reserved: MDM/GPO silent fleet install, notarized/signed store packages.
 
 ---
 

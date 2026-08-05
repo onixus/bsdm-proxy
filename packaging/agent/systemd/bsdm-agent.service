@@ -1,0 +1,19 @@
+[Unit]
+Description=BSDM Local Policy Agent (Phase C pilot)
+Documentation=https://github.com/onixus/bsdm-proxy/blob/main/docs/getting-started/pilot-agent.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bsdm-agent
+Group=bsdm-agent
+EnvironmentFile=-/etc/bsdm-agent/agent.env
+# Enroll once if DEVICE_TOKEN unset; then heartbeat + policy watch.
+ExecStart=/opt/bsdm-agent/bin/bsdm-agent
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

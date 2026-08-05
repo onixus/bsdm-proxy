@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Multi-OS agent install + system proxy (#273)** — `agent-spike` hooks
+  `--set-system-proxy` / `--clear-system-proxy` / `--manage-system-proxy`
+  (macOS `networksetup`, Linux gsettings + env snippet, Windows WinINET/netsh);
+  pilot packages under `packaging/agent/` (Linux/macOS/Windows installers,
+  systemd, LaunchDaemon, Scheduled Task); `scripts/build-agent-binaries.sh`.
 - **Multi-node agent device registry + CRL (Redis)** — write-through HASH +
   token/fingerprint/serial indexes (`AGENT_DEVICES_REDIS_URL` or
   `REDIS_URL` + `AGENT_DEVICES_REDIS=true`; prefix `AGENT_REDIS_PREFIX`,

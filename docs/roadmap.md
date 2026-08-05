@@ -48,7 +48,8 @@ Roadmap определяет порядок работ в рамках стра�
 - [x] WebSocket policy push (`/api/v1/agent/policy/ws`).
 - [x] Data-plane TLS OCSP stapling (MITM + control mTLS server leaves).
 - [x] Multi-node shared device registry + CRL (Redis write-through).
-- [ ] Production multi-OS agent (installers, system proxy).
+- [x] Multi-OS pilot installers + system-proxy hooks (`packaging/agent`, agent-spike CLI).
+- [ ] MDM/GPO silent fleet packaging / notarized store distribution.
 
 ---
 
