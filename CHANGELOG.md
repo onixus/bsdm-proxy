@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Admin Settings UI refactor** — split ~1k-line page into `pages/settings/`
+  (tabs, LiveConfig/LiveNode panels, `useSettingsController`, grouped nav:
+  Core / Policy / Observability / Advanced / Console) with pilot/frozen badges
+  and sticky Apply toolbar. Behavior preserved (live env delta Apply).
+
 ### Added
 
 - **Same-origin Search proxy** — control plane proxies `GET /api/search*` and
