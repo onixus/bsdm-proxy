@@ -1,0 +1,130 @@
+name: One-shot UI local smoke
+
+on:
+  push:
+    branches:
+      - agent/ui-refactor-admin-console
+
+permissions:
+  contents: write
+
+jobs:
+  ui-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: admin-console
+
+    steps:
+      - name: Checkout UI branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/ui-refactor-admin-console
+          fetch-depth: 0
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: admin-console/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Run lint
+        run: npm run lint
+
+      - name: Build production UI
+        run: npm run build
+
+      - name: Install browser
+        run: |
+          npm install --no-save --package-lock=false playwright@1.57.0
+          npx playwright install --with-deps chromium
+
+      - name: Start preview server
+        run: |
+          npm run preview -- --host 127.0.0.1 > /tmp/admin-console-preview.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4173/ >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/admin-console-preview.log
+          exit 1
+
+      - name: Render browser screenshots
+        run: |
+          mkdir -p ui-smoke
+          cat > /tmp/ui-smoke.mjs <<'EOF'
+          import { chromium } from 'playwright'
+          import { writeFile } from 'node:fs/promises'
+
+          const browser = await chromium.launch({ headless: true })
+          const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 1 })
+          const consoleErrors = []
+          const pageErrors = []
+
+          page.on('console', (message) => {
+            if (message.type() === 'error') consoleErrors.push(message.text())
+          })
+          page.on('pageerror', (error) => pageErrors.push(error.message))
+          await page.addInitScript(() => {
+            localStorage.setItem('bsdm-admin-demo-mode', 'true')
+          })
+
+          await page.goto('http://127.0.0.1:4173/', { waitUntil: 'networkidle' })
+          await page.waitForTimeout(1500)
+          await page.screenshot({ path: 'ui-smoke/dashboard.png', fullPage: true })
+
+          await page.goto('http://127.0.0.1:4173/logs', { waitUntil: 'networkidle' })
+          await page.waitForTimeout(1000)
+          await page.screenshot({ path: 'ui-smoke/logs.png', fullPage: true })
+
+          await page.goto('http://127.0.0.1:4173/analytics', { waitUntil: 'networkidle' })
+          await page.waitForTimeout(1000)
+          await page.screenshot({ path: 'ui-smoke/analytics.png', fullPage: true })
+
+          await page.goto('http://127.0.0.1:4173/settings?tab=security', { waitUntil: 'networkidle' })
+          await page.waitForTimeout(1000)
+          await page.screenshot({ path: 'ui-smoke/settings-security.png', fullPage: true })
+
+          await writeFile(
+            'ui-smoke/browser-report.json',
+            JSON.stringify({ consoleErrors, pageErrors }, null, 2),
+          )
+          await browser.close()
+
+          if (pageErrors.length > 0) process.exitCode = 1
+          EOF
+          node /tmp/ui-smoke.mjs
+
+      - name: Upload UI smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: admin-console-ui-smoke
+          path: |
+            admin-console/ui-smoke
+            /tmp/admin-console-preview.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Remove one-shot workflow
+        if: always()
+        working-directory: .
+        run: |
+          rm -f .github/workflows/ui-local-smoke.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "ci(admin-console): remove one-shot visual smoke workflow"
+            git push origin HEAD:agent/ui-refactor-admin-console
+          fi
