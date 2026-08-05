@@ -192,8 +192,13 @@ CMD ["ml-worker"]
 # ============================================================
 FROM runtime-base AS dns-sinkhole
 
+# runtime-base switches to USER bsdm; create zone dir as root so it is
+# traversable (needs +x) and readable by non-root, then drop privileges again.
+USER root
 COPY --from=builder --chmod=755 /dist/dns-sinkhole /usr/local/bin/dns-sinkhole
+RUN mkdir -p /etc/bsdm-proxy && chmod 755 /etc/bsdm-proxy
 COPY --chmod=644 examples/dns/blocklist.rpz /etc/bsdm-proxy/blocklist.rpz
+USER bsdm
 
 ENV DNS_SINKHOLE_ZONE_PATH=/etc/bsdm-proxy/blocklist.rpz \
     DNS_SINKHOLE_BIND=0.0.0.0:53 \
