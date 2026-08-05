@@ -1,4 +1,5 @@
-import type { ConfigFormState, ProxyConfig } from './types'
+import type { ConfigFormState, ProxyConfig } from './types.ts'
+import { defaultFormState } from './types.ts'
 
 export function collectConfig(form: ConfigFormState): ProxyConfig {
   const maxBodyMb = parseInt(form.maxBodySizeMb, 10) || 10
@@ -168,6 +169,104 @@ export function collectConfig(form: ConfigFormState): ProxyConfig {
   }
 
   return config
+}
+
+/** Masked values returned by control plane for secrets — never write back. */
+export function isMaskedSecret(value: string): boolean {
+  const v = value.trim()
+  return v === '***' || v === '****' || v === '[redacted]' || v === 'REDACTED'
+}
+
+function isSecretEnvKey(key: string): boolean {
+  const u = key.toUpperCase()
+  return (
+    u.includes('TOKEN') ||
+    u.includes('PASSWORD') ||
+    u.includes('SECRET') ||
+    u.includes('API_KEY') ||
+    u.endsWith('_KEY')
+  )
+}
+
+function normalizeEnvValue(value: string): string {
+  return value.trim()
+}
+
+/**
+ * Build a **delta** env map for POST /api/config/apply.
+ *
+ * Full `collectConfig(form)` includes every form field with UI defaults. Applying
+ * that wholesale overwrites pilot/runtime paths (e.g. ACL_RULES_PATH, HTTP_PORT)
+ * and enables features that were never set on the node. With a live baseline
+ * from GET /api/config we only send keys that actually changed (or intentional
+ * non-default additions), and we never send masked secrets.
+ */
+export function collectConfigDelta(
+  form: ConfigFormState,
+  baseline: Record<string, string> | null | undefined,
+): Record<string, string> {
+  const full = collectConfig(form)
+  const defaults = collectConfig(defaultFormState)
+  const delta: Record<string, string> = {}
+
+  for (const [key, raw] of Object.entries(full)) {
+    const value = String(raw ?? '')
+    if (isMaskedSecret(value)) continue
+    if (isSecretEnvKey(key) && value === '') continue
+
+    if (baseline && Object.keys(baseline).length > 0) {
+      if (Object.prototype.hasOwnProperty.call(baseline, key)) {
+        const baseVal = baseline[key] ?? ''
+        // Server may mask secrets as ***; treat as "unchanged" if form empty/masked
+        if (isMaskedSecret(baseVal)) {
+          if (value && !isMaskedSecret(value)) delta[key] = value
+          continue
+        }
+        if (normalizeEnvValue(baseVal) !== normalizeEnvValue(value)) {
+          delta[key] = value
+        }
+      } else {
+        // Key not on server: only push if operator changed it away from UI default
+        const def = defaults[key] ?? ''
+        if (normalizeEnvValue(value) !== normalizeEnvValue(def) && value !== '') {
+          delta[key] = value
+        }
+      }
+    } else {
+      // No baseline: still avoid shipping pure defaults (pilot-safe partial apply)
+      const def = defaults[key] ?? ''
+      if (normalizeEnvValue(value) !== normalizeEnvValue(def)) {
+        delta[key] = value
+      }
+    }
+  }
+
+  return delta
+}
+
+/** Paths that commonly break pilot if Apply rewrites them to UI defaults. */
+export const PILOT_SENSITIVE_ENV_KEYS = [
+  'ACL_RULES_PATH',
+  'CONFIG_ENV_PATH',
+  'HTTP_PORT',
+  'METRICS_PORT',
+  'AGENT_DEVICES_PATH',
+  'PINNING_EXCEPTIONS_PATH',
+  'ADMIN_CONSOLE_DIR',
+] as const
+
+export function describeEnvDelta(
+  delta: Record<string, string>,
+  baseline: Record<string, string> | null | undefined,
+): { changed: string[]; sensitive: string[] } {
+  const changed = Object.keys(delta).sort()
+  const sensitive = changed.filter((k) =>
+    (PILOT_SENSITIVE_ENV_KEYS as readonly string[]).includes(k),
+  )
+  if (baseline) {
+    // also flag if delta would change a sensitive key
+  }
+  return { changed, sensitive }
 }
 
 export function cacheMetadataEstimate(capacity: string): string {

@@ -82,6 +82,7 @@ curl -X POST http://127.0.0.1:9090/api/security/dlp \
 - [ ] `DLP_ENABLED=false` (default) — no post-start DLP wipe required
 - [ ] ACL persist: `ACL_RULES_PATH` указывает на **writable** path (каталог, не single-file `:ro` mount — иначе `*.tmp` Permission denied). Рекомендация: volume `/etc/bsdm-proxy` или `/var/lib/bsdm-proxy/acl-rules.json`
 - [ ] `CONFIG_ENV_PATH` (Settings → Apply) — writable path, не cwd `/` в контейнере
+- [ ] Admin Settings → **Reload from node** before Apply; Apply is a **delta** (won't dump form defaults over pilot paths). ACL file rewrite from Filtering checkboxes is **opt-in** — manage rules under **Policies**
 - [ ] Backup/restore drill once: `./scripts/drill-backup-restore.sh` (or CA-only with `SKIP_CLICKHOUSE=1`) — [backup-restore.md](../ops-and-dev/backup-restore.md)
 - [ ] If auth is on: `BASIC_AUTH_USERS_FILE` mounted + `./scripts/run-auth-pilot-smoke.sh` green — [pilot-auth.md](pilot-auth.md)
 - [ ] DNS: `./scripts/run-dns-pilot-smoke.sh` green (blocked.test / badsite.test / example.com) — [pilot-dns.md](pilot-dns.md)

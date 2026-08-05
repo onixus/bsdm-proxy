@@ -14,7 +14,11 @@ import {
 } from 'lucide-react'
 import type { ConfigFormState } from '../lib/config/types'
 import { defaultFormState } from '../lib/config/types'
-import { collectConfig, cacheMetadataEstimate } from '../lib/config/collect'
+import {
+  collectConfigDelta,
+  describeEnvDelta,
+  cacheMetadataEstimate,
+} from '../lib/config/collect'
 import { formatEnv, generateAclRules, generateDockerCompose, downloadFile } from '../lib/config/export'
 import { importEnvFile, loadSavedForm, saveFormState, applyEnvToForm } from '../lib/config/import'
 import { applyNodeConfig, fetchNodeConfig } from '../api/config'
@@ -68,17 +72,42 @@ export function SettingsPage() {
   const [preview, setPreview] = useState<{ title: string; content: string } | null>(null)
   const [demoEnabled, setDemoEnabled] = useState(isDemoMode)
   const [applying, setApplying] = useState(false)
+  /** Live GET /api/config snapshot — Apply only sends a delta vs this map. */
+  const [liveEnv, setLiveEnv] = useState<Record<string, string> | null>(null)
+  const [liveEnvPath, setLiveEnvPath] = useState<string | null>(null)
+  const [liveLoadState, setLiveLoadState] = useState<'idle' | 'loading' | 'ok' | 'error'>('idle')
+  /** Opt-in: rewrite ACL file from Filtering-tab category checkboxes (destructive). */
+  const [rewriteAclFromForm, setRewriteAclFromForm] = useState(false)
+
+  const reloadLiveConfig = useCallback(async () => {
+    if (isDemoMode()) {
+      const snapshot = await fetchNodeConfig()
+      setLiveEnv(snapshot.env)
+      setLiveEnvPath(snapshot.env_path)
+      setForm((prev) => applyEnvToForm(snapshot.env, prev))
+      setLiveLoadState('ok')
+      return
+    }
+    setLiveLoadState('loading')
+    try {
+      const snapshot = await fetchNodeConfig()
+      setLiveEnv(snapshot.env)
+      setLiveEnvPath(snapshot.env_path)
+      setForm((prev) => {
+        const next = applyEnvToForm(snapshot.env, prev)
+        saveFormState(next)
+        return next
+      })
+      setLiveLoadState('ok')
+    } catch {
+      setLiveLoadState('error')
+      // Control API may be offline; local form state remains usable for export.
+    }
+  }, [])
 
   useEffect(() => {
-    if (isDemoMode()) return
-    fetchNodeConfig()
-      .then((snapshot) => {
-        setForm((prev) => applyEnvToForm(snapshot.env, prev))
-      })
-      .catch(() => {
-        // Control API may be offline; local form state remains usable.
-      })
-  }, [])
+    void reloadLiveConfig()
+  }, [reloadLiveConfig])
 
   useEffect(() => {
     if (isSettingsTab(requestedTab)) setTab(requestedTab)
@@ -115,17 +144,44 @@ export function SettingsPage() {
   }
 
   const handleApply = async () => {
+    const env = collectConfigDelta(form, liveEnv)
+    const { changed, sensitive } = describeEnvDelta(env, liveEnv)
+    if (changed.length === 0 && !rewriteAclFromForm) {
+      toast('info', 'No configuration changes vs live node — nothing to apply.')
+      return
+    }
+    if (sensitive.length > 0) {
+      const ok = window.confirm(
+        `This will change pilot-sensitive paths/ports:\n\n${sensitive.map((k) => `• ${k}=${env[k]}`).join('\n')}\n\nContinue?`,
+      )
+      if (!ok) return
+    }
+    // ACL: never rewrite rules file from category checkboxes unless operator opts in
+    // (otherwise domain/custom rules from Policies are wiped).
+    let aclRules: ReturnType<typeof generateAclRules> = null
+    if (rewriteAclFromForm) {
+      if (!form.aclEnabled) {
+        toast('warning', 'Enable ACL on the Filtering tab before rewriting rules.')
+        return
+      }
+      aclRules = generateAclRules(form)
+    }
+
     setApplying(true)
     try {
-      const env = collectConfig(form)
-      const aclRules = form.aclEnabled ? generateAclRules(form) : null
       const result = await applyNodeConfig({
         env,
         acl_rules: aclRules,
         restart: true,
       })
       saveFormState(form)
-      toast('success', result.message)
+      // Refresh baseline so next Apply is delta-clean
+      await reloadLiveConfig()
+      const n = changed.length
+      toast(
+        'success',
+        `${result.message}${n ? ` (${n} env key${n === 1 ? '' : 's'})` : ''}${rewriteAclFromForm ? ' · ACL file rewritten' : ''}`,
+      )
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to apply configuration'
       toast('error', message)
@@ -144,6 +200,64 @@ export function SettingsPage() {
       </div>
 
       <LiveNodePanel tr={tr} />
+
+      <Panel title="Live node config">
+        <div className="space-y-2 text-sm text-text-secondary">
+          <p>
+            Apply sends only a <strong className="text-text-primary">delta</strong> vs the last
+            successful <code className="text-xs">GET /api/config</code> — not the full form
+            defaults (avoids overwriting <code className="text-xs">ACL_RULES_PATH</code>,{' '}
+            <code className="text-xs">HTTP_PORT</code>, etc.).
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <span
+              className={
+                liveLoadState === 'ok'
+                  ? 'text-success'
+                  : liveLoadState === 'error'
+                    ? 'text-danger'
+                    : 'text-text-muted'
+              }
+            >
+              {liveLoadState === 'loading' && 'Loading live env…'}
+              {liveLoadState === 'ok' && `Loaded · ${liveEnvPath ?? 'env'}`}
+              {liveLoadState === 'error' && 'Live config unavailable — export still works; Apply uses non-default fields only.'}
+              {liveLoadState === 'idle' && 'Not loaded'}
+            </span>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={liveLoadState === 'loading'}
+              onClick={() => {
+                void reloadLiveConfig().then(() => {
+                  if (!isDemoMode()) toast('info', 'Reloaded live configuration')
+                })
+              }}
+            >
+              <RefreshCw className="size-4" /> Reload from node
+            </Button>
+          </div>
+          {liveEnv && (
+            <p className="font-mono text-xs text-text-muted">
+              ACL_RULES_PATH={liveEnv.ACL_RULES_PATH ?? '—'} · HTTP_PORT={liveEnv.HTTP_PORT ?? '—'} ·
+              CONFIG_ENV_PATH={liveEnv.CONFIG_ENV_PATH ?? liveEnvPath ?? '—'}
+            </p>
+          )}
+          <label className="flex items-start gap-2 pt-1 text-text-secondary">
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={rewriteAclFromForm}
+              onChange={(e) => setRewriteAclFromForm(e.target.checked)}
+            />
+            <span>
+              Also rewrite <code className="text-xs">ACL_RULES_PATH</code> from Filtering-tab
+              category checkboxes only (destructive — drops custom/domain rules managed under
+              Policies). Off by default; use Policies for ACL CRUD.
+            </span>
+          </label>
+        </div>
+      </Panel>
 
       <div className="flex gap-1 overflow-x-auto border-b border-border pb-px">
         {tabs.map((t) => (

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Admin Settings Apply vs live env** — Apply posts a **delta** against
+  `GET /api/config` (not full UI defaults), never writes masked `***` secrets,
+  confirms changes to pilot-sensitive paths (`ACL_RULES_PATH`, `HTTP_PORT`, …),
+  and does **not** rewrite the ACL file from Filtering checkboxes unless
+  explicitly opted in (use Policies for ACL CRUD). Reload-from-node control.
+
 ## [0.9.10] - 2026-08-05
 
 Patch after **0.9.9**: pilot polish + agent fleet packaging residual.

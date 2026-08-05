@@ -1,5 +1,5 @@
-import type { ConfigFormState } from './types'
-import { defaultFormState } from './types'
+import type { ConfigFormState } from './types.ts'
+import { defaultFormState } from './types.ts'
 
 function truthyEnv(v: string): boolean {
   return ['1', 'true', 'yes', 'on'].includes(String(v).trim().toLowerCase())
@@ -17,17 +17,29 @@ export function parseEnvText(text: string): Record<string, string> {
   return map
 }
 
+function applyIfPresent(map: Record<string, string>, key: string): string | undefined {
+  if (!Object.prototype.hasOwnProperty.call(map, key)) return undefined
+  const v = map[key]
+  // Control plane masks secrets as ***; keep previous in-form value
+  if (v === '***' || v === '****' || v === '[redacted]') return undefined
+  return v
+}
+
 export function applyEnvToForm(map: Record<string, string>, prev: ConfigFormState): ConfigFormState {
   const next = { ...prev }
 
-  if (map.HTTP_PORT) next.httpPort = map.HTTP_PORT
-  if (map.METRICS_PORT) next.metricsPort = map.METRICS_PORT
+  const httpPort = applyIfPresent(map, 'HTTP_PORT')
+  if (httpPort !== undefined) next.httpPort = httpPort
+  const metricsPort = applyIfPresent(map, 'METRICS_PORT')
+  if (metricsPort !== undefined) next.metricsPort = metricsPort
   if (map.RUST_LOG) next.logLevel = map.RUST_LOG
   if (map.SHUTDOWN_TIMEOUT_SECONDS) next.shutdownTimeout = map.SHUTDOWN_TIMEOUT_SECONDS
   if (map.MAX_CACHE_BODY_SIZE) {
     next.maxBodySizeMb = String(Math.round(parseInt(map.MAX_CACHE_BODY_SIZE, 10) / 1024 / 1024))
   }
-  next.mitmEnabled = truthyEnv(map.MITM_ENABLED ?? 'true')
+  if (Object.prototype.hasOwnProperty.call(map, 'MITM_ENABLED')) {
+    next.mitmEnabled = truthyEnv(map.MITM_ENABLED ?? 'true')
+  }
 
   if (map.CACHE_CAPACITY) next.cacheCapacity = map.CACHE_CAPACITY
   if (map.CACHE_TTL_SECONDS) next.cacheTtl = map.CACHE_TTL_SECONDS
@@ -68,12 +80,18 @@ export function applyEnvToForm(map: Record<string, string>, prev: ConfigFormStat
   if (map.NTLM_DOMAIN) next.ntlmDomain = map.NTLM_DOMAIN
   if (map.NTLM_WORKSTATION) next.ntlmWorkstation = map.NTLM_WORKSTATION
 
-  next.aclEnabled = truthyEnv(map.ACL_ENABLED ?? 'false')
+  if (Object.prototype.hasOwnProperty.call(map, 'ACL_ENABLED')) {
+    next.aclEnabled = truthyEnv(map.ACL_ENABLED ?? 'false')
+  }
   if (map.ACL_DEFAULT_ACTION) next.aclDefaultAction = map.ACL_DEFAULT_ACTION
-  if (map.ACL_RULES_PATH) next.aclRulesPath = map.ACL_RULES_PATH
-  next.aclAutoReload = truthyEnv(map.ACL_AUTO_RELOAD ?? 'false')
+  const aclPath = applyIfPresent(map, 'ACL_RULES_PATH')
+  if (aclPath !== undefined) next.aclRulesPath = aclPath
+  if (Object.prototype.hasOwnProperty.call(map, 'ACL_AUTO_RELOAD')) {
+    next.aclAutoReload = truthyEnv(map.ACL_AUTO_RELOAD ?? 'false')
+  }
   if (map.ACL_RELOAD_INTERVAL) next.aclReloadInterval = map.ACL_RELOAD_INTERVAL
-  if (map.ACL_API_TOKEN) next.aclApiToken = map.ACL_API_TOKEN
+  const aclTok = applyIfPresent(map, 'ACL_API_TOKEN')
+  if (aclTok !== undefined) next.aclApiToken = aclTok
 
   next.categorizationEnabled = truthyEnv(map.CATEGORIZATION_ENABLED ?? 'false')
   if (map.CATEGORIZATION_CACHE_TTL) next.categorizationCacheTtl = map.CATEGORIZATION_CACHE_TTL
