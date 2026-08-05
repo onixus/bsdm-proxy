@@ -184,6 +184,29 @@ docker compose -f docker-compose.redis-l2.yml down
 cargo test -p bsdm-proxy-e2e --test e2e e2e_mitm_https_with_self_signed_ca -- --nocapture
 ```
 
+### Admin Console (UI)
+
+Локальный UI-тест не требует proxy, Kafka, ClickHouse и ML-worker: фикстурный
+backend в `admin-console/test/local/` отдаёт все REST-эндпоинты и Prometheus
+`/metrics`, которые читает консоль.
+
+```bash
+cd admin-console
+npm ci
+npm test          # unit-тесты (node --test)
+npm run test:ui   # сборка + прогон Chromium по всем маршрутам консоли
+```
+
+`npm run test:ui` проверяет, что каждая страница рендерится на живых данных
+(`Live`, без demo-badge и error state), frozen-маршруты показывают баннер
+**Frozen**, и в браузере нет ошибок консоли и неудачных HTTP-запросов.
+`UI_TEST_SCREENSHOTS=1` сохраняет по скриншоту на маршрут в
+`admin-console/test/local/screenshots/`.
+
+Ручной просмотр на тех же фикстурах: `npm run dev:mock` →
+`http://127.0.0.1:5173/admin/`. Подробности — в
+[admin-console/README.md](../../admin-console/README.md#local-ui-test).
+
 ## Release-пакет
 
 ```bash
@@ -293,7 +316,7 @@ ls scripts/archive/
 |----------|---------|-------------|
 | [ci.yml](../../.github/workflows/ci.yml) | push/PR → main | fmt, clippy, build, tests (unit + e2e + smoke), cargo-audit |
 | [trust-ui.yml](../../.github/workflows/trust-ui.yml) | push/PR → main | build-check experimental/deprecated Trust-UI reference |
-| [admin-console.yml](../../.github/workflows/admin-console.yml) | push/PR → main | npm lint & build for admin-console |
+| [admin-console.yml](../../.github/workflows/admin-console.yml) | push/PR → main | npm lint, build, unit tests + local UI smoke test (Chromium over every route) |
 | [load-test.yml](../../.github/workflows/load-test.yml) | push/PR → main | wrk high-intensity load test |
 | [release.yml](../../.github/workflows/release.yml) | push tag `v*` / manual | test, build packages, GitHub Release |
 | [docs.yml](../../.github/workflows/docs.yml) | push/PR → main | check local markdown links, sync wiki |
