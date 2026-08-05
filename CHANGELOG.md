@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Admin Console in proxy image** — multi-stage Docker build copies
+  `admin-console/dist` to `/opt/bsdm/admin-console`; `ADMIN_CONSOLE_DIR` set by
+  default. Day-1 pilot: `http://localhost:9090/admin/` without host mount.
+- **Search API CORS (cache-indexer)** — reflect localhost / 127.0.0.1 Origin,
+  `OPTIONS` preflight; Admin Console on `:9090` can call Search on `:8080`.
+
+### Fixed
+
+- **HTTP L1 cache HIT framing** — strip hop-by-hop / `transfer-encoding` /
+  stale `content-encoding` when serving buffered cache bodies (avoids hyper
+  `user sent unexpected header` on keep-alive reuse).
+- **dns-sinkhole zone dir** — create `/etc/bsdm-proxy` as root with `+x` so
+  non-root `bsdm` can load RPZ (already on main).
+- **Admin Console defaults** — `HTTP_PORT` / OIDC redirect default **3128**
+  (was 1488).
+
+### Docs
+
+- Pilot day-1: Admin Console baked-in, Search CORS, ACL/CONFIG writable paths,
+  macOS DNS host port note (`:15353`).
+
 ## [0.9.9] - 2026-08-05
 
 Patch after **0.9.8**: CI stabilization — clippy fix for agent system-proxy

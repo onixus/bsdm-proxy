@@ -40,10 +40,11 @@ Defaults:
 | Env | Day-1 value |
 |---|---|
 | `DNS_SINKHOLE_ENABLED` | `true` |
-| Host UDP | `5353` |
+| Host UDP | `5353` (на **macOS** часто remap на **`15353`**: системный mDNSResponder держит 5353) |
 | `DNS_SINKHOLE_ACTION` | `sinkhole` → `127.0.0.1` |
 | DoH / DoT | **off** (set `DNS_SINKHOLE_DOH_ENABLED=true` + TLS cert/key later) |
 | Zone | `./examples/dns/blocklist.rpz` → `/etc/bsdm-proxy/blocklist.rpz` |
+
 
 Custom zone:
 
@@ -63,7 +64,7 @@ docker compose -f docker-compose.yml -f docker-compose.pilot.yml up -d dns-sinkh
 | Check | Expected |
 |---|---|
 | `GET :8092/health` | ok |
-| `dig @127.0.0.1 -p 5353 blocked.test A +short` | `127.0.0.1` (or NXDOMAIN if action=nxdomain) |
+| `dig @127.0.0.1 -p 5353 blocked.test A +short` | `127.0.0.1` (or NXDOMAIN if action=nxdomain); macOS: `-p 15353` |
 | `dig @127.0.0.1 -p 5353 badsite.test` | blocked (load-test default qname) |
 | `dig @127.0.0.1 -p 5353 example.com A +short` | real A (forward) |
 

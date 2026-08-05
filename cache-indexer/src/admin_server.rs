@@ -44,7 +44,7 @@ pub async fn run_admin_server(
                 Some(v) => v,
                 None => {
                     let _ = socket
-                        .write_all(&http_response(400, "text/plain", b"bad request"))
+                        .write_all(&http_response(400, "text/plain", b"bad request", None))
                         .await;
                     return;
                 }
@@ -106,20 +106,32 @@ async fn handle_request(
 ) -> Vec<u8> {
     let mut lines = header.lines();
     let Some(request_line) = lines.next() else {
-        return http_response(400, "text/plain", b"bad request");
+        return http_response(400, "text/plain", b"bad request", None);
     };
     let mut parts = request_line.split_whitespace();
     let method = parts.next().unwrap_or("");
     let path_query = parts.next().unwrap_or("/");
 
     let mut auth: Option<String> = None;
+    let mut origin: Option<String> = None;
     for line in lines {
         if line.is_empty() {
             break;
         }
         if let Some(value) = line.strip_prefix("Authorization: ") {
             auth = Some(value.trim().to_string());
+        } else if let Some(value) = line
+            .strip_prefix("Origin: ")
+            .or_else(|| line.strip_prefix("origin: "))
+        {
+            origin = Some(value.trim().to_string());
         }
+    }
+    let origin = origin.as_deref();
+
+    // CORS preflight for Admin Console (browser origin often differs from Search :8080).
+    if method == "OPTIONS" {
+        return http_response(204, "text/plain", b"", origin);
     }
 
     if method == "GET" && path_query.starts_with("/metrics") {
@@ -129,13 +141,18 @@ async fn handle_request(
             .encode(&metrics.registry().gather(), &mut buffer)
             .is_err()
         {
-            return http_response(500, "text/plain", b"encode error");
+            return http_response(500, "text/plain", b"encode error", origin);
         }
-        return http_response(200, "text/plain; version=0.0.4; charset=utf-8", &buffer);
+        return http_response(
+            200,
+            "text/plain; version=0.0.4; charset=utf-8",
+            &buffer,
+            origin,
+        );
     }
 
     if method == "GET" && path_query.starts_with("/health") {
-        return http_response(200, "application/json", br#"{"status":"ok"}"#);
+        return http_response(200, "application/json", br#"{"status":"ok"}"#, origin);
     }
 
     if method == "GET" && path_query.starts_with("/api/search") {
@@ -144,18 +161,24 @@ async fn handle_request(
                 404,
                 "application/json",
                 br#"{"error":"search api disabled"}"#,
+                origin,
             );
         };
         if !api.is_authorized(auth.as_deref()) {
-            return http_response(401, "application/json", br#"{"error":"unauthorized"}"#);
+            return http_response(
+                401,
+                "application/json",
+                br#"{"error":"unauthorized"}"#,
+                origin,
+            );
         }
         let query = parse_query_string(path_query);
         return match api.handle_get(&query).await {
-            Ok((code, content_type, body)) => http_response(code, &content_type, &body),
+            Ok((code, content_type, body)) => http_response(code, &content_type, &body, origin),
             Err(e) => {
                 warn!("search api error: {e}");
                 let msg = format!(r#"{{"error":"{}"}}"#, escape_json(&e.to_string()));
-                http_response(500, "application/json", msg.as_bytes())
+                http_response(500, "application/json", msg.as_bytes(), origin)
             }
         };
     }
@@ -166,22 +189,28 @@ async fn handle_request(
                 404,
                 "application/json",
                 br#"{"error":"ingest api disabled"}"#,
+                origin,
             );
         };
         if !api.is_ingest_authorized(auth.as_deref()) {
-            return http_response(401, "application/json", br#"{"error":"unauthorized"}"#);
+            return http_response(
+                401,
+                "application/json",
+                br#"{"error":"unauthorized"}"#,
+                origin,
+            );
         }
         return match api.handle_ingest(body).await {
-            Ok((code, content_type, body)) => http_response(code, &content_type, &body),
+            Ok((code, content_type, body)) => http_response(code, &content_type, &body, origin),
             Err(e) => {
                 warn!("ingest api error: {e}");
                 let msg = format!(r#"{{"error":"{}"}}"#, escape_json(&e.to_string()));
-                http_response(400, "application/json", msg.as_bytes())
+                http_response(400, "application/json", msg.as_bytes(), origin)
             }
         };
     }
 
-    http_response(404, "text/plain", b"not found")
+    http_response(404, "text/plain", b"not found", origin)
 }
 
 fn parse_query_string(path_query: &str) -> HashMap<String, String> {
@@ -224,20 +253,47 @@ fn escape_json(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
-fn http_response(status_code: u16, content_type: &str, body: &[u8]) -> Vec<u8> {
+/// Reflect browser Origin for Admin Console cross-port calls (e.g. :9090 → :8080).
+/// Only allow http(s) localhost / 127.0.0.1 / private-ish dev hosts — not `*`.
+fn cors_origin_allowed(origin: &str) -> bool {
+    let o = origin.trim();
+    if o.is_empty() {
+        return false;
+    }
+    o.starts_with("http://localhost")
+        || o.starts_with("https://localhost")
+        || o.starts_with("http://127.0.0.1")
+        || o.starts_with("https://127.0.0.1")
+        || o.starts_with("http://[::1]")
+        || o.starts_with("https://[::1]")
+}
+
+fn http_response(status_code: u16, content_type: &str, body: &[u8], origin: Option<&str>) -> Vec<u8> {
     let status = match status_code {
         200 => "200 OK",
         202 => "202 Accepted",
+        204 => "204 No Content",
         400 => "400 Bad Request",
         401 => "401 Unauthorized",
         404 => "404 Not Found",
         500 => "500 Internal Server Error",
         _ => "500 Internal Server Error",
     };
-    let header = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+    let mut header = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n",
         body.len()
     );
+    if let Some(o) = origin.filter(|o| cors_origin_allowed(o)) {
+        header.push_str(&format!("Access-Control-Allow-Origin: {o}\r\n"));
+        header.push_str("Access-Control-Allow-Credentials: true\r\n");
+        header.push_str("Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n");
+        header.push_str(
+            "Access-Control-Allow-Headers: Authorization, Content-Type, Accept\r\n",
+        );
+        header.push_str("Access-Control-Max-Age: 86400\r\n");
+        header.push_str("Vary: Origin\r\n");
+    }
+    header.push_str("\r\n");
     let mut out = header.into_bytes();
     out.extend_from_slice(body);
     out

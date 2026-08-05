@@ -200,7 +200,7 @@ export interface ConfigFormState {
 }
 
 export const defaultFormState: ConfigFormState = {
-  httpPort: '1488',
+  httpPort: '3128',
   metricsPort: '9090',
   logLevel: 'info,bsdm_proxy=info',
   shutdownTimeout: '30',
@@ -315,5 +315,5 @@ export const defaultFormState: ConfigFormState = {
   oidcClientId: '',
   oidcClientSecret: '',
   oidcIssuerUrl: '',
-  oidcRedirectUri: 'http://localhost:1488/-/callback',
+  oidcRedirectUri: 'http://localhost:3128/-/callback',
 }

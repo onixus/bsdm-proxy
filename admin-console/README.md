@@ -84,6 +84,11 @@ The production bundle uses `/admin/` as its asset and router base. Serve it on
 that path with an SPA fallback to `/admin/index.html`, or let BSDM-Proxy serve
 `dist/` through native UI routing.
 
+**Docker / pilot:** the proxy image builds this SPA and sets
+`ADMIN_CONSOLE_DIR=/opt/bsdm/admin-console`. Open `http://localhost:9090/admin/`.
+Search API from the browser may use a separate base (`:8080`); cache-indexer
+allows CORS from `http://localhost:*` / `127.0.0.1` for that split.
+
 ## API integration
 
 The UI talks to existing BSDM REST endpoints (no backend changes required):

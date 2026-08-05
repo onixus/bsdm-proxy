@@ -31,8 +31,8 @@ Issue tracking: **#270** (этот документ + compose), **#269** (load-t
 | L1 cache + spill | **Да** |
 | Kafka → cache-indexer → ClickHouse → Search API | **Да** (base compose) |
 | Prometheus / Grafana | **Да** |
-| DNS sinkhole (UDP) | **Да (day-1)** — сервис `dns-sinkhole` в base compose, host **:5353**; DoH/DoT off by default ([pilot-dns.md](pilot-dns.md)) |
-| Admin Console `/admin/` | **Да** (если собран в image) |
+| DNS sinkhole (UDP) | **Да (day-1)** — сервис `dns-sinkhole` в base compose; host **:5353** (на macOS часто **:15353** — mDNS занимает 5353; см. [pilot-dns.md](pilot-dns.md)) |
+| Admin Console `/admin/` | **Да** — SPA встроена в proxy image (`ADMIN_CONSOLE_DIR=/opt/bsdm/admin-console`), URL `http://localhost:9090/admin/` |
 
 ## Что **не** входит (по умолчанию выключено)
 
@@ -70,14 +70,18 @@ curl -X POST http://127.0.0.1:9090/api/security/dlp \
 
 ### A. Stand-up
 
-- [ ] `docker compose -f docker-compose.yml -f docker-compose.pilot.yml up -d --build` поднимает proxy, kafka, clickhouse, cache-indexer, prometheus, grafana
+- [ ] `docker compose -f docker-compose.yml -f docker-compose.pilot.yml up -d --build` поднимает proxy, kafka, clickhouse, cache-indexer, prometheus, grafana, dns-sinkhole
 - [ ] `GET :9090/health` и `GET :9090/ready` → ok
-- [ ] `GET :8080/health` (indexer) → ok
+- [ ] `GET :9090/admin/` → Admin Console SPA (встроена в image)
+- [ ] `GET :8080/health` (indexer) → ok; Search API: `GET :8080/api/search?limit=1` с `Authorization: Bearer $SEARCH_API_TOKEN`
+- [ ] Admin Console → Settings → Console API: Control `http://localhost:9090` + tokens; Search base `http://localhost:8080` (CORS для localhost/127.0.0.1 включён на indexer)
 - [ ] Experimental profiles **не** указаны в команде запуска
 - [ ] Заданы `CONTROL_API_TOKEN`, `ACL_API_TOKEN`, `SEARCH_API_TOKEN` (не дефолтные пустые в проде)
 - [ ] `CONTROL_API_ALLOW_INSECURE` / `SEARCH_API_ALLOW_INSECURE` **не** `true` на пилоте
 - [ ] Control/metrics не торчат в internet (firewall / `METRICS_BIND` / private network) — см. [control-plane-security.md](../ops-and-dev/control-plane-security.md)
 - [ ] `DLP_ENABLED=false` (default) — no post-start DLP wipe required
+- [ ] ACL persist: `ACL_RULES_PATH` указывает на **writable** path (каталог, не single-file `:ro` mount — иначе `*.tmp` Permission denied). Рекомендация: volume `/etc/bsdm-proxy` или `/var/lib/bsdm-proxy/acl-rules.json`
+- [ ] `CONFIG_ENV_PATH` (Settings → Apply) — writable path, не cwd `/` в контейнере
 - [ ] Backup/restore drill once: `./scripts/drill-backup-restore.sh` (or CA-only with `SKIP_CLICKHOUSE=1`) — [backup-restore.md](../ops-and-dev/backup-restore.md)
 - [ ] If auth is on: `BASIC_AUTH_USERS_FILE` mounted + `./scripts/run-auth-pilot-smoke.sh` green — [pilot-auth.md](pilot-auth.md)
 - [ ] DNS: `./scripts/run-dns-pilot-smoke.sh` green (blocked.test / badsite.test / example.com) — [pilot-dns.md](pilot-dns.md)

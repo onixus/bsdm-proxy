@@ -140,15 +140,30 @@ USER bsdm
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
 
 # ============================================================
+# Admin Console SPA (served by proxy at /admin/)
+# ============================================================
+FROM node:24-alpine AS admin-console-builder
+WORKDIR /app
+COPY admin-console/package.json admin-console/package-lock.json ./
+RUN npm ci
+COPY admin-console/ ./
+RUN npm run build
+
+# ============================================================
 # Proxy runtime
 # ============================================================
 FROM runtime-base AS proxy
 
+USER root
 COPY --from=builder --chmod=755 /dist/proxy /usr/local/bin/proxy
+COPY --from=admin-console-builder --chown=bsdm:bsdm /app/dist /opt/bsdm/admin-console
+ENV ADMIN_CONSOLE_DIR=/opt/bsdm/admin-console
+USER bsdm
 
-EXPOSE 1488
+# Control/metrics (health) on 9090; data-plane proxy default 3128 (HTTP_PORT).
+EXPOSE 3128 9090
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD wget -q -O- --spider http://127.0.0.1:1488/health || exit 1
+    CMD wget -q -O- --spider http://127.0.0.1:9090/health || exit 1
 CMD ["proxy"]
 
 # ============================================================

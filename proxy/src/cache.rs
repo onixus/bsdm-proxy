@@ -15,6 +15,21 @@ use crate::http_types::{full, Body};
 pub const CACHEABLE_METHODS: &[&str] = &["GET", "HEAD"];
 pub const CACHEABLE_STATUS_CODES: &[u16] = &[200, 203, 204, 206, 300, 301, 404, 405, 410, 414, 501];
 
+/// Headers that must not be re-emitted on a fully-buffered cache HIT response.
+fn is_hop_by_hop_or_framing_header(name: &str) -> bool {
+    name.eq_ignore_ascii_case("transfer-encoding")
+        || name.eq_ignore_ascii_case("content-length")
+        || name.eq_ignore_ascii_case("content-encoding")
+        || name.eq_ignore_ascii_case("connection")
+        || name.eq_ignore_ascii_case("keep-alive")
+        || name.eq_ignore_ascii_case("proxy-connection")
+        || name.eq_ignore_ascii_case("proxy-authenticate")
+        || name.eq_ignore_ascii_case("proxy-authorization")
+        || name.eq_ignore_ascii_case("te")
+        || name.eq_ignore_ascii_case("trailers")
+        || name.eq_ignore_ascii_case("upgrade")
+}
+
 #[derive(Clone, Debug)]
 pub struct CachedResponse {
     pub status: u16,
@@ -92,11 +107,17 @@ impl CachedResponse {
 
     pub fn to_response_with_cache_status(&self, cache_status: &str) -> Response<Body> {
         let body = self.response_body();
-        let mut response = Response::new(full(body));
+        let mut response = Response::new(full(body.clone()));
         *response.status_mut() = StatusCode::from_u16(self.status).unwrap_or(StatusCode::OK);
 
         let headers_mut = response.headers_mut();
         for (key, value) in self.headers.iter() {
+            // Drop hop-by-hop / framing headers: body is already fully buffered and
+            // (when decoded) uncompressed. Re-emitting transfer-encoding or a stale
+            // content-encoding breaks HTTP/1 keep-alive (hyper: "user sent unexpected header").
+            if is_hop_by_hop_or_framing_header(key) {
+                continue;
+            }
             if let (Ok(name), Ok(val)) = (
                 HeaderName::from_bytes(key.as_bytes()),
                 HeaderValue::from_str(value),
@@ -105,7 +126,8 @@ impl CachedResponse {
             }
         }
 
-        if let Ok(val) = HeaderValue::from_str(&self.uncompressed_len.to_string()) {
+        // Always set content-length to the body we actually send.
+        if let Ok(val) = HeaderValue::from_str(&body.len().to_string()) {
             headers_mut.insert("content-length", val);
         }
 
@@ -272,6 +294,48 @@ mod tests {
         let served = cached.response_body();
         assert_eq!(served, payload);
         assert_eq!(served.as_ptr(), cached.body.to_bytes().as_ptr());
+    }
+
+    #[test]
+    fn cache_hit_response_strips_framing_headers() {
+        let payload = Bytes::from_static(b"hello-cache");
+        let headers: Arc<[(Arc<str>, Arc<str>)]> = Arc::from([
+            (Arc::from("content-type"), Arc::from("text/plain")),
+            (Arc::from("transfer-encoding"), Arc::from("chunked")),
+            (Arc::from("content-encoding"), Arc::from("gzip")),
+            (Arc::from("content-length"), Arc::from("999")),
+            (Arc::from("connection"), Arc::from("keep-alive")),
+        ]);
+        let cached = CachedResponse {
+            status: 200,
+            headers,
+            body: CachedBody::inline(payload.clone()),
+            body_encoding: BodyEncoding::Raw,
+            uncompressed_len: payload.len(),
+            cached_at: SystemTime::now(),
+            ttl: Duration::from_secs(60),
+            etag: None,
+            last_modified: None,
+            is_negative: false,
+            must_revalidate: false,
+        };
+        let resp = cached.to_response_with_cache_status("HIT");
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert!(resp.headers().get("transfer-encoding").is_none());
+        assert!(resp.headers().get("content-encoding").is_none());
+        assert!(resp.headers().get("connection").is_none());
+        assert_eq!(
+            resp.headers().get("content-length").and_then(|v| v.to_str().ok()),
+            Some(&payload.len().to_string()[..])
+        );
+        assert_eq!(
+            resp.headers().get("content-type").and_then(|v| v.to_str().ok()),
+            Some("text/plain")
+        );
+        assert_eq!(
+            resp.headers().get("x-cache-status").and_then(|v| v.to_str().ok()),
+            Some("HIT")
+        );
     }
 
     #[test]
