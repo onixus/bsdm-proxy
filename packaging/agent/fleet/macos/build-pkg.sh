@@ -9,7 +9,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 BIN=""
 OUT="${ROOT}/dist/bsdm-agent.pkg"
 IDENTIFIER="com.bsdm.agent"
-VERSION="${VERSION:-0.9.9}"
+VERSION="${VERSION:-0.9.10}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in

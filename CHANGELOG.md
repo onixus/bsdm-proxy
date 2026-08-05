@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.10] - 2026-08-05
+
+Patch after **0.9.9**: pilot polish + agent fleet packaging residual.
+
 ### Added
 
 - **Agent fleet packaging (MDM/GPO residual)** — silent install flags on
@@ -27,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stale `content-encoding` when serving buffered cache bodies (avoids hyper
   `user sent unexpected header` on keep-alive reuse).
 - **dns-sinkhole zone dir** — create `/etc/bsdm-proxy` as root with `+x` so
-  non-root `bsdm` can load RPZ (already on main).
+  non-root `bsdm` can load RPZ.
 - **Admin Console defaults** — `HTTP_PORT` / OIDC redirect default **3128**
   (was 1488).
 
@@ -35,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Pilot day-1: Admin Console baked-in, Search CORS, ACL/CONFIG writable paths,
   macOS DNS host port note (`:15353`).
+- Fleet rollout guide and roadmap Phase C residual split (scaffolding vs signed store).
 
 ## [0.9.9] - 2026-08-05
 
