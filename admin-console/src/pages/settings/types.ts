@@ -1,5 +1,7 @@
 import type { ConfigFormState } from '../../lib/config/types'
 
+export type AppTranslations = (typeof import('../../lib/i18n'))['translations']['ru']
+
 export type SettingsTabId =
   | 'general'
   | 'cache'
@@ -49,8 +51,7 @@ export type FormUpdateFn = <K extends keyof ConfigFormState>(
 export interface FormTabProps {
   form: ConfigFormState
   update: FormUpdateFn
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  tr: any
+  tr: AppTranslations
 }
 
 export function isSettingsTab(value: string | null): value is SettingsTabId {
