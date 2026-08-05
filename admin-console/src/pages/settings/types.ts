@@ -1,6 +1,9 @@
 import type { ConfigFormState } from '../../lib/config/types'
+import type { translations } from '../../lib/i18n'
 
-export type AppTranslations = (typeof import('../../lib/i18n'))['translations']['ru']
+export type AppTranslations =
+  | (typeof translations)['ru']
+  | (typeof translations)['en']
 
 export type SettingsTabId =
   | 'general'
@@ -19,7 +22,6 @@ export interface SettingsTabDef {
   id: SettingsTabId
   label: string
   group: SettingsTabGroup
-  /** Shown as subtle badge next to the tab label */
   badge?: 'frozen' | 'pilot'
 }
 
