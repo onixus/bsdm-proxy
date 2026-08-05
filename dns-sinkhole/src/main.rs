@@ -114,12 +114,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn run_admin(
-    port: u16,
-    metrics: Arc<Metrics>,
-    zone: server::SharedZone,
-    zone_path: String,
-) {
+async fn run_admin(port: u16, metrics: Arc<Metrics>, zone: server::SharedZone, zone_path: String) {
     let addr = format!("0.0.0.0:{port}");
     let listener = match TcpListener::bind(&addr).await {
         Ok(l) => l,
@@ -142,7 +137,9 @@ async fn run_admin(
             let req = String::from_utf8_lossy(&buf);
             let (status, body, ctype) = if req.starts_with("GET /health") {
                 ("200 OK", b"ok\n".as_slice(), "text/plain")
-            } else if req.starts_with("POST /api/zone/reload") || req.starts_with("GET /api/zone/reload") {
+            } else if req.starts_with("POST /api/zone/reload")
+                || req.starts_with("GET /api/zone/reload")
+            {
                 match Zone::load_path(Path::new(&zone_path)) {
                     Ok(z) => {
                         let n = z.len();
