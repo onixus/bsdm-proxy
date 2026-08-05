@@ -22,7 +22,7 @@ Issue tracking: **#273** (agent implementation), **#258** (original spike).
 | Optional enroll CSR → client cert (proxy CA) | OCSP stapling on data-plane TLS |
 | `GET /api/v1/agent/policy` pull + watch/SSE/**WebSocket** push | |
 | gRPC policy (`Get/Push/WatchAgentPolicy`, feature `grpc`) | mTLS on metrics/admin port |
-| Optional control mTLS port (`CONTROL_MTLS_*`, default `:9443`) | Multi-node shared registry |
+| Optional control mTLS port (`CONTROL_MTLS_*`, default `:9443`) | |
 | Agent cert CRL JSON/PEM + lab OCSP JSON + **RFC 6960 DER OCSP** | |
 | `POST /api/v1/agent/heartbeat` + `GET /api/v1/devices` | Durable multi-node event store |
 | `POST /api/v1/agent/events` telemetry batch | Multi-OS installers / system proxy |
