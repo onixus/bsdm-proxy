@@ -11,8 +11,8 @@ pipeline. Guide: [pilot-agent-fleet.md](../../docs/getting-started/pilot-agent-f
 ## Build binary
 
 ```bash
-cargo build -p agent-spike --release
-# → target/release/agent-spike
+cargo build -p agent-spike --release --bin bsdm-agent
+# → target/release/bsdm-agent  (alias: agent-spike)
 ```
 
 Cross targets (optional):

@@ -476,6 +476,7 @@ pub struct ControlApiState {
     pub(crate) cert_cache: Option<CertCache>,
     shutdown_tx: Option<watch::Sender<bool>>,
     acl_api: Option<Arc<AclApiState>>,
+    rpz_api: Option<Arc<crate::rpz_api::RpzApiState>>,
 }
 
 impl ControlApiState {
@@ -540,6 +541,7 @@ impl ControlApiState {
             cert_cache: None,
             shutdown_tx: None,
             acl_api: None,
+            rpz_api: Some(crate::rpz_api::RpzApiState::from_env()),
         }
     }
 
@@ -704,7 +706,8 @@ impl ControlApiState {
                     // RFC 6960 OCSP is intentionally unauthenticated (status only).
                     | (&Method::POST, "/api/v1/agent/ocsp")
                     | (&Method::GET, "/api/v1/agent/ocsp")
-            );
+            ) || (*method == Method::OPTIONS
+                && (path.starts_with("/api/search") || path == "/api/events"));
             if !public_api {
                 let enroll_api = matches!(path, "/api/v1/agent/enroll" | "/api/agent/enroll");
                 let agent_api = path.starts_with("/api/v1/agent/")
@@ -726,6 +729,30 @@ impl ControlApiState {
 
         if let Some(resp) = self.dispatch_agent(method, path, query, body.clone()).await {
             return resp;
+        }
+
+        let query_str = query.unwrap_or("");
+
+        // Same-origin Search/Ingest for Admin Console (optional upstream).
+        if path.starts_with("/api/search")
+            || path == "/api/events"
+            || (*method == Method::OPTIONS
+                && (path.starts_with("/api/search") || path == "/api/events"))
+        {
+            return crate::search_proxy::proxy_search_request(
+                method,
+                path,
+                query_str,
+                headers,
+                body.clone(),
+            )
+            .await;
+        }
+
+        if let Some(rpz) = &self.rpz_api {
+            if let Some(resp) = rpz.dispatch(method, path, query_str, body.clone()).await {
+                return resp;
+            }
         }
 
         match (method, path) {

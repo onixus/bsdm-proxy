@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "exceptions": [
+    {
+      "domain": ".slack.com",
+      "reason": "Compatibility baseline migrated from the legacy default",
+      "owner": "network-security"
+    },
+    {
+      "domain": ".teams.microsoft.com",
+      "reason": "Compatibility baseline migrated from the legacy default",
+      "owner": "network-security"
+    },
+    {
+      "domain": ".zoom.us",
+      "reason": "Compatibility baseline migrated from the legacy default",
+      "owner": "network-security"
+    }
+  ]
+}

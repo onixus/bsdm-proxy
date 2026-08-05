@@ -11,7 +11,7 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use zone::Zone;
 
 #[tokio::main]
@@ -32,26 +32,46 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let zone = Zone::load_path(Path::new(&cfg.zone_path)).map_err(|e| {
-        error!("{e}");
-        e
-    })?;
+    let zone_path = Path::new(&cfg.zone_path);
+    let zone = match Zone::load_path(zone_path) {
+        Ok(z) => z,
+        Err(e) => {
+            // First boot: fall back to image/example blocklist if compiled zone missing.
+            let fallback = Path::new("/etc/bsdm-proxy/blocklist.rpz");
+            if fallback.exists() {
+                warn!(
+                    path = %cfg.zone_path,
+                    fallback = %fallback.display(),
+                    err = %e,
+                    "primary zone missing; loading fallback"
+                );
+                Zone::load_path(fallback).map_err(|e2| {
+                    error!("{e2}");
+                    e2
+                })?
+            } else {
+                error!("{e}");
+                return Err(e.into());
+            }
+        }
+    };
     info!(
         path = %cfg.zone_path,
         rules = zone.len(),
         "zone loaded"
     );
 
+    let zone: server::SharedZone = Arc::new(std::sync::RwLock::new(Arc::new(zone)));
     let metrics = Arc::new(Metrics::new()?);
     {
         let metrics = metrics.clone();
         let port = cfg.metrics_port;
+        let zone_admin = zone.clone();
+        let zone_path = cfg.zone_path.clone();
         tokio::spawn(async move {
-            run_admin(port, metrics).await;
+            run_admin(port, metrics, zone_admin, zone_path).await;
         });
     }
-
-    let zone = Arc::new(zone);
 
     if cfg.doh_enabled || cfg.dot_enabled {
         if let (Some(cert), Some(key)) = (&cfg.tls_cert_path, &cfg.tls_key_path) {
@@ -94,7 +114,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn run_admin(port: u16, metrics: Arc<Metrics>) {
+async fn run_admin(
+    port: u16,
+    metrics: Arc<Metrics>,
+    zone: server::SharedZone,
+    zone_path: String,
+) {
     let addr = format!("0.0.0.0:{port}");
     let listener = match TcpListener::bind(&addr).await {
         Ok(l) => l,
@@ -103,18 +128,59 @@ async fn run_admin(port: u16, metrics: Arc<Metrics>) {
             return;
         }
     };
-    info!("admin http://{addr}/health");
+    info!("admin http://{addr}/health · POST /api/zone/reload");
     loop {
         let Ok((mut sock, _)) = listener.accept().await else {
             continue;
         };
         let metrics = metrics.clone();
+        let zone = zone.clone();
+        let zone_path = zone_path.clone();
         tokio::spawn(async move {
-            let mut buf = [0u8; 1024];
+            let mut buf = [0u8; 2048];
             let _ = sock.read(&mut buf).await;
             let req = String::from_utf8_lossy(&buf);
             let (status, body, ctype) = if req.starts_with("GET /health") {
                 ("200 OK", b"ok\n".as_slice(), "text/plain")
+            } else if req.starts_with("POST /api/zone/reload") || req.starts_with("GET /api/zone/reload") {
+                match Zone::load_path(Path::new(&zone_path)) {
+                    Ok(z) => {
+                        let n = z.len();
+                        let swapped = {
+                            if let Ok(mut g) = zone.write() {
+                                *g = Arc::new(z);
+                                true
+                            } else {
+                                false
+                            }
+                        };
+                        if swapped {
+                            info!(rules = n, path = %zone_path, "zone reloaded");
+                            let msg = format!("{{\"status\":\"reloaded\",\"rules\":{n}}}\n");
+                            let resp = format!(
+                                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{msg}",
+                                msg.len()
+                            );
+                            let _ = sock.write_all(resp.as_bytes()).await;
+                            return;
+                        }
+                        (
+                            "500 Internal Server Error",
+                            b"{\"error\":\"lock\"}\n".as_slice(),
+                            "application/json",
+                        )
+                    }
+                    Err(e) => {
+                        error!("zone reload failed: {e}");
+                        let msg = format!("{{\"error\":\"{e}\"}}\n");
+                        let resp = format!(
+                            "HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{msg}",
+                            msg.len()
+                        );
+                        let _ = sock.write_all(resp.as_bytes()).await;
+                        return;
+                    }
+                }
             } else if req.starts_with("GET /metrics") {
                 let encoder = TextEncoder::new();
                 let families = metrics.registry.gather();

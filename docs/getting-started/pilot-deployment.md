@@ -74,7 +74,7 @@ curl -X POST http://127.0.0.1:9090/api/security/dlp \
 - [ ] `GET :9090/health` и `GET :9090/ready` → ok
 - [ ] `GET :9090/admin/` → Admin Console SPA (встроена в image)
 - [ ] `GET :8080/health` (indexer) → ok; Search API: `GET :8080/api/search?limit=1` с `Authorization: Bearer $SEARCH_API_TOKEN`
-- [ ] Admin Console → Settings → Console API: Control `http://localhost:9090` + tokens; Search base `http://localhost:8080` (CORS для localhost/127.0.0.1 включён на indexer)
+- [ ] Admin Console → Settings → Console API: **single endpoint** `http://localhost:9090` + Control token (Search same-origin via control-plane proxy to indexer; optional advanced Search `:8080`)
 - [ ] Experimental profiles **не** указаны в команде запуска
 - [ ] Заданы `CONTROL_API_TOKEN`, `ACL_API_TOKEN`, `SEARCH_API_TOKEN` (не дефолтные пустые в проде)
 - [ ] `CONTROL_API_ALLOW_INSECURE` / `SEARCH_API_ALLOW_INSECURE` **не** `true` на пилоте

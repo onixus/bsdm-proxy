@@ -60,12 +60,14 @@ if [[ "$(id -u)" -ne 0 ]]; then
 fi
 
 if [[ -z "${BIN_SRC}" ]]; then
-  if [[ -x "${ROOT}/target/release/agent-spike" ]]; then
+  if [[ -x "${ROOT}/target/release/bsdm-agent" ]]; then
+    BIN_SRC="${ROOT}/target/release/bsdm-agent"
+  elif [[ -x "${ROOT}/target/release/agent-spike" ]]; then
     BIN_SRC="${ROOT}/target/release/agent-spike"
   else
-    echo "Building agent-spike (release)..."
-    (cd "${ROOT}" && cargo build -p agent-spike --release)
-    BIN_SRC="${ROOT}/target/release/agent-spike"
+    echo "Building bsdm-agent (release)..."
+    (cd "${ROOT}" && cargo build -p agent-spike --release --bin bsdm-agent)
+    BIN_SRC="${ROOT}/target/release/bsdm-agent"
   fi
 fi
 

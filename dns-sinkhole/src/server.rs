@@ -7,6 +7,10 @@ use crate::dns::{
 };
 use crate::doh_dot::{decode_doh_base64url, encode_dot_frame, parse_dot_length};
 use crate::zone::{Zone, ZoneAction};
+use std::sync::RwLock;
+
+/// Hot-reloadable zone (swap Arc on reload).
+pub type SharedZone = Arc<RwLock<Arc<Zone>>>;
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
 use hyper::body::Incoming;
@@ -82,7 +86,7 @@ impl Metrics {
     }
 }
 
-pub async fn run(cfg: Config, zone: Arc<Zone>, metrics: Arc<Metrics>) -> Result<(), String> {
+pub async fn run(cfg: Config, zone: SharedZone, metrics: Arc<Metrics>) -> Result<(), String> {
     let sock = Arc::new(
         UdpSocket::bind(cfg.bind)
             .await
@@ -91,7 +95,7 @@ pub async fn run(cfg: Config, zone: Arc<Zone>, metrics: Arc<Metrics>) -> Result<
     info!(
         bind = %cfg.bind,
         upstream = %cfg.upstream,
-        zone_rules = zone.len(),
+        zone_rules = zone.read().map(|z| z.len()).unwrap_or(0),
         action = ?cfg.action,
         "dns-sinkhole listening"
     );
@@ -126,7 +130,7 @@ async fn handle_one(
     peer: SocketAddr,
     packet: &[u8],
     cfg: &Config,
-    zone: &Zone,
+    zone: &SharedZone,
     metrics: &Metrics,
 ) -> Result<(), String> {
     let resp = process_dns_query(packet, cfg, zone, metrics).await?;
@@ -139,7 +143,7 @@ async fn handle_one(
 pub async fn process_dns_query(
     packet: &[u8],
     cfg: &Config,
-    zone: &Zone,
+    zone: &SharedZone,
     metrics: &Metrics,
 ) -> Result<Vec<u8>, String> {
     let query = match parse_query(packet) {
@@ -158,7 +162,8 @@ pub async fn process_dns_query(
         return Ok(build_response(&query, 0, &[]));
     }
 
-    if let Some(action) = zone.lookup(&query.question.name) {
+    let zone_snap = zone.read().map_err(|e| format!("zone lock: {e}"))?.clone();
+    if let Some(action) = zone_snap.lookup(&query.question.name) {
         metrics.blocked.inc();
         metrics
             .policy_decision_source
@@ -259,7 +264,7 @@ pub fn load_certs(cert_path: &str, key_path: &str) -> Result<ServerConfig, Strin
 
 pub async fn run_dot(
     cfg: Config,
-    zone: Arc<Zone>,
+    zone: SharedZone,
     metrics: Arc<Metrics>,
     tls_config: Arc<ServerConfig>,
 ) -> Result<(), String> {
@@ -326,7 +331,7 @@ pub async fn run_dot(
 
 pub async fn run_doh(
     cfg: Config,
-    zone: Arc<Zone>,
+    zone: SharedZone,
     metrics: Arc<Metrics>,
     tls_config: Arc<ServerConfig>,
 ) -> Result<(), String> {
@@ -484,7 +489,9 @@ mod tests {
 
     #[tokio::test]
     async fn blocks_zone_name_with_sinkhole() {
-        let zone = Arc::new(Zone::parse("blocked.test CNAME .\n").unwrap());
+        let zone: SharedZone = Arc::new(RwLock::new(Arc::new(
+            Zone::parse("blocked.test CNAME .\n").unwrap(),
+        )));
         let metrics = Arc::new(Metrics::new().unwrap());
         let cfg = Config {
             enabled: true,

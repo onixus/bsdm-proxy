@@ -1,0 +1,36 @@
+{
+  "default_action": "allow",
+  "rules": [
+    {
+      "id": "block-malware",
+      "name": "Block malware URLs",
+      "enabled": true,
+      "priority": 180,
+      "action": "deny",
+      "rule_type": {
+        "Category": "malware"
+      },
+      "comment": "Block known malware hosts"
+    },
+    {
+      "id": "block-phishing",
+      "name": "Block phishing URLs",
+      "enabled": true,
+      "priority": 180,
+      "action": "deny",
+      "rule_type": {
+        "Category": "phishing"
+      }
+    },
+    {
+      "id": "block-adult",
+      "name": "Block adult content",
+      "enabled": true,
+      "priority": 150,
+      "action": "deny",
+      "rule_type": {
+        "Category": "adult"
+      }
+    }
+  ]
+}

@@ -2,7 +2,8 @@
 name = "agent-spike"
 version = "0.1.0"
 edition = "2021"
-description = "Minimal On-Device SWG Local Policy Agent Spike (Phase C, Issue #258)"
+description = "BSDM Local Policy Agent (product binary bsdm-agent; lab alias agent-spike)"
+autobins = false
 
 [dependencies]
 tokio = { workspace = true }
@@ -16,3 +17,14 @@ rcgen = { version = "0.14", default-features = true, features = ["pem"] }
 tokio-tungstenite = { version = "0.30", default-features = true, features = ["rustls-tls-webpki-roots"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 http = "1"
+
+# Product binary (fleet packages install as bsdm-agent).
+[[bin]]
+name = "bsdm-agent"
+path = "src/main.rs"
+
+# Lab alias kept for existing docs/scripts.
+[[bin]]
+name = "agent-spike"
+path = "src/main.rs"
+

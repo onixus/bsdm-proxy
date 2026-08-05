@@ -119,6 +119,14 @@ services:
       - ACL_DEFAULT_ACTION=allow
       - ACL_RULES_PATH=/etc/bsdm-proxy/acl-rules.json
       - ACL_AUTO_RELOAD=false
+      # Writable env persist (Admin Settings Apply); not cwd /
+      - CONFIG_ENV_PATH=/var/lib/bsdm-proxy/bsdm-proxy.env
+      # Same-origin Search for Admin Console on :9090
+      - SEARCH_UPSTREAM_URL=http://cache-indexer:8080
+      # RPZ API state + compiled zone shared with dns-sinkhole
+      - DNS_RPZ_STATE_DIR=/var/lib/bsdm-proxy/rpz
+      - DNS_SINKHOLE_ZONE_PATH=/var/lib/bsdm-proxy/rpz/compiled.rpz
+      - DNS_SINKHOLE_RELOAD_URL=http://dns-sinkhole:8092/api/zone/reload
       - CATEGORIZATION_ENABLED=false
       - UT1_ENABLED=false
       # Control plane: set real secrets for pilot. Lab compose allows insecure open APIs.
@@ -140,8 +148,8 @@ services:
       - bsdm-net
     volumes:
       - ./certs:/certs:ro
-      - ./config/acl-rules.example.json:/etc/bsdm-proxy/acl-rules.json:ro
-      - ./config/pinning-exceptions.example.json:/etc/bsdm-proxy/pinning-exceptions.json:ro
+      # Writable /etc/bsdm-proxy (ACL persist needs sibling *.tmp)
+      - ./config/bsdm-etc:/etc/bsdm-proxy
       - pinning-audit:/var/log/bsdm-proxy
       - agent-devices:/var/lib/bsdm-proxy
     tty: true
@@ -442,7 +450,8 @@ services:
       - DNS_SINKHOLE_ENABLED=${DNS_SINKHOLE_ENABLED:-true}
       - DNS_SINKHOLE_BIND=0.0.0.0:53
       - DNS_SINKHOLE_UPSTREAM=${DNS_SINKHOLE_UPSTREAM:-1.1.1.1:53}
-      - DNS_SINKHOLE_ZONE_PATH=/etc/bsdm-proxy/blocklist.rpz
+      - DNS_SINKHOLE_ZONE_PATH=${DNS_SINKHOLE_ZONE_PATH:-/var/lib/bsdm-proxy/rpz/compiled.rpz}
+      - DNS_ZONE_HOST=${DNS_ZONE_HOST:-./examples/dns/blocklist.rpz}
       - DNS_SINKHOLE_ACTION=${DNS_SINKHOLE_ACTION:-sinkhole}
       - DNS_SINKHOLE_A=${DNS_SINKHOLE_A:-127.0.0.1}
       - DNS_SINKHOLE_DOH_ENABLED=${DNS_SINKHOLE_DOH_ENABLED:-false}
@@ -452,6 +461,7 @@ services:
       - METRICS_PORT=8092
       - RUST_LOG=info,dns_sinkhole=info
     volumes:
+      - agent-devices:/var/lib/bsdm-proxy
       - ${DNS_ZONE_HOST:-./examples/dns/blocklist.rpz}:/etc/bsdm-proxy/blocklist.rpz:ro
     networks:
       - bsdm-net

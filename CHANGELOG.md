@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Same-origin Search proxy** — control plane proxies `GET /api/search*` and
+  `POST /api/events` to `SEARCH_UPSTREAM_URL` (compose: `cache-indexer:8080`) so
+  Admin Console single-endpoint mode works without CORS.
+- **RPZ management API** — file-backed `/api/dns/rpz/*` + sinkhole config on the
+  control plane; compiles zone to `DNS_SINKHOLE_ZONE_PATH` and POSTs
+  `DNS_SINKHOLE_RELOAD_URL`. dns-sinkhole supports `POST /api/zone/reload`.
+- **Product agent binary** — `bsdm-agent` bin target (alias `agent-spike`);
+  installers prefer `target/release/bsdm-agent`.
+- **Writable compose config paths** — `./config/bsdm-etc` → `/etc/bsdm-proxy`,
+  `CONFIG_ENV_PATH` on `agent-devices` volume; shared RPZ dir with dns-sinkhole.
+
 ### Fixed
 
 - **Admin Settings Apply vs live env** — Apply posts a **delta** against
