@@ -325,15 +325,21 @@ mod tests {
         assert!(resp.headers().get("content-encoding").is_none());
         assert!(resp.headers().get("connection").is_none());
         assert_eq!(
-            resp.headers().get("content-length").and_then(|v| v.to_str().ok()),
+            resp.headers()
+                .get("content-length")
+                .and_then(|v| v.to_str().ok()),
             Some(&payload.len().to_string()[..])
         );
         assert_eq!(
-            resp.headers().get("content-type").and_then(|v| v.to_str().ok()),
+            resp.headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok()),
             Some("text/plain")
         );
         assert_eq!(
-            resp.headers().get("x-cache-status").and_then(|v| v.to_str().ok()),
+            resp.headers()
+                .get("x-cache-status")
+                .and_then(|v| v.to_str().ok()),
             Some("HIT")
         );
     }
