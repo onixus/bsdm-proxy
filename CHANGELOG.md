@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.9] - 2026-08-05
+
+Patch after **0.9.8**: CI stabilization — clippy fix for agent system-proxy
+on Linux, CI workflow permissions for Code Scanning.
+
+### Fixed
+
+- **agent-spike clippy (`needless_return`)** — Linux CI failed on
+  `system_proxy` cfg branches; platform `*_impl` helpers without trailing
+  `return`.
+- **CI workflow permissions** — explicit permissions on `ci.yml` (#295 /
+  code scanning alert).
+
 ## [0.9.8] - 2026-08-05
 
 Patch release after **0.9.7**: Phase C agent **productization slice** —
