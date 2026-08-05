@@ -76,26 +76,7 @@ pub fn set_system_proxy(ep: &ProxyEndpoint, dry_run: bool) -> Result<String, Str
             platform_tag()
         ));
     }
-    #[cfg(target_os = "macos")]
-    {
-        return set_macos(ep);
-    }
-    #[cfg(target_os = "linux")]
-    {
-        return set_linux(ep);
-    }
-    #[cfg(target_os = "windows")]
-    {
-        return set_windows(ep);
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
-    {
-        let _ = ep;
-        Err(format!(
-            "system proxy not implemented on platform {}",
-            platform_tag()
-        ))
-    }
+    set_system_proxy_impl(ep)
 }
 
 /// Clear OS system HTTP(S) proxy settings.
@@ -106,25 +87,54 @@ pub fn clear_system_proxy(dry_run: bool) -> Result<String, String> {
             platform_tag()
         ));
     }
-    #[cfg(target_os = "macos")]
-    {
-        return clear_macos();
-    }
-    #[cfg(target_os = "linux")]
-    {
-        return clear_linux();
-    }
-    #[cfg(target_os = "windows")]
-    {
-        return clear_windows();
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
-    {
-        Err(format!(
-            "system proxy not implemented on platform {}",
-            platform_tag()
-        ))
-    }
+    clear_system_proxy_impl()
+}
+
+#[cfg(target_os = "macos")]
+fn set_system_proxy_impl(ep: &ProxyEndpoint) -> Result<String, String> {
+    set_macos(ep)
+}
+
+#[cfg(target_os = "macos")]
+fn clear_system_proxy_impl() -> Result<String, String> {
+    clear_macos()
+}
+
+#[cfg(target_os = "linux")]
+fn set_system_proxy_impl(ep: &ProxyEndpoint) -> Result<String, String> {
+    set_linux(ep)
+}
+
+#[cfg(target_os = "linux")]
+fn clear_system_proxy_impl() -> Result<String, String> {
+    clear_linux()
+}
+
+#[cfg(target_os = "windows")]
+fn set_system_proxy_impl(ep: &ProxyEndpoint) -> Result<String, String> {
+    set_windows(ep)
+}
+
+#[cfg(target_os = "windows")]
+fn clear_system_proxy_impl() -> Result<String, String> {
+    clear_windows()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+fn set_system_proxy_impl(ep: &ProxyEndpoint) -> Result<String, String> {
+    let _ = ep;
+    Err(format!(
+        "system proxy not implemented on platform {}",
+        platform_tag()
+    ))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+fn clear_system_proxy_impl() -> Result<String, String> {
+    Err(format!(
+        "system proxy not implemented on platform {}",
+        platform_tag()
+    ))
 }
 
 fn run(cmd: &str, args: &[&str]) -> Result<String, String> {
