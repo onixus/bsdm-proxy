@@ -31,7 +31,9 @@ policy and heartbeat endpoints.
   `WatchAgentPolicy` / `GetAgentPolicy` / `PushAgentPolicy` (`--features grpc`).
 - Data-plane **OCSP stapling** on MITM/control server leaves (CA-signed good
   staple; `TLS_OCSP_STAPLING`, default on) — distinct from agent client OCSP API.
-- Reserved: multi-OS installers, multi-node registry.
+- **Multi-node registry**: Redis write-through for devices + CRL
+  (`AGENT_DEVICES_REDIS_URL` / `AGENT_DEVICES_REDIS` + `REDIS_URL`).
+- Reserved: multi-OS installers / system proxy.
 
 ---
 
@@ -55,7 +57,8 @@ policy and heartbeat endpoints.
    }
    ```
 3. Always returns a **one-time** `device_token` (`bsdmagent_…`); only SHA-256
-   hash is stored (`AGENT_DEVICES_PATH`).
+   hash is stored (local map + optional `AGENT_DEVICES_PATH` and/or multi-node
+   Redis).
 4. When `csr_pem` is present and CA is loaded: verifies CSR signature, signs a
    **ClientAuth** certificate bound to:
    - CN / URI SAN `urn:bsdm:device:{device_id}`

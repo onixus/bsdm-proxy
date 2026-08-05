@@ -303,31 +303,49 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let threat_sync = ThreatSyncEngine::new(node_id, None);
 
     let hierarchy_peers = hierarchy.as_ref().map(|m| m.peer_registry());
-    let control_api = Arc::new(
-        ControlApiState::from_env(
-            metrics.clone(),
-            service.http_cache(),
-            l2_cache.clone(),
-            hierarchy_peers,
-            hierarchy_config.use_htcp,
-            service.upstream_client(),
-            #[cfg(feature = "wasm")]
-            service.wasm_hook.clone(),
-            service.casb_engine(),
-            service.dlp_engine(),
-            service.pinning_registry(),
-            auth.clone(),
-            session_store,
-            threat_sync,
-        )
-        .with_event_pipelines(
-            #[cfg(feature = "kafka")]
-            kafka_for_control,
-            http_for_control,
-        )
-        .with_cert_cache(cert_cache_for_control)
-        .with_config_apply(shutdown_tx.clone(), acl_api.clone()),
-    );
+    let mut control_builder = ControlApiState::from_env(
+        metrics.clone(),
+        service.http_cache(),
+        l2_cache.clone(),
+        hierarchy_peers,
+        hierarchy_config.use_htcp,
+        service.upstream_client(),
+        #[cfg(feature = "wasm")]
+        service.wasm_hook.clone(),
+        service.casb_engine(),
+        service.dlp_engine(),
+        service.pinning_registry(),
+        auth.clone(),
+        session_store,
+        threat_sync,
+    )
+    .with_event_pipelines(
+        #[cfg(feature = "kafka")]
+        kafka_for_control,
+        http_for_control,
+    )
+    .with_cert_cache(cert_cache_for_control)
+    .with_config_apply(shutdown_tx.clone(), acl_api.clone());
+
+    // Multi-node agent device registry + CRL (Redis write-through).
+    if let Some(url) = bsdm_proxy::device_registry::redis_url_from_env() {
+        match bsdm_proxy::device_registry::connect_agent_redis(&url).await {
+            Ok(conn) => {
+                control_builder = control_builder.with_agent_multi_node_redis(conn).await;
+                info!(
+                    redis = %url,
+                    multi_node_devices = control_builder.agent_devices_multi_node(),
+                    multi_node_crl = control_builder.agent_crl_multi_node(),
+                    "Agent multi-node Redis enabled"
+                );
+            }
+            Err(e) => {
+                warn!(error = %e, redis = %url, "Agent multi-node Redis unavailable — local registry only");
+            }
+        }
+    }
+
+    let control_api = Arc::new(control_builder);
     info!(
         "Control plane API on :{}/api/stats · :{}/api/cache/purge · :{}/api/hierarchy/* · :{}/api/upstream/tls · :{}/api/pinning/exceptions",
         metrics_port, metrics_port, metrics_port, metrics_port, metrics_port

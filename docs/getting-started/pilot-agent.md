@@ -28,6 +28,7 @@ Issue tracking: **#273** (agent implementation), **#258** (original spike).
 | `POST /api/v1/agent/events` telemetry batch | Multi-OS installers / system proxy |
 | Device registry persistence (`AGENT_DEVICES_PATH`) | Full UT1 categorization on endpoint |
 | Admin Console `/devices` (list/revoke/push/CRL) | Production IdP binding |
+| Multi-node Redis devices + CRL (optional) | Full multi-cluster mesh productization |
 | Local SNI deny + pinning bypass + mode | |
 | `AGENT_ONCE` / `--once` / `--enroll` smoke | |
 
@@ -53,8 +54,8 @@ is for labs that want to exercise Phase C control-plane endpoints early.
 
 ## Device registry persistence
 
-Without `AGENT_DEVICES_PATH`, devices live only in memory and disappear on
-restart. With the path set:
+Without `AGENT_DEVICES_PATH` (and without Redis multi-node), devices live only
+in memory and disappear on restart. With the path set:
 
 1. Control plane **loads** JSON at start (`version: 1`, array of devices).
 2. Each successful heartbeat / revoke **rewrites** the file atomically.
@@ -69,6 +70,36 @@ docker compose up -d proxy
 # After smoke heartbeat:
 # docker compose exec proxy cat /var/lib/bsdm-proxy/agent-devices.json
 ```
+
+### Multi-node (Redis)
+
+Shared enroll / heartbeat / revoke / device-token auth across proxy nodes:
+
+```bash
+# Preferred dedicated URL:
+export AGENT_DEVICES_REDIS_URL=redis://redis:6379/0
+
+# Or reuse REDIS_URL:
+export REDIS_URL=redis://redis:6379/0
+export AGENT_DEVICES_REDIS=true
+
+# Optional key prefix (default bsdm:agent:):
+# export AGENT_REDIS_PREFIX=bsdm:agent:
+```
+
+Redis stores:
+
+| Key | Type | Content |
+|---|---|---|
+| `{prefix}devices` | HASH | `device_id` → JSON device |
+| `{prefix}tok:{sha256}` | STRING | → `device_id` |
+| `{prefix}fp:{fingerprint}` | STRING | → `device_id` |
+| `{prefix}ser:{serial}` | STRING | → `device_id` |
+| `{prefix}crl` | HASH | fingerprint → JSON CRL entry |
+| `{prefix}crl_number` | STRING | monotonic CRL number |
+
+Local memory is a cache; writes go to Redis (and optional file). List/auth
+paths pull/merge from Redis. Use the **same CA** and enroll token on all nodes.
 
 File shape:
 

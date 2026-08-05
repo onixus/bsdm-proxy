@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Multi-node agent device registry + CRL (Redis)** — write-through HASH +
+  token/fingerprint/serial indexes (`AGENT_DEVICES_REDIS_URL` or
+  `REDIS_URL` + `AGENT_DEVICES_REDIS=true`; prefix `AGENT_REDIS_PREFIX`,
+  default `bsdm:agent:`). Shared enroll/heartbeat/revoke/auth across proxy
+  nodes; file path (`AGENT_DEVICES_PATH` / `AGENT_CRL_PATH`) remains optional
+  local durability.
 - **TLS OCSP stapling (data-plane MITM + control mTLS)** — CA-signed RFC 6960
   **good** staple attached via rustls `with_single_cert_with_ocsp`; default on
   (`TLS_OCSP_STAPLING=0` to disable); refresh `TLS_OCSP_STAPLE_REFRESH_SECS`

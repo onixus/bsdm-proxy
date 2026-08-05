@@ -22,6 +22,11 @@ native install находятся в `packaging/config/*.env.example`; Compose �
 | `MITM_ENABLED` | `true` | HTTPS MITM; требует `ca.key` и `ca.crt` при POLICY_MODE != sni |
 | `TLS_OCSP_STAPLING` | `true` | OCSP staple (RFC 6960 DER, CA-signed **good**) on MITM/control TLS leaves |
 | `TLS_OCSP_STAPLE_REFRESH_SECS` | `900` | TTL refresh cached `ServerConfig` + staple (60–86400) |
+| `AGENT_DEVICES_PATH` | unset | Local durable agent device JSON |
+| `AGENT_CRL_PATH` | unset | Local durable agent CRL JSON |
+| `AGENT_DEVICES_REDIS_URL` | unset | Multi-node Redis URL for devices+CRL (preferred) |
+| `AGENT_DEVICES_REDIS` | `false` | When `true`, use `REDIS_URL` for multi-node agent store |
+| `AGENT_REDIS_PREFIX` | `bsdm:agent:` | Redis key prefix (HASH `…devices`, `…crl`, indexes) |
 | `DLP_ENABLED` | `false` | Experimental native signature DLP; `false` = no built-in patterns / no body scan |
 | `SHUTDOWN_TIMEOUT_SECONDS` | `30` | Graceful shutdown |
 | `WORKER_COUNT` | `1` | SO_REUSEPORT accept loops на Unix |

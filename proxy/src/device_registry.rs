@@ -1,10 +1,13 @@
 //! Agent device inventory (Phase C).
 //!
-//! Cohesive in-memory map with optional durable JSON path
-//! (`AGENT_DEVICES_PATH`). Heartbeats merge into the map; revoke marks
-//! devices; both rewrite the file when persistence is configured.
+//! In-memory map with optional durable JSON path (`AGENT_DEVICES_PATH`) and
+//! optional **multi-node Redis** write-through (`AGENT_DEVICES_REDIS_URL` or
+//! `REDIS_URL` + `AGENT_DEVICES_REDIS=true`). Heartbeats/enroll/revoke update
+//! local + Redis (and file when configured).
 
 use crate::security_util::constant_time_eq;
+use redis::aio::ConnectionManager;
+use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -13,7 +16,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 const FILE_VERSION: u32 = 1;
 const MAX_DEVICES: usize = 10_000;
@@ -188,11 +191,23 @@ struct DevicesFile {
     devices: Vec<RegisteredDevice>,
 }
 
-/// Runtime registry: map + optional durable path.
+/// Redis multi-node backend for the agent device registry.
+#[derive(Clone)]
+struct DeviceRedis {
+    conn: ConnectionManager,
+    /// HASH device_id → JSON RegisteredDevice
+    devices_hash: String,
+    token_prefix: String,
+    fp_prefix: String,
+    serial_prefix: String,
+}
+
+/// Runtime registry: map + optional file + optional Redis multi-node store.
 #[derive(Clone)]
 pub struct DeviceRegistry {
     devices: Arc<RwLock<HashMap<String, RegisteredDevice>>>,
     path: Option<PathBuf>,
+    redis: Option<DeviceRedis>,
 }
 
 impl Default for DeviceRegistry {
@@ -206,10 +221,12 @@ impl DeviceRegistry {
         Self {
             devices: Arc::new(RwLock::new(HashMap::new())),
             path: None,
+            redis: None,
         }
     }
 
     /// Load from `AGENT_DEVICES_PATH` when set; otherwise memory-only.
+    /// Redis is attached later via [`Self::attach_redis`] (async connect).
     pub fn from_env() -> Self {
         let Some(path) = path_from_env() else {
             return Self::memory_only();
@@ -224,6 +241,7 @@ impl DeviceRegistry {
                 Self {
                     devices: Arc::new(RwLock::new(loaded)),
                     path: Some(path),
+                    redis: None,
                 }
             }
             Err(error) => {
@@ -235,6 +253,7 @@ impl DeviceRegistry {
                 Self {
                     devices: Arc::new(RwLock::new(HashMap::new())),
                     path: Some(path),
+                    redis: None,
                 }
             }
         }
@@ -245,6 +264,7 @@ impl DeviceRegistry {
         Self {
             devices: Arc::new(RwLock::new(HashMap::new())),
             path: Some(path),
+            redis: None,
         }
     }
 
@@ -253,6 +273,7 @@ impl DeviceRegistry {
         Self {
             devices: Arc::new(RwLock::new(map)),
             path,
+            redis: None,
         }
     }
 
@@ -261,7 +282,71 @@ impl DeviceRegistry {
     }
 
     pub fn is_persistent(&self) -> bool {
-        self.path.is_some()
+        self.path.is_some() || self.redis.is_some()
+    }
+
+    pub fn is_multi_node(&self) -> bool {
+        self.redis.is_some()
+    }
+
+    /// Attach Redis multi-node backend and pull remote devices into local cache.
+    pub async fn attach_redis(&mut self, conn: ConnectionManager) -> Result<usize, String> {
+        let prefix = redis_key_prefix_from_env();
+        let backend = DeviceRedis {
+            conn,
+            devices_hash: format!("{prefix}devices"),
+            token_prefix: format!("{prefix}tok:"),
+            fp_prefix: format!("{prefix}fp:"),
+            serial_prefix: format!("{prefix}ser:"),
+        };
+        self.redis = Some(backend);
+        let n = self.pull_from_redis().await;
+        info!(
+            hash = %self.redis.as_ref().map(|r| r.devices_hash.as_str()).unwrap_or(""),
+            pulled = n,
+            "Agent device registry multi-node Redis attached"
+        );
+        Ok(n)
+    }
+
+    /// Pull all devices from Redis HASH and merge by `last_seen` (remote wins if newer).
+    pub async fn pull_from_redis(&self) -> usize {
+        let Some(r) = self.redis.clone() else {
+            return 0;
+        };
+        let mut conn = r.conn;
+        let remote: HashMap<String, String> = match conn.hgetall(&r.devices_hash).await {
+            Ok(m) => m,
+            Err(e) => {
+                warn!(error = %e, "Redis HGETALL agent devices failed");
+                return 0;
+            }
+        };
+        let mut merged = 0usize;
+        let mut devices = self.devices.write().expect("device registry lock");
+        for (_id, json) in remote {
+            let Ok(dev) = serde_json::from_str::<RegisteredDevice>(&json) else {
+                continue;
+            };
+            if dev.id.trim().is_empty() {
+                continue;
+            }
+            match devices.get(&dev.id) {
+                Some(local) if local.last_seen >= dev.last_seen => {}
+                _ => {
+                    devices.insert(dev.id.clone(), dev);
+                    merged += 1;
+                }
+            }
+        }
+        if merged > 0 {
+            debug!(
+                merged,
+                total = devices.len(),
+                "Merged agent devices from Redis"
+            );
+        }
+        merged
     }
 
     /// Merge heartbeat into the registry. Returns whether a durable write succeeded.
@@ -323,8 +408,11 @@ impl DeviceRegistry {
             agent_version = ?device.agent_version,
             "Agent heartbeat received"
         );
+        let stored = device.clone();
         devices.insert(device.id.clone(), device);
-        Ok(self.persist_locked(&devices))
+        let file_ok = self.persist_locked(&devices);
+        let redis_ok = self.redis_put_device(&stored, None);
+        Ok(file_ok || redis_ok)
     }
 
     /// Lab enroll: issue a device Bearer token (mTLS reserved).
@@ -352,6 +440,7 @@ impl DeviceRegistry {
         }
         let reenrolled = devices.contains_key(&device_id);
         let previous = devices.get(&device_id).cloned();
+        let old_token_hash = previous.as_ref().and_then(|d| d.device_token_hash.clone());
         let now = unix_now();
         let plaintext = generate_device_token();
         let token_hash = hash_device_token(&plaintext);
@@ -419,14 +508,16 @@ impl DeviceRegistry {
             has_client_cert = cert_fingerprint.is_some(),
             "Agent device enrolled"
         );
+        let stored = device.clone();
         devices.insert(device.id.clone(), device);
-        let persisted = self.persist_locked(&devices);
+        let file_ok = self.persist_locked(&devices);
+        let redis_ok = self.redis_put_device(&stored, old_token_hash.as_deref());
         Ok(EnrollResult {
             device_id,
             device_token: plaintext,
             platform,
             enrolled_at: now,
-            persisted,
+            persisted: file_ok || redis_ok,
             reenrolled,
             cert_subject,
             cert_fingerprint,
@@ -440,13 +531,25 @@ impl DeviceRegistry {
             return false;
         }
         let hash = hash_device_token(token);
-        let devices = self.devices.read().expect("device registry lock");
-        devices.values().any(|d| {
-            !d.revoked
-                && d.device_token_hash
-                    .as_ref()
-                    .is_some_and(|h| constant_time_eq(h.as_bytes(), hash.as_bytes()))
-        })
+        {
+            let devices = self.devices.read().expect("device registry lock");
+            if devices.values().any(|d| {
+                !d.revoked
+                    && d.device_token_hash
+                        .as_ref()
+                        .is_some_and(|h| constant_time_eq(h.as_bytes(), hash.as_bytes()))
+            }) {
+                return true;
+            }
+        }
+        // Multi-node: resolve token hash via Redis index.
+        if let Some(dev) = self.redis_get_by_token_hash(&hash) {
+            if !dev.revoked {
+                self.cache_device(dev);
+                return true;
+            }
+        }
+        false
     }
 
     /// True if `fingerprint` (SHA-256 hex of client cert DER) matches a non-revoked enroll.
@@ -455,13 +558,24 @@ impl DeviceRegistry {
             return false;
         }
         let fp = fingerprint.to_ascii_lowercase();
-        let devices = self.devices.read().expect("device registry lock");
-        devices.values().any(|d| {
-            !d.revoked
-                && d.cert_fingerprint.as_ref().is_some_and(|h| {
-                    constant_time_eq(h.to_ascii_lowercase().as_bytes(), fp.as_bytes())
-                })
-        })
+        {
+            let devices = self.devices.read().expect("device registry lock");
+            if devices.values().any(|d| {
+                !d.revoked
+                    && d.cert_fingerprint.as_ref().is_some_and(|h| {
+                        constant_time_eq(h.to_ascii_lowercase().as_bytes(), fp.as_bytes())
+                    })
+            }) {
+                return true;
+            }
+        }
+        if let Some(dev) = self.redis_get_by_fp(&fp) {
+            if !dev.revoked {
+                self.cache_device(dev);
+                return true;
+            }
+        }
+        false
     }
 
     /// True if we have ever seen this fingerprint (even if later revoked).
@@ -470,12 +584,17 @@ impl DeviceRegistry {
             return false;
         }
         let fp = fingerprint.to_ascii_lowercase();
-        let devices = self.devices.read().expect("device registry lock");
-        devices.values().any(|d| {
-            d.cert_fingerprint
-                .as_ref()
-                .is_some_and(|h| constant_time_eq(h.to_ascii_lowercase().as_bytes(), fp.as_bytes()))
-        })
+        {
+            let devices = self.devices.read().expect("device registry lock");
+            if devices.values().any(|d| {
+                d.cert_fingerprint.as_ref().is_some_and(|h| {
+                    constant_time_eq(h.to_ascii_lowercase().as_bytes(), fp.as_bytes())
+                })
+            }) {
+                return true;
+            }
+        }
+        self.redis_get_by_fp(&fp).is_some()
     }
 
     /// True if serial was issued to any enrolled (or revoked) device.
@@ -484,12 +603,17 @@ impl DeviceRegistry {
             return false;
         }
         let s = serial_hex.to_ascii_lowercase();
-        let devices = self.devices.read().expect("device registry lock");
-        devices.values().any(|d| {
-            d.cert_serial
-                .as_ref()
-                .is_some_and(|h| constant_time_eq(h.to_ascii_lowercase().as_bytes(), s.as_bytes()))
-        })
+        {
+            let devices = self.devices.read().expect("device registry lock");
+            if devices.values().any(|d| {
+                d.cert_serial.as_ref().is_some_and(|h| {
+                    constant_time_eq(h.to_ascii_lowercase().as_bytes(), s.as_bytes())
+                })
+            }) {
+                return true;
+            }
+        }
+        self.redis_get_by_serial(&s).is_some()
     }
 
     /// Active (non-revoked) device with matching serial, if any.
@@ -498,13 +622,24 @@ impl DeviceRegistry {
             return false;
         }
         let s = serial_hex.to_ascii_lowercase();
-        let devices = self.devices.read().expect("device registry lock");
-        devices.values().any(|d| {
-            !d.revoked
-                && d.cert_serial.as_ref().is_some_and(|h| {
-                    constant_time_eq(h.to_ascii_lowercase().as_bytes(), s.as_bytes())
-                })
-        })
+        {
+            let devices = self.devices.read().expect("device registry lock");
+            if devices.values().any(|d| {
+                !d.revoked
+                    && d.cert_serial.as_ref().is_some_and(|h| {
+                        constant_time_eq(h.to_ascii_lowercase().as_bytes(), s.as_bytes())
+                    })
+            }) {
+                return true;
+            }
+        }
+        if let Some(dev) = self.redis_get_by_serial(&s) {
+            if !dev.revoked {
+                self.cache_device(dev);
+                return true;
+            }
+        }
+        false
     }
 
     /// Revoke device trust. Returns `(persisted, cert_fingerprint, cert_serial)` for CRL.
@@ -515,21 +650,39 @@ impl DeviceRegistry {
         if device_id.is_empty() || device_id.contains('/') {
             return Err(RevokeError::InvalidId);
         }
+        // Multi-node: ensure we have the device if only remote has it.
+        if self
+            .devices
+            .read()
+            .expect("device registry lock")
+            .get(device_id)
+            .is_none()
+        {
+            if let Some(remote) = self.redis_get_device(device_id) {
+                self.cache_device(remote);
+            }
+        }
         let mut devices = self.devices.write().expect("device registry lock");
         let Some(device) = devices.get_mut(device_id) else {
             return Err(RevokeError::NotFound);
         };
+        let old_token = device.device_token_hash.clone();
         device.revoked = true;
         device.device_token_hash = None;
         let fp = device.cert_fingerprint.clone();
         let serial = device.cert_serial.clone();
+        let stored = device.clone();
         warn!(device_id, "Device trust revoked");
-        let persisted = self.persist_locked(&devices);
-        Ok((persisted, fp, serial))
+        let file_ok = self.persist_locked(&devices);
+        drop(devices);
+        let redis_ok = self.redis_put_device(&stored, old_token.as_deref());
+        Ok((file_ok || redis_ok, fp, serial))
     }
 
     /// Devices sorted by `last_seen` descending (API list order).
     pub fn list_api_rows(&self) -> Vec<serde_json::Value> {
+        // Best-effort multi-node refresh before listing.
+        self.block_on_redis_pull();
         let devices = self.devices.read().expect("device registry lock");
         let mut rows: Vec<_> = devices.values().map(RegisteredDevice::to_api_row).collect();
         rows.sort_by_key(|row| std::cmp::Reverse(row["lastSeen"].as_u64().unwrap_or(0)));
@@ -552,6 +705,169 @@ impl DeviceRegistry {
             }
         }
     }
+
+    fn cache_device(&self, device: RegisteredDevice) {
+        let mut devices = self.devices.write().expect("device registry lock");
+        devices.insert(device.id.clone(), device);
+    }
+
+    fn redis_put_device(&self, device: &RegisteredDevice, old_token_hash: Option<&str>) -> bool {
+        let Some(r) = self.redis.clone() else {
+            return false;
+        };
+        let device = device.clone();
+        let old_token_hash = old_token_hash.map(str::to_string);
+        block_on_current(async move {
+            let mut conn = r.conn;
+            let Ok(json) = serde_json::to_string(&device) else {
+                return false;
+            };
+            if let Err(e) = conn
+                .hset::<_, _, _, ()>(&r.devices_hash, &device.id, &json)
+                .await
+            {
+                warn!(error = %e, device_id = %device.id, "Redis HSET agent device failed");
+                return false;
+            }
+            if let Some(ref old) = old_token_hash {
+                if device
+                    .device_token_hash
+                    .as_ref()
+                    .map(|h| h != old)
+                    .unwrap_or(true)
+                {
+                    let _: Result<(), _> = conn.del(format!("{}{old}", r.token_prefix)).await;
+                }
+            }
+            if let Some(ref h) = device.device_token_hash {
+                let _: Result<(), _> = conn.set(format!("{}{h}", r.token_prefix), &device.id).await;
+            } else if let Some(ref old) = old_token_hash {
+                let _: Result<(), _> = conn.del(format!("{}{old}", r.token_prefix)).await;
+            }
+            if let Some(ref fp) = device.cert_fingerprint {
+                let _: Result<(), _> = conn
+                    .set(
+                        format!("{}{}", r.fp_prefix, fp.to_ascii_lowercase()),
+                        &device.id,
+                    )
+                    .await;
+            }
+            if let Some(ref ser) = device.cert_serial {
+                let _: Result<(), _> = conn
+                    .set(
+                        format!("{}{}", r.serial_prefix, ser.to_ascii_lowercase()),
+                        &device.id,
+                    )
+                    .await;
+            }
+            true
+        })
+        .unwrap_or(false)
+    }
+
+    fn redis_get_device(&self, device_id: &str) -> Option<RegisteredDevice> {
+        let r = self.redis.clone()?;
+        let device_id = device_id.to_string();
+        block_on_current(async move {
+            let mut conn = r.conn;
+            let json: Option<String> = conn.hget(&r.devices_hash, &device_id).await.ok()?;
+            json.and_then(|j| serde_json::from_str(&j).ok())
+        })
+        .flatten()
+    }
+
+    fn redis_get_by_token_hash(&self, hash: &str) -> Option<RegisteredDevice> {
+        let r = self.redis.clone()?;
+        let key = format!("{}{hash}", r.token_prefix);
+        block_on_current(async move {
+            let mut conn = r.conn;
+            let id: Option<String> = conn.get(&key).await.ok()?;
+            let id = id?;
+            let json: Option<String> = conn.hget(&r.devices_hash, &id).await.ok()?;
+            json.and_then(|j| serde_json::from_str(&j).ok())
+        })
+        .flatten()
+    }
+
+    fn redis_get_by_fp(&self, fp: &str) -> Option<RegisteredDevice> {
+        let r = self.redis.clone()?;
+        let key = format!("{}{fp}", r.fp_prefix);
+        block_on_current(async move {
+            let mut conn = r.conn;
+            let id: Option<String> = conn.get(&key).await.ok()?;
+            let id = id?;
+            let json: Option<String> = conn.hget(&r.devices_hash, &id).await.ok()?;
+            json.and_then(|j| serde_json::from_str(&j).ok())
+        })
+        .flatten()
+    }
+
+    fn redis_get_by_serial(&self, serial: &str) -> Option<RegisteredDevice> {
+        let r = self.redis.clone()?;
+        let key = format!("{}{serial}", r.serial_prefix);
+        block_on_current(async move {
+            let mut conn = r.conn;
+            let id: Option<String> = conn.get(&key).await.ok()?;
+            let id = id?;
+            let json: Option<String> = conn.hget(&r.devices_hash, &id).await.ok()?;
+            json.and_then(|j| serde_json::from_str(&j).ok())
+        })
+        .flatten()
+    }
+
+    fn block_on_redis_pull(&self) {
+        if self.redis.is_none() {
+            return;
+        }
+        let this = self.clone();
+        let _ = block_on_current(async move { this.pull_from_redis().await });
+    }
+}
+
+/// Run an async block on the current Tokio runtime (hyper handlers), or None if none.
+pub(crate) fn block_on_current<F, T>(fut: F) -> Option<T>
+where
+    F: std::future::Future<Output = T>,
+{
+    let handle = tokio::runtime::Handle::try_current().ok()?;
+    Some(tokio::task::block_in_place(|| handle.block_on(fut)))
+}
+
+/// Redis URL for multi-node agent devices.
+/// Prefer `AGENT_DEVICES_REDIS_URL`; else `REDIS_URL` when `AGENT_DEVICES_REDIS=true`.
+pub fn redis_url_from_env() -> Option<String> {
+    if let Ok(url) = std::env::var("AGENT_DEVICES_REDIS_URL") {
+        let url = url.trim().to_string();
+        if !url.is_empty() {
+            return Some(url);
+        }
+    }
+    let enabled = std::env::var("AGENT_DEVICES_REDIS")
+        .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false);
+    if !enabled {
+        return None;
+    }
+    std::env::var("REDIS_URL")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+pub(crate) fn redis_key_prefix_from_env() -> String {
+    std::env::var("AGENT_REDIS_PREFIX")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "bsdm:agent:".into())
+}
+
+/// Connect a Redis client for agent multi-node stores.
+pub async fn connect_agent_redis(url: &str) -> Result<ConnectionManager, String> {
+    let client = redis::Client::open(url).map_err(|e| format!("agent redis client: {e}"))?;
+    ConnectionManager::new(client)
+        .await
+        .map_err(|e| format!("agent redis connect: {e}"))
 }
 
 // --- Agent Contract policy helpers (shared with control plane) ---

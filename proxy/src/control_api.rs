@@ -549,6 +549,28 @@ impl ControlApiState {
         self
     }
 
+    /// Attach Redis multi-node backends for device registry + agent CRL.
+    pub async fn with_agent_multi_node_redis(
+        mut self,
+        conn: redis::aio::ConnectionManager,
+    ) -> Self {
+        if let Err(e) = self.device_registry.attach_redis(conn.clone()).await {
+            warn!(error = %e, "Agent device multi-node Redis attach failed");
+        }
+        if let Err(e) = self.agent_crl.attach_redis(conn).await {
+            warn!(error = %e, "Agent CRL multi-node Redis attach failed");
+        }
+        self
+    }
+
+    pub fn agent_devices_multi_node(&self) -> bool {
+        self.device_registry.is_multi_node()
+    }
+
+    pub fn agent_crl_multi_node(&self) -> bool {
+        self.agent_crl.is_multi_node()
+    }
+
     pub fn with_config_apply(
         mut self,
         shutdown_tx: watch::Sender<bool>,

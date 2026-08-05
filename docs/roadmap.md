@@ -47,7 +47,8 @@ Roadmap определяет порядок работ в рамках стра�
 - [x] RFC 6960 DER OCSP responder + gRPC agent policy product path (`WatchAgentPolicy`).
 - [x] WebSocket policy push (`/api/v1/agent/policy/ws`).
 - [x] Data-plane TLS OCSP stapling (MITM + control mTLS server leaves).
-- [ ] Production multi-OS agent (installers, system proxy) и multi-node shared registry.
+- [x] Multi-node shared device registry + CRL (Redis write-through).
+- [ ] Production multi-OS agent (installers, system proxy).
 
 ---
 

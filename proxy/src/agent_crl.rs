@@ -2,9 +2,14 @@
 //!
 //! Tracks revoked client-cert fingerprints (and serials when issued). Serves
 //! JSON for ops and optional CA-signed X.509 CRL PEM for external consumers.
+//! Multi-node: optional Redis HASH write-through (same URL as device registry).
 
+use crate::device_registry::{block_on_current, redis_key_prefix_from_env};
 use crate::security_util::constant_time_eq;
+use redis::aio::ConnectionManager;
+use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -33,12 +38,20 @@ struct CrlFile {
     entries: Vec<CrlEntry>,
 }
 
-/// In-memory + optional durable CRL.
+#[derive(Clone)]
+struct CrlRedis {
+    conn: ConnectionManager,
+    entries_hash: String,
+    number_key: String,
+}
+
+/// In-memory + optional durable CRL + optional multi-node Redis.
 #[derive(Clone)]
 pub struct AgentCrl {
     entries: Arc<RwLock<Vec<CrlEntry>>>,
     path: Option<PathBuf>,
     crl_number: Arc<AtomicU64>,
+    redis: Option<CrlRedis>,
 }
 
 impl Default for AgentCrl {
@@ -53,6 +66,7 @@ impl AgentCrl {
             entries: Arc::new(RwLock::new(Vec::new())),
             path: None,
             crl_number: Arc::new(AtomicU64::new(1)),
+            redis: None,
         }
     }
 
@@ -75,6 +89,7 @@ impl AgentCrl {
                         entries: Arc::new(RwLock::new(entries)),
                         path: Some(p),
                         crl_number: Arc::new(AtomicU64::new(number.max(1))),
+                        redis: None,
                     }
                 }
                 Err(e) => {
@@ -87,6 +102,7 @@ impl AgentCrl {
                         entries: Arc::new(RwLock::new(Vec::new())),
                         path: Some(p),
                         crl_number: Arc::new(AtomicU64::new(1)),
+                        redis: None,
                     }
                 }
             },
@@ -99,13 +115,70 @@ impl AgentCrl {
             entries: Arc::new(RwLock::new(Vec::new())),
             path: Some(path),
             crl_number: Arc::new(AtomicU64::new(1)),
+            redis: None,
         }
+    }
+
+    /// Attach Redis multi-node backend (shared agent prefix) and pull remote CRL.
+    pub async fn attach_redis(&mut self, conn: ConnectionManager) -> Result<usize, String> {
+        let prefix = redis_key_prefix_from_env();
+        self.redis = Some(CrlRedis {
+            conn,
+            entries_hash: format!("{prefix}crl"),
+            number_key: format!("{prefix}crl_number"),
+        });
+        let n = self.pull_from_redis().await;
+        info!(pulled = n, "Agent CRL multi-node Redis attached");
+        Ok(n)
+    }
+
+    pub async fn pull_from_redis(&self) -> usize {
+        let Some(r) = self.redis.clone() else {
+            return 0;
+        };
+        let mut conn = r.conn;
+        let remote: HashMap<String, String> = match conn.hgetall(&r.entries_hash).await {
+            Ok(m) => m,
+            Err(e) => {
+                warn!(error = %e, "Redis HGETALL agent CRL failed");
+                return 0;
+            }
+        };
+        let number: u64 = conn
+            .get::<_, Option<u64>>(&r.number_key)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or(1)
+            .max(1);
+        let mut added = 0usize;
+        let mut entries = self.entries.write().expect("crl lock");
+        for (_fp, json) in remote {
+            let Ok(entry) = serde_json::from_str::<CrlEntry>(&json) else {
+                continue;
+            };
+            if entries.iter().any(|e| e.fingerprint == entry.fingerprint) {
+                continue;
+            }
+            entries.push(entry);
+            added += 1;
+        }
+        let local_n = self.crl_number.load(Ordering::Relaxed);
+        if number > local_n {
+            self.crl_number.store(number, Ordering::Relaxed);
+        }
+        added
+    }
+
+    pub fn is_multi_node(&self) -> bool {
+        self.redis.is_some()
     }
 
     pub fn is_fingerprint_revoked(&self, fingerprint: &str) -> bool {
         if fingerprint.is_empty() {
             return false;
         }
+        self.block_on_pull();
         let fp = fingerprint.to_ascii_lowercase();
         let entries = self.entries.read().expect("crl lock");
         entries
@@ -117,6 +190,7 @@ impl AgentCrl {
         if serial_hex.is_empty() {
             return false;
         }
+        self.block_on_pull();
         let s = serial_hex.to_ascii_lowercase();
         let entries = self.entries.read().expect("crl lock");
         entries.iter().any(|e| {
@@ -130,6 +204,7 @@ impl AgentCrl {
         if fingerprint.is_empty() {
             return None;
         }
+        self.block_on_pull();
         let fp = fingerprint.to_ascii_lowercase();
         let entries = self.entries.read().expect("crl lock");
         entries
@@ -144,6 +219,7 @@ impl AgentCrl {
         if serial_hex.is_empty() {
             return None;
         }
+        self.block_on_pull();
         let s = serial_hex.to_ascii_lowercase();
         let entries = self.entries.read().expect("crl lock");
         entries
@@ -168,6 +244,7 @@ impl AgentCrl {
             return false;
         };
         let fp = fp.to_ascii_lowercase();
+        self.block_on_pull();
         let mut entries = self.entries.write().expect("crl lock");
         if entries
             .iter()
@@ -175,8 +252,8 @@ impl AgentCrl {
         {
             return false;
         }
-        entries.push(CrlEntry {
-            fingerprint: fp,
+        let entry = CrlEntry {
+            fingerprint: fp.clone(),
             serial_hex: serial_hex
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
@@ -188,7 +265,8 @@ impl AgentCrl {
             } else {
                 reason.to_string()
             },
-        });
+        };
+        entries.push(entry.clone());
         self.crl_number.fetch_add(1, Ordering::Relaxed);
         let number = self.crl_number.load(Ordering::Relaxed);
         info!(
@@ -198,11 +276,45 @@ impl AgentCrl {
             "Agent cert added to CRL"
         );
         let _ = self.persist_locked(&entries, number);
+        drop(entries);
+        self.redis_put_entry(&entry, number);
         true
     }
 
     pub fn list(&self) -> Vec<CrlEntry> {
+        self.block_on_pull();
         self.entries.read().expect("crl lock").clone()
+    }
+
+    fn redis_put_entry(&self, entry: &CrlEntry, number: u64) {
+        let Some(r) = self.redis.clone() else {
+            return;
+        };
+        let entry = entry.clone();
+        let _ = block_on_current(async move {
+            let mut conn = r.conn;
+            let Ok(json) = serde_json::to_string(&entry) else {
+                return;
+            };
+            if let Err(e) = conn
+                .hset::<_, _, _, ()>(&r.entries_hash, &entry.fingerprint, &json)
+                .await
+            {
+                warn!(error = %e, "Redis HSET agent CRL entry failed");
+                return;
+            }
+            let _: Result<(), _> = conn.set(&r.number_key, number).await;
+        });
+    }
+
+    fn block_on_pull(&self) {
+        if self.redis.is_none() {
+            return;
+        }
+        let this = self.clone();
+        let _ = block_on_current(async move {
+            this.pull_from_redis().await;
+        });
     }
 
     pub fn crl_number(&self) -> u64 {
@@ -310,6 +422,7 @@ mod tests {
             entries: Arc::new(RwLock::new(entries)),
             path: Some(path),
             crl_number: Arc::new(AtomicU64::new(number)),
+            redis: None,
         };
         assert!(loaded.is_fingerprint_revoked("deadbeef"));
         let _ = fs::remove_dir_all(&dir);
