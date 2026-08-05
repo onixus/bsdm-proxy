@@ -1,9 +1,12 @@
-# BSDM Local Policy Agent — multi-OS pilot install
+# BSDM Local Policy Agent — multi-OS pilot + fleet install
 
 Lab/pilot packaging for `agent-spike` (`bsdm-agent` binary name on install).
 
-**Not** full MDM product packaging (code signing, silent GPO/Intune, notarization).
-Provides install scripts + system-proxy hooks for Linux, macOS, and Windows.
+Install scripts + system-proxy hooks for Linux, macOS, and Windows.
+
+**Fleet residual (MDM/GPO):** silent flags, Intune/GPO/Jamf scaffolding under
+[`fleet/`](fleet/). Packages are **unsigned** — sign/notarize in your enterprise
+pipeline. Guide: [pilot-agent-fleet.md](../../docs/getting-started/pilot-agent-fleet.md).
 
 ## Build binary
 
@@ -25,6 +28,7 @@ Cross targets (optional):
 | Linux | `sudo ./packaging/agent/install-linux.sh` |
 | macOS | `sudo ./packaging/agent/install-macos.sh` |
 | Windows | elevated `.\packaging\agent\install-windows.ps1` |
+| Fleet silent | `--silent` / `-Silent` + `--control-plane-url` (see [fleet/](fleet/)) |
 
 Edit env after install:
 

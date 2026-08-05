@@ -49,7 +49,8 @@ Roadmap определяет порядок работ в рамках стра�
 - [x] Data-plane TLS OCSP stapling (MITM + control mTLS server leaves).
 - [x] Multi-node shared device registry + CRL (Redis write-through).
 - [x] Multi-OS pilot installers + system-proxy hooks (`packaging/agent`, agent-spike CLI).
-- [ ] MDM/GPO silent fleet packaging / notarized store distribution.
+- [x] MDM/GPO **silent fleet packaging scaffolding** — silent installers, Intune Win32 scripts, GPO ADMX, macOS pkgbuild + mobileconfig example, fleet drop script (`packaging/agent/fleet/`, [pilot-agent-fleet.md](getting-started/pilot-agent-fleet.md)).
+- [ ] **Notarized / Authenticode-signed store distribution** — customer signing pipeline only (out of lab; no Apple/Microsoft certs in CI).
 
 ---
 

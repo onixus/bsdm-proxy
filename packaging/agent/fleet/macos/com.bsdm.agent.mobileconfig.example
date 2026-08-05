@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Example Configuration Profile for Jamf / Apple Business Manager.
+  Deploy alongside the agent package. Map PayloadContent values into
+  /usr/local/etc/bsdm-agent/agent.env via a Jamf script (profile prefs
+  alone do not source agent.env — use a follow-up script or custom
+  schema if you wire CFPreferences later).
+-->
+<plist version="1.0">
+<dict>
+  <key>PayloadContent</key>
+  <array>
+    <dict>
+      <key>PayloadType</key>
+      <string>com.bsdm.agent</string>
+      <key>PayloadIdentifier</key>
+      <string>com.bsdm.agent.settings</string>
+      <key>PayloadUUID</key>
+      <string>A1B2C3D4-E5F6-7890-ABCD-EF1234567890</string>
+      <key>PayloadVersion</key>
+      <integer>1</integer>
+      <key>PayloadDisplayName</key>
+      <string>BSDM Agent Settings</string>
+      <key>ControlPlaneURL</key>
+      <string>https://control.corp.example:9090</string>
+      <key>SystemProxyHost</key>
+      <string>127.0.0.1</string>
+      <key>SystemProxyPort</key>
+      <integer>3128</integer>
+      <key>ManageSystemProxy</key>
+      <true/>
+    </dict>
+  </array>
+  <key>PayloadDisplayName</key>
+  <string>BSDM Local Policy Agent</string>
+  <key>PayloadIdentifier</key>
+  <string>com.bsdm.agent.profile</string>
+  <key>PayloadRemovalDisallowed</key>
+  <false/>
+  <key>PayloadType</key>
+  <string>Configuration</string>
+  <key>PayloadUUID</key>
+  <string>B2C3D4E5-F6A7-8901-BCDE-F12345678901</string>
+  <key>PayloadVersion</key>
+  <integer>1</integer>
+</dict>
+</plist>

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<policyDefinitionResources revision="1.0" schemaVersion="1.0">
+  <displayName>BSDM Agent</displayName>
+  <description>Group Policy settings for BSDM Local Policy Agent fleet deploy.</description>
+  <resources>
+    <stringTable>
+      <string id="BSDM">BSDM</string>
+      <string id="BSDM_Agent">Local Policy Agent</string>
+      <string id="ControlPlaneUrl">Control plane URL</string>
+      <string id="ControlPlaneUrl_Help">HTTP(S) base for agent control API (e.g. https://control.corp:9090). Written to CONTROL_PLANE_URL.</string>
+      <string id="EnrollTokenPath">Enroll token file path</string>
+      <string id="EnrollTokenPath_Help">Path to a secured file containing AGENT_ENROLL_TOKEN (prefer over storing secrets in the registry). Example: C:\ProgramData\BSDM\enroll.token</string>
+      <string id="SystemProxyHost">System proxy host</string>
+      <string id="SystemProxyHost_Help">Data-plane proxy host for --set-system-proxy (default 127.0.0.1 if agent colocated).</string>
+      <string id="SystemProxyPort">System proxy port</string>
+      <string id="SystemProxyPort_Help">Data-plane proxy port (default 3128).</string>
+      <string id="ManageSystemProxy">Manage OS system proxy</string>
+      <string id="ManageSystemProxy_Help">When enabled, install/startup configures WinINET/WinHTTP system proxy toward SYSTEM_PROXY_HOST:PORT.</string>
+    </stringTable>
+  </resources>
+</policyDefinitionResources>

@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Agent fleet packaging (MDM/GPO residual)** — silent install flags on
+  Linux/macOS/Windows installers; `packaging/agent/fleet/` with Intune Win32
+  scripts, GPO ADMX/ADML + registry→env script, macOS `pkgbuild` + mobileconfig
+  example, Linux silent wrapper, `scripts/build-agent-fleet-packages.sh`;
+  guide [pilot-agent-fleet.md](docs/getting-started/pilot-agent-fleet.md).
+  Packages remain **unsigned** (signing/notarization = customer pipeline).
 - **Admin Console in proxy image** — multi-stage Docker build copies
   `admin-console/dist` to `/opt/bsdm/admin-console`; `ADMIN_CONSOLE_DIR` set by
   default. Day-1 pilot: `http://localhost:9090/admin/` without host mount.

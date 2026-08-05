@@ -41,7 +41,7 @@
 | Admin UI | Admin Console (Hybrid core) | Основной | Primary nav: Dashboard, Logs, Analytics, Policies, RPZ, **Devices**, Users, Settings. SPA baked into proxy image (`/admin/`). Live/demo provenance, error/empty states, mutation token gate. Search CORS for localhost split. |
 | Admin UI | Admin Console experimental routes | Experimental (Frozen) | Deep-links `/wasm`, `/cluster`, `/ai-cache`, `/amneziawg` only — frozen banner, not in primary nav. |
 | UI reference | Standalone Trust-UI | Experimental (Deprecated) | Не запускается по умолчанию; сохранён только как reference для будущего Agent posture. |
-| Agent (Phase C) | Local policy agent spike | Beta (lab) | Enroll, CSR, events, push (long-poll/SSE/**WS**/gRPC), mTLS, CRL, lab OCSP JSON + **RFC 6960 DER OCSP**, data-plane **OCSP stapling**, **multi-node Redis**, multi-OS **pilot installers + system proxy**, Admin `/devices`. MDM fleet packaging reserved. [pilot-agent.md](getting-started/pilot-agent.md). |
+| Agent (Phase C) | Local policy agent spike | Beta (lab) | Enroll, CSR, events, push (long-poll/SSE/**WS**/gRPC), mTLS, CRL, lab OCSP JSON + **RFC 6960 DER OCSP**, data-plane **OCSP stapling**, **multi-node Redis**, multi-OS installers + system proxy, **fleet silent/MDM scaffolding** (Intune/GPO/Jamf, unsigned), Admin `/devices`. Notarized/signed store packages = customer pipeline. [pilot-agent.md](getting-started/pilot-agent.md) · [pilot-agent-fleet.md](getting-started/pilot-agent-fleet.md). |
 
 ## Известные ограничения
 

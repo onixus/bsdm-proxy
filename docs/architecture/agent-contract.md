@@ -34,8 +34,10 @@ policy and heartbeat endpoints.
 - **Multi-node registry**: Redis write-through for devices + CRL
   (`AGENT_DEVICES_REDIS_URL` / `AGENT_DEVICES_REDIS` + `REDIS_URL`).
 - **Multi-OS pilot install**: `packaging/agent/*` + system-proxy hooks on the
-  spike (`--set-system-proxy`); not full MDM product packaging.
-- Reserved: MDM/GPO silent fleet install, notarized/signed store packages.
+  spike (`--set-system-proxy`); fleet silent installers + Intune/GPO/Jamf
+  scaffolding under `packaging/agent/fleet/` (unsigned).
+- Reserved for customer pipeline: notarized/signed store packages (Apple
+  notarytool, Authenticode EV).
 
 ---
 

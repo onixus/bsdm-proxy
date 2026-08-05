@@ -25,11 +25,13 @@ Issue tracking: **#273** (agent implementation), **#258** (original spike).
 | Optional control mTLS port (`CONTROL_MTLS_*`, default `:9443`) | |
 | Agent cert CRL JSON/PEM + lab OCSP JSON + **RFC 6960 DER OCSP** | |
 | `POST /api/v1/agent/heartbeat` + `GET /api/v1/devices` | Durable multi-node event store |
-| `POST /api/v1/agent/events` telemetry batch | MDM/GPO silent fleet packaging |
+| `POST /api/v1/agent/events` telemetry batch | Notarized/signed store packages (customer CI) |
+| Silent fleet install scaffolding (Intune/GPO/Jamf) | |
 | Device registry persistence (`AGENT_DEVICES_PATH`) | Full UT1 categorization on endpoint |
 | Admin Console `/devices` (list/revoke/push/CRL) | Production IdP binding |
 | Multi-node Redis devices + CRL (optional) | Full multi-cluster mesh productization |
-| Multi-OS pilot installers + system proxy hooks | Notarized/signed enterprise packages |
+| Multi-OS pilot installers + system proxy hooks | Full MDM product UI |
+| Fleet silent + Intune/GPO/pkg scaffolding | Notarized/signed enterprise packages |
 | Local SNI deny + pinning bypass + mode | |
 | `AGENT_ONCE` / `--once` / `--enroll` smoke | |
 

@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  BSDM Agent ADMX — deploy under %SystemRoot%\PolicyDefinitions
+  Companion: en-US\bsdm-agent.adml
+  Registry: HKLM\SOFTWARE\Policies\BSDM\Agent
+  Map these values into agent.env or a small GPO startup script.
+-->
+<policyDefinitions revision="1.0" schemaVersion="1.0">
+  <policyNamespaces>
+    <target prefix="bsdm" namespace="BSDM.Policies.Agent" />
+    <using prefix="windows" namespace="Microsoft.Policies.Windows" />
+  </policyNamespaces>
+  <resources minRequiredRevision="1.0" />
+  <categories>
+    <category name="BSDM" displayName="$(string.BSDM)" />
+    <category name="BSDM_Agent" displayName="$(string.BSDM_Agent)">
+      <parentCategory ref="BSDM" />
+    </category>
+  </categories>
+  <policies>
+    <policy name="ControlPlaneUrl" class="Machine"
+            displayName="$(string.ControlPlaneUrl)"
+            explainText="$(string.ControlPlaneUrl_Help)"
+            key="Software\Policies\BSDM\Agent"
+            valueName="ControlPlaneUrl">
+      <parentCategory ref="BSDM_Agent" />
+      <supportedOn ref="windows:SUPPORTED_Windows7" />
+      <elements>
+        <text id="ControlPlaneUrl_Text" valueName="ControlPlaneUrl" required="true" />
+      </elements>
+    </policy>
+    <policy name="EnrollTokenPath" class="Machine"
+            displayName="$(string.EnrollTokenPath)"
+            explainText="$(string.EnrollTokenPath_Help)"
+            key="Software\Policies\BSDM\Agent"
+            valueName="EnrollTokenPath">
+      <parentCategory ref="BSDM_Agent" />
+      <supportedOn ref="windows:SUPPORTED_Windows7" />
+      <elements>
+        <text id="EnrollTokenPath_Text" valueName="EnrollTokenPath" />
+      </elements>
+    </policy>
+    <policy name="SystemProxyHost" class="Machine"
+            displayName="$(string.SystemProxyHost)"
+            explainText="$(string.SystemProxyHost_Help)"
+            key="Software\Policies\BSDM\Agent"
+            valueName="SystemProxyHost">
+      <parentCategory ref="BSDM_Agent" />
+      <supportedOn ref="windows:SUPPORTED_Windows7" />
+      <elements>
+        <text id="SystemProxyHost_Text" valueName="SystemProxyHost" />
+      </elements>
+    </policy>
+    <policy name="SystemProxyPort" class="Machine"
+            displayName="$(string.SystemProxyPort)"
+            explainText="$(string.SystemProxyPort_Help)"
+            key="Software\Policies\BSDM\Agent"
+            valueName="SystemProxyPort">
+      <parentCategory ref="BSDM_Agent" />
+      <supportedOn ref="windows:SUPPORTED_Windows7" />
+      <elements>
+        <decimal id="SystemProxyPort_Num" valueName="SystemProxyPort" minValue="1" maxValue="65535" />
+      </elements>
+    </policy>
+    <policy name="ManageSystemProxy" class="Machine"
+            displayName="$(string.ManageSystemProxy)"
+            explainText="$(string.ManageSystemProxy_Help)"
+            key="Software\Policies\BSDM\Agent"
+            valueName="ManageSystemProxy">
+      <parentCategory ref="BSDM_Agent" />
+      <supportedOn ref="windows:SUPPORTED_Windows7" />
+      <enabledValue><decimal value="1" /></enabledValue>
+      <disabledValue><decimal value="0" /></disabledValue>
+    </policy>
+  </policies>
+</policyDefinitions>
