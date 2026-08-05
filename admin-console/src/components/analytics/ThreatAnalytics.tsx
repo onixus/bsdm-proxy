@@ -1,42 +1,51 @@
+import type { DataSource } from '../../api/source'
 import type { ThreatScoreSnapshot } from '../../api/threatScores'
-import { severitySegments } from './analyticsUtils'
-import { SegmentBar } from '../charts/SegmentBar'
 import { BarList } from '../charts/BarList'
+import { seriesColor } from '../charts/common'
+import { SegmentBar } from '../charts/SegmentBar'
 import { Panel } from '../dashboard/MetricWidget'
-import { EmptyState } from '../ui/DataState'
+import { EmptyState, SourceBadge } from '../ui/DataState'
+import { countBy, severitySegments } from './analyticsUtils'
 
 interface ThreatAnalyticsProps {
-  title: string
-  severityTitle: string
-  entitiesTitle: string
+  labels: {
+    threatSeverity: string
+    threatByModel: string
+    mlUnreachable: string
+    noActiveScores: string
+  }
   snapshot?: ThreatScoreSnapshot
+  source?: DataSource
+  error?: boolean
 }
 
-export function ThreatAnalytics({ title, severityTitle, entitiesTitle, snapshot }: ThreatAnalyticsProps) {
+export function ThreatAnalytics({ labels, snapshot, source, error }: ThreatAnalyticsProps) {
   const scores = snapshot?.scores ?? []
 
   return (
     <div className="grid gap-6 lg:grid-cols-2">
-      <Panel title={`${title}: ${severityTitle}`}>
-        {scores.length === 0 ? (
-          <EmptyState message="No threat scores available" />
-        ) : (
+      <Panel
+        title={labels.threatSeverity}
+        action={source ? <SourceBadge source={source} /> : undefined}
+      >
+        {error && <EmptyState message={labels.mlUnreachable} />}
+        {!error && scores.length === 0 && <EmptyState message={labels.noActiveScores} />}
+        {!error && scores.length > 0 && (
           <SegmentBar segments={severitySegments(scores.map((score) => score.severity))} />
         )}
       </Panel>
 
-      <Panel title={entitiesTitle}>
+      <Panel title={labels.threatByModel}>
         {scores.length === 0 ? (
-          <EmptyState message="No threat entities available" />
+          <EmptyState message={labels.noActiveScores} />
         ) : (
           <BarList
-            items={scores
-              .slice()
-              .sort((a, b) => b.score - a.score)
-              .slice(0, 10)
-              .map((score) => ({
-                label: `${score.entity_type}: ${score.entity_id}`,
-                value: Math.round(score.score * 100),
+            items={countBy(scores.map((score) => score.model))
+              .slice(0, 8)
+              .map(([label, value], index) => ({
+                label,
+                value,
+                color: seriesColor(index),
               }))}
           />
         )}
