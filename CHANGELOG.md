@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.8] - 2026-08-05
+
+Patch release after **0.9.7**: Phase C agent **productization slice** —
+WebSocket policy push, TLS OCSP stapling, multi-node Redis registry/CRL,
+multi-OS pilot installers + system proxy (#273).
+
 ### Added
 
 - **Multi-OS agent install + system proxy (#273)** — `agent-spike` hooks
