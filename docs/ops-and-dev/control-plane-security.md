@@ -52,6 +52,9 @@ OCSP:
 - **RFC 6960 DER**: `POST /api/v1/agent/ocsp` with body
   `application/ocsp-request` → `application/ocsp-response` (public, CA-signed).
   Optional `GET /api/v1/agent/ocsp?b64=…`.
+- **TLS stapling** (data-plane MITM + control mTLS server leaves): CA-signed
+  **good** staple in the TLS handshake (`TLS_OCSP_STAPLING`, default on;
+  refresh `TLS_OCSP_STAPLE_REFRESH_SECS`). Not the agent client-cert status API.
 
 ### Agent control mTLS (optional)
 

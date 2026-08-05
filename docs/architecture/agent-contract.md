@@ -29,6 +29,8 @@ policy and heartbeat endpoints.
 - Handlers live in `proxy/src/agent_api.rs` (`dispatch_agent`).
 - Policy product push: HTTP long-poll/SSE/**WebSocket** + optional **gRPC**
   `WatchAgentPolicy` / `GetAgentPolicy` / `PushAgentPolicy` (`--features grpc`).
+- Data-plane **OCSP stapling** on MITM/control server leaves (CA-signed good
+  staple; `TLS_OCSP_STAPLING`, default on) — distinct from agent client OCSP API.
 - Reserved: multi-OS installers, multi-node registry.
 
 ---
@@ -94,7 +96,6 @@ by the proxy/agent CA. Plain `METRICS_PORT` stays HTTP for scrapers/Admin.
 
 #### Reserved
 
-- OCSP stapling on data-plane TLS.
 - Forcing mTLS on the primary metrics port (would break Prometheus scrape).
 
 ---

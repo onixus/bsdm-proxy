@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **TLS OCSP stapling (data-plane MITM + control mTLS)** — CA-signed RFC 6960
+  **good** staple attached via rustls `with_single_cert_with_ocsp`; default on
+  (`TLS_OCSP_STAPLING=0` to disable); refresh `TLS_OCSP_STAPLE_REFRESH_SECS`
+  (default 900s). Separate from agent client-cert OCSP API.
 - **Agent policy WebSocket push (#273)** — `GET /api/v1/agent/policy/ws`
   (RFC 6455 upgrade); server sends full policy JSON text frames on publish;
   HTTP/1 upgrades enabled on metrics + mTLS control ports; `agent-spike`

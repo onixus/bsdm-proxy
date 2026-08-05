@@ -59,6 +59,9 @@ pub struct OcspStatusResponse {
 
 const NEXT_UPDATE_SECS: u64 = 300;
 
+/// Default `nextUpdate` window for TLS OCSP staples (data-plane MITM leaves).
+pub const STAPLE_NEXT_UPDATE_SECS: u64 = 3600;
+
 /// Resolve status from CRL + device registry.
 pub fn check_status(
     crl: &AgentCrl,
@@ -255,9 +258,52 @@ pub fn respond_der(
         response_extensions = Some(vec![ext]);
     }
 
+    sign_basic_response(cert_cache, ca, responses, response_extensions)
+}
+
+/// Malformed-request / internal-error style unsigned OCSP response.
+pub fn error_response_der(status: OcspResponseStatus) -> Vec<u8> {
+    OcspResponse {
+        response_status: status,
+        response_bytes: None,
+    }
+    .to_der()
+    .unwrap_or_default()
+}
+
+/// Build a CA-signed RFC 6960 OCSP response (**good**) for a MITM/server leaf.
+///
+/// Used for TLS **OCSP stapling** on data-plane (and control mTLS) server certs
+/// issued by the proxy CA. Does not consult the agent device CRL.
+pub fn staple_good_for_leaf_pem(
+    cert_cache: &CertCache,
+    leaf_pem: &[u8],
+) -> Result<Vec<u8>, String> {
+    let leaf = parse_first_certificate_pem(leaf_pem)?;
+    let ca = parse_ca_certificate(&cert_cache.ca_cert_pem())?;
+    let cert_id = cert_id_sha256(&ca, leaf.tbs_certificate.serial_number.clone())?;
+    sign_basic_response(
+        cert_cache,
+        ca,
+        vec![SingleResponse {
+            cert_id,
+            cert_status: CertStatus::good(),
+            this_update: unix_to_ocsp_time(unix_now())?,
+            next_update: Some(unix_to_ocsp_time(unix_now() + STAPLE_NEXT_UPDATE_SECS)?),
+            single_extensions: None,
+        }],
+        None,
+    )
+}
+
+fn sign_basic_response(
+    cert_cache: &CertCache,
+    ca: Certificate,
+    responses: Vec<SingleResponse>,
+    response_extensions: Option<x509_cert::ext::Extensions>,
+) -> Result<Vec<u8>, String> {
     let produced_at = OcspGeneralizedTime::try_from(SystemTime::now())
         .map_err(|e| format!("OCSP producedAt: {e}"))?;
-
     let tbs = ResponseData {
         version: Version::V1,
         responder_id: ResponderId::ByName(ca.tbs_certificate.subject.clone()),
@@ -268,12 +314,10 @@ pub fn respond_der(
     let tbs_der = tbs
         .to_der()
         .map_err(|e| format!("encode OCSP tbsResponseData: {e}"))?;
-
     let (signature_algorithm, signature_bytes) =
         sign_tbs_with_ca_key(&cert_cache.ca_key_pkcs8_der(), &tbs_der)?;
     let signature = BitString::from_bytes(&signature_bytes)
         .map_err(|e| format!("OCSP signature BIT STRING: {e}"))?;
-
     let basic = BasicOcspResponse {
         tbs_response_data: tbs,
         signature_algorithm,
@@ -285,14 +329,15 @@ pub fn respond_der(
         .map_err(|e| format!("encode OCSP response: {e}"))
 }
 
-/// Malformed-request / internal-error style unsigned OCSP response.
-pub fn error_response_der(status: OcspResponseStatus) -> Vec<u8> {
-    OcspResponse {
-        response_status: status,
-        response_bytes: None,
-    }
-    .to_der()
-    .unwrap_or_default()
+fn parse_first_certificate_pem(pem: &[u8]) -> Result<Certificate, String> {
+    let mut reader = std::io::Cursor::new(pem);
+    let ders = rustls_pemfile::certs(&mut reader)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("leaf PEM parse: {e}"))?;
+    let der = ders
+        .first()
+        .ok_or_else(|| "leaf PEM contains no certificate".to_string())?;
+    Certificate::from_der(der.as_ref()).map_err(|e| format!("leaf cert DER: {e}"))
 }
 
 fn parse_ca_certificate(pem: &str) -> Result<Certificate, String> {
@@ -500,5 +545,16 @@ mod tests {
         assert_eq!(rev.response_status, OcspResponseStatus::Successful);
         assert!(!rev_der.is_empty());
         assert_ne!(good_der, rev_der);
+    }
+
+    #[test]
+    fn staple_good_for_mitm_leaf() {
+        let ca_key = KeyPair::generate().unwrap();
+        let cache = CertCache::from_pem(ca_key.serialize_pem().as_bytes(), b"").unwrap();
+        let (leaf_pem, _) = cache.server_identity_pem("staple.test").unwrap();
+        let der = staple_good_for_leaf_pem(&cache, &leaf_pem).unwrap();
+        let resp = OcspResponse::from_der(&der).unwrap();
+        assert_eq!(resp.response_status, OcspResponseStatus::Successful);
+        assert!(der.len() > 50);
     }
 }

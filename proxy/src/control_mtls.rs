@@ -103,12 +103,36 @@ pub fn build_mtls_server_config(
         .build()
         .map_err(|e| format!("client cert verifier: {e}"))?;
 
-    let (cert_chain, key) = load_server_identity(cert_cache, config)?;
+    let (cert_chain, key, leaf_pem) = load_server_identity(cert_cache, config)?;
 
-    let mut server_config = ServerConfig::builder()
-        .with_client_cert_verifier(verifier)
-        .with_single_cert(cert_chain, key)
-        .map_err(|e| format!("server config: {e}"))?;
+    let ocsp = if crate::tls::ocsp_stapling_enabled() {
+        match crate::agent_ocsp::staple_good_for_leaf_pem(cert_cache, &leaf_pem) {
+            Ok(der) => {
+                info!(
+                    staple_len = der.len(),
+                    "Control mTLS server OCSP staple attached"
+                );
+                Some(der)
+            }
+            Err(e) => {
+                warn!(error = %e, "Control mTLS OCSP staple skipped");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    let mut server_config = match ocsp {
+        Some(ocsp) => ServerConfig::builder()
+            .with_client_cert_verifier(verifier)
+            .with_single_cert_with_ocsp(cert_chain, key, ocsp)
+            .map_err(|e| format!("server config: {e}"))?,
+        None => ServerConfig::builder()
+            .with_client_cert_verifier(verifier)
+            .with_single_cert(cert_chain, key)
+            .map_err(|e| format!("server config: {e}"))?,
+    };
     server_config.alpn_protocols = vec![b"http/1.1".to_vec()];
 
     info!(
@@ -150,10 +174,18 @@ fn load_client_ca_pem(
     Ok(pem.into_bytes())
 }
 
+/// Returns `(chain, key, leaf_pem)` — leaf PEM is used for OCSP stapling.
 fn load_server_identity(
     cert_cache: &CertCache,
     config: &ControlMtlsConfig,
-) -> Result<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>), String> {
+) -> Result<
+    (
+        Vec<CertificateDer<'static>>,
+        PrivateKeyDer<'static>,
+        Vec<u8>,
+    ),
+    String,
+> {
     if let (Some(cert_path), Some(key_path)) = (&config.cert_file, &config.key_file) {
         let cert_pem =
             std::fs::read(cert_path).map_err(|e| format!("read CONTROL_MTLS_CERT_FILE: {e}"))?;
@@ -165,7 +197,7 @@ fn load_server_identity(
             chain.extend(parse_certs(&ca)?);
         }
         let key = parse_private_key(&key_pem)?;
-        return Ok((chain, key));
+        return Ok((chain, key, cert_pem));
     }
 
     // Auto leaf signed by proxy CA for CONTROL_MTLS_SERVER_NAME.
@@ -179,7 +211,7 @@ fn load_server_identity(
         server_name = %config.server_name,
         "CONTROL_MTLS server cert auto-issued by proxy CA"
     );
-    Ok((chain, key))
+    Ok((chain, key, cert_pem))
 }
 
 fn parse_certs(pem: &[u8]) -> Result<Vec<CertificateDer<'static>>, String> {

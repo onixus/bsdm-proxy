@@ -17,12 +17,22 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::RwLock;
 use tracing::{debug, warn};
 
+use crate::agent_ocsp;
+
 pub type CertPair = (Bytes, Bytes);
 type CertMap = Arc<RwLock<HashMap<Arc<str>, CertPair>>>;
-type ServerConfigMap = Arc<RwLock<HashMap<Arc<str>, Arc<ServerConfig>>>>;
+
+struct CachedServerConfig {
+    config: Arc<ServerConfig>,
+    /// When the OCSP staple was generated (for TTL refresh).
+    stapled_at: Instant,
+}
+
+type ServerConfigMap = Arc<RwLock<HashMap<Arc<str>, CachedServerConfig>>>;
 
 #[derive(Clone)]
 pub struct CertCache {
@@ -126,19 +136,51 @@ impl CertCache {
         domain: &str,
     ) -> Result<Arc<ServerConfig>, Box<dyn std::error::Error + Send + Sync>> {
         let domain_arc: Arc<str> = domain.into();
+        let refresh = ocsp_staple_refresh_secs();
 
         {
             let cache = self.server_configs.read().await;
-            if let Some(config) = cache.get(&domain_arc) {
-                return Ok(config.clone());
+            if let Some(entry) = cache.get(&domain_arc) {
+                if entry.stapled_at.elapsed().as_secs() < refresh {
+                    return Ok(entry.config.clone());
+                }
             }
         }
 
         let (cert_pem, key_pem) = self.get_or_generate(domain).await?;
-        let config = Arc::new(build_server_config(&cert_pem, &key_pem, &self.ca_cert_pem)?);
+        let ocsp = if ocsp_stapling_enabled() {
+            match agent_ocsp::staple_good_for_leaf_pem(self, &cert_pem) {
+                Ok(der) => {
+                    debug!(
+                        domain,
+                        staple_len = der.len(),
+                        "OCSP staple attached to MITM leaf"
+                    );
+                    Some(der)
+                }
+                Err(e) => {
+                    warn!(domain, error = %e, "OCSP stapling failed; serving without staple");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let config = Arc::new(build_server_config(
+            &cert_pem,
+            &key_pem,
+            &self.ca_cert_pem,
+            ocsp.as_deref(),
+        )?);
 
         let mut cache = self.server_configs.write().await;
-        cache.insert(domain_arc, config.clone());
+        cache.insert(
+            domain_arc,
+            CachedServerConfig {
+                config: config.clone(),
+                stapled_at: Instant::now(),
+            },
+        );
         Ok(config)
     }
 
@@ -370,20 +412,49 @@ pub struct AgentClientCert {
     pub validity_days: u32,
 }
 
+/// Whether data-plane MITM TLS should staple OCSP responses.
+/// Default **on**. Disable: `TLS_OCSP_STAPLING=0` / `false`.
+pub fn ocsp_stapling_enabled() -> bool {
+    match std::env::var("TLS_OCSP_STAPLING") {
+        Ok(v) => {
+            let t = v.trim();
+            !(t == "0"
+                || t.eq_ignore_ascii_case("false")
+                || t.eq_ignore_ascii_case("no")
+                || t.eq_ignore_ascii_case("off"))
+        }
+        Err(_) => true,
+    }
+}
+
+/// How long a cached `ServerConfig` (and its staple) is reused.
+/// Default 900s. Env: `TLS_OCSP_STAPLE_REFRESH_SECS`.
+pub fn ocsp_staple_refresh_secs() -> u64 {
+    std::env::var("TLS_OCSP_STAPLE_REFRESH_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(900)
+        .clamp(60, 24 * 3600)
+}
+
 fn build_server_config(
     cert_pem: &[u8],
     key_pem: &[u8],
     ca_cert_pem: &[u8],
+    ocsp_der: Option<&[u8]>,
 ) -> Result<ServerConfig, Box<dyn std::error::Error + Send + Sync>> {
     let mut chain = parse_certs(cert_pem)?;
     chain.extend(parse_certs(ca_cert_pem)?);
 
     let key = parse_private_key(key_pem)?;
 
-    ServerConfig::builder()
-        .with_no_client_auth()
-        .with_single_cert(chain, key)
-        .map_err(|e| e.into())
+    let builder = ServerConfig::builder().with_no_client_auth();
+    match ocsp_der {
+        Some(ocsp) if !ocsp.is_empty() => builder
+            .with_single_cert_with_ocsp(chain, key, ocsp.to_vec())
+            .map_err(|e| e.into()),
+        _ => builder.with_single_cert(chain, key).map_err(|e| e.into()),
+    }
 }
 
 fn parse_certs(
@@ -495,6 +566,33 @@ mod tests {
             .block_on(cache.server_config_for_domain("test.example.com"))
             .unwrap();
         assert!(!config.ignore_client_order);
+    }
+
+    #[test]
+    fn mitm_server_config_ocsp_staple() {
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
+        let ca_key = KeyPair::generate().unwrap();
+        let cache = CertCache::from_pem(ca_key.serialize_pem().as_bytes(), b"").unwrap();
+        let (cert_pem, _key_pem) = cache.server_identity_pem("staple.example.com").unwrap();
+        let staple = agent_ocsp::staple_good_for_leaf_pem(&cache, &cert_pem).unwrap();
+        assert!(!staple.is_empty());
+        use der::Decode;
+        let resp = x509_ocsp::OcspResponse::from_der(&staple).unwrap();
+        assert_eq!(
+            resp.response_status,
+            x509_ocsp::OcspResponseStatus::Successful
+        );
+        // Building ServerConfig with staple must succeed.
+        let cfg = build_server_config(
+            &cert_pem,
+            &_key_pem,
+            cache.ca_cert_pem().as_bytes(),
+            Some(&staple),
+        )
+        .unwrap();
+        assert!(!cfg.ignore_client_order);
     }
 
     #[test]

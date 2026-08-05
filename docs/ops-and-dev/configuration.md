@@ -20,6 +20,8 @@ native install находятся в `packaging/config/*.env.example`; Compose �
 | `PINNING_AUDIT_LOG_PATH` | `<registry>.audit.jsonl` | Append-only audit trail изменений реестра |
 | `PINNING_EXCEPTIONS` | `.slack.com,.teams.microsoft.com,.zoom.us` | Legacy startup fallback; без reload и аудита |
 | `MITM_ENABLED` | `true` | HTTPS MITM; требует `ca.key` и `ca.crt` при POLICY_MODE != sni |
+| `TLS_OCSP_STAPLING` | `true` | OCSP staple (RFC 6960 DER, CA-signed **good**) on MITM/control TLS leaves |
+| `TLS_OCSP_STAPLE_REFRESH_SECS` | `900` | TTL refresh cached `ServerConfig` + staple (60–86400) |
 | `DLP_ENABLED` | `false` | Experimental native signature DLP; `false` = no built-in patterns / no body scan |
 | `SHUTDOWN_TIMEOUT_SECONDS` | `30` | Graceful shutdown |
 | `WORKER_COUNT` | `1` | SO_REUSEPORT accept loops на Unix |
