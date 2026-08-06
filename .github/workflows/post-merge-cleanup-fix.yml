@@ -1,0 +1,75 @@
+name: One-shot post-merge cleanup fix
+
+on:
+  push:
+    branches:
+      - fix/post-merge-cleanup
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/post-merge-cleanup
+          fetch-depth: 0
+
+      - name: Harden mock static path validation and add regression test
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          mock = Path('admin-console/test/local/mock-api.ts')
+          text = mock.read_text()
+          old_import = "import { extname, join, normalize, resolve } from 'node:path'"
+          new_import = "import { extname, join, normalize, resolve, sep } from 'node:path'"
+          if old_import not in text:
+              raise SystemExit('mock-api path import pattern not found')
+          text = text.replace(old_import, new_import, 1)
+
+          marker = "async function serveStatic(distDir: string, pathname: string, res: ServerResponse): Promise<boolean> {"
+          helper = """export function isPathWithinRoot(root: string, candidate: string): boolean {\n  const resolvedRoot = resolve(root)\n  const resolvedCandidate = resolve(candidate)\n  return resolvedCandidate === resolvedRoot || resolvedCandidate.startsWith(`${resolvedRoot}${sep}`)\n}\n\n"""
+          if marker not in text:
+              raise SystemExit('serveStatic marker not found')
+          text = text.replace(marker, helper + marker, 1)
+
+          old_check = "  if (!candidate.startsWith(root)) {"
+          new_check = "  if (!isPathWithinRoot(root, candidate)) {"
+          if old_check not in text:
+              raise SystemExit('unsafe startsWith check not found')
+          text = text.replace(old_check, new_check, 1)
+          mock.write_text(text)
+
+          test = Path('admin-console/test/local/ui.smoke.test.ts')
+          text = test.read_text()
+          old_path_import = "import { dirname, join } from 'node:path'"
+          new_path_import = "import { dirname, join, resolve } from 'node:path'"
+          if old_path_import not in text:
+              raise SystemExit('ui test path import pattern not found')
+          text = text.replace(old_path_import, new_path_import, 1)
+
+          old_mock_import = "import { startMockApi, type MockApiInstance } from './mock-api.ts'"
+          new_mock_import = "import { isPathWithinRoot, startMockApi, type MockApiInstance } from './mock-api.ts'"
+          if old_mock_import not in text:
+              raise SystemExit('ui test mock import pattern not found')
+          text = text.replace(old_mock_import, new_mock_import, 1)
+
+          insertion = """\n  it('rejects paths outside the static root, including sibling prefix collisions', () => {\n    const root = resolve('/tmp/bsdm-admin-dist')\n    assert.equal(isPathWithinRoot(root, join(root, 'assets', 'app.js')), true)\n    assert.equal(isPathWithinRoot(root, `${root}-escape/secret.txt`), false)\n    assert.equal(isPathWithinRoot(root, resolve(root, '..', 'secret.txt')), false)\n  })\n"""
+          anchor = "\n  it('keeps fixture timestamps stable across runs', () => {"
+          if anchor not in text:
+              raise SystemExit('ui test insertion anchor not found')
+          text = text.replace(anchor, insertion + anchor, 1)
+          test.write_text(text)
+          PY
+
+      - name: Remove one-shot workflow and commit
+        run: |
+          rm .github/workflows/post-merge-cleanup-fix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "test(admin-console): harden mock static path boundary"
+          git push origin HEAD:fix/post-merge-cleanup
