@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   prepare:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -26,7 +27,7 @@ jobs:
 
       - uses: ./.github/actions/setup-rust
 
-      - name: Prepare release files
+      - name: Prepare release content
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -44,259 +45,43 @@ jobs:
           for name in manifests:
               path = Path(name)
               text = path.read_text()
-              needle = f'version = "{old}"'
-              if needle not in text:
-                  raise SystemExit(f'{name}: expected {needle!r}')
-              path.write_text(text.replace(needle, f'version = "{new}"', 1))
+              old_line = f'version = "{old}"'
+              new_line = f'version = "{new}"'
+              if new_line in text:
+                  continue
+              if old_line not in text:
+                  raise SystemExit(f'{name}: version is neither {old} nor {new}')
+              path.write_text(text.replace(old_line, new_line, 1))
 
           changelog = Path('CHANGELOG.md')
           text = changelog.read_text()
-          start = text.index('## [Unreleased]')
-          end = text.index('## [0.9.10]')
-          release = '''## [Unreleased]\n\n## [0.9.11] - 2026-08-06\n\nPatch after **0.9.10**: Admin Console foundations, fixture-backed browser\nsmoke testing, control-plane/RPZ integration, and release pipeline hardening.\n\n### Added\n\n- **Fixture-backed Admin Console smoke test** — production build is driven by\n  Chromium over all supported and frozen routes without requiring Kafka,\n  ClickHouse, proxy data-plane, or the ML worker. CI rejects console errors,\n  failed requests, demo-data fallback, missing fixture markers, and broken SPA\n  navigation.\n- **Same-origin Search proxy** — control plane proxies `GET /api/search*` and\n  `POST /api/events` to `SEARCH_UPSTREAM_URL`, removing cross-origin deployment\n  requirements for the Admin Console.\n- **RPZ management API** — file-backed `/api/dns/rpz/*`, sinkhole config, zone\n  compilation, and live dns-sinkhole reload support.\n- **Product agent binary** — `bsdm-agent` is the preferred product binary name\n  for packaging and fleet rollout.\n\n### Changed\n\n- **Admin Console UI foundations** — shared design tokens, surface primitives,\n  page headers, status pills, command palette navigation, decomposed Dashboard,\n  Logs, Analytics, and Settings pages, URL-synchronised Settings tabs, and\n  consistent focus/reduced-motion behaviour.\n- **Release validation** — tag, manifest, lockfile, and changelog consistency are\n  checked before release; Rust formatting/clippy/tests and Admin Console\n  lint/unit/build/browser smoke checks are release gates.\n- **Release artifacts** — archives now include detached SHA-256 checksum files;\n  GHCR builds publish SBOM and provenance attestations.\n\n### Fixed\n\n- **Settings Apply safety** — sends a delta against live configuration, never\n  persists masked secrets, and requires confirmation for sensitive path changes.\n- **RPZ startup inside Tokio** — avoids taking a blocking lock while the runtime\n  is active.\n- **Mock static path boundary** — separator-aware root validation prevents sibling\n  prefix and `..` traversal bypasses, with a regression test.\n- **Generated RPZ state** — runtime zone output is no longer tracked by Git.\n- **Admin Console Docker build** — the UI builder receives the proxy manifest\n  used to expose the product version.\n\n'''
-          changelog.write_text(text[:start] + release + text[end:])
+          if '## [0.9.11] - 2026-08-06' not in text:
+              start = text.index('## [Unreleased]')
+              end = text.index('## [0.9.10]')
+              release = '''## [Unreleased]\n\n## [0.9.11] - 2026-08-06\n\nPatch after **0.9.10**: Admin Console foundations, fixture-backed browser\nsmoke testing, control-plane/RPZ integration, and release pipeline hardening.\n\n### Added\n\n- **Fixture-backed Admin Console smoke test** — production build is driven by\n  Chromium over all supported and frozen routes without Kafka, ClickHouse, the\n  proxy data-plane, or the ML worker. CI rejects console errors, failed requests,\n  demo-data fallback, missing fixture markers, and broken SPA navigation.\n- **Same-origin Search proxy** — control plane proxies `GET /api/search*` and\n  `POST /api/events` to `SEARCH_UPSTREAM_URL`.\n- **RPZ management API** — file-backed `/api/dns/rpz/*`, sinkhole configuration,\n  zone compilation, and live dns-sinkhole reload support.\n- **Product agent binary** — `bsdm-agent` is the preferred product binary name.\n\n### Changed\n\n- **Admin Console foundations** — shared design tokens, reusable surfaces,\n  command palette navigation, decomposed Dashboard, Logs, Analytics, and Settings,\n  URL-synchronised tabs, consistent focus handling, and reduced-motion support.\n- **Release validation** — manifest, lockfile, changelog, Rust, Admin Console,\n  browser smoke, package checksum, SBOM, and provenance checks are release gates.\n\n### Fixed\n\n- **Settings Apply safety** — sends a delta against live configuration, does not\n  persist masked secrets, and confirms sensitive path changes.\n- **RPZ startup inside Tokio** — avoids blocking-lock use on the active runtime.\n- **Mock static path boundary** — prevents sibling-prefix and `..` traversal.\n- **Generated RPZ state** — runtime zone output is no longer tracked by Git.\n- **Admin Console Docker build** — exposes the product version from the manifest.\n\n'''
+              changelog.write_text(text[:start] + release + text[end:])
 
-          Path('docs/releases/v0.9.11.md').write_text('''# BSDM-Proxy v0.9.11\n\n**Release date:** 2026-08-06  \n**Type:** patch release  \n**Previous release:** v0.9.10\n\n## Highlights\n\n- Refactored Admin Console foundations and modular Settings UI.\n- Fixture-backed Chromium smoke test across every console route.\n- Same-origin Search integration and file-backed RPZ management.\n- Safer live configuration Apply semantics.\n- Hardened release validation, package checksums, GHCR SBOM, and provenance.\n\n## Upgrade\n\n1. Pull or build the `v0.9.11` images/packages.\n2. Preserve `/etc/bsdm-proxy`, `/certs`, and persistent data volumes.\n3. Generated RPZ state now belongs under `proxy/data/rpz/` or the configured\n   `DNS_RPZ_STATE_DIR`; do not restore it from source control.\n4. Verify `http://127.0.0.1:9090/health`, `/ready`, and `/admin/`.\n5. Validate archive downloads with the adjacent `.sha256` file.\n\nNo intentional breaking control-plane API changes.\n''')
+          Path('docs/releases/v0.9.11.md').write_text('''# BSDM-Proxy v0.9.11\n\n**Release date:** 2026-08-06  \n**Type:** patch release  \n**Previous release:** v0.9.10\n\n## Highlights\n\n- Refactored Admin Console foundations and modular Settings UI.\n- Fixture-backed Chromium smoke test across every console route.\n- Same-origin Search integration and file-backed RPZ management.\n- Safer live configuration Apply semantics.\n- Package checksums, GHCR SBOM, provenance, and stronger release validation.\n\n## Upgrade\n\n1. Pull or build the `v0.9.11` images or packages.\n2. Preserve `/etc/bsdm-proxy`, `/certs`, and persistent data volumes.\n3. Do not restore generated RPZ state from source control.\n4. Verify `/health`, `/ready`, and `/admin/` on port `9090`.\n5. Validate archive downloads with the adjacent `.sha256` file.\n\nNo intentional breaking control-plane API changes.\n''')
 
-          Path('packaging/README.md').write_text('''# BSDM-Proxy release package\n\nInstallation from a prebuilt release archive. The package version is derived\nfrom `proxy/Cargo.toml`; avoid hardcoding it in operational procedures, because\nhumans already have enough opportunities to deploy yesterday by accident.\n\n## Contents\n\n| Path | Description |\n|------|-------------|\n| `bin/proxy` | HTTPS caching proxy and control plane |\n| `bin/cache-indexer` | Kafka to ClickHouse indexer |\n| `bin/alert-worker` | ClickHouse to SIEM/webhook alerts |\n| `bin/ml-worker` | Feature and ML score worker |\n| `bin/dns-sinkhole` | RPZ DNS sinkhole sidecar |\n| `config/*.example` | Environment and ACL templates |\n| `systemd/` | systemd unit files |\n| `install.sh` | Installer script |\n| `VERSION` | Package version string |\n| `SHA256SUMS` | Checksums for packaged binaries |\n\nThe release also publishes `<archive>.sha256` next to each tarball.\n\n## Quick start\n\n```bash\nVERSION=0.9.11\nARCH=x86_64\nsha256sum -c bsdm-proxy-${VERSION}-linux-${ARCH}.tar.gz.sha256\ntar xzf bsdm-proxy-${VERSION}-linux-${ARCH}.tar.gz\ncd bsdm-proxy-${VERSION}-linux-${ARCH}\nsudo ./install.sh --create-user --systemd\n```\n\nPlace MITM CA certificates before starting:\n\n```bash\nsudo cp ca.key ca.crt /certs/\nsudo chown bsdm-proxy:bsdm-proxy /certs/ca.*\nsudo chmod 600 /certs/ca.key\nsudo systemctl start bsdm-proxy\n```\n\n## Verify\n\n```bash\ncurl --fail http://127.0.0.1:9090/health\ncurl --fail http://127.0.0.1:9090/ready\ncurl --fail http://127.0.0.1:9090/admin/ >/dev/null\ncat VERSION\n```\n\nDefault ports: proxy `3128`, control/metrics `9090`, cache-indexer `8080`,\nalert-worker `8090`, ML worker `8091`, DNS sinkhole metrics `8092`.\n''')
+          Path('packaging/README.md').write_text('''# BSDM-Proxy release package\n\nThe package version is derived from `proxy/Cargo.toml`; operational procedures\nshould not hardcode a stale version.\n\n## Contents\n\n| Path | Description |\n|------|-------------|\n| `bin/proxy` | HTTPS caching proxy and control plane |\n| `bin/cache-indexer` | Kafka to ClickHouse indexer |\n| `bin/alert-worker` | ClickHouse to SIEM/webhook alerts |\n| `bin/ml-worker` | Feature and ML score worker |\n| `bin/dns-sinkhole` | RPZ DNS sinkhole sidecar |\n| `config/*.example` | Environment and ACL templates |\n| `systemd/` | systemd unit files |\n| `install.sh` | Installer script |\n| `VERSION` | Package version string |\n| `SHA256SUMS` | Checksums for packaged binaries |\n\nThe release publishes `<archive>.sha256` beside every tarball.\n\n## Quick start\n\n```bash\nVERSION=0.9.11\nARCH=x86_64\nsha256sum -c bsdm-proxy-${VERSION}-linux-${ARCH}.tar.gz.sha256\ntar xzf bsdm-proxy-${VERSION}-linux-${ARCH}.tar.gz\ncd bsdm-proxy-${VERSION}-linux-${ARCH}\nsudo ./install.sh --create-user --systemd\n```\n\n## Verify\n\n```bash\ncurl --fail http://127.0.0.1:9090/health\ncurl --fail http://127.0.0.1:9090/ready\ncurl --fail http://127.0.0.1:9090/admin/ >/dev/null\ncat VERSION\n```\n\nDefault ports: proxy `3128`, control/metrics `9090`, cache-indexer `8080`,\nalert-worker `8090`, ML worker `8091`, DNS sinkhole metrics `8092`.\n''')
 
           build = Path('scripts/build-package.sh')
           text = build.read_text()
-          old_block = 'tar -C "${ROOT}/dist" -czf "$TARBALL" "$PACKAGE_NAME"\n\necho "==> Package ready"'
-          new_block = '''tar -C "${ROOT}/dist" -czf "$TARBALL" "$PACKAGE_NAME"\n(\n  cd "${ROOT}/dist"\n  sha256sum "$(basename "$TARBALL")" >"$(basename "$TARBALL").sha256"\n)\n\necho "==> Package ready"'''
-          if old_block not in text:
-              raise SystemExit('build-package tar block not found')
-          build.write_text(text.replace(old_block, new_block, 1))
+          checksum = 'sha256sum "$(basename "$TARBALL")" >"$(basename "$TARBALL").sha256"'
+          if checksum not in text:
+              old_block = 'tar -C "${ROOT}/dist" -czf "$TARBALL" "$PACKAGE_NAME"\n\necho "==> Package ready"'
+              new_block = '''tar -C "${ROOT}/dist" -czf "$TARBALL" "$PACKAGE_NAME"\n(\n  cd "${ROOT}/dist"\n  sha256sum "$(basename "$TARBALL")" >"$(basename "$TARBALL").sha256"\n)\n\necho "==> Package ready"'''
+              if old_block not in text:
+                  raise SystemExit('build-package tar block not found')
+              build.write_text(text.replace(old_block, new_block, 1))
           PY
 
-          cat > .github/workflows/release.yml <<'YAML'
-          name: Release
-
-          on:
-            push:
-              tags:
-                - "v*"
-            workflow_dispatch:
-              inputs:
-                dry_run:
-                  description: "Build packages only (no GitHub Release)"
-                  type: boolean
-                  default: true
-
-          concurrency:
-            group: release-${{ github.ref }}
-            cancel-in-progress: false
-
-          permissions:
-            contents: write
-
-          env:
-            CARGO_TERM_COLOR: always
-            RUST_BACKTRACE: 1
-
-          jobs:
-            validate:
-              name: Validate before release
-              runs-on: ubuntu-latest
-              steps:
-                - name: Checkout sources
-                  uses: actions/checkout@v4
-
-                - name: Setup Rust environment
-                  uses: ./.github/actions/setup-rust
-
-                - name: Setup Node.js
-                  uses: actions/setup-node@v4
-                  with:
-                    node-version: 24
-                    cache: npm
-                    cache-dependency-path: admin-console/package-lock.json
-
-                - name: Validate release metadata
-                  shell: bash
-                  run: |
-                    set -euo pipefail
-                    VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' proxy/Cargo.toml | head -1)"
-                    test -n "$VERSION"
-                    for manifest in proxy bsdm-events cache-indexer alert-worker ml-worker dns-sinkhole; do
-                      grep -q "^version = \"${VERSION}\"$" "${manifest}/Cargo.toml"
-                    done
-                    grep -q "^## \[${VERSION}\]" CHANGELOG.md
-                    if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
-                      test "${GITHUB_REF_NAME}" = "v${VERSION}"
-                    fi
-                    cargo metadata --locked --no-deps --format-version 1 >/dev/null
-
-                - name: Check formatting
-                  run: cargo fmt --all -- --check
-
-                - name: Run clippy
-                  run: cargo clippy --workspace --all-targets -- -D warnings
-
-                - name: Run Rust tests
-                  run: cargo test --workspace --all-targets
-
-                - name: Install Admin Console dependencies
-                  working-directory: admin-console
-                  run: npm ci
-
-                - name: Validate Admin Console
-                  working-directory: admin-console
-                  run: |
-                    npm run lint
-                    npm test
-                    npm run build
-                    npx playwright-core install --with-deps chromium
-                    npm run test:ui
-
-            build:
-              name: Build package (${{ matrix.arch }})
-              needs: validate
-              runs-on: ${{ matrix.runner }}
-              continue-on-error: ${{ matrix.arch == 'aarch64' }}
-              strategy:
-                fail-fast: false
-                matrix:
-                  include:
-                    - runner: ubuntu-latest
-                      arch: x86_64
-                    - runner: ubuntu-24.04-arm
-                      arch: aarch64
-              steps:
-                - name: Checkout sources
-                  uses: actions/checkout@v4
-
-                - name: Setup Rust environment
-                  uses: ./.github/actions/setup-rust
-
-                - name: Build release package
-                  run: ./scripts/build-package.sh
-
-                - name: Verify archive checksum
-                  run: cd dist && sha256sum -c *.tar.gz.sha256
-
-                - name: Upload package artifact
-                  uses: actions/upload-artifact@v4
-                  with:
-                    name: bsdm-proxy-package-${{ matrix.arch }}
-                    path: |
-                      dist/*.tar.gz
-                      dist/*.tar.gz.sha256
-                    if-no-files-found: error
-                    retention-days: 30
-
-            publish:
-              name: Publish GitHub Release
-              needs: build
-              if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-              runs-on: ubuntu-latest
-              steps:
-                - name: Checkout sources
-                  uses: actions/checkout@v4
-
-                - name: Download all package artifacts
-                  uses: actions/download-artifact@v4
-                  with:
-                    path: dist
-                    pattern: bsdm-proxy-package-*
-                    merge-multiple: true
-
-                - name: Prepare release notes
-                  run: |
-                    VERSION="${GITHUB_REF_NAME#v}"
-                    chmod +x scripts/extract-release-notes.sh
-                    ./scripts/extract-release-notes.sh "$VERSION" > dist/RELEASE_NOTES.md
-
-                - name: Create GitHub Release
-                  uses: softprops/action-gh-release@v2
-                  with:
-                    tag_name: ${{ github.ref_name }}
-                    name: BSDM-Proxy ${{ github.ref_name }}
-                    body_path: dist/RELEASE_NOTES.md
-                    draft: false
-                    prerelease: ${{ contains(github.ref_name, '-') }}
-                    files: |
-                      dist/*.tar.gz
-                      dist/*.tar.gz.sha256
-                    generate_release_notes: false
-          YAML
-
-          cat > .github/workflows/docker-publish.yml <<'YAML'
-          name: Docker Publish GHCR
-
-          on:
-            push:
-              tags:
-                - "v*"
-            workflow_dispatch:
-
-          concurrency:
-            group: docker-${{ github.ref }}
-            cancel-in-progress: true
-
-          permissions:
-            contents: read
-            packages: write
-            actions: write
-            id-token: write
-            attestations: write
-
-          env:
-            REGISTRY: ghcr.io
-            IMAGE_NAME: ${{ github.repository }}
-
-          jobs:
-            build-and-push:
-              name: Build & Push Docker Image (GHCR)
-              runs-on: ubuntu-latest
-              steps:
-                - name: Checkout repository
-                  uses: actions/checkout@v4
-
-                - name: Set up QEMU
-                  uses: docker/setup-qemu-action@v3
-
-                - name: Set up Docker Buildx
-                  uses: docker/setup-buildx-action@v3
-
-                - name: Log in to GitHub Container Registry
-                  uses: docker/login-action@v3
-                  with:
-                    registry: ${{ env.REGISTRY }}
-                    username: ${{ github.actor }}
-                    password: ${{ secrets.GITHUB_TOKEN }}
-
-                - name: Extract Docker metadata
-                  id: meta
-                  uses: docker/metadata-action@v5
-                  with:
-                    images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-                    tags: |
-                      type=ref,event=branch
-                      type=semver,pattern={{version}}
-                      type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
-
-                - name: Build and push Docker image
-                  uses: docker/build-push-action@v6
-                  with:
-                    context: .
-                    file: Dockerfile
-                    target: proxy
-                    platforms: linux/amd64,linux/arm64
-                    push: true
-                    tags: ${{ steps.meta.outputs.tags }}
-                    labels: ${{ steps.meta.outputs.labels }}
-                    cache-from: type=gha
-                    cache-to: type=gha,mode=max,ignore-error=true
-                    sbom: true
-                    provenance: mode=max
-          YAML
-
-      - name: Refresh lockfile and validate metadata
+      - name: Refresh lockfile and validate
         run: |
           cargo metadata --no-deps --format-version 1 >/dev/null
           cargo metadata --locked --no-deps --format-version 1 >/dev/null
           cargo fmt --all -- --check
+          grep -q '^## \[0.9.11\]' CHANGELOG.md
 
       - name: Validate Admin Console
         working-directory: admin-console
@@ -306,11 +91,13 @@ jobs:
           npm test
           npm run build
 
-      - name: Commit release preparation
+      - name: Commit release content
         run: |
-          rm .github/workflows/prepare-v0.9.11.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
+          git add Cargo.lock CHANGELOG.md \
+            proxy/Cargo.toml bsdm-events/Cargo.toml cache-indexer/Cargo.toml \
+            alert-worker/Cargo.toml ml-worker/Cargo.toml dns-sinkhole/Cargo.toml \
+            docs/releases/v0.9.11.md packaging/README.md scripts/build-package.sh
           git commit -m "release: prepare BSDM-Proxy v0.9.11"
           git push origin HEAD:release/v0.9.11-hardening
