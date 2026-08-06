@@ -46,6 +46,10 @@ echo "${VERSION}" >"$STAGING/VERSION"
 
 TARBALL="${ROOT}/dist/${PACKAGE_NAME}.tar.gz"
 tar -C "${ROOT}/dist" -czf "$TARBALL" "$PACKAGE_NAME"
+(
+  cd "${ROOT}/dist"
+  sha256sum "$(basename "$TARBALL")" >"$(basename "$TARBALL").sha256"
+)
 
 echo "==> Package ready"
 echo "    Directory: ${STAGING}"
