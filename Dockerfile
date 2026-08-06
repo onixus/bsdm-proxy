@@ -146,6 +146,8 @@ FROM node:24-alpine AS admin-console-builder
 WORKDIR /app
 COPY admin-console/package.json admin-console/package-lock.json ./
 RUN npm ci
+# vite.config.ts reads the product version from the proxy manifest at ../proxy/Cargo.toml
+COPY proxy/Cargo.toml /proxy/Cargo.toml
 COPY admin-console/ ./
 RUN npm run build
 

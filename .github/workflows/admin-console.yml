@@ -38,3 +38,35 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run build
+      - run: npm test
+
+  ui-smoke:
+    name: Local UI smoke test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: admin-console
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: admin-console/package-lock.json
+
+      - run: npm ci
+      - name: Install Chromium
+        run: npx playwright-core install --with-deps chromium
+      - name: Build and drive the console against the fixture backend
+        run: npm run test:ui
+        env:
+          UI_TEST_SCREENSHOTS: '1'
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: admin-console-screenshots
+          path: admin-console/test/local/screenshots
+          if-no-files-found: ignore
+          retention-days: 7
