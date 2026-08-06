@@ -190,17 +190,17 @@ impl RpzApiState {
             .filter(|s| !s.trim().is_empty());
         let state = Self::load_or_default(&state_dir);
         let api = Self {
-            inner: RwLock::new(state),
+            inner: RwLock::new(state.clone()),
             state_dir: state_dir.clone(),
             zone_path: zone_path.clone(),
             reload_url,
         };
-        // Ensure compiled zone exists for dns-sinkhole first boot.
-        {
-            let g = api.inner.blocking_read();
-            if let Err(e) = api.compile_zone(&g) {
-                warn!("initial RPZ zone compile: {e}");
-            }
+        // Ensure compiled zone exists for dns-sinkhole first boot. Compile from
+        // the state we just loaded rather than taking the lock: `blocking_read`
+        // panics when `from_env` runs inside a Tokio runtime, which is exactly
+        // how the proxy starts up (`#[tokio::main]` → `ControlApiState::from_env`).
+        if let Err(e) = api.compile_zone(&state) {
+            warn!("initial RPZ zone compile: {e}");
         }
         Arc::new(api)
     }
