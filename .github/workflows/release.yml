@@ -33,8 +33,49 @@ jobs:
       - name: Setup Rust environment
         uses: ./.github/actions/setup-rust
 
-      - name: Run tests
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: admin-console/package-lock.json
+
+      - name: Validate release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' proxy/Cargo.toml | head -1)"
+          test -n "$VERSION"
+          for manifest in proxy bsdm-events cache-indexer alert-worker ml-worker dns-sinkhole; do
+            grep -q "^version = \"${VERSION}\"$" "${manifest}/Cargo.toml"
+          done
+          grep -q "^## \[${VERSION}\]" CHANGELOG.md
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            test "${GITHUB_REF_NAME}" = "v${VERSION}"
+          fi
+          cargo metadata --locked --no-deps --format-version 1 >/dev/null
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Run Rust tests
         run: cargo test --workspace --all-targets
+
+      - name: Install Admin Console dependencies
+        working-directory: admin-console
+        run: npm ci
+
+      - name: Validate Admin Console
+        working-directory: admin-console
+        run: |
+          npm run lint
+          npm test
+          npm run build
+          npx playwright-core install --with-deps chromium
+          npm run test:ui
 
   build:
     name: Build package (${{ matrix.arch }})
@@ -59,11 +100,16 @@ jobs:
       - name: Build release package
         run: ./scripts/build-package.sh
 
+      - name: Verify archive checksum
+        run: cd dist && sha256sum -c *.tar.gz.sha256
+
       - name: Upload package artifact
         uses: actions/upload-artifact@v4
         with:
           name: bsdm-proxy-package-${{ matrix.arch }}
-          path: dist/*.tar.gz
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
           if-no-files-found: error
           retention-days: 30
 
@@ -84,14 +130,10 @@ jobs:
           merge-multiple: true
 
       - name: Prepare release notes
-        id: notes
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          NOTES_FILE="dist/RELEASE_NOTES.md"
           chmod +x scripts/extract-release-notes.sh
-          ./scripts/extract-release-notes.sh "$VERSION" > "$NOTES_FILE"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Release notes written for v${VERSION} ($(wc -l < "$NOTES_FILE") lines)"
+          ./scripts/extract-release-notes.sh "$VERSION" > dist/RELEASE_NOTES.md
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -101,5 +143,7 @@ jobs:
           body_path: dist/RELEASE_NOTES.md
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
-          files: dist/*.tar.gz
+          files: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
           generate_release_notes: false
