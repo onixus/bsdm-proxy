@@ -6,8 +6,15 @@
 // переживают сборки, поэтому холодный прогон долгий, а дальше — как в GHA.
 
 def RUST_IMAGE = 'rust:1-bookworm'
-def CACHE_ARGS = '-v bsdm-cargo-home:/usr/local/cargo/registry -v bsdm-cargo-target:/build-target'
-def RUST_ENV = ['CARGO_TERM_COLOR=always', 'RUST_BACKTRACE=1', 'CARGO_TARGET_DIR=/build-target']
+
+// Кэш target/ вешается НА ШТАТНЫЙ путь внутри воркспейса, а не через
+// CARGO_TARGET_DIR. Так было сначала, и e2e падали с "proxy binary not found":
+// e2e/src/lib.rs ищет бинарь по жёсткому <workspace>/target/{debug,release}/proxy,
+// а увод CARGO_TARGET_DIR делал этот путь несуществующим.
+// Путь захардкожен под имя джобы (bsdm-proxy) — переименуешь джобу, поправь тут.
+def WS_TARGET = '/Users/onixus/jenkins_home/workspace/bsdm-proxy/target'
+def CACHE_ARGS = "-v bsdm-cargo-home:/usr/local/cargo/registry -v bsdm-cargo-target:${WS_TARGET} -v bsdm-cargo-tools:/opt/cargo-tools"
+def RUST_ENV = ['CARGO_TERM_COLOR=always', 'RUST_BACKTRACE=1']
 
 // Системные зависимости из .github/actions/setup-rust.
 // Ставятся каждый прогон: кэшируются только volume'ы, а корень контейнера
@@ -88,9 +95,9 @@ pipeline {
               sh """
                 set -eu
                 ${SYS_DEPS}
-                export PATH="/build-target/tools/bin:\$PATH"
+                export PATH="/opt/cargo-tools/bin:\$PATH"
                 command -v cargo-audit >/dev/null 2>&1 || \
-                  cargo install cargo-audit --locked --root /build-target/tools
+                  cargo install cargo-audit --locked --root /opt/cargo-tools
                 cargo audit
               """
             }
