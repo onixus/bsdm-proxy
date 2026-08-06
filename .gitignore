@@ -40,3 +40,4 @@ backups/
 
 # Local RPZ state (DNS_RPZ_STATE_DIR fallback when /var/lib is unavailable)
 data/
+proxy/data/rpz/
