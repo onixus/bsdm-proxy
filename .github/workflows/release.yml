@@ -25,8 +25,16 @@ env:
 jobs:
   validate:
     name: Validate before release
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
+      - name: Show release context
+        run: |
+          echo "ref=${GITHUB_REF}"
+          echo "ref_name=${GITHUB_REF_NAME}"
+          echo "ref_type=${GITHUB_REF_TYPE}"
+          git rev-parse HEAD
+
       - name: Checkout sources
         uses: actions/checkout@v4
 
@@ -46,13 +54,13 @@ jobs:
           set -euo pipefail
           VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' proxy/Cargo.toml | head -1)"
           test -n "$VERSION"
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            test "${GITHUB_REF_NAME}" = "v${VERSION}"
+          fi
           for manifest in proxy bsdm-events cache-indexer alert-worker ml-worker dns-sinkhole; do
             grep -q "^version = \"${VERSION}\"$" "${manifest}/Cargo.toml"
           done
           grep -q "^## \[${VERSION}\]" CHANGELOG.md
-          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
-            test "${GITHUB_REF_NAME}" = "v${VERSION}"
-          fi
           cargo metadata --locked --no-deps --format-version 1 >/dev/null
 
       - name: Check formatting
@@ -81,7 +89,6 @@ jobs:
     name: Build package (${{ matrix.arch }})
     needs: validate
     runs-on: ${{ matrix.runner }}
-    continue-on-error: ${{ matrix.arch == 'aarch64' }}
     strategy:
       fail-fast: false
       matrix:
@@ -91,59 +98,38 @@ jobs:
           - runner: ubuntu-24.04-arm
             arch: aarch64
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Setup Rust environment
-        uses: ./.github/actions/setup-rust
-
-      - name: Build release package
-        run: ./scripts/build-package.sh
-
-      - name: Verify archive checksum
-        run: cd dist && sha256sum -c *.tar.gz.sha256
-
-      - name: Upload package artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-rust
+      - run: ./scripts/build-package.sh
+      - run: cd dist && sha256sum -c *.tar.gz.sha256
+      - uses: actions/upload-artifact@v4
         with:
           name: bsdm-proxy-package-${{ matrix.arch }}
           path: |
             dist/*.tar.gz
             dist/*.tar.gz.sha256
-          if-no-files-found: error
-          retention-days: 30
 
   publish:
     name: Publish GitHub Release
     needs: build
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Download all package artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
         with:
           path: dist
           pattern: bsdm-proxy-package-*
           merge-multiple: true
-
-      - name: Prepare release notes
-        run: |
+      - run: |
           VERSION="${GITHUB_REF_NAME#v}"
           chmod +x scripts/extract-release-notes.sh
           ./scripts/extract-release-notes.sh "$VERSION" > dist/RELEASE_NOTES.md
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: BSDM-Proxy ${{ github.ref_name }}
           body_path: dist/RELEASE_NOTES.md
-          draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
             dist/*.tar.gz
             dist/*.tar.gz.sha256
-          generate_release_notes: false
