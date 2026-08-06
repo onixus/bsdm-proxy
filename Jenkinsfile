@@ -40,6 +40,59 @@ pipeline {
       }
     }
 
+    // Quality gate — блокирующие security-проверки, обе до сборки.
+    // Холодный cargo build тут идёт десятки минут, и ловить криты после него
+    // бессмысленно; ни SAST, ни аудит зависимостей сборки не требуют.
+    stage('Quality gate') {
+      parallel {
+        stage('SAST (semgrep)') {
+          agent any
+          steps {
+            sh '''
+              set -eu
+              RULES="--config p/security-audit --config p/secrets --config p/rust"
+
+              # Проход 1 — полный отчёт, все severity, билд не роняет (--no-error).
+              echo "[sast] полный отчёт"
+              docker run --rm -v "$WORKSPACE":/src -w /src semgrep/semgrep:latest \
+                semgrep scan $RULES --metrics=off --no-error \
+                  --json --output semgrep.json
+
+              # Проход 2 — гейт: только ERROR, находки уходят в код возврата.
+              echo "[sast] quality gate: блок при ERROR"
+              docker run --rm -v "$WORKSPACE":/src -w /src semgrep/semgrep:latest \
+                semgrep scan $RULES --metrics=off --severity ERROR --error
+            '''
+          }
+          post {
+            always {
+              archiveArtifacts artifacts: 'semgrep.json', allowEmptyArchive: true
+            }
+          }
+        }
+
+        stage('Dependency audit') {
+          agent { docker { image RUST_IMAGE; args CACHE_ARGS; reuseNode true } }
+          steps {
+            withEnv(RUST_ENV) {
+              // rustsec/audit-check недоступен вне GHA. cargo-audit ставим через
+              // --root в кэшируемый volume (в CARGO_HOME его класть нельзя: том,
+              // навешенный на /usr/local/cargo, перекрыл бы сам cargo из образа).
+              // Блокирует сам по себе: любая advisory — ненулевой код возврата.
+              sh """
+                set -eu
+                ${SYS_DEPS}
+                export PATH="/build-target/tools/bin:\$PATH"
+                command -v cargo-audit >/dev/null 2>&1 || \
+                  cargo install cargo-audit --locked --root /build-target/tools
+                cargo audit --deny warnings
+              """
+            }
+          }
+        }
+      }
+    }
+
     stage('Format & lint') {
       agent { docker { image RUST_IMAGE; args CACHE_ARGS; reuseNode true } }
       steps {
@@ -118,23 +171,5 @@ pipeline {
       }
     }
 
-    stage('Security audit') {
-      agent { docker { image RUST_IMAGE; args CACHE_ARGS; reuseNode true } }
-      steps {
-        withEnv(RUST_ENV) {
-          // rustsec/audit-check недоступен вне GHA. Ставим cargo-audit через
-          // --root в кэшируемый volume (в CARGO_HOME его класть нельзя: том,
-          // навешенный на /usr/local/cargo, перекрыл бы сам cargo из образа).
-          sh """
-            set -eu
-            ${SYS_DEPS}
-            export PATH="/build-target/tools/bin:\$PATH"
-            command -v cargo-audit >/dev/null 2>&1 || \
-              cargo install cargo-audit --locked --root /build-target/tools
-            cargo audit
-          """
-        }
-      }
-    }
   }
 }
