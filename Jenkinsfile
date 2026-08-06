@@ -79,13 +79,19 @@ pipeline {
               // --root в кэшируемый volume (в CARGO_HOME его класть нельзя: том,
               // навешенный на /usr/local/cargo, перекрыл бы сам cargo из образа).
               // Блокирует сам по себе: любая advisory — ненулевой код возврата.
+              //
+              // БЕЗ --deny warnings намеренно. С ним билд роняли таймауты
+              // проверки yanked-пакетов ("couldn't check if the package is
+              // yanked: registry: request could not be completed"), то есть
+              // флаки-сеть, а не находки. Гейт должен блокировать на
+              // уязвимостях — это и есть поведение по умолчанию.
               sh """
                 set -eu
                 ${SYS_DEPS}
                 export PATH="/build-target/tools/bin:\$PATH"
                 command -v cargo-audit >/dev/null 2>&1 || \
                   cargo install cargo-audit --locked --root /build-target/tools
-                cargo audit --deny warnings
+                cargo audit
               """
             }
           }
