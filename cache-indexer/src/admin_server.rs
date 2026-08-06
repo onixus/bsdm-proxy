@@ -268,7 +268,12 @@ fn cors_origin_allowed(origin: &str) -> bool {
         || o.starts_with("https://[::1]")
 }
 
-fn http_response(status_code: u16, content_type: &str, body: &[u8], origin: Option<&str>) -> Vec<u8> {
+fn http_response(
+    status_code: u16,
+    content_type: &str,
+    body: &[u8],
+    origin: Option<&str>,
+) -> Vec<u8> {
     let status = match status_code {
         200 => "200 OK",
         202 => "202 Accepted",
@@ -287,9 +292,7 @@ fn http_response(status_code: u16, content_type: &str, body: &[u8], origin: Opti
         header.push_str(&format!("Access-Control-Allow-Origin: {o}\r\n"));
         header.push_str("Access-Control-Allow-Credentials: true\r\n");
         header.push_str("Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n");
-        header.push_str(
-            "Access-Control-Allow-Headers: Authorization, Content-Type, Accept\r\n",
-        );
+        header.push_str("Access-Control-Allow-Headers: Authorization, Content-Type, Accept\r\n");
         header.push_str("Access-Control-Max-Age: 86400\r\n");
         header.push_str("Vary: Origin\r\n");
     }

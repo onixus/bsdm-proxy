@@ -1,9 +1,10 @@
 @import 'tailwindcss';
 
 /*
- * Runtime-switchable theming: Tailwind tokens reference CSS variables
- * (via @theme inline) whose values change with [data-theme] on <html>.
- * Default is dark (the console's historical identity); light is opt-in.
+ * Runtime-switchable theming.
+ *
+ * Tailwind tokens reference CSS variables so the application can switch themes
+ * without rebuilding class names. Dark remains the default console theme.
  */
 @theme inline {
   --color-surface-0: var(--t-surface-0);
@@ -19,31 +20,34 @@
   --color-text-primary: var(--t-text-primary);
   --color-text-secondary: var(--t-text-secondary);
   --color-border: var(--t-border);
-  --font-sans: system-ui, -apple-system, 'Segoe UI', Inter, Roboto, sans-serif;
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, sans-serif;
   --font-mono: ui-monospace, 'SFMono-Regular', 'Cascadia Code', 'Fira Code', monospace;
   --radius-sm: 0.375rem;
   --radius-md: 0.5rem;
   --radius-lg: 0.75rem;
   --radius-xl: 1rem;
+  --radius-2xl: 1.25rem;
   --touch-min: 2.75rem;
 }
 
 :root,
 :root[data-theme='dark'] {
   color-scheme: dark;
-  --t-surface-0: #0b0f14;
-  --t-surface-1: #151a26;
-  --t-surface-2: #1e2638;
-  --t-surface-3: #2a354d;
+  --t-surface-0: #090d13;
+  --t-surface-1: #111722;
+  --t-surface-2: #1a2331;
+  --t-surface-3: #263247;
   --t-accent: #e94560;
-  --t-accent-hover: #ff5270;
-  --t-accent-glow: rgba(233, 69, 96, 0.35);
+  --t-accent-hover: #ff5b74;
+  --t-accent-glow: rgba(233, 69, 96, 0.32);
   --t-success: #10b981;
   --t-warning: #f59e0b;
   --t-danger: #ef4444;
-  --t-text-primary: #f3f4f6;
-  --t-text-secondary: #9ca3af;
-  --t-border: #263044;
+  --t-text-primary: #f8fafc;
+  --t-text-secondary: #94a3b8;
+  --t-border: #263247;
+  --t-overlay: rgba(2, 6, 23, 0.74);
+  --t-panel-shadow: 0 18px 48px -28px rgba(0, 0, 0, 0.72);
 
   /* Data-viz series palette */
   --viz-1: #3b82f6;
@@ -67,19 +71,21 @@
 
 :root[data-theme='light'] {
   color-scheme: light;
-  --t-surface-0: #f8fafc;
+  --t-surface-0: #f5f7fb;
   --t-surface-1: #ffffff;
-  --t-surface-2: #f1f5f9;
-  --t-surface-3: #e2e8f0;
-  --t-accent: #dc2626;
-  --t-accent-hover: #b91c1c;
-  --t-accent-glow: rgba(220, 38, 38, 0.25);
+  --t-surface-2: #eef2f7;
+  --t-surface-3: #dde5ef;
+  --t-accent: #d72645;
+  --t-accent-hover: #b91c36;
+  --t-accent-glow: rgba(215, 38, 69, 0.22);
   --t-success: #059669;
-  --t-warning: #d97706;
+  --t-warning: #b45309;
   --t-danger: #dc2626;
   --t-text-primary: #0f172a;
-  --t-text-secondary: #64748b;
-  --t-border: #e2e8f0;
+  --t-text-secondary: #5f6f85;
+  --t-border: #dce3ed;
+  --t-overlay: rgba(15, 23, 42, 0.46);
+  --t-panel-shadow: 0 18px 44px -28px rgba(15, 23, 42, 0.28);
 
   /* Series palette stepped for light mode */
   --viz-1: #2563eb;
@@ -90,26 +96,56 @@
   --viz-6: #16a34a;
   --viz-7: #9333ea;
   --viz-8: #e11d48;
-  --viz-grid: #f1f5f9;
+  --viz-grid: #eef2f7;
   --viz-axis: #cbd5e1;
   --viz-muted: #94a3b8;
   --viz-good: #059669;
-  --viz-warning: #d97706;
+  --viz-warning: #b45309;
   --viz-serious: #ea580c;
   --viz-critical: #dc2626;
 }
 
 @layer base {
   html {
-    @apply antialiased scroll-smooth;
+    min-width: 20rem;
+    background: var(--t-surface-0);
+    @apply scroll-smooth antialiased;
   }
 
   body {
-    @apply bg-surface-0 text-text-primary font-sans min-h-screen selection:bg-accent/30 selection:text-text-primary;
+    margin: 0;
+    min-height: 100vh;
+    background-color: var(--t-surface-0);
+    background-image:
+      radial-gradient(circle at 8% -8%, color-mix(in srgb, var(--t-accent) 9%, transparent), transparent 34rem),
+      radial-gradient(circle at 92% 0%, color-mix(in srgb, var(--viz-1) 7%, transparent), transparent 30rem);
+    @apply font-sans text-text-primary selection:bg-accent/30 selection:text-text-primary;
   }
 
-  * {
-    @apply border-border transition-colors duration-150;
+  #root {
+    min-height: 100vh;
+  }
+
+  *,
+  *::before,
+  *::after {
+    border-color: var(--t-border);
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  button,
+  [role='button'] {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  a {
+    text-underline-offset: 0.18em;
   }
 }
 
@@ -119,36 +155,76 @@
     min-width: var(--touch-min);
   }
 
+  .surface-card {
+    background: color-mix(in srgb, var(--t-surface-1) 94%, transparent);
+    border: 1px solid color-mix(in srgb, var(--t-border) 88%, transparent);
+    box-shadow: var(--t-panel-shadow);
+  }
+
+  .surface-panel {
+    background: color-mix(in srgb, var(--t-surface-1) 86%, transparent);
+    border: 1px solid color-mix(in srgb, var(--t-border) 82%, transparent);
+    backdrop-filter: blur(18px) saturate(125%);
+    -webkit-backdrop-filter: blur(18px) saturate(125%);
+  }
+
   .glass-card {
-    background: linear-gradient(135deg, rgba(var(--color-surface-1), 0.85) 0%, rgba(var(--color-surface-1), 0.65) 100%);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: color-mix(in srgb, var(--t-surface-1) 84%, transparent);
+    border: 1px solid color-mix(in srgb, var(--t-border) 74%, transparent);
+    backdrop-filter: blur(18px) saturate(125%);
+    -webkit-backdrop-filter: blur(18px) saturate(125%);
   }
 
   .glass-panel {
-    background: rgba(var(--color-surface-1), 0.75);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    background: color-mix(in srgb, var(--t-surface-1) 76%, transparent);
+    backdrop-filter: blur(14px) saturate(120%);
+    -webkit-backdrop-filter: blur(14px) saturate(120%);
+  }
+
+  .interactive-surface {
+    transition:
+      background-color 150ms ease,
+      border-color 150ms ease,
+      color 150ms ease,
+      box-shadow 150ms ease,
+      transform 150ms ease;
+  }
+
+  .interactive-surface:hover {
+    border-color: color-mix(in srgb, var(--t-accent) 34%, var(--t-border));
   }
 
   .shadow-glow-accent {
-    box-shadow: 0 0 20px -3px var(--color-accent-glow);
+    box-shadow: 0 0 22px -5px var(--t-accent-glow);
   }
 
   .shadow-glow-success {
-    box-shadow: 0 0 20px -3px rgba(16, 185, 129, 0.3);
+    box-shadow: 0 0 22px -5px rgba(16, 185, 129, 0.3);
   }
 
   .shadow-glow-danger {
-    box-shadow: 0 0 20px -3px rgba(239, 68, 68, 0.3);
+    box-shadow: 0 0 22px -5px rgba(239, 68, 68, 0.3);
+  }
+
+  .scrollbar-stable {
+    scrollbar-gutter: stable;
+    scrollbar-color: var(--t-surface-3) transparent;
+    scrollbar-width: thin;
+  }
+
+  .app-grid {
+    background-image:
+      linear-gradient(color-mix(in srgb, var(--t-border) 22%, transparent) 1px, transparent 1px),
+      linear-gradient(90deg, color-mix(in srgb, var(--t-border) 22%, transparent) 1px, transparent 1px);
+    background-size: 2rem 2rem;
+    mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.38), transparent 30rem);
   }
 }
 
 @keyframes modalPop {
   0% {
     opacity: 0;
-    transform: scale(0.95) translateY(6px);
+    transform: scale(0.97) translateY(8px);
   }
   100% {
     opacity: 1;
@@ -157,18 +233,19 @@
 }
 
 @keyframes pulseGlow {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 1;
     transform: scale(1);
   }
   50% {
-    opacity: 0.6;
+    opacity: 0.62;
     transform: scale(1.08);
   }
 }
 
 .animate-modal-pop {
-  animation: modalPop 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: modalPop 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .animate-pulse-glow {
@@ -177,8 +254,8 @@
 
 /* Custom scrollbar styling */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 0.45rem;
+  height: 0.45rem;
 }
 
 ::-webkit-scrollbar-track {
@@ -186,17 +263,30 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--color-surface-3);
+  background: var(--t-surface-3);
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-secondary);
+  background: color-mix(in srgb, var(--t-text-secondary) 72%, transparent);
 }
 
 :focus-visible {
-  outline: 2px solid var(--color-accent);
+  outline: 2px solid var(--t-accent);
   outline-offset: 2px;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
 
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

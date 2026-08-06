@@ -11,6 +11,9 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "test": "node --test test/*.test.ts",
+    "test:ui": "npm run build && node --test test/local/*.test.ts",
+    "mock:api": "node test/local/mock-api.ts",
+    "dev:mock": "node test/local/mock-api.ts & MOCK_PID=$!; trap 'kill $MOCK_PID' EXIT INT TERM; vite",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -30,6 +33,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
     "oxlint": "^1.71.0",
+    "playwright-core": "^1.62.1",
     "tailwindcss": "^4.3.3",
     "typescript": "~6.0.2",
     "vite": "^8.1.1"

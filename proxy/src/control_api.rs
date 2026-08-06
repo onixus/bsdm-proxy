@@ -734,11 +734,8 @@ impl ControlApiState {
         let query_str = query.unwrap_or("");
 
         // Same-origin Search/Ingest for Admin Console (optional upstream).
-        if path.starts_with("/api/search")
-            || path == "/api/events"
-            || (*method == Method::OPTIONS
-                && (path.starts_with("/api/search") || path == "/api/events"))
-        {
+        // OPTIONS preflight is covered by the same paths and handled downstream.
+        if path.starts_with("/api/search") || path == "/api/events" {
             return crate::search_proxy::proxy_search_request(
                 method,
                 path,

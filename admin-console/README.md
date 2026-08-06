@@ -89,6 +89,50 @@ that path with an SPA fallback to `/admin/index.html`, or let BSDM-Proxy serve
 Search API from the browser may use a separate base (`:8080`); cache-indexer
 allows CORS from `http://localhost:*` / `127.0.0.1` for that split.
 
+## Local UI test
+
+The console can be run and tested end to end with **no proxy, Kafka, ClickHouse
+or ML worker** — a fixture backend in [`test/local/`](test/local/) serves every
+REST endpoint and the Prometheus `/metrics` scrape the UI consumes.
+
+```bash
+npm run test:ui          # build + drive Chromium over every route
+```
+
+What it checks, per route (all 10 supported pages plus the 4 frozen deep-links):
+
+- the page heading renders and data that **can only come from the backend**
+  appears on screen;
+- provenance is `Live` — no demo badge, no error state (demo mode is explicitly
+  off, so a `Demo` badge means the console silently faked data);
+- frozen deep-links show the **Frozen** banner and supported routes do not;
+- zero console errors, page errors, and zero failed or 4xx/5xx requests;
+- `/` redirects to `/admin/` and in-app navigation stays a client-side SPA
+  transition.
+
+Chromium is found via `CHROMIUM_PATH`, then `PLAYWRIGHT_BROWSERS_PATH`, then the
+usual system paths; otherwise install one with
+`npx playwright-core install chromium`. Set `UI_TEST_SCREENSHOTS=1` to write a
+full-page PNG per route to `test/local/screenshots/` (git-ignored, uploaded as a
+CI artifact).
+
+### Manual browsing against the fixture backend
+
+```bash
+npm run dev:mock         # mock backend + Vite dev server
+# → http://127.0.0.1:5173/admin/
+```
+
+`npm run mock:api` starts the fixture backend alone on `9090` (control / ACL /
+metrics), `8080` (search) and `8091` (ML worker) — exactly the targets
+`vite.config.ts` proxies to, so a plain `npm run dev` in another shell is fully
+live-backed.
+
+Fixtures live in [`test/local/fixtures.ts`](test/local/fixtures.ts) and are typed
+against `src/api/*`, so an API contract change fails type-check instead of
+silently drifting. Mutating requests are acknowledged but never change fixture
+state, keeping runs reproducible.
+
 ## API integration
 
 The UI talks to existing BSDM REST endpoints (no backend changes required):
