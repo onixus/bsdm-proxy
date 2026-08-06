@@ -1,0 +1,33 @@
+{
+  "results": [
+    {
+      "name": "dashboard",
+      "route": "/admin/",
+      "status": 200,
+      "invalid": false,
+      "title": "BSDM Console"
+    },
+    {
+      "name": "logs",
+      "route": "/admin/logs",
+      "status": 200,
+      "invalid": false,
+      "title": "BSDM Console"
+    },
+    {
+      "name": "analytics",
+      "route": "/admin/analytics",
+      "status": 200,
+      "invalid": false,
+      "title": "BSDM Console"
+    },
+    {
+      "name": "settings-security",
+      "route": "/admin/settings?tab=security",
+      "status": 200,
+      "invalid": false,
+      "title": "BSDM Console"
+    }
+  ],
+  "pageErrors": []
+}

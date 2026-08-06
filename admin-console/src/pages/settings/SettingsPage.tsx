@@ -1,44 +1,47 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Download, Eye, Save, Upload } from 'lucide-react'
-import { defaultFormState } from '../../lib/config/types'
-import { formatEnv, generateAclRules, generateDockerCompose, downloadFile } from '../../lib/config/export'
-import { Button } from '../../components/ui/Button'
 import { CodePreview, CopyButton, Modal } from '../../components/ui/Modal'
 import { useToast } from '../../components/ui/Toast'
-import { useLanguage, translations } from '../../lib/i18n'
 import { isDemoMode } from '../../api/source'
-import { LiveNodePanel } from './components/LiveNodePanel'
+import { translations, useLanguage } from '../../lib/i18n'
 import { LiveConfigPanel } from './components/LiveConfigPanel'
+import { LiveNodePanel } from './components/LiveNodePanel'
+import { SettingsActions } from './components/SettingsActions'
 import { SettingsNav } from './components/SettingsNav'
 import { useSettingsController } from './hooks/useSettingsController'
-import { isSettingsTab, type SettingsTabId } from './types'
-import { GeneralTab } from './tabs/GeneralTab'
-import { CacheTab } from './tabs/CacheTab'
+import { ApiTab } from './tabs/ApiTab'
 import { AuthTab } from './tabs/AuthTab'
-import { FilteringTab } from './tabs/FilteringTab'
-import { ThreatTab } from './tabs/ThreatTab'
+import { CacheTab } from './tabs/CacheTab'
 import { EventsTab } from './tabs/EventsTab'
+import { FilteringTab } from './tabs/FilteringTab'
+import { GeneralTab } from './tabs/GeneralTab'
 import { NetworkTab } from './tabs/NetworkTab'
 import { SecurityTab } from './tabs/SecurityTab'
-import { ApiTab } from './tabs/ApiTab'
+import { ThreatTab } from './tabs/ThreatTab'
+import { isSettingsTab, type SettingsTabId } from './types'
 
 export function SettingsPage() {
   const [lang] = useLanguage()
   const tr = translations[lang]
   const { toast } = useToast()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const requestedTab = searchParams.get('tab')
   const [tab, setTab] = useState<SettingsTabId>(() =>
     isSettingsTab(requestedTab) ? requestedTab : 'general',
   )
   const [preview, setPreview] = useState<{ title: string; content: string } | null>(null)
-
   const ctrl = useSettingsController(toast)
 
   useEffect(() => {
     if (isSettingsTab(requestedTab)) setTab(requestedTab)
   }, [requestedTab])
+
+  const changeTab = (nextTab: SettingsTabId) => {
+    setTab(nextTab)
+    const nextParams = new URLSearchParams(searchParams)
+    nextParams.set('tab', nextTab)
+    setSearchParams(nextParams, { replace: true })
+  }
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
@@ -63,7 +66,7 @@ export function SettingsPage() {
         }}
       />
 
-      <SettingsNav tab={tab} onChange={setTab} tr={tr} />
+      <SettingsNav tab={tab} onChange={changeTab} tr={tr} />
 
       <div className="rounded-xl border border-border bg-surface-1 p-6 shadow-sm">
         {tab === 'general' && <GeneralTab form={ctrl.form} update={ctrl.update} tr={tr} />}
@@ -84,60 +87,31 @@ export function SettingsPage() {
         )}
       </div>
 
-      {/* Sticky-feel action row */}
-      <div className="sticky bottom-4 z-10 flex flex-wrap gap-2 rounded-xl border border-border/80 bg-surface-1/95 p-3 shadow-lg backdrop-blur">
-        <Button onClick={() => void ctrl.handleApply()} disabled={ctrl.applying}>
-          <Save className="size-4" /> {ctrl.applying ? tr.settings.applying : tr.settings.saveApply}
-        </Button>
-        <Button onClick={() => setPreview({ title: 'bsdm-proxy.env', content: formatEnv(ctrl.form) })}>
-          <Eye className="size-4" /> {tr.settings.previewEnv}
-        </Button>
-        <Button
-          variant="secondary"
-          onClick={() => downloadFile('bsdm-proxy.env', formatEnv(ctrl.form))}
-        >
-          <Download className="size-4" /> {tr.settings.exportEnv}
-        </Button>
-        <Button
-          variant="secondary"
-          onClick={() => downloadFile('docker-compose.yml', generateDockerCompose(ctrl.form))}
-        >
-          <Download className="size-4" /> {tr.settings.exportCompose}
-        </Button>
-        <Button
-          variant="secondary"
-          onClick={() => {
-            const rules = generateAclRules(ctrl.form)
-            if (!rules) {
-              toast('warning', 'Enable ACL on the Filtering tab first')
-              return
-            }
-            downloadFile('acl-rules.json', JSON.stringify(rules, null, 2) + '\n')
-          }}
-        >
-          <Download className="size-4" /> {tr.settings.exportAcl}
-        </Button>
-        <label className="touch-target inline-flex cursor-pointer items-center justify-center gap-2 rounded-md border border-border bg-surface-2 px-4 py-2 text-sm font-semibold hover:bg-surface-3">
-          <Upload className="size-4" /> {tr.settings.importEnv}
-          <input type="file" accept=".env,text/plain" className="hidden" onChange={ctrl.handleImport} />
-        </label>
-        <Button
-          variant="ghost"
-          onClick={() => {
-            ctrl.handleReset()
-            // ensure defaultFormState path still works if handleReset only sets form
-            void defaultFormState
-          }}
-        >
-          {tr.settings.resetSettings}
-        </Button>
-      </div>
+      <SettingsActions
+        form={ctrl.form}
+        applying={ctrl.applying}
+        labels={{
+          applying: tr.settings.applying,
+          saveApply: tr.settings.saveApply,
+          previewEnv: tr.settings.previewEnv,
+          exportEnv: tr.settings.exportEnv,
+          exportCompose: tr.settings.exportCompose,
+          exportAcl: tr.settings.exportAcl,
+          importEnv: tr.settings.importEnv,
+          resetSettings: tr.settings.resetSettings,
+        }}
+        onApply={() => void ctrl.handleApply()}
+        onPreviewEnv={(content) => setPreview({ title: 'bsdm-proxy.env', content })}
+        onImport={ctrl.handleImport}
+        onReset={ctrl.handleReset}
+        onMissingAcl={() => toast('warning', 'Enable ACL on the Filtering tab first')}
+      />
 
       <Modal
-        open={!!preview}
+        open={Boolean(preview)}
         onClose={() => setPreview(null)}
         title={preview?.title ?? ''}
-        footer={preview && <CopyButton text={preview.content} />}
+        footer={preview ? <CopyButton text={preview.content} /> : undefined}
         wide
       >
         {preview && <CodePreview content={preview.content} />}
