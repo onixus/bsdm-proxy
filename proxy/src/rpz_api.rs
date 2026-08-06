@@ -536,7 +536,7 @@ impl RpzApiState {
         let domain = query
             .split('&')
             .find_map(|p| p.strip_prefix("domain="))
-            .map(|s| percent_decode(s))
+            .map(percent_decode)
             .unwrap_or_default()
             .to_ascii_lowercase();
         let g = self.inner.read().await;
