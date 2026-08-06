@@ -18,10 +18,10 @@ import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
 import { after, before, describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { chromium, type Browser, type Page } from 'playwright-core'
 import { MARKERS, NOW_MS } from './fixtures.ts'
-import { startMockApi, type MockApiInstance } from './mock-api.ts'
+import { isPathWithinRoot, startMockApi, type MockApiInstance } from './mock-api.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const distDir = join(here, '..', '..', 'dist')
@@ -224,6 +224,13 @@ describe('admin console local UI smoke', { concurrency: 1 }, () => {
     } finally {
       await page.context().close()
     }
+  })
+
+  it('rejects paths outside the static root, including sibling prefix collisions', () => {
+    const root = resolve('/tmp/bsdm-admin-dist')
+    assert.equal(isPathWithinRoot(root, join(root, 'assets', 'app.js')), true)
+    assert.equal(isPathWithinRoot(root, `${root}-escape/secret.txt`), false)
+    assert.equal(isPathWithinRoot(root, resolve(root, '..', 'secret.txt')), false)
   })
 
   it('keeps fixture timestamps stable across runs', () => {

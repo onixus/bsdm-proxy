@@ -38,5 +38,6 @@ admin-console/node_modules/
 # Local backup drill output
 backups/
 
-# Local RPZ state (DNS_RPZ_STATE_DIR fallback when /var/lib is unavailable)
+# Local RPZ runtime state (generated from DNS_RPZ_STATE_DIR or local fallbacks)
 data/
+proxy/data/rpz/
