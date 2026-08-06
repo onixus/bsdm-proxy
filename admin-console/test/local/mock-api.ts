@@ -23,7 +23,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { createReadStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
-import { extname, join, normalize, resolve } from 'node:path'
+import { extname, join, normalize, resolve, sep } from 'node:path'
 import * as fx from './fixtures.ts'
 
 /** Ports `vite.config.ts` proxies to in development. */
@@ -160,11 +160,17 @@ function mutationResponse(method: string, pathname: string): unknown {
   return { status: 'ok', method, path: pathname, note: 'local mock backend — not persisted' }
 }
 
+export function isPathWithinRoot(root: string, candidate: string): boolean {
+  const resolvedRoot = resolve(root)
+  const resolvedCandidate = resolve(candidate)
+  return resolvedCandidate === resolvedRoot || resolvedCandidate.startsWith(`${resolvedRoot}${sep}`)
+}
+
 async function serveStatic(distDir: string, pathname: string, res: ServerResponse): Promise<boolean> {
   const relative = pathname.replace(/^\/admin\/?/, '') || 'index.html'
   const root = resolve(distDir)
   const candidate = resolve(join(root, normalize(relative)))
-  if (!candidate.startsWith(root)) {
+  if (!isPathWithinRoot(root, candidate)) {
     sendJson(res, 403, { error: 'path traversal rejected' })
     return true
   }
