@@ -23,9 +23,16 @@ env:
 
 jobs:
   build-and-push:
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     name: Build & Push Docker Image (GHCR)
     runs-on: ubuntu-latest
     steps:
+      - name: Show publish context
+        run: |
+          echo "ref=${GITHUB_REF}"
+          echo "ref_name=${GITHUB_REF_NAME}"
+          echo "ref_type=${GITHUB_REF_TYPE}"
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
