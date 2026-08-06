@@ -7,33 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
+## [0.9.11] - 2026-08-06
 
-- **Admin Settings UI refactor** — split ~1k-line page into `pages/settings/`
-  (tabs, LiveConfig/LiveNode panels, `useSettingsController`, grouped nav:
-  Core / Policy / Observability / Advanced / Console) with pilot/frozen badges
-  and sticky Apply toolbar. Behavior preserved (live env delta Apply).
+Patch after **0.9.10**: Admin Console foundations, fixture-backed browser
+smoke testing, control-plane/RPZ integration, and release pipeline hardening.
 
 ### Added
 
+- **Fixture-backed Admin Console smoke test** — production build is driven by
+  Chromium over all supported and frozen routes without Kafka, ClickHouse, the
+  proxy data-plane, or the ML worker. CI rejects console errors, failed requests,
+  demo-data fallback, missing fixture markers, and broken SPA navigation.
 - **Same-origin Search proxy** — control plane proxies `GET /api/search*` and
-  `POST /api/events` to `SEARCH_UPSTREAM_URL` (compose: `cache-indexer:8080`) so
-  Admin Console single-endpoint mode works without CORS.
-- **RPZ management API** — file-backed `/api/dns/rpz/*` + sinkhole config on the
-  control plane; compiles zone to `DNS_SINKHOLE_ZONE_PATH` and POSTs
-  `DNS_SINKHOLE_RELOAD_URL`. dns-sinkhole supports `POST /api/zone/reload`.
-- **Product agent binary** — `bsdm-agent` bin target (alias `agent-spike`);
-  installers prefer `target/release/bsdm-agent`.
-- **Writable compose config paths** — `./config/bsdm-etc` → `/etc/bsdm-proxy`,
-  `CONFIG_ENV_PATH` on `agent-devices` volume; shared RPZ dir with dns-sinkhole.
+  `POST /api/events` to `SEARCH_UPSTREAM_URL`.
+- **RPZ management API** — file-backed `/api/dns/rpz/*`, sinkhole configuration,
+  zone compilation, and live dns-sinkhole reload support.
+- **Product agent binary** — `bsdm-agent` is the preferred product binary name.
+
+### Changed
+
+- **Admin Console foundations** — shared design tokens, reusable surfaces,
+  command palette navigation, decomposed Dashboard, Logs, Analytics, and Settings,
+  URL-synchronised tabs, consistent focus handling, and reduced-motion support.
+- **Release validation** — manifest, lockfile, changelog, Rust, Admin Console,
+  browser smoke, package checksum, SBOM, and provenance checks are release gates.
 
 ### Fixed
 
-- **Admin Settings Apply vs live env** — Apply posts a **delta** against
-  `GET /api/config` (not full UI defaults), never writes masked `***` secrets,
-  confirms changes to pilot-sensitive paths (`ACL_RULES_PATH`, `HTTP_PORT`, …),
-  and does **not** rewrite the ACL file from Filtering checkboxes unless
-  explicitly opted in (use Policies for ACL CRUD). Reload-from-node control.
+- **Settings Apply safety** — sends a delta against live configuration, does not
+  persist masked secrets, and confirms sensitive path changes.
+- **RPZ startup inside Tokio** — avoids blocking-lock use on the active runtime.
+- **Mock static path boundary** — prevents sibling-prefix and `..` traversal.
+- **Generated RPZ state** — runtime zone output is no longer tracked by Git.
+- **Admin Console Docker build** — exposes the product version from the manifest.
 
 ## [0.9.10] - 2026-08-05
 
