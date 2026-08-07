@@ -2,9 +2,9 @@
 //! Implements Agent Contract v0.1: Enroll, Policy Fetch, Local Evaluate, Events, Heartbeat.
 //! Optional multi-OS system-proxy apply/clear for pilot installers.
 
-mod engine;
-mod policy;
-mod system_proxy;
+pub mod engine;
+pub mod policy;
+pub mod system_proxy;
 
 use engine::{demo_evaluate, AgentEngine};
 use std::sync::Arc;
@@ -22,8 +22,7 @@ fn has_arg(flag: &str) -> bool {
     std::env::args().any(|a| a == flag)
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
