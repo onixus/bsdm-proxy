@@ -7,19 +7,31 @@
 
 def RUST_IMAGE = 'rust:1-bookworm'
 
-// target/ НЕ кэшируется томом — намеренно, после двух неудачных попыток:
+// target/ ОБЯЗАН лежать на нативном томе, а не в воркспейсе.
 //
-//   1. CARGO_TARGET_DIR=/build-target ломал e2e: e2e/src/lib.rs ищет бинарь по
-//      жёсткому <workspace>/target/{debug,release}/proxy.
-//   2. Том на захардкоженный <workspace>/target ломается о параллельные
-//      стадии: Jenkins выдаёт им отдельные воркспейсы (bsdm-proxy@2), и один
-//      branch писал мимо тома, а другой — в него.
+// Воркспейс Jenkins — bind-mount macOS через VirtioFS, и сборка Rust на нём
+// разваливается: cargo пишет десятки тысяч мелких файлов, часть записей не
+// доезжает, зависимые крейты падают с "E0463: can't find crate for tokio".
+// Замерено на одном и том же коде: 3 холодных прогона на bind-mount'е — 3
+// падения (26, 7 и 2 ошибки, число убывает по мере прогрева кэша хостовой ФС);
+// 2 прогона на файловой системе контейнера — 0 ошибок. Отсюда же прежние
+// «то падает, то нет» и спасительный эффект тёплого target/.
 //
-// target/ и так переживает сборки: воркспейс Jenkins между билдами не чистится.
-// Кэшируем только пути, фиксированные внутри контейнера и от воркспейса не
-// зависящие: реестр cargo и каталог с cargo-audit.
-def CACHE_ARGS = '-v bsdm-cargo-home:/usr/local/cargo/registry -v bsdm-cargo-tools:/opt/cargo-tools'
-def RUST_ENV = ['CARGO_TERM_COLOR=always', 'RUST_BACKTRACE=1']
+// Путь фиксирован внутри контейнера, поэтому параллельные стадии с их
+// отдельными воркспейсами (bsdm-proxy@2) больше не при чём: cargo сам берёт
+// файловую блокировку на target и сериализует доступ.
+def CACHE_ARGS = '-v bsdm-cargo-home:/usr/local/cargo/registry -v bsdm-cargo-tools:/opt/cargo-tools -v bsdm-cargo-target:/build-target'
+
+// BSDM_PROXY_BIN — штатное переопределение из e2e/src/lib.rs (proxy_binary()
+// проверяет его первым). Без него e2e ищет бинарь по жёсткому
+// <workspace>/target/debug/proxy и с уводом CARGO_TARGET_DIR не находит —
+// ровно на это я уже наступал.
+def RUST_ENV = [
+  'CARGO_TERM_COLOR=always',
+  'RUST_BACKTRACE=1',
+  'CARGO_TARGET_DIR=/build-target',
+  'BSDM_PROXY_BIN=/build-target/debug/proxy',
+]
 
 // Системные зависимости из .github/actions/setup-rust.
 // Ставятся каждый прогон: кэшируются только volume'ы, а корень контейнера
