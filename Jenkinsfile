@@ -7,13 +7,18 @@
 
 def RUST_IMAGE = 'rust:1-bookworm'
 
-// Кэш target/ вешается НА ШТАТНЫЙ путь внутри воркспейса, а не через
-// CARGO_TARGET_DIR. Так было сначала, и e2e падали с "proxy binary not found":
-// e2e/src/lib.rs ищет бинарь по жёсткому <workspace>/target/{debug,release}/proxy,
-// а увод CARGO_TARGET_DIR делал этот путь несуществующим.
-// Путь захардкожен под имя джобы (bsdm-proxy) — переименуешь джобу, поправь тут.
-def WS_TARGET = '/Users/onixus/jenkins_home/workspace/bsdm-proxy/target'
-def CACHE_ARGS = "-v bsdm-cargo-home:/usr/local/cargo/registry -v bsdm-cargo-target:${WS_TARGET} -v bsdm-cargo-tools:/opt/cargo-tools"
+// target/ НЕ кэшируется томом — намеренно, после двух неудачных попыток:
+//
+//   1. CARGO_TARGET_DIR=/build-target ломал e2e: e2e/src/lib.rs ищет бинарь по
+//      жёсткому <workspace>/target/{debug,release}/proxy.
+//   2. Том на захардкоженный <workspace>/target ломается о параллельные
+//      стадии: Jenkins выдаёт им отдельные воркспейсы (bsdm-proxy@2), и один
+//      branch писал мимо тома, а другой — в него.
+//
+// target/ и так переживает сборки: воркспейс Jenkins между билдами не чистится.
+// Кэшируем только пути, фиксированные внутри контейнера и от воркспейса не
+// зависящие: реестр cargo и каталог с cargo-audit.
+def CACHE_ARGS = '-v bsdm-cargo-home:/usr/local/cargo/registry -v bsdm-cargo-tools:/opt/cargo-tools'
 def RUST_ENV = ['CARGO_TERM_COLOR=always', 'RUST_BACKTRACE=1']
 
 // Системные зависимости из .github/actions/setup-rust.
