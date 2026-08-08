@@ -1,0 +1,26 @@
+# Baseline gitleaks: подтверждённые ложные срабатывания на момент
+# включения стадии Secrets (gitleaks) в CI. Каждая строка — fingerprint
+# находки из gitleaks.json. Новые утечки этим файлом не глушатся.
+
+# admin-console/src/api/amneziawg.ts [generic-api-key] — wP4k...placeholder...key=
+86274ddf3c22a522e61e88ffb580563dc5f262f7:admin-console/src/api/amneziawg.ts:generic-api-key:38
+
+# config/basic-auth-users.example.json [generic-api-key] — ad939580b000f8e506e332bbbc44e2a83e48506b7c702775d106d8cba635
+788e90134e0ebe405cd3ab9de04ab69f341fcc90:config/basic-auth-users.example.json:generic-api-key:4
+788e90134e0ebe405cd3ab9de04ab69f341fcc90:config/basic-auth-users.example.json:generic-api-key:9
+
+# docs/analytics/clickhouse-retrosearch.md [curl-auth-header] — secret_token
+115869852871dca4fe3ae2a1a35190edf7cb8307:docs/analytics/clickhouse-retrosearch.md:curl-auth-header:133
+
+# docs/authentication.md [generic-api-key] — squid-2.5-ntlmssp
+034190f006f061fa262230584b19ef867ba8a80d:docs/authentication.md:generic-api-key:149
+034190f006f061fa262230584b19ef867ba8a80d:docs/authentication.md:generic-api-key:64
+
+# packaging/config/bsdm-proxy.env.example [generic-api-key] — squid-2.5-ntlmssp
+034190f006f061fa262230584b19ef867ba8a80d:packaging/config/bsdm-proxy.env.example:generic-api-key:54
+
+# proxy/src/amneziawg.rs [generic-api-key] — wP4k...placeholder...key=
+86274ddf3c22a522e61e88ffb580563dc5f262f7:proxy/src/amneziawg.rs:generic-api-key:59
+
+# proxy/src/auth_sspi.rs [generic-api-key] — squid-2.5-ntlmssp
+024730a4c47e89c3bf24447c6d10a4f657787285:proxy/src/auth_sspi.rs:generic-api-key:437

@@ -64,9 +64,10 @@ pipeline {
       }
     }
 
-    // Quality gate — блокирующие security-проверки, обе до сборки.
+    // Quality gate — блокирующие security-проверки, все до сборки.
     // Холодный cargo build тут идёт десятки минут, и ловить криты после него
-    // бессмысленно; ни SAST, ни аудит зависимостей сборки не требуют.
+    // бессмысленно; ни SAST, ни скан секретов, ни аудит зависимостей сборки
+    // не требуют.
     stage('Quality gate') {
       parallel {
         stage('SAST (semgrep)') {
@@ -91,6 +92,38 @@ pipeline {
           post {
             always {
               archiveArtifacts artifacts: 'semgrep.json', allowEmptyArchive: true
+            }
+          }
+        }
+
+        // Дубликатом p/secrets из semgrep не является: тот смотрит только
+        // рабочее дерево, gitleaks — всю историю коммитов, а утёкший ключ
+        // остаётся в ней и после удаления из рабочей копии.
+        stage('Secrets (gitleaks)') {
+          agent any
+          steps {
+            sh '''
+              set -eu
+              # Один проход, в отличие от semgrep: severity у находок нет,
+              # делить отчёт и гейт незачем. Отчёт пишется до выхода с
+              # ненулевым кодом, поэтому post заберёт его и на падении.
+              # --redact держит сами секреты вне лога Jenkins.
+              # Ложные срабатывания глушатся .gitleaksignore в корне репо —
+              # fingerprint находки берётся из gitleaks.json.
+              NO_GIT=""
+              [ -d .git ] || NO_GIT="--no-git"   # не из SCM — сканируем дерево
+              # Версия запинена, в отличие от соседнего semgrep: подкоманда
+              # detect объявлена устаревшей в пользу git/dir, и плавающий
+              # :latest однажды уронит стадию не находкой, а сменой CLI.
+              docker run --rm -v "$WORKSPACE":/src -w /src zricethezav/gitleaks:v8.30.1 \
+                detect --source /src $NO_GIT \
+                  --report-format json --report-path /src/gitleaks.json \
+                  --redact --no-banner --exit-code 1
+            '''
+          }
+          post {
+            always {
+              archiveArtifacts artifacts: 'gitleaks.json', allowEmptyArchive: true
             }
           }
         }
