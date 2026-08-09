@@ -149,6 +149,12 @@ documentation и frontend gates. Load test и CD-стадии отделены �
 smoke Chromium dependencies должны быть установлены в образе агента; сам browser
 кэшируется Playwright в пользовательском каталоге.
 
+Load-test wrapper перед запуском временно назначает сгенерированной CA владельца
+`CA_RUNTIME_UID:CA_RUNTIME_GID` (по умолчанию `1000:1000`, пользователь контейнера)
+и восстанавливает исходного владельца при cleanup. Если Docker-agent работает под
+другим UID, ему нужен passwordless `sudo chown`; режимы каталога `700` и ключа
+`600` не ослабляются.
+
 Создайте Multibranch Pipeline, укажите GitHub repository и оставьте Script Path
 `Jenkinsfile`. Для release jobs включите в GitHub Branch Source trait обнаружение
 тегов: `buildingTag()` и `TAG_NAME` доступны только для tag branch. Значения labels

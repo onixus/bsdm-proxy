@@ -7,7 +7,20 @@ cd "$ROOT"
 
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.lite.yml}"
 RESULTS_DIR="${RESULTS_DIR:-${ROOT}/load-test-results}"
+CERT_DIR="${CERT_DIR:-${ROOT}/certs}"
+CA_RUNTIME_UID="${CA_RUNTIME_UID:-1000}"
+CA_RUNTIME_GID="${CA_RUNTIME_GID:-1000}"
 COMPOSE=(docker compose -f "$COMPOSE_FILE")
+
+CA_DIR_ORIGINAL_OWNER=""
+CA_KEY_ORIGINAL_OWNER=""
+CA_CERT_ORIGINAL_OWNER=""
+CA_OWNERSHIP_CHANGED=0
+
+if [[ ! "$CA_RUNTIME_UID" =~ ^[0-9]+$ || ! "$CA_RUNTIME_GID" =~ ^[0-9]+$ ]]; then
+  echo "CA_RUNTIME_UID and CA_RUNTIME_GID must be numeric" >&2
+  exit 2
+fi
 
 for command_name in docker curl wrk; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
@@ -17,6 +30,65 @@ for command_name in docker curl wrk; do
 done
 docker compose version >/dev/null
 docker buildx version >/dev/null
+
+run_privileged() {
+  if (( EUID == 0 )); then
+    "$@"
+    return
+  fi
+  if command -v sudo >/dev/null 2>&1; then
+    sudo -n "$@"
+    return
+  fi
+  return 1
+}
+
+prepare_ca_ownership() {
+  local runtime_owner="${CA_RUNTIME_UID}:${CA_RUNTIME_GID}"
+  local current_dir_owner current_key_owner current_cert_owner
+
+  for path in "$CERT_DIR" "$CERT_DIR/ca.key" "$CERT_DIR/ca.crt"; do
+    if [[ ! -e "$path" ]]; then
+      echo "generated CA path is missing: ${path}" >&2
+      return 1
+    fi
+  done
+
+  current_dir_owner="$(stat -c '%u:%g' "$CERT_DIR")"
+  current_key_owner="$(stat -c '%u:%g' "$CERT_DIR/ca.key")"
+  current_cert_owner="$(stat -c '%u:%g' "$CERT_DIR/ca.crt")"
+  CA_DIR_ORIGINAL_OWNER="$current_dir_owner"
+  CA_KEY_ORIGINAL_OWNER="$current_key_owner"
+  CA_CERT_ORIGINAL_OWNER="$current_cert_owner"
+
+  if [[ "$current_dir_owner" == "$runtime_owner" &&
+        "$current_key_owner" == "$runtime_owner" &&
+        "$current_cert_owner" == "$runtime_owner" ]]; then
+    return 0
+  fi
+
+  if ! run_privileged chown \
+    "$runtime_owner" "$CERT_DIR" "$CERT_DIR/ca.key" "$CERT_DIR/ca.crt"; then
+    echo "cannot assign the generated CA to container owner ${runtime_owner}" >&2
+    echo "run the Docker agent as that UID/GID or allow passwordless sudo chown" >&2
+    return 1
+  fi
+  CA_OWNERSHIP_CHANGED=1
+}
+
+restore_ca_ownership() {
+  if (( CA_OWNERSHIP_CHANGED == 0 )); then
+    return 0
+  fi
+
+  if ! run_privileged chown "$CA_DIR_ORIGINAL_OWNER" "$CERT_DIR" ||
+     ! run_privileged chown "$CA_KEY_ORIGINAL_OWNER" "$CERT_DIR/ca.key" ||
+     ! run_privileged chown "$CA_CERT_ORIGINAL_OWNER" "$CERT_DIR/ca.crt"; then
+    echo "warning: failed to restore generated CA ownership in ${CERT_DIR}" >&2
+    return 1
+  fi
+  CA_OWNERSHIP_CHANGED=0
+}
 
 cleanup() {
   "${COMPOSE[@]}" down -v || true
@@ -29,6 +101,7 @@ on_exit() {
     show_logs
   fi
   cleanup
+  restore_ca_ownership || true
   exit "$status"
 }
 
@@ -57,6 +130,7 @@ trap on_exit EXIT
 trap 'exit 130' INT TERM
 
 ./scripts/gen-ca.sh
+prepare_ca_ownership
 if ! "${COMPOSE[@]}" up -d --build mock-upstream; then
   echo "failed to start the lite load-test stack" >&2
   exit 1
