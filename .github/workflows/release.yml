@@ -50,40 +50,23 @@ jobs:
 
       - name: Validate release metadata
         shell: bash
-        run: |
-          set -euo pipefail
-          VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' proxy/Cargo.toml | head -1)"
-          test -n "$VERSION"
-          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
-            test "${GITHUB_REF_NAME}" = "v${VERSION}"
-          fi
-          for manifest in proxy bsdm-events cache-indexer alert-worker ml-worker dns-sinkhole; do
-            grep -q "^version = \"${VERSION}\"$" "${manifest}/Cargo.toml"
-          done
-          grep -q "^## \[${VERSION}\]" CHANGELOG.md
-          cargo metadata --locked --no-deps --format-version 1 >/dev/null
+        env:
+          CI_RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: ./scripts/ci/run.sh release-validate
 
       - name: Check formatting
-        run: cargo fmt --all -- --check
+        run: ./scripts/ci/run.sh rust-fmt
 
       - name: Run clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: ./scripts/ci/run.sh rust-clippy
 
       - name: Run Rust tests
-        run: cargo test --workspace --all-targets
-
-      - name: Install Admin Console dependencies
-        working-directory: admin-console
-        run: npm ci
+        run: ./scripts/ci/run.sh rust-test
 
       - name: Validate Admin Console
-        working-directory: admin-console
-        run: |
-          npm run lint
-          npm test
-          npm run build
-          npx playwright-core install --with-deps chromium
-          npm run test:ui
+        env:
+          PLAYWRIGHT_INSTALL_DEPS: '1'
+        run: ./scripts/ci/run.sh admin-console
 
   build:
     name: Build package (${{ matrix.arch }})
@@ -100,8 +83,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-rust
-      - run: ./scripts/build-package.sh
-      - run: cd dist && sha256sum -c *.tar.gz.sha256
+      - run: ./scripts/ci/run.sh package
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
       - uses: actions/upload-artifact@v4
         with:
           name: bsdm-proxy-package-${{ matrix.arch }}

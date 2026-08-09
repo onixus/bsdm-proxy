@@ -1,4 +1,4 @@
-.PHONY: help setup rotate-ca-drill backup-drill build run run-lite test lint docker-lite docker-full docker-down install package clean
+.PHONY: help setup rotate-ca-drill backup-drill build run run-lite test lint docker-lite docker-full docker-down install package clean ci ci-rust ci-docs ci-admin ci-trust ci-release-validate
 
 # Default target
 help:
@@ -20,6 +20,12 @@ help:
 	@echo "  docker-down   Stop and remove Docker Compose containers"
 	@echo "  install       Run the interactive Linux system installer"
 	@echo "  package       Build the Linux release package tarball"
+	@echo "  ci            Run the portable Rust, docs, and frontend CI contract"
+	@echo "  ci-rust       Run the complete Rust CI gate"
+	@echo "  ci-docs       Validate documentation and Wiki mappings"
+	@echo "  ci-admin      Validate the Admin Console"
+	@echo "  ci-trust      Validate the experimental Trust UI"
+	@echo "  ci-release-validate  Validate release metadata without publishing"
 	@echo "  clean         Clean Cargo build artifacts"
 	@echo ""
 
@@ -68,6 +74,23 @@ install:
 package:
 	@echo "Building release package..."
 	./scripts/build-package.sh
+
+ci: ci-rust ci-docs ci-admin ci-trust
+
+ci-rust:
+	./scripts/ci/run.sh rust-all
+
+ci-docs:
+	./scripts/ci/run.sh docs
+
+ci-admin:
+	./scripts/ci/run.sh admin-console
+
+ci-trust:
+	./scripts/ci/run.sh trust-ui
+
+ci-release-validate:
+	./scripts/ci/run.sh release-validate
 
 clean:
 	cargo clean

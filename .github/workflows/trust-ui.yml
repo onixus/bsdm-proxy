@@ -5,11 +5,13 @@ on:
     branches: [main]
     paths:
       - 'trust-ui/**'
+      - 'scripts/ci/**'
       - '.github/workflows/trust-ui.yml'
   pull_request:
     branches: [main]
     paths:
       - 'trust-ui/**'
+      - 'scripts/ci/**'
       - '.github/workflows/trust-ui.yml'
 
 concurrency:
@@ -23,9 +25,6 @@ jobs:
   build:
     name: Build & Typecheck
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: trust-ui
     steps:
       - uses: actions/checkout@v4
 
@@ -35,5 +34,5 @@ jobs:
           cache: npm
           cache-dependency-path: trust-ui/package-lock.json
 
-      - run: npm ci
-      - run: npm run build
+      - name: Install and build
+        run: ./scripts/ci/run.sh trust-ui

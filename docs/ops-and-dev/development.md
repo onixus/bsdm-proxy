@@ -99,6 +99,96 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
+### Единый CI-контракт
+
+Команды CI не дублируются в Jenkinsfile и GitHub Actions. Переносимый entrypoint:
+
+```bash
+./scripts/ci/run.sh --help
+./scripts/ci/run.sh rust-all
+./scripts/ci/run.sh docs
+RUN_UI_TESTS=0 ./scripts/ci/run.sh admin-console
+./scripts/ci/run.sh trust-ui
+./scripts/ci/run.sh release-validate
+```
+
+Для полного локального прогона без security audit, packaging и load test:
+
+```bash
+make ci
+```
+
+`security-audit` требует установленный `cargo-audit`, а `load-test` — Docker
+Buildx/Compose, `curl` и `wrk`. Публикующие скрипты не входят в `make ci` и не
+запускаются без отдельного release gate.
+
+## Jenkins CI/CD
+
+Корневой [Jenkinsfile](../../Jenkinsfile) предназначен для **Multibranch
+Pipeline**. Branch и pull request builds запускают параллельные Rust, RustSec,
+documentation и frontend gates. Load test и CD-стадии отделены параметрами.
+
+### Требования к Jenkins
+
+Минимальные controller plugins:
+
+- Pipeline: Declarative и Git;
+- Credentials Binding;
+- Timestamper.
+
+Рекомендуемые agent labels и содержимое:
+
+| Label по умолчанию | Требования |
+|---|---|
+| `linux && bsdm-ci` | Rust 1.88+, Node.js 24+, Python 3, `cargo-audit`, native build packages |
+| `linux && docker` | Docker Buildx/Compose, `curl`, `wrk`, доступ к Docker daemon |
+| `linux && amd64 && bsdm-ci` | Native x86_64 package build |
+| `linux && arm64 && bsdm-ci` | Optional native aarch64 package build |
+
+Для Debian/Ubuntu Rust-agent нужны пакеты из раздела «Требования» выше. Для UI
+smoke Chromium dependencies должны быть установлены в образе агента; сам browser
+кэшируется Playwright в пользовательском каталоге.
+
+Создайте Multibranch Pipeline, укажите GitHub repository и оставьте Script Path
+`Jenkinsfile`. Для release jobs включите в GitHub Branch Source trait обнаружение
+тегов: `buildingTag()` и `TAG_NAME` доступны только для tag branch. Значения labels
+можно переопределить параметрами job без изменения репозитория.
+
+### Параметры и release gates
+
+| Параметр | По умолчанию | Поведение |
+|---|---:|---|
+| `RUN_UI_TESTS` | `true` | Chromium smoke для Admin Console |
+| `RUN_LOAD_TESTS` | `false` | Lite/hybrid Docker profile и архив результата |
+| `BUILD_PACKAGES` | `false` | Native amd64 package для non-tag build |
+| `BUILD_ARM64_PACKAGE` | `false` | Дополнительная сборка на arm64-agent |
+| `PUBLISH_GITHUB_RELEASE` | `false` | Публикация package artifacts только из tag build |
+| `PUBLISH_GHCR_IMAGE` | `false` | Multi-platform Buildx push только из tag build |
+
+Tag build всегда проверяет соответствие `vX.Y.Z` версии product crates,
+`CHANGELOG.md`, `docs/releases/vX.Y.Z.md` и `Cargo.lock`, после чего собирает
+amd64 package. Публикация требует одновременно tag build и явный boolean gate.
+Существующий GitHub Release не перезаписывается; тег `latest` для GHCR обновляется
+только стабильным релизом без prerelease suffix.
+
+Credentials хранятся только в Jenkins Credentials Store:
+
+| Credentials ID по умолчанию | Тип | Минимальные права |
+|---|---|---|
+| `bsdm-github-token` | Secret text | GitHub repository contents: write |
+| `bsdm-ghcr` | Username with password/token | GitHub Packages: write |
+
+Секреты подключаются через `withCredentials`, не передаются параметрами и не
+сохраняются в artifacts. Для dry run включите только `BUILD_PACKAGES`; publish
+flags оставьте выключенными.
+
+Publish stages запускайте только на выделенных trusted agents без параллельных
+untrusted jobs: credentials существуют в environment процесса во время binding.
+Пока GitHub Actions `release.yml` и `docker-publish.yml` остаются включены, Jenkins
+должен использоваться для CI и package dry run, а оба Jenkins publish flag должны
+оставаться `false`. Перед переносом CD выберите один writer и отключите публикацию
+во втором контуре, чтобы tag build не создавал конкурирующие releases/images.
+
 ## Тесты
 
 ### Workspace
@@ -229,9 +319,11 @@ npm run test:ui   # сборка + прогон Chromium по всем марш�
 
 См. [kubernetes.md](k8s-architecture.md) и [k8s-architecture.md](k8s-architecture.md) — Helm chart `charts/bsdm/`, probes, HA.
 
-## GitHub Release (CI)
+## GitHub Release (CI/CD)
 
 Workflow [release.yml](../../.github/workflows/release.yml) публикует release при push тега `v*`.
+Jenkins использует тот же `scripts/ci/validate-release.sh`, но publication в нём
+дополнительно требует ручного `PUBLISH_GITHUB_RELEASE=true`.
 
 ### Порядок релиза
 
