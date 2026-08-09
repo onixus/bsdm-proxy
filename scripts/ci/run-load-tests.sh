@@ -81,9 +81,10 @@ restore_ca_ownership() {
     return 0
   fi
 
-  if ! run_privileged chown "$CA_DIR_ORIGINAL_OWNER" "$CERT_DIR" ||
-     ! run_privileged chown "$CA_KEY_ORIGINAL_OWNER" "$CERT_DIR/ca.key" ||
-     ! run_privileged chown "$CA_CERT_ORIGINAL_OWNER" "$CERT_DIR/ca.crt"; then
+  # Keep the directory traversable until its children have been restored.
+  if ! run_privileged chown "$CA_KEY_ORIGINAL_OWNER" "$CERT_DIR/ca.key" ||
+     ! run_privileged chown "$CA_CERT_ORIGINAL_OWNER" "$CERT_DIR/ca.crt" ||
+     ! run_privileged chown "$CA_DIR_ORIGINAL_OWNER" "$CERT_DIR"; then
     echo "warning: failed to restore generated CA ownership in ${CERT_DIR}" >&2
     return 1
   fi
@@ -115,7 +116,7 @@ wait_for_http() {
   local url="$2"
   local attempt
   for attempt in $(seq 1 60); do
-    if curl --fail --silent --show-error --head "$url" >/dev/null; then
+    if curl --fail --silent --show-error --output /dev/null "$url"; then
       echo "${name} is ready"
       return 0
     fi
