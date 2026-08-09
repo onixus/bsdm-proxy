@@ -5,11 +5,13 @@ on:
     branches: [main]
     paths:
       - 'admin-console/**'
+      - 'scripts/ci/**'
       - '.github/workflows/admin-console.yml'
   pull_request:
     branches: [main]
     paths:
       - 'admin-console/**'
+      - 'scripts/ci/**'
       - '.github/workflows/admin-console.yml'
 
 concurrency:
@@ -23,9 +25,6 @@ jobs:
   build:
     name: Build & Lint
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: admin-console
     steps:
       - uses: actions/checkout@v4
 
@@ -35,17 +34,12 @@ jobs:
           cache: npm
           cache-dependency-path: admin-console/package-lock.json
 
-      - run: npm ci
-      - run: npm run lint
-      - run: npm run build
-      - run: npm test
+      - name: Lint, test, and build
+        run: ./scripts/ci/run.sh admin-console-core
 
   ui-smoke:
     name: Local UI smoke test
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: admin-console
     steps:
       - uses: actions/checkout@v4
 
@@ -55,13 +49,11 @@ jobs:
           cache: npm
           cache-dependency-path: admin-console/package-lock.json
 
-      - run: npm ci
-      - name: Install Chromium
-        run: npx playwright-core install --with-deps chromium
       - name: Build and drive the console against the fixture backend
-        run: npm run test:ui
+        run: ./scripts/ci/run.sh admin-console-ui
         env:
           UI_TEST_SCREENSHOTS: '1'
+          PLAYWRIGHT_INSTALL_DEPS: '1'
 
       - uses: actions/upload-artifact@v4
         if: always()
