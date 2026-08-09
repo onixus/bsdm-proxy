@@ -168,6 +168,7 @@ E2E:
 
 | Документ | Назначение |
 |---|---|
+| [GitHub Wiki](https://github.com/onixus/bsdm-proxy/wiki) | Навигация, тематические хабы и зеркала канонических страниц |
 | [Documentation index](docs/README.md) | Полная карта документации |
 | [Project status](docs/project-status.md) | Зрелость и ограничения функций |
 | [Agent contract](docs/architecture/agent-contract.md) | Протокол взаимодействия локального агента v0.1 |
@@ -181,7 +182,8 @@ E2E:
 | [Roadmap](docs/roadmap.md) | Стратегия развития |
 | [Documentation maintenance](docs/maintenance.md) | Правила и Wiki sync |
 
-GitHub Wiki публикуется как зеркало канонических файлов из `docs/`.
+Wiki генерируется из `docs/`; изменения в сгенерированные страницы напрямую не
+вносятся.
 
 ## Лицензия
 
