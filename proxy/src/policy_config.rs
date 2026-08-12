@@ -2,9 +2,7 @@
 
 use crate::acl::{AclAction, AclEngine, AclEngineHandle};
 use crate::acl_config::{load_acl_engine_from_file, parse_acl_action};
-use crate::categorization::{
-    CategorizationConfig, CategorizationEngine, DEFAULT_RKN_FALLBACK_URL,
-};
+use crate::categorization::{CategorizationConfig, CategorizationEngine, DEFAULT_RKN_FALLBACK_URL};
 use crate::pinning::PinningRegistry;
 use std::sync::Arc;
 use std::time::Duration;
