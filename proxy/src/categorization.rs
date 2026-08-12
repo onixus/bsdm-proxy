@@ -491,10 +491,7 @@ impl CategorizationEngine {
                         }
                         info!(
                             count,
-                            revision,
-                            source,
-                            path,
-                            "Loaded last-known-good RKN registry snapshot"
+                            revision, source, path, "Loaded last-known-good RKN registry snapshot"
                         );
                     }
                     Err(e) => warn!("RKN last-known-good snapshot unavailable: {}", e),
