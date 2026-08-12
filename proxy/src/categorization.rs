@@ -612,7 +612,14 @@ impl CategorizationEngine {
         snapshot_path: Option<String>,
         min_entries: usize,
     ) {
-        tokio::spawn(async move {
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            warn!(
+                "RKN sync enabled but no Tokio runtime is active; background sync was not started"
+            );
+            return;
+        };
+
+        runtime.spawn(async move {
             let client = Client::builder()
                 .timeout(Duration::from_secs(60))
                 .user_agent("bsdm-proxy/RKN-Sync")
@@ -954,7 +961,10 @@ mod tests {
                 "example.com".to_string(),
             ]
         );
-        assert_eq!(domain_suffixes("WWW.Example.COM."), vec!["www.example.com", "example.com"]);
+        assert_eq!(
+            domain_suffixes("WWW.Example.COM."),
+            vec!["www.example.com", "example.com"]
+        );
     }
 
     #[test]
@@ -990,7 +1000,9 @@ mod tests {
         let engine = CategorizationEngine::new(config);
         {
             let mut registry = engine.rkn_registry.write().unwrap();
-            registry.urls.insert("https://shared.example/blocked".to_string());
+            registry
+                .urls
+                .insert("https://shared.example/blocked".to_string());
             registry.revision = 42;
         }
 
