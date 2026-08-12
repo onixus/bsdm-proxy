@@ -69,13 +69,7 @@ jobs:
           expected=$(cat <<'EOF'
           CHANGELOG.md
           Cargo.lock
-          alert-worker/Cargo.toml
-          bsdm-events/Cargo.toml
-          cache-indexer/Cargo.toml
-          dns-sinkhole/Cargo.toml
           docs/releases/v0.9.12.md
-          ml-worker/Cargo.toml
-          proxy/Cargo.toml
           EOF
           )
           actual=$(git status --short | awk '{print $2}' | grep -v '^.github/workflows/prepare-v0.9.12.yml$' | sort)
@@ -93,7 +87,7 @@ jobs:
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add CHANGELOG.md Cargo.lock proxy/Cargo.toml bsdm-events/Cargo.toml cache-indexer/Cargo.toml alert-worker/Cargo.toml ml-worker/Cargo.toml dns-sinkhole/Cargo.toml docs/releases/v0.9.12.md
+          git add CHANGELOG.md Cargo.lock docs/releases/v0.9.12.md
           git rm .github/workflows/prepare-v0.9.12.yml
           git commit -m 'release: prepare BSDM-Proxy v0.9.12'
           git push origin HEAD:release/v0.9.12
