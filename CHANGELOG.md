@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.12] - 2026-08-12
+
+Patch after **0.9.11**: hardened RKN registry ACL enforcement and registry-source resilience.
+
+### Added
+
+- **RKN fallback source** — configurable `RKN_FALLBACK_URL` with a domain-only Re-filter fallback when the primary scoped registry feed fails validation or fetch.
+- **Last-known-good RKN snapshot** — validated registry state persists to `RKN_SNAPSHOT_PATH` and is restored on startup.
+- **RKN source provenance** — audit/log matches carry the selected registry source.
+
+### Changed
+
+- **Scoped RKN matching** — URL, domain, and literal-IP records retain their original scope; IPs attached to domain/URL rows are no longer promoted into broad IP blocks.
+- **Readiness semantics** — when RKN sync is enabled, `/ready` fails closed until a validated live or persisted registry is available; `/health` remains liveness-only.
+- **Registry refresh safety** — minimum entry validation, atomic registry replacement, cache invalidation on revision, and retention of the active/LKG registry on bad feeds.
+
+### Fixed
+
+- **Tokio startup safety** — RKN background sync scheduling no longer assumes an active runtime during engine construction.
+- **Clippy compatibility** — use a concise char-pattern split accepted by the current Rust lint gate.
+
+
 ## [0.9.11] - 2026-08-06
 
 Patch after **0.9.10**: Admin Console foundations, fixture-backed browser
