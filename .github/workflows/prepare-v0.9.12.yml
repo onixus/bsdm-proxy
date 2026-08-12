@@ -1,0 +1,99 @@
+name: Prepare v0.9.12 release metadata
+
+on:
+  push:
+    branches:
+      - release/v0.9.12
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          manifests = [
+              Path('proxy/Cargo.toml'),
+              Path('bsdm-events/Cargo.toml'),
+              Path('cache-indexer/Cargo.toml'),
+              Path('alert-worker/Cargo.toml'),
+              Path('ml-worker/Cargo.toml'),
+              Path('dns-sinkhole/Cargo.toml'),
+          ]
+          for path in manifests:
+              text = path.read_text()
+              text, n = re.subn(r'(?m)^version = "0\.9\.11"$', 'version = "0.9.12"', text, count=1)
+              if n == 0 and 'version = "0.9.12"' not in text:
+                  raise SystemExit(f'cannot bump {path}')
+              path.write_text(text)
+
+          lock = Path('Cargo.lock')
+          text = lock.read_text()
+          packages = ['alert-worker', 'bsdm-events', 'bsdm-proxy', 'cache-indexer', 'dns-sinkhole', 'ml-worker']
+          for package in packages:
+              pattern = rf'(\[\[package\]\]\nname = "{re.escape(package)}"\n)version = "0\.9\.11"'
+              text, n = re.subn(pattern, rf'\1version = "0.9.12"', text, count=1)
+              if n != 1:
+                  raise SystemExit(f'cannot bump Cargo.lock package {package}')
+          lock.write_text(text)
+
+          changelog = Path('CHANGELOG.md')
+          text = changelog.read_text()
+          marker = '## [Unreleased]\n'
+          section = '''## [0.9.12] - 2026-08-12\n\nPatch after **0.9.11**: hardened RKN registry ACL enforcement and registry-source resilience.\n\n### Added\n\n- **RKN fallback source** — configurable `RKN_FALLBACK_URL` with a domain-only Re-filter fallback when the primary scoped registry feed fails validation or fetch.\n- **Last-known-good RKN snapshot** — validated registry state persists to `RKN_SNAPSHOT_PATH` and is restored on startup.\n- **RKN source provenance** — audit/log matches carry the selected registry source.\n\n### Changed\n\n- **Scoped RKN matching** — URL, domain, and literal-IP records retain their original scope; IPs attached to domain/URL rows are no longer promoted into broad IP blocks.\n- **Readiness semantics** — when RKN sync is enabled, `/ready` fails closed until a validated live or persisted registry is available; `/health` remains liveness-only.\n- **Registry refresh safety** — minimum entry validation, atomic registry replacement, cache invalidation on revision, and retention of the active/LKG registry on bad feeds.\n\n### Fixed\n\n- **Tokio startup safety** — RKN background sync scheduling no longer assumes an active runtime during engine construction.\n- **Clippy compatibility** — use a concise char-pattern split accepted by the current Rust lint gate.\n\n'''
+          if '## [0.9.12]' not in text:
+              if marker not in text:
+                  raise SystemExit('CHANGELOG Unreleased marker missing')
+              text = text.replace(marker, marker + '\n' + section, 1)
+              changelog.write_text(text)
+
+          notes = Path('docs/releases/v0.9.12.md')
+          notes.write_text('''# BSDM-Proxy v0.9.12\n\n**Release date:** 2026-08-12  \n**Type:** patch release  \n**Previous tag:** v0.9.11\n\n## Highlights\n\n- Hardened RKN ACL enforcement while preserving URL/domain/IP scope.\n- Added configurable fallback registry source and persistent last-known-good snapshot.\n- Readiness now fails closed when RKN is enabled but no validated registry is available.\n- Added registry-source provenance to RKN decisions and audit logs.\n- CI, security audit, and load-test gates for the RKN hardening change are green.\n\n## Upgrade\n\n1. Pull or build the `v0.9.12` images or packages.\n2. Preserve `/etc/bsdm-proxy`, `/certs`, and persistent data volumes.\n3. Persist `RKN_SNAPSHOT_PATH` (default `/var/lib/bsdm-proxy/rkn-registry.json`) across container or pod recreation.\n4. Verify `/health` and `/ready`; with RKN enabled, readiness requires a validated registry or LKG snapshot.\n5. Validate archive downloads with the adjacent `.sha256` file.\n\nNo intentional breaking control-plane API changes.\n''')
+          PY
+
+          rm .github/workflows/prepare-v0.9.12.yml
+
+          expected=$(cat <<'EOF'
+          CHANGELOG.md
+          Cargo.lock
+          alert-worker/Cargo.toml
+          bsdm-events/Cargo.toml
+          cache-indexer/Cargo.toml
+          dns-sinkhole/Cargo.toml
+          docs/releases/v0.9.12.md
+          ml-worker/Cargo.toml
+          proxy/Cargo.toml
+          EOF
+          )
+          actual=$(git status --short | awk '{print $2}' | grep -v '^.github/workflows/prepare-v0.9.12.yml$' | sort)
+          if [[ "$actual" != "$(printf '%s\n' "$expected" | sort)" ]]; then
+            echo 'unexpected release diff:' >&2
+            git status --short >&2
+            exit 1
+          fi
+
+          ./scripts/ci/validate-release.sh
+
+      - name: Commit prepared release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add CHANGELOG.md Cargo.lock proxy/Cargo.toml bsdm-events/Cargo.toml cache-indexer/Cargo.toml alert-worker/Cargo.toml ml-worker/Cargo.toml dns-sinkhole/Cargo.toml docs/releases/v0.9.12.md
+          git rm .github/workflows/prepare-v0.9.12.yml
+          git commit -m 'release: prepare BSDM-Proxy v0.9.12'
+          git push origin HEAD:release/v0.9.12
