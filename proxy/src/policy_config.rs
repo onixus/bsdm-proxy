@@ -268,7 +268,14 @@ pub fn load_policy_config() -> PolicyConfig {
         None
     };
 
-    let categorization = if env_flag("CATEGORIZATION_ENABLED") {
+    let categorization_enabled = env_flag("CATEGORIZATION_ENABLED");
+    let rkn_sync_enabled = env_flag("RKN_SYNC_ENABLED");
+    if rkn_sync_enabled && !categorization_enabled {
+        warn!(
+            "RKN_SYNC_ENABLED=true implies categorization; enabling categorization engine automatically"
+        );
+    }
+    let categorization = if categorization_enabled || rkn_sync_enabled {
         Some(Arc::new(CategorizationEngine::new(
             load_categorization_config(),
         )))
