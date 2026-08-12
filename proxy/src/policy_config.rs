@@ -159,6 +159,14 @@ fn load_categorization_config() -> CategorizationConfig {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(86400),
+        rkn_snapshot_path: std::env::var("RKN_SNAPSHOT_PATH")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| Some("/var/lib/bsdm-proxy/rkn-registry.json".to_string())),
+        rkn_min_entries: std::env::var("RKN_MIN_ENTRIES")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1000),
     }
 }
 
