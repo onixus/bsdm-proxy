@@ -244,6 +244,19 @@ pub async fn metrics_server(
                                                     b"{\"status\":\"draining\"}",
                                                 )))
                                             })
+                                    } else if !crate::categorization::rkn_global_ready() {
+                                        warn!("Readiness check: RKN registry unavailable");
+                                        Response::builder()
+                                            .status(StatusCode::SERVICE_UNAVAILABLE)
+                                            .header("Content-Type", "application/json")
+                                            .body(full(Bytes::from_static(
+                                                b"{\"status\":\"not_ready\",\"reason\":\"rkn_registry_unavailable\"}",
+                                            )))
+                                            .unwrap_or_else(|_| {
+                                                Response::new(full(Bytes::from_static(
+                                                    b"{\"status\":\"not_ready\"}",
+                                                )))
+                                            })
                                     } else {
                                         debug!("Readiness check OK");
                                         Response::builder()
@@ -380,7 +393,7 @@ pub async fn agent_control_mtls_server(
                             }
                             let path = req.uri().path();
                             // Agent + health only on this port (not full Admin Console).
-                            if path == "/health" || path == "/ready" {
+                            if path == "/health" {
                                 return Ok::<_, Infallible>(
                                     Response::builder()
                                         .status(StatusCode::OK)
@@ -388,6 +401,26 @@ pub async fn agent_control_mtls_server(
                                         .body(full(Bytes::from_static(b"{\"status\":\"ok\",\"mtls\":true}")))
                                         .unwrap_or_else(|_| {
                                             Response::new(full(Bytes::from_static(b"ok")))
+                                        }),
+                                );
+                            }
+                            if path == "/ready" {
+                                let ready = crate::categorization::rkn_global_ready();
+                                return Ok::<_, Infallible>(
+                                    Response::builder()
+                                        .status(if ready {
+                                            StatusCode::OK
+                                        } else {
+                                            StatusCode::SERVICE_UNAVAILABLE
+                                        })
+                                        .header("Content-Type", "application/json")
+                                        .body(full(Bytes::from_static(if ready {
+                                            b"{\"status\":\"ready\",\"mtls\":true}"
+                                        } else {
+                                            b"{\"status\":\"not_ready\",\"reason\":\"rkn_registry_unavailable\",\"mtls\":true}"
+                                        })))
+                                        .unwrap_or_else(|_| {
+                                            Response::new(full(Bytes::from_static(b"not ready")))
                                         }),
                                 );
                             }
