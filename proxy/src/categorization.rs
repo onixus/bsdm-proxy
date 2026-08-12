@@ -248,7 +248,7 @@ fn parse_rkn_dump(text: &str, min_entries: usize) -> Result<RknRegistrySnapshot,
             // zapret-info often carries resolved IPs alongside domain/URL rows;
             // treating those as IP-wide blocks would overblock shared hosting.
             // Only IP-only rows become IP rules.
-            for raw_ip in ips_field.split(|c| c == ',' || c == ' ' || c == '\t') {
+            for raw_ip in ips_field.split([',', ' ', '\t']) {
                 let raw_ip = raw_ip.trim();
                 if raw_ip.is_empty() {
                     continue;
