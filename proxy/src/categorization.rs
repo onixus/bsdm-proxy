@@ -5,14 +5,28 @@
 //! - URLhaus (malware URLs)
 //! - PhishTank (phishing detection)
 //! - Custom database
+//! - Roskomnadzor registry (domain / URL / literal IP matching)
 
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::net::IpAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tracing::{debug, error, info, warn};
 use url::Url;
+
+static RKN_REQUIRED: AtomicBool = AtomicBool::new(false);
+static RKN_READY: AtomicBool = AtomicBool::new(true);
+
+/// Global readiness signal consumed by the metrics `/ready` endpoint.
+///
+/// The proxy is RKN-ready when RKN sync is disabled, or when a validated
+/// registry (downloaded or last-known-good snapshot) is loaded.
+pub fn rkn_global_ready() -> bool {
+    !RKN_REQUIRED.load(Ordering::Relaxed) || RKN_READY.load(Ordering::Relaxed)
+}
 
 /// URL category
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -111,7 +125,7 @@ impl Category {
 
 /// Domain suffix chain for local blacklist lookup (`www.foo.example.com` → `foo.example.com` → `example.com`).
 fn domain_suffixes(domain: &str) -> Vec<String> {
-    let domain = domain.trim().to_ascii_lowercase();
+    let domain = domain.trim().trim_end_matches('.').to_ascii_lowercase();
     let parts: Vec<&str> = domain.split('.').filter(|p| !p.is_empty()).collect();
     if parts.len() < 2 {
         return vec![domain];
@@ -120,6 +134,179 @@ fn domain_suffixes(domain: &str) -> Vec<String> {
         .rev()
         .map(|n| parts[parts.len() - n..].join("."))
         .collect()
+}
+
+/// RKN last-known-good registry snapshot persisted between restarts.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct RknRegistrySnapshot {
+    domains: HashSet<String>,
+    urls: HashSet<String>,
+    ips: HashSet<IpAddr>,
+    revision: u64,
+}
+
+impl RknRegistrySnapshot {
+    fn entry_count(&self) -> usize {
+        self.domains.len() + self.urls.len() + self.ips.len()
+    }
+
+    fn validate(&self, min_entries: usize) -> Result<(), String> {
+        let count = self.entry_count();
+        if count < min_entries {
+            return Err(format!(
+                "RKN registry rejected: only {count} unique entries, minimum is {min_entries}"
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RknMatch {
+    pub match_type: &'static str,
+    pub value: String,
+    pub revision: u64,
+}
+
+fn normalize_rkn_url(raw: &str) -> Option<String> {
+    let mut parsed = Url::parse(raw.trim()).ok()?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return None;
+    }
+    parsed.set_fragment(None);
+    Some(parsed.to_string())
+}
+
+fn rkn_request_url_keys(parsed: &Url) -> Vec<String> {
+    let mut full = parsed.clone();
+    full.set_fragment(None);
+    let full = full.to_string();
+
+    let mut base = parsed.clone();
+    base.set_fragment(None);
+    base.set_query(None);
+    let base = base.to_string();
+
+    if full == base {
+        vec![full]
+    } else {
+        vec![full, base]
+    }
+}
+
+fn parse_rkn_dump(text: &str, min_entries: usize) -> Result<RknRegistrySnapshot, String> {
+    let mut snapshot = RknRegistrySnapshot::default();
+    let mut parsed_rows = 0usize;
+    let mut malformed_urls = 0usize;
+
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        let mut parts = line.split(';');
+        let ips_field = parts.next().unwrap_or("").trim();
+        let domain_field = parts.next().unwrap_or("").trim();
+        let url_field = parts.next().unwrap_or("").trim();
+
+        if ips_field.eq_ignore_ascii_case("ip")
+            || domain_field.eq_ignore_ascii_case("domain")
+            || url_field.eq_ignore_ascii_case("url")
+        {
+            continue;
+        }
+
+        let has_url = !url_field.is_empty();
+        let has_domain = !domain_field.is_empty();
+
+        // URL-scoped registry records must stay URL-scoped. Adding their domain
+        // to the domain set would recreate the old overblocking behaviour.
+        if has_url {
+            if let Some(url) = normalize_rkn_url(url_field) {
+                snapshot.urls.insert(url);
+                parsed_rows += 1;
+            } else {
+                malformed_urls += 1;
+            }
+        } else if has_domain {
+            let mut domain = domain_field
+                .trim_end_matches('.')
+                .to_ascii_lowercase();
+            if let Some(stripped) = domain.strip_prefix("*.") {
+                domain = stripped.to_string();
+            }
+            if !domain.is_empty() {
+                snapshot.domains.insert(domain);
+                parsed_rows += 1;
+            }
+        } else if !ips_field.is_empty() {
+            // zapret-info often carries resolved IPs alongside domain/URL rows;
+            // treating those as IP-wide blocks would overblock shared hosting.
+            // Only IP-only rows become IP rules.
+            for raw_ip in ips_field.split(|c| c == ',' || c == ' ' || c == '\t') {
+                let raw_ip = raw_ip.trim();
+                if raw_ip.is_empty() {
+                    continue;
+                }
+                if let Ok(ip) = raw_ip.parse::<IpAddr>() {
+                    snapshot.ips.insert(ip);
+                    parsed_rows += 1;
+                }
+            }
+        }
+    }
+
+    if parsed_rows == 0 {
+        return Err("RKN registry rejected: no parseable records".to_string());
+    }
+    snapshot.validate(min_entries)?;
+
+    if malformed_urls > 0 {
+        warn!(
+            malformed_urls,
+            "RKN registry contained malformed URL records; ignored them"
+        );
+    }
+
+    Ok(snapshot)
+}
+
+fn load_rkn_snapshot(path: &str, min_entries: usize) -> Result<RknRegistrySnapshot, String> {
+    let content = std::fs::read(path)
+        .map_err(|e| format!("Failed to read RKN snapshot {path}: {e}"))?;
+    let snapshot: RknRegistrySnapshot = serde_json::from_slice(&content)
+        .map_err(|e| format!("Failed to parse RKN snapshot {path}: {e}"))?;
+    snapshot.validate(min_entries)?;
+    Ok(snapshot)
+}
+
+fn persist_rkn_snapshot(path: &str, snapshot: &RknRegistrySnapshot) -> Result<(), String> {
+    let path = std::path::Path::new(path);
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create RKN snapshot directory: {e}"))?;
+        }
+    }
+
+    let bytes = serde_json::to_vec(snapshot)
+        .map_err(|e| format!("Failed to serialize RKN snapshot: {e}"))?;
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, bytes)
+        .map_err(|e| format!("Failed to write RKN snapshot {}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("Failed to replace RKN snapshot {}: {e}", path.display())
+    })?;
+    Ok(())
+}
+
+fn next_rkn_revision() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// Categorization result
@@ -167,6 +354,8 @@ pub struct CategorizationConfig {
     pub rkn_sync_enabled: bool,
     pub rkn_sync_url: String,
     pub rkn_sync_interval_secs: u64,
+    pub rkn_snapshot_path: Option<String>,
+    pub rkn_min_entries: usize,
 }
 
 impl Default for CategorizationConfig {
@@ -186,6 +375,8 @@ impl Default for CategorizationConfig {
             rkn_sync_enabled: false,
             rkn_sync_url: crate::runtime_config::DEFAULT_RKN_SYNC_URL.to_string(),
             rkn_sync_interval_secs: 86400,
+            rkn_snapshot_path: Some("/var/lib/bsdm-proxy/rkn-registry.json".to_string()),
+            rkn_min_entries: 1000,
         }
     }
 }
@@ -198,12 +389,15 @@ pub struct CategorizationEngine {
     local_db: Option<HashMap<String, HashSet<Category>>>,
     custom_db: Option<HashMap<String, HashSet<Category>>>,
     http_client: Client,
-    rkn_domains: Arc<std::sync::RwLock<HashSet<String>>>,
+    rkn_registry: Arc<std::sync::RwLock<RknRegistrySnapshot>>,
 }
 
 impl CategorizationEngine {
     pub fn new(config: CategorizationConfig) -> Self {
         info!("Categorization engine initialized");
+
+        RKN_REQUIRED.store(config.rkn_sync_enabled, Ordering::Relaxed);
+        RKN_READY.store(!config.rkn_sync_enabled, Ordering::Relaxed);
 
         let mut engine = Self {
             config,
@@ -215,7 +409,7 @@ impl CategorizationEngine {
                 .user_agent("bsdm-proxy/0.3.2 (+https://github.com/onixus/bsdm-proxy)")
                 .build()
                 .expect("Failed to create HTTP client"),
-            rkn_domains: Arc::new(std::sync::RwLock::new(HashSet::new())),
+            rkn_registry: Arc::new(std::sync::RwLock::new(RknRegistrySnapshot::default())),
         };
 
         // Load UT1 blacklists if enabled
@@ -237,12 +431,36 @@ impl CategorizationEngine {
                 }
             }
         }
-        // Start RKN sync if enabled
+
+        // Load last-known-good RKN snapshot before accepting traffic.
         if engine.config.rkn_sync_enabled {
+            if let Some(path) = engine.config.rkn_snapshot_path.as_deref() {
+                match load_rkn_snapshot(path, engine.config.rkn_min_entries) {
+                    Ok(snapshot) => {
+                        let count = snapshot.entry_count();
+                        let revision = snapshot.revision;
+                        if let Ok(mut lock) = engine.rkn_registry.write() {
+                            *lock = snapshot;
+                            RKN_READY.store(true, Ordering::Relaxed);
+                        }
+                        info!(
+                            count,
+                            revision,
+                            path,
+                            "Loaded last-known-good RKN registry snapshot"
+                        );
+                    }
+                    Err(e) => warn!("RKN last-known-good snapshot unavailable: {}", e),
+                }
+            }
+
             CategorizationEngine::schedule_rkn_sync(
-                engine.rkn_domains.clone(),
+                engine.rkn_registry.clone(),
+                engine.cache.clone(),
                 engine.config.rkn_sync_url.clone(),
                 engine.config.rkn_sync_interval_secs,
+                engine.config.rkn_snapshot_path.clone(),
+                engine.config.rkn_min_entries,
             );
         }
 
@@ -252,6 +470,53 @@ impl CategorizationEngine {
     /// Whether URLhaus / PhishTank lookups are configured.
     pub fn online_enrichment_enabled(&self) -> bool {
         self.config.urlhaus_enabled || self.config.phishtank_enabled
+    }
+
+    pub fn rkn_ready(&self) -> bool {
+        if !self.config.rkn_sync_enabled {
+            return true;
+        }
+        self.rkn_registry
+            .read()
+            .map(|r| r.entry_count() >= self.config.rkn_min_entries)
+            .unwrap_or(false)
+    }
+
+    fn check_rkn(&self, parsed_url: &Url) -> Option<RknMatch> {
+        let registry = self.rkn_registry.read().ok()?;
+
+        for key in rkn_request_url_keys(parsed_url) {
+            if registry.urls.contains(&key) {
+                return Some(RknMatch {
+                    match_type: "url",
+                    value: key,
+                    revision: registry.revision,
+                });
+            }
+        }
+
+        let domain = parsed_url.host_str().unwrap_or("");
+        for suffix in domain_suffixes(domain) {
+            if registry.domains.contains(&suffix) {
+                return Some(RknMatch {
+                    match_type: "domain",
+                    value: suffix,
+                    revision: registry.revision,
+                });
+            }
+        }
+
+        if let Ok(ip) = domain.parse::<IpAddr>() {
+            if registry.ips.contains(&ip) {
+                return Some(RknMatch {
+                    match_type: "ip",
+                    value: ip.to_string(),
+                    revision: registry.revision,
+                });
+            }
+        }
+
+        None
     }
 
     /// Hot path: in-memory cache + local UT1/custom DB only (no HTTP). #104
@@ -266,55 +531,58 @@ impl CategorizationEngine {
 
         let domain = parsed_url.host_str().unwrap_or("").to_string();
 
-        if let Some(cached) = self.get_cached(&domain) {
+        // Domain cache intentionally contains non-RKN categories only. RKN can
+        // be URL-scoped, therefore it must be evaluated for every request.
+        let (mut categories, mut source, cached) = if let Some(cached) = self.get_cached(&domain) {
             debug!("Category cache hit for: {}", domain);
-            return self.create_result(url, &domain, cached.categories, &cached.source, true);
-        }
+            (cached.categories, cached.source, true)
+        } else {
+            let mut categories = HashSet::new();
+            let mut source = "unknown".to_string();
 
-        let mut categories = HashSet::new();
-        let mut source = "unknown";
-
-        if self.config.ut1_enabled {
-            if let Some(cats) = self.check_local_db(&domain) {
-                categories.extend(cats);
-                source = "ut1";
+            if self.config.ut1_enabled {
+                if let Some(cats) = self.check_local_db(&domain) {
+                    categories.extend(cats);
+                    source = "ut1".to_string();
+                }
             }
-        }
 
-        if self.config.custom_db_enabled {
-            if let Some(cats) = self.check_custom_db(&domain) {
-                categories.extend(cats);
-                source = if source == "unknown" {
-                    "custom"
-                } else {
-                    "multiple"
-                };
+            if self.config.custom_db_enabled {
+                if let Some(cats) = self.check_custom_db(&domain) {
+                    categories.extend(cats);
+                    source = if source == "unknown" {
+                        "custom".to_string()
+                    } else {
+                        "multiple".to_string()
+                    };
+                }
             }
-        }
+
+            if !categories.is_empty() {
+                self.cache_categories(&domain, categories.clone(), &source);
+            }
+            (categories, source, false)
+        };
 
         if self.config.rkn_sync_enabled {
-            let is_rkn = if let Ok(rkn_lock) = self.rkn_domains.read() {
-                domain_suffixes(&domain)
-                    .iter()
-                    .any(|d| rkn_lock.contains(d))
-            } else {
-                false
-            };
-            if is_rkn {
+            if let Some(rkn_match) = self.check_rkn(&parsed_url) {
                 categories.insert(Category::Rkn);
                 source = if source == "unknown" {
-                    "rkn"
+                    "rkn".to_string()
                 } else {
-                    "multiple"
+                    "multiple".to_string()
                 };
+                info!(
+                    rkn_match_type = rkn_match.match_type,
+                    rkn_match = %rkn_match.value,
+                    rkn_revision = rkn_match.revision,
+                    request_url = %url,
+                    "RKN registry match"
+                );
             }
         }
 
-        if !categories.is_empty() {
-            self.cache_categories(&domain, categories.clone(), source);
-        }
-
-        self.create_result(url, &domain, categories, source, false)
+        self.create_result(url, &domain, categories, &source, cached)
     }
 
     /// Spawn background URLhaus/PhishTank lookup when local DB had no match (#104).
@@ -337,9 +605,12 @@ impl CategorizationEngine {
     }
 
     fn schedule_rkn_sync(
-        rkn_domains: Arc<std::sync::RwLock<HashSet<String>>>,
+        rkn_registry: Arc<std::sync::RwLock<RknRegistrySnapshot>>,
+        cache: Arc<std::sync::RwLock<HashMap<String, CategoryCache>>>,
         url: String,
         interval: u64,
+        snapshot_path: Option<String>,
+        min_entries: usize,
     ) {
         tokio::spawn(async move {
             let client = Client::builder()
@@ -355,29 +626,49 @@ impl CategorizationEngine {
                         match response.bytes().await {
                             Ok(bytes) => {
                                 let (decoded, _, _) = encoding_rs::WINDOWS_1251.decode(&bytes);
-                                let mut new_domains = HashSet::new();
+                                match parse_rkn_dump(&decoded, min_entries) {
+                                    Ok(mut snapshot) => {
+                                        snapshot.revision = next_rkn_revision();
+                                        let count = snapshot.entry_count();
+                                        let domains = snapshot.domains.len();
+                                        let urls = snapshot.urls.len();
+                                        let ips = snapshot.ips.len();
+                                        let revision = snapshot.revision;
 
-                                for line in decoded.lines() {
-                                    let mut parts = line.split(';');
-                                    // Zapret-info dump format: IPs;domain;url;...
-                                    if parts.next().is_some() {
-                                        if let Some(domain) = parts.next() {
-                                            let mut d = domain.trim().to_ascii_lowercase();
-                                            if d.starts_with("*.") {
-                                                d = d[2..].to_string();
-                                            }
-                                            if !d.is_empty() && d != "domain" {
-                                                new_domains.insert(d);
+                                        if let Some(path) = snapshot_path.as_deref() {
+                                            if let Err(e) = persist_rkn_snapshot(path, &snapshot) {
+                                                warn!("Failed to persist RKN last-known-good snapshot: {}", e);
                                             }
                                         }
+
+                                        if let Ok(mut lock) = rkn_registry.write() {
+                                            *lock = snapshot;
+                                            RKN_READY.store(true, Ordering::Relaxed);
+                                        }
+
+                                        // Invalidate categorization cache on every registry revision.
+                                        // RKN itself is never cached by domain, but this also prevents
+                                        // stale source/category combinations after a feed transition.
+                                        if let Ok(mut cache) = cache.write() {
+                                            cache.clear();
+                                        }
+
+                                        info!(
+                                            count,
+                                            domains,
+                                            urls,
+                                            ips,
+                                            revision,
+                                            "Successfully synced validated RKN registry"
+                                        );
+                                    }
+                                    Err(e) => {
+                                        error!(
+                                            "Rejected RKN registry update; keeping last-known-good data: {}",
+                                            e
+                                        );
                                     }
                                 }
-
-                                let count = new_domains.len();
-                                if let Ok(mut lock) = rkn_domains.write() {
-                                    *lock = new_domains;
-                                }
-                                info!("Successfully synced RKN registry: {} domains loaded", count);
                             }
                             Err(e) => error!("Failed to read RKN registry response bytes: {}", e),
                         }
@@ -389,7 +680,7 @@ impl CategorizationEngine {
                         error!("Failed to fetch RKN registry: {}", e);
                     }
                 }
-                tokio::time::sleep(Duration::from_secs(interval)).await;
+                tokio::time::sleep(Duration::from_secs(interval.max(60))).await;
             }
         });
     }
@@ -581,7 +872,13 @@ impl CategorizationEngine {
     }
 
     /// Cache categories (sync) with feed provenance for `threat_sources`.
-    fn cache_categories(&self, domain: &str, categories: HashSet<Category>, source: &str) {
+    fn cache_categories(&self, domain: &str, mut categories: HashSet<Category>, source: &str) {
+        // Never cache RKN by domain: registry records can be URL-specific.
+        categories.remove(&Category::Rkn);
+        if categories.is_empty() {
+            return;
+        }
+
         if let Ok(mut cache) = self.cache.write() {
             cache.insert(
                 domain.to_string(),
@@ -657,6 +954,67 @@ mod tests {
                 "example.com".to_string(),
             ]
         );
+        assert_eq!(domain_suffixes("WWW.Example.COM."), vec!["www.example.com", "example.com"]);
+    }
+
+    #[test]
+    fn test_rkn_parser_preserves_url_scope() {
+        let dump = concat!(
+            "ip;domain;url;date\n",
+            "1.2.3.4;shared.example;https://shared.example/blocked;2026-01-01\n",
+            ";whole.example;;2026-01-01\n",
+            "5.6.7.8;;;2026-01-01\n",
+        );
+        let snapshot = parse_rkn_dump(dump, 3).unwrap();
+        assert!(snapshot.urls.contains("https://shared.example/blocked"));
+        assert!(!snapshot.domains.contains("shared.example"));
+        assert!(snapshot.domains.contains("whole.example"));
+        assert!(snapshot.ips.contains(&"5.6.7.8".parse().unwrap()));
+        assert!(!snapshot.ips.contains(&"1.2.3.4".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_rkn_parser_rejects_tiny_feed() {
+        let dump = ";one.example;;\n";
+        assert!(parse_rkn_dump(dump, 1000).is_err());
+    }
+
+    #[test]
+    fn test_rkn_url_match_does_not_overblock_domain() {
+        let config = CategorizationConfig {
+            rkn_sync_enabled: true,
+            rkn_min_entries: 1,
+            rkn_snapshot_path: None,
+            ..Default::default()
+        };
+        let engine = CategorizationEngine::new(config);
+        {
+            let mut registry = engine.rkn_registry.write().unwrap();
+            registry.urls.insert("https://shared.example/blocked".to_string());
+            registry.revision = 42;
+        }
+
+        let blocked = engine.categorize_local("https://shared.example/blocked");
+        assert!(blocked.categories.contains(&Category::Rkn));
+
+        let allowed = engine.categorize_local("https://shared.example/other");
+        assert!(!allowed.categories.contains(&Category::Rkn));
+    }
+
+    #[test]
+    fn test_rkn_snapshot_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rkn.json");
+        let snapshot = RknRegistrySnapshot {
+            domains: HashSet::from(["blocked.example".to_string()]),
+            urls: HashSet::from(["https://shared.example/blocked".to_string()]),
+            ips: HashSet::from(["203.0.113.7".parse().unwrap()]),
+            revision: 77,
+        };
+        persist_rkn_snapshot(path.to_str().unwrap(), &snapshot).unwrap();
+        let loaded = load_rkn_snapshot(path.to_str().unwrap(), 3).unwrap();
+        assert_eq!(loaded.revision, 77);
+        assert_eq!(loaded.entry_count(), 3);
     }
 
     #[test]
