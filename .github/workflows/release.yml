@@ -28,15 +28,15 @@ jobs:
     if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
       - name: Show release context
         run: |
           echo "ref=${GITHUB_REF}"
           echo "ref_name=${GITHUB_REF_NAME}"
           echo "ref_type=${GITHUB_REF_TYPE}"
           git rev-parse HEAD
-
-      - name: Checkout sources
-        uses: actions/checkout@v4
 
       - name: Setup Rust environment
         uses: ./.github/actions/setup-rust
