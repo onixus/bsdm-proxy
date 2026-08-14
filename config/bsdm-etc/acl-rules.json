@@ -31,6 +31,158 @@
       "rule_type": {
         "Category": "adult"
       }
+    },
+    {
+      "id": "block-social",
+      "name": "Block social networks",
+      "enabled": true,
+      "priority": 140,
+      "action": "deny",
+      "rule_type": {
+        "Category": "social"
+      },
+      "comment": "UT1 social_networks → ACL category social"
+    },
+    {
+      "id": "block-filehosting",
+      "name": "Block cloud / file hosting",
+      "enabled": true,
+      "priority": 140,
+      "action": "deny",
+      "rule_type": {
+        "Category": "filehosting"
+      },
+      "comment": "UT1 filehosting (Dropbox, Box, Mega, WeTransfer, …)"
+    },
+    {
+      "id": "block-social-telegram",
+      "name": "Block Telegram",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": {
+        "Domain": "*.telegram.org"
+      }
+    },
+    {
+      "id": "block-social-tme",
+      "name": "Block t.me",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": {
+        "Domain": "t.me"
+      }
+    },
+    {
+      "id": "block-cloud-gdrive",
+      "name": "Block Google Drive",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": {
+        "Domain": "*.drive.google.com"
+      }
+    },
+    {
+      "id": "block-cloud-gdocs",
+      "name": "Block Google Docs",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": {
+        "Domain": "*.docs.google.com"
+      }
+    },
+    {
+      "id": "block-cloud-onedrive",
+      "name": "Block OneDrive",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": {
+        "Domain": "*.onedrive.live.com"
+      }
+    },
+    {
+      "id": "block-cloud-1drv",
+      "name": "Block 1drv.ms",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": {
+        "Domain": "*.1drv.ms"
+      }
+    },
+    {
+      "id": "block-cloud-sharepoint",
+      "name": "Block SharePoint",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": {
+        "Domain": "*.sharepoint.com"
+      }
+    },
+    {
+      "id": "block-cloud-icloud",
+      "name": "Block iCloud",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": {
+        "Domain": "*.icloud.com"
+      }
+    },
+    {
+      "id": "block-cloud-yadisk",
+      "name": "Block Yandex Disk",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": {
+        "Domain": "*.disk.yandex.ru"
+      }
+    },
+    {
+      "id": "block-cloud-yadisk-com",
+      "name": "Block Yandex Disk (com)",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": {
+        "Domain": "*.disk.yandex.com"
+      }
+    },
+    {
+      "id": "block-cloud-yadisk-sk",
+      "name": "Block yadi.sk",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": {
+        "Domain": "*.yadi.sk"
+      }
+    },
+    {
+      "id": "block-cloud-mailru",
+      "name": "Block Mail.ru Cloud",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": {
+        "Domain": "*.cloud.mail.ru"
+      }
+    },
+    {
+      "id": "block-cloud-mega",
+      "name": "Block mega.nz",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": {
+        "Domain": "*.mega.nz"
+      }
     }
   ]
 }
