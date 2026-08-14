@@ -118,6 +118,18 @@ impl ProxyHarness {
             .env("ACL_DEFAULT_ACTION", "allow")
             // e2e lab: production profile is default; allow open control plane unless tests set tokens.
             .env("CONTROL_API_ALLOW_INSECURE", "true")
+            // Isolate the proxy from any ambient persisted config. The harness runs it
+            // with current_dir set to the workspace root, and config_env_path() falls
+            // back to ./bsdm-proxy.env there — a tracked file pinning HTTP_PORT=3128
+            // and METRICS_PORT=9090. Since startup applies that file over the process
+            // environment, it would clobber the ports assigned just above and every
+            // test would time out waiting for health on a port nothing is listening on.
+            // Point at a path that does not exist so read_env_file() yields nothing;
+            // extra_env is applied after this, so a test can still opt back in.
+            .env(
+                "CONFIG_ENV_PATH",
+                std::env::temp_dir().join(format!("bsdm-e2e-absent-{proxy_port}.env")),
+            )
             .env(
                 "CATEGORIZATION_ENABLED",
                 bool_env(config.categorization_enabled),
