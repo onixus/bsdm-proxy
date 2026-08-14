@@ -9,11 +9,11 @@ INSTALLER_DIR="${SCRIPT_DIR}/installer"
 source "${INSTALLER_DIR}/common.sh"
 source "${INSTALLER_DIR}/preflight.sh"
 
-MODE=""
+MODE="docker"
 PREFIX="/opt/bsdm-proxy"
-ETC_DIR="/etc/bsdm-proxy"
 HTTP_PORT="3128"
 METRICS_PORT="9090"
+ACL_ENABLED="false"
 
 banner() {
   clear 2>/dev/null || true
@@ -35,44 +35,23 @@ select_mode() {
 
 configure() {
   prompt_input "Installation prefix" "$PREFIX" PREFIX
-  prompt_input "Configuration directory" "$ETC_DIR" ETC_DIR
   prompt_port "HTTP proxy port" "$HTTP_PORT" HTTP_PORT
   prompt_port "Metrics port" "$METRICS_PORT" METRICS_PORT
+  prompt_yn "Enable ACL" "$ACL_ENABLED" ACL_ENABLED
 
   echo
   echo "Installation plan"
   echo "Mode: ${MODE}"
   echo "Prefix: ${PREFIX}"
-  echo "Config: ${ETC_DIR}"
   echo "Proxy port: ${HTTP_PORT}"
   echo "Metrics port: ${METRICS_PORT}"
-}
-
-install_docker() {
-  require_cmd docker
-  require_cmd docker
-
-  cd "${SCRIPT_DIR}/.."
-  [[ -f docker-compose.yml ]] || die "docker-compose.yml not found"
-
-  docker compose config >/dev/null
-  docker compose up -d
-}
-
-install_native() {
-  local root
-  root="$(cd "${SCRIPT_DIR}/.." && pwd)"
-
-  [[ -x "${root}/packaging/install.sh" ]] || die "Canonical packaging installer missing"
-
-  echo "Native installation delegates to packaging/install.sh"
-  "${root}/packaging/install.sh"
+  echo "ACL: ${ACL_ENABLED}"
 }
 
 main() {
   banner
-  preflight
   select_mode
+  preflight "$MODE"
   configure
 
   read -r -p "Continue? [Y/n]: " confirm
@@ -80,9 +59,16 @@ main() {
     n|N) exit 0 ;;
   esac
 
+  local root
+  root="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
   case "$MODE" in
-    docker) install_docker ;;
-    native) install_native ;;
+    docker)
+      "${INSTALLER_DIR}/docker.sh" "$root"
+      ;;
+    native)
+      "${INSTALLER_DIR}/native.sh" "$root" "$PREFIX" "$HTTP_PORT" "$METRICS_PORT" "$ACL_ENABLED"
+      ;;
   esac
 
   info "Installation completed, running validation next"
