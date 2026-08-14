@@ -7,7 +7,7 @@ export interface AclRule {
   enabled: boolean
   priority: number
   action: 'allow' | 'deny' | 'redirect'
-  rule_type: Record<string, string>
+  rule_type: Record<string, unknown>
   redirect_url?: string | null
   comment?: string | null
 }

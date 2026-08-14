@@ -1,6 +1,6 @@
 # Access Control Lists (ACL)
 
-> См. также: [оглавление документации](../README.md) · [пример правил](../../config/acl-rules.example.json) · [Agent Contract](../architecture/agent-contract.md)
+> См. также: [оглавление документации](../README.md) · [Policies в консоли](acl-console.md) · [пример правил](../../config/acl-rules.example.json) · [Agent Contract](../architecture/agent-contract.md)
 
 > ✅ **Статус реализации:** REST ACL CRUD + persist, Cache-Tag purge, hierarchy peer reload, upstream TLS reload и gRPC control mesh (`grpc` feature, см. [control-plane.md](control-plane.md)).
 
@@ -106,10 +106,11 @@ Startup logs `TLS policy startup: … policy_mode=…`. Runtime: control API exp
 }
 ```
 
-**Supported categories:**
+**Supported categories:** ACL id, не имя папки UT1. `social_networks` → `social`, `filehosting` остаётся `filehosting`. Полный разбор консоли и каталога: [acl-console.md](acl-console.md).
+
 - `adult`, `gambling`, `violence`, `weapons`, `drugs`
 - `malware`, `phishing`, `spyware`
-- `hacking`, `redirector`, `tracker`
+- `hacking`, `redirector`, `tracker`, `social`, `filehosting`
 - Custom categories from categorization engine
 
 ### 5. Time-based Rules

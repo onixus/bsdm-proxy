@@ -139,7 +139,14 @@ impl RedisL2Cache {
         metrics: Arc<Metrics>,
     ) -> Result<Self, redis::RedisError> {
         let client = redis::Client::open(config.url.as_str())?;
-        let conn = ConnectionManager::new(client).await?;
+        let conn = tokio::time::timeout(Duration::from_secs(3), ConnectionManager::new(client))
+            .await
+            .map_err(|_| {
+                redis::RedisError::from((
+                    redis::ErrorKind::IoError,
+                    "Redis L2 connect timed out after 3s",
+                ))
+            })??;
         Ok(Self {
             conn,
             key_prefix: config.key_prefix.clone(),

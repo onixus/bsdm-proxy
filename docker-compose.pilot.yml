@@ -37,6 +37,34 @@ services:
           cpus: "3.00"
           memory: 6G
 
+  redis:
+    image: redis:7.4-alpine
+    ports:
+      - "6379:6379"
+    command:
+      - redis-server
+      - --maxmemory
+      - 512mb
+      - --maxmemory-policy
+      - allkeys-lfu
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+    networks:
+      - bsdm-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 768M
+
   proxy:
     environment:
       # --- Hybrid Policy (Phase B pilot) ---
@@ -75,6 +103,11 @@ services:
       PERF_FAST_CACHE_HIT: "false"
       STREAMING_MISS_ENABLED: "true"
 
+      # --- Redis L2 (shared cache; survives proxy restart) ---
+      REDIS_L2_ENABLED: "${REDIS_L2_ENABLED:-true}"
+      REDIS_URL: "${REDIS_URL:-redis://redis:6379}"
+      REDIS_KEY_PREFIX: "${REDIS_KEY_PREFIX:-bsdm:http:}"
+
       # --- Tokens (required for pilot; never commit real values) ---
       CONTROL_API_TOKEN: "${CONTROL_API_TOKEN:?set CONTROL_API_TOKEN}"
       ACL_API_TOKEN: "${ACL_API_TOKEN:?set ACL_API_TOKEN}"
@@ -85,6 +118,9 @@ services:
       METRICS_AUTH_TOKEN: "${METRICS_AUTH_TOKEN:-}"
       # Experimental DLP off for pilot day-1 (persistent kill-switch; no control-API wipe needed).
       DLP_ENABLED: "false"
+    depends_on:
+      redis:
+        condition: service_healthy
     volumes:
       - pilot-spill:/var/cache/bsdm-spill
       # Optional Basic auth users (override host path via bind). Example password: pilot-secret.

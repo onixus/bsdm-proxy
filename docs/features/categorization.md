@@ -108,6 +108,8 @@ Stub only (`ML_ENABLED`); not used in production paths yet.
 
 Categories feed URL filtering and policy rules. Events include `categories`, `threat_sources` (`ut1`, `urlhaus`, `phishtank`, …), and `acl_action` in Kafka / ClickHouse.
 
+Как эти метки включают в консоли (и чем каталог имён отличается от живого ACL): [acl-console.md](acl-console.md).
+
 ## Prometheus metrics (M4)
 
 Exported on the proxy metrics port (`/metrics`):

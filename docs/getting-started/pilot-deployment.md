@@ -29,6 +29,7 @@ Issue tracking: **#270** (этот документ + compose), **#269** (load-t
 | Auth (Basic/LDAP/…) | **Опционально** (`AUTH_ENABLED`) |
 | Categorization / UT1 | **Опционально** (включать после подготовки feeds) |
 | L1 cache + spill | **Да** |
+| Redis L2 (`redis:7.4`, `REDIS_L2_ENABLED`) | **Да** (pilot overlay; `maxmemory 512mb`, `allkeys-lfu`) |
 | Kafka → cache-indexer → ClickHouse → Search API | **Да** (base compose) |
 | Prometheus / Grafana | **Да** |
 | DNS sinkhole (UDP) | **Да (day-1)** — сервис `dns-sinkhole` в base compose; host **:5353** (на macOS часто **:15353** — mDNS занимает 5353; см. [pilot-dns.md](pilot-dns.md)) |
@@ -70,7 +71,8 @@ curl -X POST http://127.0.0.1:9090/api/security/dlp \
 
 ### A. Stand-up
 
-- [ ] `docker compose -f docker-compose.yml -f docker-compose.pilot.yml up -d --build` поднимает proxy, kafka, clickhouse, cache-indexer, prometheus, grafana, dns-sinkhole
+- [ ] `docker compose -f docker-compose.yml -f docker-compose.pilot.yml up -d --build` поднимает proxy, redis, kafka, clickhouse, cache-indexer, prometheus, grafana, dns-sinkhole
+- [ ] Redis healthy (`redis-cli -h 127.0.0.1 ping` inside the `redis` service) and proxy log `Redis L2 cache enabled`
 - [ ] `GET :9090/health` и `GET :9090/ready` → ok
 - [ ] `GET :9090/admin/` → Admin Console SPA (встроена в image)
 - [ ] `GET :8080/health` (indexer) → ok; Search API: `GET :8080/api/search?limit=1` с `Authorization: Bearer $SEARCH_API_TOKEN`
