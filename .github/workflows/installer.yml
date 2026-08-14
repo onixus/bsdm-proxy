@@ -1,0 +1,29 @@
+name: Installer Validation
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  installer:
+    name: Validate installer scripts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Bash syntax check
+        run: |
+          bash -n install.sh
+          bash -n scripts/interactive-install.sh
+          find scripts/installer -name '*.sh' -print0 | xargs -0 -n1 bash -n
+
+      - name: Shellcheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: .
+
+      - name: Installer sanity
+        run: tests/install/test-installer-sanity.sh
