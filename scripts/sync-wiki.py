@@ -140,6 +140,13 @@ SECTION_HUBS = {
         "Architecture Decision Records",
         "Зафиксированные архитектурные решения проекта.",
     ),
+    # Landing place for docs picked up automatically (see derived_pages). Without
+    # a hub of their own such pages would render but nothing would link to them.
+    "Прочее": (
+        "Other-Documentation.md",
+        "Прочие документы",
+        "Документы без курируемой записи в PAGES; раздел назначен автоматически.",
+    ),
 }
 
 
@@ -160,8 +167,76 @@ def release_pages() -> tuple[Page, ...]:
     return tuple(pages)
 
 
+# Which hub a derived page lands in, keyed by its first directory under docs/.
+# Every value must be a key of SECTION_HUBS, otherwise the page renders but no
+# hub links to it. Anything not listed falls back to "Project".
+DERIVED_SECTIONS = {
+    "getting-started": "Getting started",
+    "architecture": "Architecture & design",
+    "features": "Security & policy",
+    "threat-intelligence": "Security & policy",
+    "analytics": "Analytics & detection",
+    "ops-and-dev": "Operations",
+    "adr": "ADRs",
+}
+
+DERIVED_SUMMARY = "Автоматически включённый документ; добавьте курируемое описание в PAGES."
+
+
+def derived_title(source: Path) -> str:
+    """First Markdown H1, falling back to a readable form of the file name."""
+
+    for line in source.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("# "):
+            return stripped[2:].strip()
+    return source.stem.replace("_", " ").replace("-", " ").strip()
+
+
+def derived_target(rel: str) -> str:
+    """Wiki file name built from the whole path under docs/, so it cannot collide."""
+
+    parts = Path(rel).relative_to("docs").with_suffix("").parts
+    tokens: list[str] = []
+    for part in parts:
+        for token in re.split(r"[\s_-]+", part):
+            if token:
+                tokens.append(token[:1].upper() + token[1:])
+    return "-".join(tokens) + ".md"
+
+
+def derived_pages(covered: set[str]) -> tuple[Page, ...]:
+    """Cover every remaining doc so a new file cannot fail the coverage gate.
+
+    Curated entries in PAGES are always preferred — they carry a hand-written
+    label and summary. This exists so that dropping a Markdown file into docs/
+    (including straight onto main, which is how the threat-intelligence docs
+    arrived) publishes it to the Wiki instead of turning the docs gate red until
+    somebody edits this file by hand.
+    """
+
+    pages: list[Page] = []
+    for path in sorted(DOCS_ROOT.rglob("*.md")):
+        rel = path.relative_to(ROOT).as_posix()
+        if rel in covered or is_excluded_doc(rel):
+            continue
+        parts = Path(rel).relative_to("docs").parts
+        top = parts[0] if len(parts) > 1 else ""
+        pages.append(
+            Page(
+                rel,
+                derived_target(rel),
+                DERIVED_SECTIONS.get(top, "Прочее"),
+                derived_title(path),
+                DERIVED_SUMMARY,
+            )
+        )
+    return tuple(pages)
+
+
 def catalog() -> tuple[Page, ...]:
-    return PAGES + release_pages()
+    curated = PAGES + release_pages()
+    return curated + derived_pages({page.source for page in curated})
 
 
 def version() -> str:
@@ -383,6 +458,7 @@ def sidebar() -> str:
 * [Релизы](Release-History)
 * [Разработка](Development-Guide)
 * [Поддержка Wiki](Documentation-Maintenance)
+* [Прочие документы](Other-Documentation)
 """
 
 
