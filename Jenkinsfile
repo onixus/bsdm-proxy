@@ -1,238 +1,367 @@
-// Локальный Jenkins (http://localhost:8081) — порт .github/workflows/ci.yml.
-// Всё собирается в контейнере rust:1-bookworm через docker.sock хоста;
-// на контроллере Rust не нужен.
-//
-// Swatinem/rust-cache заменён именованными volume'ами: CARGO_HOME и target/
-// переживают сборки, поэтому холодный прогон долгий, а дальше — как в GHA.
-
-def RUST_IMAGE = 'rust:1-bookworm'
-
-// target/ ОБЯЗАН лежать на нативном томе, а не в воркспейсе.
-//
-// Воркспейс Jenkins — bind-mount macOS через VirtioFS, и сборка Rust на нём
-// разваливается: cargo пишет десятки тысяч мелких файлов, часть записей не
-// доезжает, зависимые крейты падают с "E0463: can't find crate for tokio".
-// Замерено на одном и том же коде: 3 холодных прогона на bind-mount'е — 3
-// падения (26, 7 и 2 ошибки, число убывает по мере прогрева кэша хостовой ФС);
-// 2 прогона на файловой системе контейнера — 0 ошибок. Отсюда же прежние
-// «то падает, то нет» и спасительный эффект тёплого target/.
-//
-// Путь фиксирован внутри контейнера, поэтому параллельные стадии с их
-// отдельными воркспейсами (bsdm-proxy@2) больше не при чём: cargo сам берёт
-// файловую блокировку на target и сериализует доступ.
-def CACHE_ARGS = '-v bsdm-cargo-home:/usr/local/cargo/registry -v bsdm-cargo-tools:/opt/cargo-tools -v bsdm-cargo-target:/build-target'
-
-// BSDM_PROXY_BIN — штатное переопределение из e2e/src/lib.rs (proxy_binary()
-// проверяет его первым). Без него e2e ищет бинарь по жёсткому
-// <workspace>/target/debug/proxy и с уводом CARGO_TARGET_DIR не находит —
-// ровно на это я уже наступал.
-def RUST_ENV = [
-  'CARGO_TERM_COLOR=always',
-  'RUST_BACKTRACE=1',
-  'CARGO_TARGET_DIR=/build-target',
-  'BSDM_PROXY_BIN=/build-target/debug/proxy',
-]
-
-// Системные зависимости из .github/actions/setup-rust.
-// Ставятся каждый прогон: кэшируются только volume'ы, а корень контейнера
-// эфемерный — маркер «уже поставлено» тут соврал бы на втором билде.
-def SYS_DEPS = '''
-  apt-get update -qq
-  apt-get install -y --no-install-recommends \
-    libssl-dev pkg-config cmake librdkafka-dev libclang-dev protobuf-compiler
-'''
-
 pipeline {
-  agent none
+    agent none
 
-  options {
-    timestamps()
-    disableConcurrentBuilds()
-    buildDiscarder(logRotator(numToKeepStr: '20'))
-    timeout(time: 120, unit: 'MINUTES')
-  }
-
-  stages {
-    stage('CA rotation drill') {
-      agent { docker { image RUST_IMAGE; args CACHE_ARGS; reuseNode true } }
-      steps {
-        sh """
-          set -eu
-          ${SYS_DEPS}
-          ./scripts/test-ca-rotation.sh
-        """
-      }
+    parameters {
+        string(
+            name: 'CI_AGENT_LABEL',
+            defaultValue: 'linux && bsdm-ci',
+            description: 'Agent with Rust 1.88+, Node.js 24+, Python 3, and cargo-audit'
+        )
+        string(
+            name: 'DOCKER_AGENT_LABEL',
+            defaultValue: 'linux && docker',
+            description: 'Agent with Docker Buildx, Compose, curl, and wrk'
+        )
+        string(
+            name: 'AMD64_AGENT_LABEL',
+            defaultValue: 'linux && amd64 && bsdm-ci',
+            description: 'Native linux/amd64 package builder'
+        )
+        string(
+            name: 'ARM64_AGENT_LABEL',
+            defaultValue: 'linux && arm64 && bsdm-ci',
+            description: 'Native linux/arm64 package builder'
+        )
+        booleanParam(
+            name: 'RUN_UI_TESTS',
+            defaultValue: true,
+            description: 'Run the Chromium Admin Console smoke tests'
+        )
+        booleanParam(
+            name: 'RUN_LOAD_TESTS',
+            defaultValue: false,
+            description: 'Run the Docker-based lite and hybrid load-test profile'
+        )
+        booleanParam(
+            name: 'BUILD_PACKAGES',
+            defaultValue: false,
+            description: 'Build a native package on a non-tag build; tag builds always package amd64'
+        )
+        booleanParam(
+            name: 'BUILD_ARM64_PACKAGE',
+            defaultValue: false,
+            description: 'Also build a native package on the configured arm64 agent'
+        )
+        booleanParam(
+            name: 'PUBLISH_GITHUB_RELEASE',
+            defaultValue: false,
+            description: 'For tag builds only: create a GitHub Release from package artifacts'
+        )
+        booleanParam(
+            name: 'PUBLISH_GHCR_IMAGE',
+            defaultValue: false,
+            description: 'For tag builds only: publish the multi-platform image to GHCR'
+        )
+        string(
+            name: 'GITHUB_TOKEN_CREDENTIALS_ID',
+            defaultValue: 'bsdm-github-token',
+            description: 'Jenkins secret-text credential used by gh release create'
+        )
+        string(
+            name: 'GHCR_CREDENTIALS_ID',
+            defaultValue: 'bsdm-ghcr',
+            description: 'Jenkins username/password credential used for ghcr.io'
+        )
+        string(
+            name: 'GHCR_IMAGE',
+            defaultValue: 'ghcr.io/onixus/bsdm-proxy',
+            description: 'Fully qualified image repository'
+        )
+        string(
+            name: 'GHCR_PLATFORMS',
+            defaultValue: 'linux/amd64,linux/arm64',
+            description: 'Buildx target platforms'
+        )
     }
 
-    // Quality gate — блокирующие security-проверки, все до сборки.
-    // Холодный cargo build тут идёт десятки минут, и ловить криты после него
-    // бессмысленно; ни SAST, ни скан секретов, ни аудит зависимостей сборки
-    // не требуют.
-    stage('Quality gate') {
-      parallel {
-        stage('SAST (semgrep)') {
-          agent any
-          steps {
-            sh '''
-              set -eu
-              RULES="--config p/security-audit --config p/secrets --config p/rust"
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '30', artifactNumToKeepStr: '10'))
+        timeout(time: 120, unit: 'MINUTES')
+        timestamps()
+        skipDefaultCheckout(true)
+        parallelsAlwaysFailFast()
+        preserveStashes(buildCount: 5)
+    }
 
-              # Проход 1 — полный отчёт, все severity, билд не роняет (--no-error).
-              echo "[sast] полный отчёт"
-              docker run --rm -v "$WORKSPACE":/src -w /src semgrep/semgrep:latest \
-                semgrep scan $RULES --metrics=off --no-error \
-                  --json --output semgrep.json
+    environment {
+        CARGO_TERM_COLOR = 'always'
+        RUST_BACKTRACE = '1'
+    }
 
-              # Проход 2 — гейт: только ERROR, находки уходят в код возврата.
-              echo "[sast] quality gate: блок при ERROR"
-              docker run --rm -v "$WORKSPACE":/src -w /src semgrep/semgrep:latest \
-                semgrep scan $RULES --metrics=off --severity ERROR --error
-            '''
-          }
-          post {
-            always {
-              archiveArtifacts artifacts: 'semgrep.json', allowEmptyArchive: true
+    stages {
+        stage('Preflight') {
+            agent { label "${params.CI_AGENT_LABEL}" }
+            steps {
+                deleteDir()
+                checkout scm
+                sh './scripts/ci/run.sh preflight'
+                sh 'git rev-parse HEAD'
             }
-          }
         }
 
-        // Дубликатом p/secrets из semgrep не является: тот смотрит только
-        // рабочее дерево, gitleaks — всю историю коммитов, а утёкший ключ
-        // остаётся в ней и после удаления из рабочей копии.
-        stage('Secrets (gitleaks)') {
-          agent any
-          steps {
-            sh '''
-              set -eu
-              # Один проход, в отличие от semgrep: severity у находок нет,
-              # делить отчёт и гейт незачем. Отчёт пишется до выхода с
-              # ненулевым кодом, поэтому post заберёт его и на падении.
-              # --redact держит сами секреты вне лога Jenkins.
-              # Ложные срабатывания глушатся .gitleaksignore в корне репо —
-              # fingerprint находки берётся из gitleaks.json.
-              NO_GIT=""
-              [ -d .git ] || NO_GIT="--no-git"   # не из SCM — сканируем дерево
-              # Версия запинена, в отличие от соседнего semgrep: подкоманда
-              # detect объявлена устаревшей в пользу git/dir, и плавающий
-              # :latest однажды уронит стадию не находкой, а сменой CLI.
-              docker run --rm -v "$WORKSPACE":/src -w /src zricethezav/gitleaks:v8.30.1 \
-                detect --source /src $NO_GIT \
-                  --report-format json --report-path /src/gitleaks.json \
-                  --redact --no-banner --exit-code 1
-            '''
-          }
-          post {
-            always {
-              archiveArtifacts artifacts: 'gitleaks.json', allowEmptyArchive: true
+        stage('Quality gates') {
+            parallel {
+                stage('Rust') {
+                    agent { label "${params.CI_AGENT_LABEL}" }
+                    steps {
+                        deleteDir()
+                        checkout scm
+                        sh './scripts/ci/run.sh rust-all'
+                    }
+                }
+
+                stage('Security audit') {
+                    agent { label "${params.CI_AGENT_LABEL}" }
+                    steps {
+                        deleteDir()
+                        checkout scm
+                        sh './scripts/ci/run.sh security-audit'
+                    }
+                }
+
+                stage('SAST (semgrep)') {
+                    agent { label "${params.DOCKER_AGENT_LABEL}" }
+                    steps {
+                        deleteDir()
+                        checkout scm
+                        sh './scripts/ci/run.sh sast'
+                    }
+                    post {
+                        always {
+                            archiveArtifacts(
+                                artifacts: 'semgrep.json',
+                                allowEmptyArchive: true
+                            )
+                        }
+                    }
+                }
+
+                stage('Secrets (gitleaks)') {
+                    agent { label "${params.DOCKER_AGENT_LABEL}" }
+                    steps {
+                        deleteDir()
+                        checkout scm
+                        sh './scripts/ci/run.sh secrets'
+                    }
+                    post {
+                        always {
+                            archiveArtifacts(
+                                artifacts: 'gitleaks.json',
+                                allowEmptyArchive: true
+                            )
+                        }
+                    }
+                }
+
+                stage('Documentation') {
+                    agent { label "${params.CI_AGENT_LABEL}" }
+                    steps {
+                        deleteDir()
+                        checkout scm
+                        sh './scripts/ci/run.sh docs'
+                    }
+                }
+
+                stage('Admin Console') {
+                    agent { label "${params.CI_AGENT_LABEL}" }
+                    steps {
+                        deleteDir()
+                        checkout scm
+                        withEnv([
+                            "RUN_UI_TESTS=${params.RUN_UI_TESTS ? '1' : '0'}",
+                            'UI_TEST_SCREENSHOTS=1'
+                        ]) {
+                            sh './scripts/ci/run.sh admin-console'
+                        }
+                    }
+                    post {
+                        always {
+                            archiveArtifacts(
+                                artifacts: 'admin-console/test/local/screenshots/**',
+                                allowEmptyArchive: true
+                            )
+                        }
+                    }
+                }
+
+                stage('Trust UI') {
+                    agent { label "${params.CI_AGENT_LABEL}" }
+                    steps {
+                        deleteDir()
+                        checkout scm
+                        sh './scripts/ci/run.sh trust-ui'
+                    }
+                }
             }
-          }
         }
 
-        stage('Dependency audit') {
-          agent { docker { image RUST_IMAGE; args CACHE_ARGS; reuseNode true } }
-          steps {
-            withEnv(RUST_ENV) {
-              // rustsec/audit-check недоступен вне GHA. cargo-audit ставим через
-              // --root в кэшируемый volume (в CARGO_HOME его класть нельзя: том,
-              // навешенный на /usr/local/cargo, перекрыл бы сам cargo из образа).
-              // Блокирует сам по себе: любая advisory — ненулевой код возврата.
-              //
-              // БЕЗ --deny warnings намеренно. С ним билд роняли таймауты
-              // проверки yanked-пакетов ("couldn't check if the package is
-              // yanked: registry: request could not be completed"), то есть
-              // флаки-сеть, а не находки. Гейт должен блокировать на
-              // уязвимостях — это и есть поведение по умолчанию.
-              sh """
-                set -eu
-                ${SYS_DEPS}
-                export PATH="/opt/cargo-tools/bin:\$PATH"
-                command -v cargo-audit >/dev/null 2>&1 || \
-                  cargo install cargo-audit --locked --root /opt/cargo-tools
-                cargo audit
-              """
+        stage('Load test') {
+            when {
+                beforeAgent true
+                expression { params.RUN_LOAD_TESTS }
             }
-          }
-        }
-      }
-    }
-
-    stage('Format & lint') {
-      agent { docker { image RUST_IMAGE; args CACHE_ARGS; reuseNode true } }
-      steps {
-        withEnv(RUST_ENV) {
-          sh """
-            set -eu
-            ${SYS_DEPS}
-            rustup component add rustfmt clippy
-            cargo fmt --all -- --check
-            cargo clippy --workspace --all-targets -- -D warnings
-          """
-        }
-      }
-    }
-
-    stage('Build') {
-      agent { docker { image RUST_IMAGE; args CACHE_ARGS; reuseNode true } }
-      steps {
-        withEnv(RUST_ENV) {
-          sh """
-            set -eu
-            ${SYS_DEPS}
-            cargo build --workspace --all-targets
-
-            # lite-профиль: без rdkafka
-            cargo build -p bsdm-proxy --no-default-features --features auth-basic --all-targets
-            cargo build -p cache-indexer --no-default-features --all-targets
-          """
-        }
-      }
-    }
-
-    stage('Test') {
-      agent { docker { image RUST_IMAGE; args CACHE_ARGS; reuseNode true } }
-      steps {
-        withEnv(RUST_ENV) {
-          sh """
-            set -eu
-            ${SYS_DEPS}
-            cargo test --workspace --all-targets
-          """
-        }
-      }
-    }
-
-    stage('Feature gates') {
-      parallel {
-        stage('grpc') {
-          agent { docker { image RUST_IMAGE; args CACHE_ARGS; reuseNode true } }
-          steps {
-            withEnv(RUST_ENV) {
-              sh """
-                set -eu
-                ${SYS_DEPS}
-                rustup component add clippy
-                cargo clippy -p bsdm-proxy --features grpc --all-targets -- -D warnings
-                cargo test -p bsdm-proxy --features grpc --lib -- control_grpc
-              """
+            agent { label "${params.DOCKER_AGENT_LABEL}" }
+            steps {
+                deleteDir()
+                checkout scm
+                sh './scripts/ci/run.sh load-test'
             }
-          }
-        }
-        stage('wasm') {
-          agent { docker { image RUST_IMAGE; args CACHE_ARGS; reuseNode true } }
-          steps {
-            withEnv(RUST_ENV) {
-              sh """
-                set -eu
-                ${SYS_DEPS}
-                rustup component add clippy
-                cargo clippy -p bsdm-proxy --features wasm --lib -- -D warnings
-                cargo test -p bsdm-proxy --features wasm --lib -- wasm_host
-              """
+            post {
+                always {
+                    archiveArtifacts(
+                        artifacts: 'load-test-results/**',
+                        allowEmptyArchive: true
+                    )
+                }
             }
-          }
         }
-      }
+
+        stage('Release metadata') {
+            when {
+                beforeAgent true
+                anyOf {
+                    buildingTag()
+                    expression { params.BUILD_PACKAGES }
+                    expression { params.PUBLISH_GITHUB_RELEASE }
+                    expression { params.PUBLISH_GHCR_IMAGE }
+                }
+            }
+            agent { label "${params.CI_AGENT_LABEL}" }
+            steps {
+                deleteDir()
+                checkout scm
+                withEnv(["CI_RELEASE_TAG=${env.TAG_NAME ?: ''}"]) {
+                    sh './scripts/ci/run.sh release-validate'
+                }
+            }
+        }
+
+        stage('Packages') {
+            when {
+                beforeAgent true
+                anyOf {
+                    buildingTag()
+                    expression { params.BUILD_PACKAGES }
+                }
+            }
+            parallel {
+                stage('Package amd64') {
+                    agent { label "${params.AMD64_AGENT_LABEL}" }
+                    steps {
+                        deleteDir()
+                        checkout scm
+                        withEnv(['EXPECTED_ARCH=x86_64']) {
+                            sh './scripts/ci/run.sh package'
+                        }
+                        archiveArtifacts(
+                            artifacts: 'dist/*.tar.gz,dist/*.tar.gz.sha256',
+                            fingerprint: true
+                        )
+                        stash(
+                            name: 'package-amd64',
+                            includes: 'dist/*.tar.gz,dist/*.tar.gz.sha256'
+                        )
+                    }
+                }
+
+                stage('Package arm64') {
+                    when {
+                        beforeAgent true
+                        expression { params.BUILD_ARM64_PACKAGE }
+                    }
+                    agent { label "${params.ARM64_AGENT_LABEL}" }
+                    steps {
+                        deleteDir()
+                        checkout scm
+                        withEnv(['EXPECTED_ARCH=aarch64']) {
+                            sh './scripts/ci/run.sh package'
+                        }
+                        archiveArtifacts(
+                            artifacts: 'dist/*.tar.gz,dist/*.tar.gz.sha256',
+                            fingerprint: true
+                        )
+                        stash(
+                            name: 'package-arm64',
+                            includes: 'dist/*.tar.gz,dist/*.tar.gz.sha256'
+                        )
+                    }
+                }
+            }
+        }
+
+        stage('Publish GitHub Release') {
+            when {
+                beforeAgent true
+                allOf {
+                    buildingTag()
+                    expression { params.PUBLISH_GITHUB_RELEASE }
+                }
+            }
+            agent { label "${params.CI_AGENT_LABEL}" }
+            steps {
+                deleteDir()
+                checkout scm
+                unstash 'package-amd64'
+                script {
+                    if (params.BUILD_ARM64_PACKAGE) {
+                        unstash 'package-arm64'
+                    }
+                }
+                withCredentials([
+                    string(
+                        credentialsId: params.GITHUB_TOKEN_CREDENTIALS_ID,
+                        variable: 'GH_TOKEN'
+                    )
+                ]) {
+                    sh './scripts/ci/publish-github-release.sh "$TAG_NAME"'
+                }
+            }
+        }
+
+        stage('Publish GHCR image') {
+            when {
+                beforeAgent true
+                allOf {
+                    buildingTag()
+                    expression { params.PUBLISH_GHCR_IMAGE }
+                }
+            }
+            agent { label "${params.DOCKER_AGENT_LABEL}" }
+            steps {
+                deleteDir()
+                checkout scm
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: params.GHCR_CREDENTIALS_ID,
+                        usernameVariable: 'REGISTRY_USER',
+                        passwordVariable: 'REGISTRY_PASSWORD'
+                    )
+                ]) {
+                    withEnv([
+                        "IMAGE_NAME=${params.GHCR_IMAGE}",
+                        "PLATFORMS=${params.GHCR_PLATFORMS}"
+                    ]) {
+                        sh '''
+                            set +x
+                            trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+                            printf '%s' "$REGISTRY_PASSWORD" |
+                                docker login ghcr.io \
+                                    --username "$REGISTRY_USER" \
+                                    --password-stdin
+                            ./scripts/ci/publish-image.sh "$TAG_NAME"
+                        '''
+                    }
+                }
+            }
+        }
     }
 
-  }
+    post {
+        success {
+            echo 'BSDM-Proxy CI/CD pipeline completed successfully'
+        }
+        failure {
+            echo 'BSDM-Proxy CI/CD pipeline failed; inspect the first failed stage'
+        }
+    }
 }

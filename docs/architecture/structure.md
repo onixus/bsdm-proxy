@@ -91,6 +91,7 @@ bsdm-proxy/
 Wiki не является отдельным источником истины. Она генерируется командой:
 
 ```bash
+python3 scripts/sync-wiki.py --validate
 python3 scripts/sync-wiki.py /path/to/bsdm-proxy.wiki
 ```
 

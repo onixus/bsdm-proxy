@@ -32,6 +32,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check local Markdown links
         run: python3 scripts/check-doc-links.py
+      - name: Validate Wiki catalog and generated links
+        run: python3 scripts/sync-wiki.py --validate
 
   wiki:
     if: github.event_name == 'push'
@@ -48,6 +50,8 @@ jobs:
             wiki
       - name: Generate Wiki
         run: python3 scripts/sync-wiki.py wiki
+      - name: Verify generated Wiki is current
+        run: python3 scripts/sync-wiki.py wiki --check
       - name: Publish Wiki changes
         working-directory: wiki
         run: |

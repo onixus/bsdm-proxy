@@ -41,3 +41,7 @@ backups/
 # Local RPZ runtime state (generated from DNS_RPZ_STATE_DIR or local fallbacks)
 data/
 proxy/data/rpz/
+
+# CI security-scan reports (archived as build artifacts)
+semgrep.json
+gitleaks.json

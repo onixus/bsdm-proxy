@@ -7,6 +7,7 @@ on:
       - 'proxy/**'
       - 'scripts/run-load-test.sh'
       - 'scripts/run-hybrid-load-test.sh'
+      - 'scripts/ci/**'
       - 'scripts/wrk-proxy.lua'
       - 'docker-compose.lite.yml'
       - '.github/workflows/load-test.yml'
@@ -16,6 +17,7 @@ on:
       - 'proxy/**'
       - 'scripts/run-load-test.sh'
       - 'scripts/run-hybrid-load-test.sh'
+      - 'scripts/ci/**'
       - 'scripts/wrk-proxy.lua'
       - 'docker-compose.lite.yml'
       - '.github/workflows/load-test.yml'
@@ -41,84 +43,16 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Generate MITM CA
-        run: |
-          ./scripts/gen-ca.sh
-          sudo chown -R 1000:1000 certs
+      - name: Run lite and hybrid load-test profiles
+        env:
+          RESULTS_DIR: /tmp/hybrid-load-results
+        run: ./scripts/ci/run.sh load-test
 
-      - name: Start bsdm-proxy (Lite Mode)
-        run: |
-          docker compose -f docker-compose.lite.yml up -d --build mock-upstream || {
-            echo "❌ Failed to start mock-upstream. Proxy logs:"
-            docker compose -f docker-compose.lite.yml logs proxy
-            echo "❌ Cache Indexer logs:"
-            docker compose -f docker-compose.lite.yml logs cache-indexer
-            exit 1
-          }
-
-      - name: Wait for Proxy Readiness
-        run: |
-          echo "Waiting for proxy to become healthy..."
-          for i in {1..30}; do
-            if curl -s -I http://localhost:9090/health | grep -q "HTTP/"; then
-              echo "✅ bsdm-proxy is healthy"
-              break
-            fi
-            sleep 1
-            if [ $i -eq 30 ]; then
-              echo "❌ Proxy did not start within 30 seconds"
-              docker compose -f docker-compose.lite.yml logs proxy
-              exit 1
-            fi
-          done
-
-          echo "Waiting for mock-upstream to become healthy..."
-          for i in {1..30}; do
-            if curl -s -I http://localhost:18080/ping | grep -q "HTTP/"; then
-              echo "✅ mock-upstream is healthy"
-              break
-            fi
-            sleep 1
-            if [ $i -eq 30 ]; then
-              echo "❌ mock-upstream did not start within 30 seconds"
-              docker compose -f docker-compose.lite.yml logs mock-upstream
-              exit 1
-            fi
-          done
-
-      - name: Run Standard Load Test Script
-        run: |
-          chmod +x ./scripts/run-load-test.sh
-          PROXY=http://127.0.0.1:3128 METRICS_URL=http://127.0.0.1:9090 UPSTREAM=http://127.0.0.1:18080 \
-            ./scripts/run-load-test.sh
-
-      - name: Run Hybrid Selective-MITM Profile (#269)
-        run: |
-          chmod +x ./scripts/run-hybrid-load-test.sh
-          # CI-friendly duration/users; public upstream may add RTT noise.
-          CONCURRENT_USERS=20 TEST_DURATION=20 \
-          PROXY=http://127.0.0.1:3128 METRICS_URL=http://127.0.0.1:9090 \
-          SNI_URL=http://127.0.0.1:18080/get \
-          MITM_URL=http://127.0.0.1:18080/get \
-          HTTP_URL=http://127.0.0.1:18080/get \
-          WRITE_RESULTS=1 \
-          RESULTS_DIR=/tmp/hybrid-load-results \
-            ./scripts/run-hybrid-load-test.sh
-          echo "=== Hybrid results ==="
-          cat /tmp/hybrid-load-results/latest.md
-
-      - name: Run High-Intensity wrk Benchmark
-        run: |
-          echo "=== Running wrk benchmark with wrk-proxy.lua ==="
-          wrk -t2 -c100 -d30s -s ./scripts/wrk-proxy.lua http://localhost:3128
-
-      - name: Container Resource Metrics
+      - name: Upload hybrid load-test result
+        uses: actions/upload-artifact@v4
         if: always()
-        run: |
-          echo "=== Container resource usage ==="
-          docker stats --no-stream
-
-      - name: Stop & Clean Stack
-        if: always()
-        run: |
-          docker compose -f docker-compose.lite.yml down -v
+        with:
+          name: hybrid-load-test-result
+          path: /tmp/hybrid-load-results
+          if-no-files-found: ignore
+          retention-days: 7

@@ -1,7 +1,8 @@
 # Документация BSDM-Proxy
 
 Каноническая документация проекта хранится в `README.md` и каталоге `docs/`.
-GitHub Wiki является автоматически обновляемым зеркалом этих файлов.
+[GitHub Wiki](https://github.com/onixus/bsdm-proxy/wiki) предоставляет
+автоматически обновляемую навигацию по этим файлам.
 
 Перед использованием опциональной функции проверьте
 [матрицу зрелости](project-status.md).
@@ -15,6 +16,9 @@ GitHub Wiki является автоматически обновляемым �
 | [Pilot authentication](getting-started/pilot-auth.md) | Basic users file, smoke, OIDC out-of-scope note |
 | [Pilot DNS sinkhole](getting-started/pilot-dns.md) | UDP first hop :5353, dig smoke, load-test DNS share |
 | [Pilot alerts](getting-started/pilot-alerts.md) | decision_source UX + alert-worker pilot rule pack |
+| [Pilot ML](getting-started/pilot-ml.md) | Одна модель, write-back и smoke test |
+| [Pilot agent](getting-started/pilot-agent.md) | Phase C lab spike и приёмка |
+| [Agent fleet](getting-started/pilot-agent-fleet.md) | MDM/GPO/Jamf packaging scaffolding |
 | [Hybrid load-test profile](ops-and-dev/load-test-selective-mitm.md) | 100-user SNI/MITM/DNS probe + results archive (#269) |
 | [Control plane security](ops-and-dev/control-plane-security.md) | Tokens, bind, network policy for pilot (#271) |
 | [Backup & restore](ops-and-dev/backup-restore.md) | ClickHouse dumps + CA archive rollback drill |
@@ -42,6 +46,7 @@ GitHub Wiki является автоматически обновляемым �
 | [Categorization](features/categorization.md) | основной/beta по источнику |
 | [Control plane](features/control-plane.md) | REST — основной; gRPC — beta |
 | [Certificate Pinning exceptions](features/certificate-pinning.md) | Управляемый bypass-реестр, reload и аудит |
+| [Admin Console security](features/admin-console-security.md) | Trust boundaries и mutation token gate |
 | [Semantic cache](features/semantic-cache.md) | beta |
 | [DNS sinkhole, DoH, DoT](features/dns-sinkhole.md) | основной |
 | [WASM plugins](features/wasm-plugins.md) | experimental |
@@ -60,6 +65,11 @@ GitHub Wiki является автоматически обновляемым �
 | Документ | Назначение |
 |---|---|
 | [Kubernetes](ops-and-dev/k8s-architecture.md) | Helm и разделение data/analytics plane |
+| [Control plane security](ops-and-dev/control-plane-security.md) | Tokens, bind и network policy |
+| [Backup & restore](ops-and-dev/backup-restore.md) | ClickHouse и MITM CA rollback drill |
+| [CA lifecycle](ops-and-dev/ca-lifecycle.md) | Выпуск, ротация и отзыв CA |
+| [Hybrid load test](ops-and-dev/load-test-selective-mitm.md) | Selective MITM, DNS и auth workload |
+| [Load-test results](ops-and-dev/load-test-results/README.md) | Хранение и интерпретация отчётов |
 | [Logging and metrics](ops-and-dev/logging.md) | Логи, Prometheus и диагностика |
 | [Benchmarks](ops-and-dev/benchmarks.md) | Методика и опубликованные результаты |
 | [Development](ops-and-dev/development.md) | Build, test и release workflow |
@@ -75,9 +85,8 @@ GitHub Wiki является автоматически обновляемым �
 - [ADR 0005: Local policy agent](adr/0005-local-policy-agent-vs-tunnel-first.md)
 - [ADR 0006: One supported operator console](adr/0006-single-operator-console.md)
 - [Roadmap](roadmap.md)
-- [Release notes (v0.9.1)](releases/v0.9.1.md)
-- [Release notes (v0.9.0)](releases/v0.9.0.md)
-- [Release notes (v0.8.0)](releases/v0.8.0.md)
+- [Latest release notes (v0.9.11)](releases/v0.9.11.md)
+- [Release history](releases/)
 
 Исторические release notes сохраняют версии и ограничения соответствующего
 релиза. Их не следует использовать как актуальную deployment-инструкцию.
