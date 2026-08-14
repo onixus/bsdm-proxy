@@ -4,7 +4,6 @@ set -euo pipefail
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
@@ -87,7 +86,7 @@ backup_file_if_present() {
   local timestamp backup
   timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
   backup="${path}.bak.${timestamp}"
-  cp -a -- "$path" "$backup"
+  cp -p "$path" "$backup"
   info "Backed up $path -> $backup"
 }
 
@@ -95,8 +94,15 @@ upsert_env() {
   local file="$1"
   local key="$2"
   local value="$3"
-  local tmp
+  local tmp rendered
+
+  if [[ ! -f "$file" ]]; then
+    : > "$file"
+    chmod 0640 "$file"
+  fi
+
   tmp="$(mktemp "${file}.tmp.XXXXXX")"
+  rendered="${tmp}.rendered"
 
   awk -v key="$key" -v value="$value" '
     BEGIN { replaced = 0 }
@@ -107,10 +113,17 @@ upsert_env() {
     }
     { print }
     END { if (!replaced) print key "=" value }
-  ' "$file" > "$tmp"
-  chmod --reference="$file" "$tmp" 2>/dev/null || chmod 0640 "$tmp"
-  chown --reference="$file" "$tmp" 2>/dev/null || true
-  mv -f -- "$tmp" "$file"
+  ' "$file" > "$rendered"
+
+  if cp -p "$file" "$tmp" 2>/dev/null; then
+    :
+  else
+    cp "$file" "$tmp"
+    chmod 0640 "$tmp"
+  fi
+  cat "$rendered" > "$tmp"
+  rm -f "$rendered"
+  mv -f "$tmp" "$file"
 }
 
 ensure_ca() {
