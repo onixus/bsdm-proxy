@@ -58,7 +58,6 @@ configure_native_proxy() {
 
   ensure_secret "$env_file" CONTROL_API_TOKEN
   ensure_secret "$env_file" ACL_API_TOKEN
-
   chmod 0640 "$env_file"
 }
 
@@ -66,9 +65,12 @@ configure_compose_secrets() {
   local root="$1"
   local env_file="${root}/.env"
 
-  touch "$env_file"
+  if [[ -f "$env_file" ]]; then
+    backup_file_if_present "$env_file"
+  else
+    : > "$env_file"
+  fi
   chmod 0600 "$env_file"
-  backup_file_if_present "$env_file"
 
   ensure_secret "$env_file" CONTROL_API_TOKEN
   ensure_secret "$env_file" ACL_API_TOKEN
