@@ -41,3 +41,6 @@ backups/
 # Local RPZ runtime state (generated from DNS_RPZ_STATE_DIR or local fallbacks)
 data/
 proxy/data/rpz/
+
+# UI smoke-test screenshots (CI uploads them as artifacts)
+admin-console/test/local/screenshots/
