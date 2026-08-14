@@ -4,28 +4,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/common.sh"
 
-preflight() {
-  require_root
-
-  for cmd in curl openssl install awk mv; do
-    require_cmd "$cmd"
-  done
-
-  if command -v systemctl >/dev/null 2>&1; then
-    info "systemd detected"
-  else
-    warn "systemd not detected; native service install unavailable"
-  fi
-
-  if command -v docker >/dev/null 2>&1; then
-    info "docker detected"
-  else
-    warn "docker not detected; compose mode unavailable"
-  fi
-
+check_architecture() {
   case "$(uname -m)" in
     x86_64|aarch64|arm64)
-      info "supported architecture: $(uname -m)"
+      info "Supported architecture: $(uname -m)"
       ;;
     *)
       die "Unsupported architecture: $(uname -m)"
@@ -33,6 +15,40 @@ preflight() {
   esac
 }
 
+preflight_common() {
+  for cmd in curl openssl awk mv install; do
+    require_cmd "$cmd"
+  done
+  check_architecture
+}
+
+preflight_native() {
+  preflight_common
+  require_root
+  [[ "$(uname -s)" == "Linux" ]] || die "Native systemd installation is supported on Linux only"
+  require_cmd cargo
+  require_cmd systemctl
+  require_cmd sha256sum
+  systemctl --version >/dev/null 2>&1 || die "systemd is required for native installation"
+  info "Native installation prerequisites passed"
+}
+
+preflight_docker() {
+  preflight_common
+  require_cmd docker
+  docker compose version >/dev/null 2>&1 || die "Docker Compose plugin is required"
+  info "Docker installation prerequisites passed"
+}
+
+preflight() {
+  local mode="${1:-}"
+  case "$mode" in
+    native) preflight_native ;;
+    docker) preflight_docker ;;
+    *) die "Unknown preflight mode: ${mode:-<empty>}" ;;
+  esac
+}
+
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-  preflight
+  preflight "${1:-}"
 fi
