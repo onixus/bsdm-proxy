@@ -71,7 +71,7 @@
       "priority": 141,
       "action": "deny",
       "rule_type": {
-        "Domain": "t.me"
+        "Domain": "*.t.me"
       }
     },
     {
@@ -183,6 +183,542 @@
       "rule_type": {
         "Domain": "*.mega.nz"
       }
+    },
+    {
+      "id": "block-social-userapi",
+      "name": "Block VK userapi CDN",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.userapi.com" }
+    },
+    {
+      "id": "block-social-vkvideo",
+      "name": "Block VK Video",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.vkvideo.ru" }
+    },
+    {
+      "id": "block-social-vk-portal",
+      "name": "Block vk-portal.net",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.vk-portal.net" }
+    },
+    {
+      "id": "block-social-vk-ru",
+      "name": "Block vk.ru",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.vk.ru" }
+    },
+    {
+      "id": "block-social-okcdn",
+      "name": "Block OK/VK okcdn",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.okcdn.ru" }
+    },
+    {
+      "id": "block-social-telegram-me",
+      "name": "Block telegram.me",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.telegram.me" }
+    },
+    {
+      "id": "block-social-telegram-dog",
+      "name": "Block telegram.dog",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.telegram.dog" }
+    },
+    {
+      "id": "block-social-telegram-api",
+      "name": "Block api.telegram.org",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "api.telegram.org" }
+    },
+    {
+      "id": "block-social-reddit-it",
+      "name": "Block redd.it CDN",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.redd.it" }
+    },
+    {
+      "id": "block-social-redditmedia",
+      "name": "Block redditmedia",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.redditmedia.com" }
+    },
+    {
+      "id": "block-social-redditstatic",
+      "name": "Block redditstatic",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.redditstatic.com" }
+    },
+    {
+      "id": "block-social-fbcdn",
+      "name": "Block Facebook CDN",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.fbcdn.net" }
+    },
+    {
+      "id": "block-social-twimg",
+      "name": "Block Twitter/X media",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.twimg.com" }
+    },
+    {
+      "id": "block-social-max",
+      "name": "Block MAX messenger",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.max.ru" }
+    },
+    {
+      "id": "block-adult-phncdn",
+      "name": "Block Pornhub CDN",
+      "enabled": true,
+      "priority": 151,
+      "action": "deny",
+      "rule_type": { "Domain": "*.phncdn.com" }
+    },
+    {
+      "id": "block-cloud-gusercontent",
+      "name": "Block Google user content",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.googleusercontent.com" }
+    },
+    {
+      "id": "block-cloud-livefilestore",
+      "name": "Block OneDrive livefilestore",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.livefilestore.com" }
+    },
+    {
+      "id": "block-cloud-1drv-com",
+      "name": "Block 1drv.com",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.1drv.com" }
+    },
+    {
+      "id": "block-cloud-yadisk-net",
+      "name": "Block disk.yandex.net",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.disk.yandex.net" }
+    },
+    {
+      "id": "block-cloud-attachmail",
+      "name": "Block attachmail.ru",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.attachmail.ru" }
+    },
+    {
+      "id": "block-cloud-dropboxapi",
+      "name": "Block Dropbox API",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.dropboxapi.com" }
+    },
+    {
+      "id": "block-cloud-boxcdn",
+      "name": "Block Box CDN",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.boxcdn.net" }
+    },
+    {
+      "id": "block-social-telegram-cdn",
+      "name": "Block telegram-cdn.org",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.telegram-cdn.org" }
+    },
+    {
+      "id": "block-social-cdn-telegram",
+      "name": "Block cdn-telegram.org",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.cdn-telegram.org" }
+    },
+    {
+      "id": "block-social-telegraph",
+      "name": "Block telegra.ph",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.telegra.ph" }
+    },
+    {
+      "id": "block-social-telesco",
+      "name": "Block telesco.pe",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.telesco.pe" }
+    },
+    {
+      "id": "block-social-vk-me",
+      "name": "Block vk.me",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.vk.me" }
+    },
+    {
+      "id": "block-social-vk-cc",
+      "name": "Block vk.cc",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.vk.cc" }
+    },
+    {
+      "id": "block-social-vkuservideo",
+      "name": "Block vkuservideo.net",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.vkuservideo.net" }
+    },
+    {
+      "id": "block-social-vkuseraudio",
+      "name": "Block vkuseraudio.net",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.vkuseraudio.net" }
+    },
+    {
+      "id": "block-social-vkuserlive",
+      "name": "Block vkuserlive.net",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.vkuserlive.net" }
+    },
+    {
+      "id": "block-social-vk-cdn-net",
+      "name": "Block vk-cdn.net",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.vk-cdn.net" }
+    },
+    {
+      "id": "block-social-vk-cdn-me",
+      "name": "Block vk-cdn.me",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.vk-cdn.me" }
+    },
+    {
+      "id": "block-social-mvk",
+      "name": "Block mvk.com",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.mvk.com" }
+    },
+    {
+      "id": "block-social-ok-me",
+      "name": "Block ok.me",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.ok.me" }
+    },
+    {
+      "id": "block-social-oneme",
+      "name": "Block MAX oneme.ru",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.oneme.ru" }
+    },
+    {
+      "id": "block-social-tco",
+      "name": "Block t.co",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.t.co" }
+    },
+    {
+      "id": "block-social-pscp",
+      "name": "Block Periscope/X pscp.tv",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.pscp.tv" }
+    },
+    {
+      "id": "block-social-fbsbx",
+      "name": "Block Facebook fbsbx",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.fbsbx.com" }
+    },
+    {
+      "id": "block-social-messenger",
+      "name": "Block Messenger",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.messenger.com" }
+    },
+    {
+      "id": "block-social-cdninstagram",
+      "name": "Block Instagram CDN",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.cdninstagram.com" }
+    },
+    {
+      "id": "block-social-whatsapp-net",
+      "name": "Block WhatsApp CDN",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.whatsapp.net" }
+    },
+    {
+      "id": "block-social-wa-me",
+      "name": "Block wa.me",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.wa.me" }
+    },
+    {
+      "id": "block-social-discord-media",
+      "name": "Block Discord media",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.discord.media" }
+    },
+    {
+      "id": "block-social-discordapp-net",
+      "name": "Block discordapp.net",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.discordapp.net" }
+    },
+    {
+      "id": "block-social-discordcdn",
+      "name": "Block Discord CDN",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.discordcdn.com" }
+    },
+    {
+      "id": "block-social-licdn",
+      "name": "Block LinkedIn CDN",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.licdn.com" }
+    },
+    {
+      "id": "block-social-sccdn",
+      "name": "Block Snapchat CDN",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.sc-cdn.net" }
+    },
+    {
+      "id": "block-social-threads-net",
+      "name": "Block threads.net",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.threads.net" }
+    },
+    {
+      "id": "block-social-threads-com",
+      "name": "Block threads.com",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.threads.com" }
+    },
+    {
+      "id": "block-cloud-mega-io",
+      "name": "Block mega.io",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.mega.io" }
+    },
+    {
+      "id": "block-cloud-icloud-content",
+      "name": "Block iCloud content",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.icloud-content.com" }
+    },
+    {
+      "id": "block-cloud-gdrive-usercontent",
+      "name": "Block Drive usercontent",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.drive.usercontent.google.com" }
+    },
+    {
+      "id": "block-cloud-gphotos",
+      "name": "Block Google Photos",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.photos.google.com" }
+    },
+    {
+      "id": "block-cloud-gsheets",
+      "name": "Block Google Sheets",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.sheets.google.com" }
+    },
+    {
+      "id": "block-cloud-gslides",
+      "name": "Block Google Slides",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.slides.google.com" }
+    },
+    {
+      "id": "block-cloud-onedrive-com",
+      "name": "Block onedrive.com",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.onedrive.com" }
+    },
+    {
+      "id": "block-cloud-sharepointonline",
+      "name": "Block SharePoint Online",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.sharepointonline.com" }
+    },
+    {
+      "id": "block-cloud-dropboxusercontent",
+      "name": "Block Dropbox usercontent",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.dropboxusercontent.com" }
+    },
+    {
+      "id": "block-cloud-dropboxstatic",
+      "name": "Block Dropbox static",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.dropboxstatic.com" }
+    },
+    {
+      "id": "block-cloud-files-mailru",
+      "name": "Block files.mail.ru",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.files.mail.ru" }
+    },
+    {
+      "id": "block-cloud-yadisk-kz",
+      "name": "Block Yandex Disk (kz)",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.disk.yandex.kz" }
+    },
+    {
+      "id": "block-cloud-yadisk-ua",
+      "name": "Block Yandex Disk (ua)",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.disk.yandex.ua" }
+    },
+    {
+      "id": "block-cloud-yadisk-by",
+      "name": "Block Yandex Disk (by)",
+      "enabled": true,
+      "priority": 141,
+      "action": "deny",
+      "rule_type": { "Domain": "*.disk.yandex.by" }
+    },
+    {
+      "id": "block-adult-pphcdn",
+      "name": "Block Pornhub premium CDN",
+      "enabled": true,
+      "priority": 151,
+      "action": "deny",
+      "rule_type": { "Domain": "*.pphcdn.com" }
+    },
+    {
+      "id": "block-adult-trafficjunky-net",
+      "name": "Block TrafficJunky",
+      "enabled": true,
+      "priority": 151,
+      "action": "deny",
+      "rule_type": { "Domain": "*.trafficjunky.net" }
+    },
+    {
+      "id": "block-adult-trafficjunky-com",
+      "name": "Block TrafficJunky (com)",
+      "enabled": true,
+      "priority": 151,
+      "action": "deny",
+      "rule_type": { "Domain": "*.trafficjunky.com" }
     }
   ]
 }
