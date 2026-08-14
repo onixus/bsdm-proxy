@@ -119,6 +119,40 @@ pipeline {
                     }
                 }
 
+                stage('SAST (semgrep)') {
+                    agent { label "${params.DOCKER_AGENT_LABEL}" }
+                    steps {
+                        deleteDir()
+                        checkout scm
+                        sh './scripts/ci/run.sh sast'
+                    }
+                    post {
+                        always {
+                            archiveArtifacts(
+                                artifacts: 'semgrep.json',
+                                allowEmptyArchive: true
+                            )
+                        }
+                    }
+                }
+
+                stage('Secrets (gitleaks)') {
+                    agent { label "${params.DOCKER_AGENT_LABEL}" }
+                    steps {
+                        deleteDir()
+                        checkout scm
+                        sh './scripts/ci/run.sh secrets'
+                    }
+                    post {
+                        always {
+                            archiveArtifacts(
+                                artifacts: 'gitleaks.json',
+                                allowEmptyArchive: true
+                            )
+                        }
+                    }
+                }
+
                 stage('Documentation') {
                     agent { label "${params.CI_AGENT_LABEL}" }
                     steps {

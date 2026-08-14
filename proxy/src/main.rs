@@ -68,6 +68,13 @@ async fn run_accept_loop(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Admin Console persist file must win over compose hardcodes after Apply+restart.
+    if let Ok(saved) = bsdm_proxy::runtime_config::read_env_file() {
+        if !saved.is_empty() {
+            bsdm_proxy::runtime_config::apply_env_map(&saved);
+        }
+    }
+
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();

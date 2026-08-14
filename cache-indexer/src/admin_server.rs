@@ -118,7 +118,10 @@ async fn handle_request(
         if line.is_empty() {
             break;
         }
-        if let Some(value) = line.strip_prefix("Authorization: ") {
+        if let Some(value) = line
+            .strip_prefix("Authorization: ")
+            .or_else(|| line.strip_prefix("authorization: "))
+        {
             auth = Some(value.trim().to_string());
         } else if let Some(value) = line
             .strip_prefix("Origin: ")

@@ -42,6 +42,7 @@
 |---|---|
 | [Authentication](features/authentication.md) | Basic/OIDC — основной; LDAP/NTLM/Kerberos — beta |
 | [ACL](features/acl-policy.md) | основной |
+| [ACL в Admin Console](features/acl-console.md) | Policies: категории vs домены |
 | [Categorization](features/categorization.md) | основной/beta по источнику |
 | [Control plane](features/control-plane.md) | REST — основной; gRPC — beta |
 | [Certificate Pinning exceptions](features/certificate-pinning.md) | Управляемый bypass-реестр, reload и аудит |

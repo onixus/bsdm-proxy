@@ -27,6 +27,21 @@ export interface ResolvedApiSettings {
 }
 
 const STORAGE_KEY = 'bsdm-admin-api-settings'
+
+declare global {
+  interface Window {
+    __BSDM_CONSOLE_API__?: Partial<ApiSettings>
+  }
+}
+
+function bootstrapFromWindow(): Partial<ApiSettings> {
+  try {
+    return window.__BSDM_CONSOLE_API__ ?? {}
+  } catch {
+    return {}
+  }
+}
+
 export const API_CREDENTIALS_CHANGED_EVENT = 'bsdm-api-credentials-changed'
 
 const defaults: ApiSettings = {
@@ -51,10 +66,23 @@ let runtimeTokens: Pick<ApiSettings, SensitiveApiKey> = {
   controlToken: '',
 }
 
+function filledTokens(source: Partial<ApiSettings>): Partial<ApiSettings> {
+  const out: Partial<ApiSettings> = {}
+  for (const key of ['controlPlaneToken', 'searchToken', 'aclToken', 'controlToken'] as const) {
+    const value = source[key]
+    if (typeof value === 'string' && value.trim()) {
+      out[key] = value
+    }
+  }
+  return out
+}
+
 export function loadApiSettings(): ApiSettings {
+  const boot = filledTokens(bootstrapFromWindow())
+  const session = filledTokens(runtimeTokens)
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return { ...defaults, ...runtimeTokens }
+    if (!raw) return { ...defaults, ...boot, ...session }
     const parsed = JSON.parse(raw) as Partial<ApiSettings>
     const legacyHasSplitConfiguration = [
       parsed.searchBaseUrl,
@@ -66,10 +94,11 @@ export function loadApiSettings(): ApiSettings {
       ...defaults,
       ...parsed,
       connectionMode: parsed.connectionMode ?? (legacyHasSplitConfiguration ? 'advanced' : 'single'),
-      ...runtimeTokens,
+      ...boot,
+      ...session,
     }
   } catch {
-    return { ...defaults, ...runtimeTokens }
+    return { ...defaults, ...boot, ...session }
   }
 }
 

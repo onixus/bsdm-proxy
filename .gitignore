@@ -42,5 +42,9 @@ backups/
 data/
 proxy/data/rpz/
 
+# CI security-scan reports (archived as build artifacts)
+semgrep.json
+gitleaks.json
+
 # UI smoke-test screenshots (CI uploads them as artifacts)
 admin-console/test/local/screenshots/

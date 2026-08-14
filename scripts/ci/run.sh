@@ -144,6 +144,50 @@ trust_ui() {
   )
 }
 
+sast() {
+  require_commands docker
+  # An array, not a string: these have to reach semgrep as separate argv
+  # entries, and an unquoted string expansion to achieve that trips SC2086.
+  local rules=(--config p/security-audit --config p/secrets --config p/rust)
+
+  # Pass 1 — full report over every severity. --no-error keeps the build green
+  # here so the artifact is always produced, even when pass 2 will fail.
+  log "SAST (semgrep): full report"
+  docker run --rm -v "${ROOT}:/src" -w /src semgrep/semgrep:latest \
+    semgrep scan "${rules[@]}" --metrics=off --no-error \
+      --json --output semgrep.json
+
+  # Pass 2 — the gate itself: ERROR severity only, findings become the exit code.
+  log "SAST (semgrep): gate on ERROR"
+  docker run --rm -v "${ROOT}:/src" -w /src semgrep/semgrep:latest \
+    semgrep scan "${rules[@]}" --metrics=off --severity ERROR --error
+}
+
+secrets() {
+  require_commands docker
+  # Not a duplicate of semgrep's p/secrets: that one only sees the working tree,
+  # while gitleaks walks the whole commit history — and a leaked key stays in
+  # history after it is deleted from the working copy.
+  #
+  # Single pass, unlike semgrep: findings carry no severity, so splitting report
+  # from gate buys nothing. The report is written before the non-zero exit, so
+  # callers can archive it on failure. --redact keeps secrets out of CI logs.
+  # False positives are silenced via .gitleaksignore in the repo root, keyed by
+  # the finding fingerprint from gitleaks.json.
+  #
+  # The version is pinned, unlike semgrep above: the `detect` subcommand is
+  # deprecated in favour of `git`/`dir`, and a floating :latest would one day
+  # break this gate on a CLI change rather than on a real finding.
+  local no_git=()
+  [[ -d "${ROOT}/.git" ]] || no_git=(--no-git)
+
+  log "Secrets (gitleaks)"
+  docker run --rm -v "${ROOT}:/src" -w /src zricethezav/gitleaks:v8.30.1 \
+    detect --source /src "${no_git[@]}" \
+      --report-format json --report-path /src/gitleaks.json \
+      --redact --no-banner --exit-code 1
+}
+
 security_audit() {
   require_commands cargo
   if ! cargo audit --version >/dev/null 2>&1; then
@@ -217,6 +261,8 @@ Tasks:
   admin-console-core Lint, test, and build the admin console
   admin-console-ui   Run the Admin Console Chromium smoke test
   trust-ui           Build the experimental trust UI
+  sast               Run the semgrep SAST gate (needs Docker)
+  secrets            Scan commit history for leaked secrets (needs Docker)
   security-audit     Run cargo-audit (must be installed on the agent)
   release-validate   Validate version, tag, changelog, and Cargo metadata
   package            Build and verify the native release package
@@ -241,6 +287,8 @@ case "$task" in
   admin-console-core) admin_console_core ;;
   admin-console-ui) admin_console_ui ;;
   trust-ui) trust_ui ;;
+  sast) sast ;;
+  secrets) secrets ;;
   security-audit) security_audit ;;
   release-validate) release_validate "$@" ;;
   package) package ;;

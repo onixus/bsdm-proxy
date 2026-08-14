@@ -91,9 +91,11 @@ export function collectConfig(form: ConfigFormState): ProxyConfig {
     })
   }
 
+  Object.assign(config, {
+    REDIS_L2_ENABLED: String(form.redisL2Enabled),
+  })
   if (form.redisL2Enabled) {
     Object.assign(config, {
-      REDIS_L2_ENABLED: 'true',
       REDIS_URL: form.redisUrl,
       REDIS_KEY_PREFIX: form.redisKeyPrefix,
     })

@@ -3,7 +3,6 @@ name = "agent-spike"
 version = "0.1.0"
 edition = "2021"
 description = "BSDM Local Policy Agent (product binary bsdm-agent; lab alias agent-spike)"
-autobins = false
 
 [dependencies]
 tokio = { workspace = true }
@@ -18,13 +17,12 @@ tokio-tungstenite = { version = "0.30", default-features = true, features = ["ru
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 http = "1"
 
-# Product binary (fleet packages install as bsdm-agent).
-[[bin]]
-name = "bsdm-agent"
-path = "src/main.rs"
-
-# Lab alias kept for existing docs/scripts.
-[[bin]]
-name = "agent-spike"
-path = "src/main.rs"
+# Both binaries are auto-discovered from src/bin/ and are thin wrappers over
+# this package's library. They previously shared a single src/main.rs via two
+# explicit [[bin]] targets, which cargo warns about ("found to be present in
+# multiple build targets") and which broke cold builds with E0463: the two
+# targets compile the same source concurrently. Keep one file per binary.
+[lib]
+name = "agent_spike"
+path = "src/lib.rs"
 
