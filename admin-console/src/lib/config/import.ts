@@ -173,14 +173,31 @@ function formForStorage(form: ConfigFormState): Omit<ConfigFormState, (typeof SE
   return stored as Omit<ConfigFormState, (typeof SENSITIVE_FORM_KEYS)[number]>
 }
 
+function bootstrapControlToken(): string {
+  try {
+    const token = window.__BSDM_CONSOLE_API__?.controlPlaneToken
+    return typeof token === 'string' ? token.trim() : ''
+  } catch {
+    return ''
+  }
+}
+
 export function loadSavedForm(): ConfigFormState {
+  const bootToken = bootstrapControlToken()
+  const seeded = bootToken
+    ? {
+        controlApiToken: bootToken,
+        searchApiToken: bootToken,
+        aclApiToken: bootToken,
+      }
+    : {}
   try {
     const raw = localStorage.getItem(FORM_STORAGE_KEY)
-    if (!raw) return { ...defaultFormState }
+    if (!raw) return { ...defaultFormState, ...seeded }
     const parsed = JSON.parse(raw) as Partial<ConfigFormState>
-    return { ...defaultFormState, ...parsed }
+    return { ...defaultFormState, ...parsed, ...seeded }
   } catch {
-    return { ...defaultFormState }
+    return { ...defaultFormState, ...seeded }
   }
 }
 
