@@ -87,7 +87,7 @@ malware.example
 
 ```bash
 # Base service (no profile). Pilot overlay optional:
-docker compose -f docker-compose.yml -f docker-compose.pilot.yml up -d --build dns-sinkhole
+docker compose -f docker-compose.yml -f deploy/compose/docker-compose.pilot.yml up -d --build dns-sinkhole
 
 # Host: UDP 5353 → container 53; health/metrics :8092
 # Day-1: DoH/DoT disabled unless DNS_SINKHOLE_DOH_ENABLED / DOT + TLS certs

@@ -1,9 +1,13 @@
+# Pinned so the project name stays 'bsdm-proxy' now that this file lives
+# outside the repo root (Compose would otherwise derive it from the directory).
+name: bsdm-proxy
+
 # Pilot overlay for Hybrid Policy path (issues #269 / #270).
 #
 # Usage:
 #   export CONTROL_API_TOKEN ACL_API_TOKEN SEARCH_API_TOKEN  # required secrets
-#   ./scripts/gen-ca.sh
-#   docker compose -f docker-compose.yml -f docker-compose.pilot.yml up -d --build
+#   ../../scripts/gen-ca.sh
+#   docker compose -f docker-compose.yml -f deploy/compose/docker-compose.pilot.yml up -d --build
 #
 # Hybrid defaults only. Experimental modules stay behind compose profiles
 # (alerts, ml, icap, experimental-trust-ui) and are NOT enabled by this file.
@@ -30,7 +34,7 @@ services:
 
   clickhouse:
     volumes:
-      - ./scripts/clickhouse/pilot_retention.sql:/docker-entrypoint-initdb.d/03-pilot-retention.sql:ro
+      - ../../scripts/clickhouse/pilot_retention.sql:/docker-entrypoint-initdb.d/03-pilot-retention.sql:ro
     deploy:
       resources:
         limits:
@@ -88,7 +92,7 @@ services:
     volumes:
       - pilot-spill:/var/cache/bsdm-spill
       # Optional Basic auth users (override host path via bind). Example password: pilot-secret.
-      - ${BASIC_AUTH_USERS_HOST:-./config/basic-auth-users.example.json}:/etc/bsdm-proxy/basic-auth-users.json:ro
+      - ${BASIC_AUTH_USERS_HOST:-../../config/basic-auth-users.example.json}:/etc/bsdm-proxy/basic-auth-users.json:ro
     deploy:
       resources:
         limits:

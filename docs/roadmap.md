@@ -33,7 +33,7 @@ Roadmap определяет порядок работ в рамках стра�
 - [x] Управление реестром исключений Certificate Pinning (`pinning_exceptions.json`).
 - [x] Включение MITM строго через политики (запрет глобальных флагов принудительного MITM в продакшене).
 - [x] Профиль нагрузочного тестирования пилота: Selective MITM + DNS + Auth (100 пользователей) — `scripts/run-hybrid-load-test.sh`, [docs](ops-and-dev/load-test-selective-mitm.md), CI hybrid job (#269).
-- [x] Pilot compose + acceptance criteria (Hybrid defaults, no experimental day-1) — `docker-compose.pilot.yml`, [pilot-deployment.md](getting-started/pilot-deployment.md) (#270).
+- [x] Pilot compose + acceptance criteria (Hybrid defaults, no experimental day-1) — `deploy/compose/docker-compose.pilot.yml`, [pilot-deployment.md](getting-started/pilot-deployment.md) (#270).
 - [x] Проверка резервного копирования и восстановления ClickHouse / ротации CA — [backup-restore.md](ops-and-dev/backup-restore.md), `scripts/drill-backup-restore.sh`, `scripts/backup-clickhouse.sh` / `restore-clickhouse.sh`, CA archive rollback.
 
 ---

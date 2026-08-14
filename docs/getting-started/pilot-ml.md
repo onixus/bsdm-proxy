@@ -58,7 +58,7 @@ clickhouse-client --multiquery < scripts/clickhouse/ml_features.sql
 # Optional pilot env pack:
 # set -a; source config/pilot-ml.env.example; set +a
 
-docker compose -f docker-compose.yml -f docker-compose.pilot.yml \
+docker compose -f docker-compose.yml -f deploy/compose/docker-compose.pilot.yml \
   --profile ml up -d --build ml-worker
 
 curl -fsS http://127.0.0.1:8091/health

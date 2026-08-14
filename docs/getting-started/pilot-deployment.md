@@ -8,7 +8,7 @@
 
 | Артефакт | Назначение |
 |---|---|
-| [`docker-compose.pilot.yml`](../../docker-compose.pilot.yml) | Hybrid defaults + resource caps + 5-day retention |
+| [`deploy/compose/docker-compose.pilot.yml`](../../deploy/compose/docker-compose.pilot.yml) | Hybrid defaults + resource caps + 5-day retention |
 | [Load-test profile](../ops-and-dev/load-test-selective-mitm.md) | 100-user Hybrid нагрузка (#269) |
 | [CA lifecycle](../ops-and-dev/ca-lifecycle.md) | Выпуск / ротация MITM CA |
 | [Project status](../project-status.md) | Зрелость функций |
@@ -70,7 +70,7 @@ curl -X POST http://127.0.0.1:9090/api/security/dlp \
 
 ### A. Stand-up
 
-- [ ] `docker compose -f docker-compose.yml -f docker-compose.pilot.yml up -d --build` поднимает proxy, kafka, clickhouse, cache-indexer, prometheus, grafana, dns-sinkhole
+- [ ] `docker compose -f docker-compose.yml -f deploy/compose/docker-compose.pilot.yml up -d --build` поднимает proxy, kafka, clickhouse, cache-indexer, prometheus, grafana, dns-sinkhole
 - [ ] `GET :9090/health` и `GET :9090/ready` → ok
 - [ ] `GET :9090/admin/` → Admin Console SPA (встроена в image)
 - [ ] `GET :8080/health` (indexer) → ok; Search API: `GET :8080/api/search?limit=1` с `Authorization: Bearer $SEARCH_API_TOKEN`
@@ -157,7 +157,7 @@ curl -X POST http://127.0.0.1:9090/api/security/dlp \
 
 ## Compose override
 
-[`docker-compose.pilot.yml`](../../docker-compose.pilot.yml) задаёт:
+[`deploy/compose/docker-compose.pilot.yml`](../../deploy/compose/docker-compose.pilot.yml) задаёт:
 
 - Hybrid: `POLICY_MODE=selective-mitm`, `MITM_CATEGORIES`, production profile
 - ACL on by default; auth/categorization off until configured
@@ -179,7 +179,7 @@ export SEARCH_API_TOKEN="$(openssl rand -hex 16)"
 ./scripts/gen-ca.sh
 docker compose \
   -f docker-compose.yml \
-  -f docker-compose.pilot.yml \
+  -f deploy/compose/docker-compose.pilot.yml \
   up -d --build
 ```
 
@@ -233,7 +233,7 @@ volume. Для уже инициализированного ClickHouse прим
 ## Запуск и smoke
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.pilot.yml ps
+docker compose -f docker-compose.yml -f deploy/compose/docker-compose.pilot.yml ps
 
 curl -fsS http://127.0.0.1:9090/health
 curl -fsS http://127.0.0.1:9090/ready
@@ -256,7 +256,7 @@ export ALERT_WEBHOOK_URL='https://siem.example.invalid/bsdm'
 export ML_MODEL='ueba_zscore_v0'
 docker compose \
   -f docker-compose.yml \
-  -f docker-compose.pilot.yml \
+  -f deploy/compose/docker-compose.pilot.yml \
   --profile alerts --profile ml \
   up -d --build
 ```

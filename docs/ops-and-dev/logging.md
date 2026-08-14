@@ -65,8 +65,8 @@ RUST_LOG=info,bsdm_proxy::icp=debug,bsdm_proxy::hierarchy=debug
 | [packaging/config/bsdm-proxy.env.example](../../packaging/config/bsdm-proxy.env.example) | `info,bsdm_proxy=info` |
 | [packaging/config/cache-indexer.env.example](../../packaging/config/cache-indexer.env.example) | `info,cache_indexer=info` |
 | [docker-compose.yml](../../docker-compose.yml) | `info,bsdm_proxy=debug` / `info,cache_indexer=debug` |
-| [docker-compose.hierarchy.yml](../../docker-compose.hierarchy.yml) | `info,bsdm_proxy=info` |
-| [docker-compose.test.yml](../../docker-compose.test.yml) | `warn` |
+| [deploy/compose/docker-compose.hierarchy.yml](../../deploy/compose/docker-compose.hierarchy.yml) | `info,bsdm_proxy=info` |
+| [deploy/compose/docker-compose.test.yml](../../deploy/compose/docker-compose.test.yml) | `warn` |
 | [proxy/src/main.rs](../../proxy/src/main.rs) | init + fallback |
 | [cache-indexer/src/main.rs](../../cache-indexer/src/main.rs) | init + fallback |
 

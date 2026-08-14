@@ -37,8 +37,8 @@ HTTPS в этом режиме идёт как CONNECT tunnel и не прохо
 
 ```bash
 ./scripts/gen-ca.sh
-docker compose -f docker-compose.lite.yml up -d --build
-docker compose -f docker-compose.lite.yml ps
+docker compose -f deploy/compose/docker-compose.lite.yml up -d --build
+docker compose -f deploy/compose/docker-compose.lite.yml ps
 ```
 
 Проверка:
@@ -84,13 +84,13 @@ zone files, model selection и проверку external endpoints.
 
 | Файл | Назначение |
 |---|---|
-| `docker-compose.lite.yml` | Proxy + SQLite |
-| `docker-compose.test.yml` | Smoke/E2E stack |
-| `docker-compose.pilot.yml` | Override ресурсов и retention для пилота на 100 пользователей |
-| `docker-compose.redis-l2.yml` | Redis L2 example |
-| `docker-compose.hierarchy.yml` | Multi-proxy hierarchy |
-| `docker-compose.ha.yml` | Лабораторный HA sketch |
-| `docker-compose.awg.yml` | Experimental AWG sidecar |
+| `deploy/compose/docker-compose.lite.yml` | Proxy + SQLite |
+| `deploy/compose/docker-compose.test.yml` | Smoke/E2E stack |
+| `deploy/compose/docker-compose.pilot.yml` | Override ресурсов и retention для пилота на 100 пользователей |
+| `deploy/compose/docker-compose.redis-l2.yml` | Redis L2 example |
+| `deploy/compose/docker-compose.hierarchy.yml` | Multi-proxy hierarchy |
+| `deploy/compose/docker-compose.ha.yml` | Лабораторный HA sketch |
+| `deploy/compose/docker-compose.awg.yml` | Experimental AWG sidecar |
 
 Не объединяйте overlays автоматически: проверьте network names, ports, volumes и
 environment каждого файла.

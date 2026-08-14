@@ -73,7 +73,7 @@ flowchart LR
 
 ```bash
 ./scripts/gen-ca.sh
-docker compose -f docker-compose.lite.yml up -d --build
+docker compose -f deploy/compose/docker-compose.lite.yml up -d --build
 
 curl http://127.0.0.1:9090/health
 curl --cacert certs/ca.crt \
@@ -116,7 +116,7 @@ docker compose --profile icap up -d
 
 Расчёт, TTL и критерии приёмки:
 [Pilot deployment](docs/getting-started/pilot-deployment.md).
-Готовые Compose overrides находятся в `docker-compose.pilot.yml`.
+Готовые Compose overrides находятся в `deploy/compose/docker-compose.pilot.yml`.
 
 ## Сборка
 

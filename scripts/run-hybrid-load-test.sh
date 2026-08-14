@@ -131,7 +131,7 @@ if ! curl -fsS "${METRICS_URL}/health" >/dev/null 2>&1; then
   echo "❌ Proxy is not healthy at ${METRICS_URL}."
   echo "   Example: HTTP_PORT=3128 METRICS_PORT=9090 POLICY_MODE=selective-mitm \\"
   echo "            cargo run -p bsdm-proxy --bin proxy"
-  echo "   Or: docker compose -f docker-compose.lite.yml up -d --build"
+  echo "   Or: docker compose -f deploy/compose/docker-compose.lite.yml up -d --build"
   exit 1
 fi
 echo "✅ Health check passed."

@@ -15,7 +15,7 @@ if [[ "$EXTERNAL" == "false" ]]; then
   echo "Running in-process E2E tests..."
   cargo test -p bsdm-proxy-e2e
 else
-  echo "Running E2E checks against docker-compose.test.yml stack..."
+  echo "Running E2E checks against deploy/compose/docker-compose.test.yml stack..."
   PROXY_URL="${PROXY_URL:-http://127.0.0.1:1488}"
   METRICS_URL="${METRICS_URL:-http://127.0.0.1:9090}"
 

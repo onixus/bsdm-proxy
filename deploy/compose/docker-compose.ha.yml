@@ -1,10 +1,14 @@
+# Pinned so the project name stays 'bsdm-proxy' now that this file lives
+# outside the repo root (Compose would otherwise derive it from the directory).
+name: bsdm-proxy
+
 # HA sketch: 2 proxy instances + Redis L2 behind implicit round-robin.
 # No k8s required — validates L2-HIT across restarts before Helm deploy.
 #
 # Usage:
-#   docker compose -f docker-compose.ha.yml up -d --build
+#   docker compose -f deploy/compose/docker-compose.ha.yml up -d --build
 #   curl -x http://127.0.0.1:1488 http://upstream/get          # MISS via proxy-a
-#   docker compose -f docker-compose.ha.yml restart proxy-a
+#   docker compose -f deploy/compose/docker-compose.ha.yml restart proxy-a
 #   curl -x http://127.0.0.1:1488 http://upstream/get          # L2-HIT on proxy-b path
 #
 # k8s equivalent: docs/k8s-architecture.md, charts/bsdm/
@@ -27,7 +31,7 @@ services:
 
   proxy-a:
     build:
-      context: .
+      context: ../..
       dockerfile: Dockerfile
       target: proxy
     ports:
@@ -62,7 +66,7 @@ services:
 
   proxy-b:
     build:
-      context: .
+      context: ../..
       dockerfile: Dockerfile
       target: proxy
     environment:

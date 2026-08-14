@@ -1,9 +1,13 @@
+# Pinned so the project name stays 'bsdm-proxy' now that this file lives
+# outside the repo root (Compose would otherwise derive it from the directory).
+name: bsdm-proxy
+
 # Zero-config Lite profile: caching HTTPS proxy + optional SQLite search.
 # No Kafka / ClickHouse / Prometheus / Grafana.
 #
 # Usage:
-#   ./scripts/gen-ca.sh
-#   docker compose -f docker-compose.lite.yml up -d --build
+#   ../../scripts/gen-ca.sh
+#   docker compose -f deploy/compose/docker-compose.lite.yml up -d --build
 #   curl --cacert certs/ca.crt -x http://127.0.0.1:3128 https://httpbin.org/get
 #   curl 'http://127.0.0.1:8080/api/search?limit=5'
 #
@@ -12,7 +16,7 @@
 services:
   cache-indexer:
     build:
-      context: .
+      context: ../..
       dockerfile: Dockerfile
       target: cache-indexer
       args:
@@ -44,7 +48,7 @@ services:
   proxy:
     image: ghcr.io/onixus/bsdm-proxy:latest
     build:
-      context: .
+      context: ../..
       dockerfile: Dockerfile
       target: proxy
       args:
@@ -81,8 +85,8 @@ services:
       - RUST_LOG=info,bsdm_proxy=info
       - RUST_BACKTRACE=0
     volumes:
-      - ./certs:/certs:ro
-      - ./config/pinning-exceptions.example.json:/etc/bsdm-proxy/pinning-exceptions.json:ro
+      - ../../certs:/certs:ro
+      - ../../config/pinning-exceptions.example.json:/etc/bsdm-proxy/pinning-exceptions.json:ro
       - lite-pinning-audit:/var/log/bsdm-proxy
       - lite-spill:/var/cache/bsdm-spill
     depends_on:
@@ -110,7 +114,7 @@ services:
       proxy:
         condition: service_started
     volumes:
-      - ./scripts/mock-upstream-threaded.py:/mock-upstream.py:ro
+      - ../../scripts/mock-upstream-threaded.py:/mock-upstream.py:ro
     environment:
       - MOCK_HOST=0.0.0.0
       - MOCK_PORT=18080
@@ -120,7 +124,7 @@ services:
   trust-ui:
     profiles: ["experimental-trust-ui"]
     build:
-      context: .
+      context: ../..
       dockerfile: Dockerfile
       target: trust-ui
     ports:

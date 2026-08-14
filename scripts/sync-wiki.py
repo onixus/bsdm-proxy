@@ -65,6 +65,12 @@ PAGES: tuple[Page, ...] = (
     Page("docs/features/semantic-cache.md", "AI-Semantic-Cache.md", "Security & policy", "Semantic cache", "Exact и vector near-hit cache."),
     Page("docs/features/wasm-plugins.md", "WASM-Plugins.md", "Security & policy", "WASM plugins", "Замороженный experimental extension path."),
     Page("docs/features/icap-inspection.md", "ICAP-Inspection.md", "Security & policy", "ICAP inspection", "Замороженный REQMOD/RESPMOD adapter."),
+    Page("docs/threat-intelligence/Architecture.md", "Threat-Intelligence-Architecture.md", "Security & policy", "TI architecture", "Архитектура модуля threat intelligence: ingestion и enforcement."),
+    Page("docs/threat-intelligence/Integration_with_BSDM.md", "Threat-Intelligence-Integration.md", "Security & policy", "TI integration", "Встраивание IOC-фидов в pipeline фильтрации."),
+    Page("docs/threat-intelligence/DNS_RPZ_Platform_Plan.md", "DNS-RPZ-Platform-Plan.md", "Security & policy", "DNS RPZ platform (plan)", "Проектный план платформы DNS-блокировок по IOC-фидам."),
+    Page("docs/threat-intelligence/RPZ_Deployment.md", "RPZ-Deployment-Plan.md", "Security & policy", "RPZ deployment (plan)", "План развёртывания DNS RPZ-блокировок."),
+    Page("docs/threat-intelligence/Threat_Intelligence_Collector_Agent.md", "Threat-Intelligence-Collector-Agent.md", "Security & policy", "TI collector agent (spec)", "Спецификация агента сбора и нормализации phishing IOC."),
+    Page("docs/threat-intelligence/Roadmap.md", "Threat-Intelligence-Roadmap.md", "Security & policy", "TI roadmap", "Планы развития TI-контура; не подтверждение готовности."),
 
     Page("docs/analytics/clickhouse-retrosearch.md", "ClickHouse-RetroSearch.md", "Analytics & detection", "ClickHouse retro-search", "Schema, ingest и Search API."),
     Page("docs/analytics/alerting.md", "Threat-Alerting.md", "Analytics & detection", "Threat alerting", "Alert-worker и SIEM webhook."),

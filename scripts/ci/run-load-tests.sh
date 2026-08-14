@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.lite.yml}"
+COMPOSE_FILE="${COMPOSE_FILE:-deploy/compose/docker-compose.lite.yml}"
 RESULTS_DIR="${RESULTS_DIR:-${ROOT}/load-test-results}"
 CERT_DIR="${CERT_DIR:-${ROOT}/certs}"
 CA_RUNTIME_UID="${CA_RUNTIME_UID:-1000}"

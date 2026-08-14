@@ -43,7 +43,7 @@ CLICKHOUSE_URL=http://127.0.0.1:8123 \
 
 docker compose --profile ml up -d --build ml-worker
 # Pilot overlay (gentler min_requests / poll):
-# docker compose -f docker-compose.yml -f docker-compose.pilot.yml --profile ml up -d ml-worker
+# docker compose -f docker-compose.yml -f deploy/compose/docker-compose.pilot.yml --profile ml up -d ml-worker
 ```
 
 ### Offline baseline artifact (optional)
