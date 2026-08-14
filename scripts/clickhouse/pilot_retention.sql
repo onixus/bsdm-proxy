@@ -1,5 +1,5 @@
 -- Pilot profile: keep analytics data for no more than five days.
--- Mounted after the base DDL by docker-compose.pilot.yml on a fresh volume.
+-- Mounted after the base DDL by deploy/compose/docker-compose.pilot.yml on a fresh volume.
 
 ALTER TABLE bsdm.http_cache
 MODIFY TTL toDateTime(ts) + INTERVAL 5 DAY;

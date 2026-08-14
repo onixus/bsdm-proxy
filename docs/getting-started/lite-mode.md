@@ -8,7 +8,7 @@ See [roadmap.md](../roadmap.md) (Lite Mode).
 
 ```bash
 ./scripts/gen-ca.sh
-docker compose -f docker-compose.lite.yml up -d --build
+docker compose -f deploy/compose/docker-compose.lite.yml up -d --build
 ```
 
 | Service | Port | Notes |

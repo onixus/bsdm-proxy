@@ -5,7 +5,7 @@ on:
     paths:
       - "*.md"
       - "**/*.md"
-      - "docker-compose.pilot.yml"
+      - "deploy/compose/docker-compose.pilot.yml"
       - "docs/**"
       - "scripts/check-doc-links.py"
       - "scripts/sync-wiki.py"
@@ -16,7 +16,7 @@ on:
     paths:
       - "*.md"
       - "**/*.md"
-      - "docker-compose.pilot.yml"
+      - "deploy/compose/docker-compose.pilot.yml"
       - "docs/**"
       - "scripts/check-doc-links.py"
       - "scripts/sync-wiki.py"

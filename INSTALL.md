@@ -40,7 +40,7 @@ curl --cacert certs/ca.crt -x http://127.0.0.1:3128 https://httpbin.org/uuid
 
 ```bash
 # Proxy + SQLite indexer, без Kafka и ClickHouse
-docker compose -f docker-compose.lite.yml up -d --build
+docker compose -f deploy/compose/docker-compose.lite.yml up -d --build
 
 # Локальная сборка основного proxy
 cargo build -p bsdm-proxy --bin proxy

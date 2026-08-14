@@ -9,7 +9,7 @@ on:
       - 'scripts/run-hybrid-load-test.sh'
       - 'scripts/ci/**'
       - 'scripts/wrk-proxy.lua'
-      - 'docker-compose.lite.yml'
+      - 'deploy/compose/docker-compose.lite.yml'
       - '.github/workflows/load-test.yml'
   pull_request:
     branches: [main]
@@ -19,7 +19,7 @@ on:
       - 'scripts/run-hybrid-load-test.sh'
       - 'scripts/ci/**'
       - 'scripts/wrk-proxy.lua'
-      - 'docker-compose.lite.yml'
+      - 'deploy/compose/docker-compose.lite.yml'
       - '.github/workflows/load-test.yml'
   workflow_dispatch:
 

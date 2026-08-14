@@ -201,7 +201,7 @@ Full TOML config is still planned. Env vars + optional peers JSON cover runtime 
 6. **Configuration** (`proxy/src/hierarchy_config.rs`) — env vars
 7. **Runtime wiring** (`proxy/src/main.rs`) — request path + ICP server spawn
 8. **Cache key** (`proxy/src/cache_key.rs`) — shared L1 + ICP lookup
-9. **Docker-compose** (`docker-compose.hierarchy.yml`) — 3-tier demo
+9. **Docker-compose** (`deploy/compose/docker-compose.hierarchy.yml`) — 3-tier demo
 10. **Hierarchy Prometheus metrics** (`bsdm_proxy_hierarchy_*`)
 
 ### Phase 4: Discovery & Optimization ✅ (v0.3.x)

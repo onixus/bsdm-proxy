@@ -32,7 +32,7 @@ fi
 if ! curl -fsS --max-time "$TIMEOUT" "${METRICS_URL}/health" >/dev/null 2>&1; then
   echo "❌ dns-sinkhole not healthy at ${METRICS_URL}/health" >&2
   echo "   Start: docker compose up -d dns-sinkhole" >&2
-  echo "   Or:    docker compose -f docker-compose.yml -f docker-compose.pilot.yml up -d dns-sinkhole" >&2
+  echo "   Or:    docker compose -f docker-compose.yml -f deploy/compose/docker-compose.pilot.yml up -d dns-sinkhole" >&2
   exit 1
 fi
 echo "✅ Health OK"

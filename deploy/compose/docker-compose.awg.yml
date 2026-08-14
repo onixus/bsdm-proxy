@@ -1,8 +1,12 @@
+# Pinned so the project name stays 'bsdm-proxy' now that this file lives
+# outside the repo root (Compose would otherwise derive it from the directory).
+name: bsdm-proxy
+
 # AmneziaWG (AWG) sidecar profile for BSDM-Proxy.
 # Runs an obfuscated AmneziaWG VPN server endpoint forwarding traffic to BSDM-Proxy.
 #
 # Usage:
-#   docker compose -f docker-compose.lite.yml -f docker-compose.awg.yml up -d
+#   docker compose -f deploy/compose/docker-compose.lite.yml -f deploy/compose/docker-compose.awg.yml up -d
 #
 # Docs: docs/ops-and-dev/configuration.md · docs/roadmap.md
 

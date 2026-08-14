@@ -57,7 +57,7 @@ lint:
 
 docker-lite:
 	@if [ ! -f "certs/ca.key" ]; then ./scripts/gen-ca.sh; fi
-	docker compose -f docker-compose.lite.yml up -d --build
+	docker compose -f deploy/compose/docker-compose.lite.yml up -d --build
 
 docker-full:
 	@if [ ! -f "certs/ca.key" ]; then ./scripts/gen-ca.sh; fi
@@ -65,7 +65,7 @@ docker-full:
 
 docker-down:
 	docker compose down
-	docker compose -f docker-compose.lite.yml down
+	docker compose -f deploy/compose/docker-compose.lite.yml down
 
 install:
 	@echo "Starting interactive installation..."

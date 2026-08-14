@@ -44,6 +44,7 @@ bsdm-proxy/
 ├── grafana/            # Datasources + dashboards (Prometheus, ClickHouse)
 ├── prometheus/         # Scrape config
 ├── web-config/         # Legacy static config generator
+├── deploy/compose/     # Профильные compose-файлы (lite, pilot, ha, ...)
 └── docs/               # Документация
 ```
 
@@ -213,10 +214,10 @@ In-process (поднимает proxy как subprocess):
 ./scripts/run-smoke-tests.sh
 ```
 
-Против docker-compose.test.yml:
+Против deploy/compose/docker-compose.test.yml:
 
 ```bash
-docker compose -f docker-compose.test.yml up -d --build
+docker compose -f deploy/compose/docker-compose.test.yml up -d --build
 ./scripts/run-smoke-tests.sh --external
 ```
 
@@ -253,9 +254,9 @@ E2E harness: `e2e/src/lib.rs` — `ProxyHarness`, mock upstream, test CA, hierar
 ### Hierarchy demo (Docker)
 
 ```bash
-docker compose -f docker-compose.hierarchy.yml up -d --build
+docker compose -f deploy/compose/docker-compose.hierarchy.yml up -d --build
 curl -x http://127.0.0.1:3128 http://upstream/get
-docker compose -f docker-compose.hierarchy.yml down
+docker compose -f deploy/compose/docker-compose.hierarchy.yml down
 ```
 
 3-tier stack: **child** (3128) → **sibling** (ICP, 1490) / **parent** (1489) → **upstream**.
@@ -263,11 +264,11 @@ docker compose -f docker-compose.hierarchy.yml down
 ### Redis L2 demo (Docker)
 
 ```bash
-docker compose -f docker-compose.redis-l2.yml up -d --build
+docker compose -f deploy/compose/docker-compose.redis-l2.yml up -d --build
 curl -x http://127.0.0.1:3128 http://upstream/get          # MISS
-docker compose -f docker-compose.redis-l2.yml restart proxy-a  # clears L1 only
+docker compose -f deploy/compose/docker-compose.redis-l2.yml restart proxy-a  # clears L1 only
 curl -x http://127.0.0.1:3128 http://upstream/get          # L2-HIT (x-cache-status)
-docker compose -f docker-compose.redis-l2.yml down
+docker compose -f deploy/compose/docker-compose.redis-l2.yml down
 ```
 
 Переменные для тестов MITM:

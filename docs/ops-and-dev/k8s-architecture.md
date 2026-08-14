@@ -163,7 +163,7 @@ sessionAffinity: None
 
 Поведение: pod-A кеширует MISS → L1+L2 → pod-B после restart получает **L2-HIT**.
 
-Демо без k8s: `docker compose -f docker-compose.redis-l2.yml`.
+Демо без k8s: `docker compose -f deploy/compose/docker-compose.redis-l2.yml`.
 
 ---
 

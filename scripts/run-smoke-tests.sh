@@ -15,7 +15,7 @@ if [[ "$EXTERNAL" == "false" ]]; then
   echo "Running in-process smoke tests..."
   cargo test -p bsdm-proxy-e2e --test smoke -- --nocapture
 else
-  echo "Running smoke tests against docker-compose.test.yml stack..."
+  echo "Running smoke tests against deploy/compose/docker-compose.test.yml stack..."
   PROXY_URL="${PROXY_URL:-http://127.0.0.1:1488}"
   METRICS_URL="${METRICS_URL:-http://127.0.0.1:9090}"
 

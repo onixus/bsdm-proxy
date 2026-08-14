@@ -66,8 +66,8 @@ export BASIC_AUTH_USERS_FILE=/etc/bsdm-proxy/basic-auth-users.json
 ```bash
 export AUTH_ENABLED=true
 export BASIC_AUTH_USERS_FILE=./config/basic-auth-users.example.json
-# mount is already declared in docker-compose.pilot.yml when AUTH is on
-docker compose -f docker-compose.yml -f docker-compose.pilot.yml up -d proxy
+# mount is already declared in deploy/compose/docker-compose.pilot.yml when AUTH is on
+docker compose -f docker-compose.yml -f deploy/compose/docker-compose.pilot.yml up -d proxy
 ```
 
 Without `BASIC_AUTH_USERS_FILE` (and empty in-memory DB), Basic accepts **any**
