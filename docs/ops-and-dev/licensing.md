@@ -120,8 +120,8 @@ cd proxy && cargo license --features auth-kerberos --json \
 | **`grafana/grafana:12.3.8`** | **AGPL-3.0** | `docker-compose.yml` |
 | `grafana-clickhouse-datasource` | Apache-2.0 | Grafana plugin |
 | `grafana-piechart-panel` | MIT | Grafana plugin |
-| `redis:7.4-alpine` | BSD-3-Clause | `docker-compose.redis-l2.yml`, `.ha.yml` |
-| `kennethreitz/httpbin` | BSD | `docker-compose.test.yml` (только тесты) |
+| `redis:7.4-alpine` | BSD-3-Clause | `deploy/compose/docker-compose.redis-l2.yml`, `.ha.yml` |
+| `kennethreitz/httpbin` | BSD | `deploy/compose/docker-compose.test.yml` (только тесты) |
 
 ### Grafana (AGPL-3.0)
 

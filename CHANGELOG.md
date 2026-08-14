@@ -410,7 +410,7 @@ Milestone **M4 Threat analytics**: rule-based alerts, C&C / Shannon heuristics, 
 - **PhishTank API key** — `PHISHTANK_API_KEY` sent as `app_key`; category cache keeps feed source for `threat_sources`
 - **M4 beacon heuristic (B18)** — `beacon_periodic` rule in `alert-worker` (regular client→domain gaps); Grafana “Beacon candidates” panel; docs
 - **Lite SQLite indexer** — `INDEX_STORE=sqlite|memory`, `POST /api/events`, proxy `EVENT_SINK_URL`; Lite compose includes indexer ([docs/getting-started/lite-mode.md](docs/getting-started/lite-mode.md))
-- **Lite compose (Phase 1)** — [`docker-compose.lite.yml`](docker-compose.lite.yml) standalone proxy (no Kafka/CH); [`scripts/gen-ca.sh`](scripts/gen-ca.sh); docs [`docs/getting-started/lite-mode.md`](docs/getting-started/lite-mode.md)
+- **Lite compose (Phase 1)** — [`docker-compose.lite.yml`](deploy/compose/docker-compose.lite.yml) standalone proxy (no Kafka/CH); [`scripts/gen-ca.sh`](scripts/gen-ca.sh); docs [`docs/getting-started/lite-mode.md`](docs/getting-started/lite-mode.md)
 - **Alert worker (B19 / #50)** — `alert-worker` polls ClickHouse threat rules and POSTs SIEM JSON webhooks; compose profile `alerts`, Dockerfile target, Prometheus scrape, docs [`docs/analytics/alerting.md`](docs/analytics/alerting.md)
 - **Strategic roadmap** — Lite / DX / Wasm / AI-traffic phases in [`docs/roadmap.md`](docs/roadmap.md)
 - **Web config GUI** — restored General/Cache/Kafka/Auth tabs; Performance, import `.env`, export `acl-rules.json`; compose aligned with root `docker-compose.yml` (P2-5)

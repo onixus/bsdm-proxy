@@ -30,7 +30,7 @@ export ALERT_WEBHOOK_URL=http://host.docker.internal:9080/hooks/siem
 # Or use the pilot pack defaults:
 # set -a; source config/pilot-alert.env.example; set +a
 
-docker compose -f docker-compose.yml -f docker-compose.pilot.yml \
+docker compose -f docker-compose.yml -f deploy/compose/docker-compose.pilot.yml \
   --profile alerts up -d --build alert-worker
 
 curl -fsS http://127.0.0.1:8090/health

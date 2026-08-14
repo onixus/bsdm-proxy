@@ -43,8 +43,9 @@ bsdm-proxy/
 ├── alertmanager/           # Alertmanager template
 ├── bpf/                    # Experimental XDP program
 ├── examples/               # Agent, DNS и WASM examples
+├── deploy/compose/         # Профильные compose-файлы (lite, pilot, ha, ...)
 ├── Dockerfile              # Multi-stage images
-└── docker-compose*.yml     # Deployment examples
+└── docker-compose.yml      # Базовый стек (аналитика + профили)
 ```
 
 ## Compose
@@ -52,12 +53,12 @@ bsdm-proxy/
 | Файл | Назначение |
 |---|---|
 | `docker-compose.yml` | Analytics base + optional profiles |
-| `docker-compose.lite.yml` | Proxy + SQLite |
-| `docker-compose.test.yml` | Test stack |
-| `docker-compose.redis-l2.yml` | Redis L2 example |
-| `docker-compose.hierarchy.yml` | Cache hierarchy example |
-| `docker-compose.ha.yml` | HA lab sketch |
-| `docker-compose.awg.yml` | Experimental AWG sidecar |
+| `deploy/compose/docker-compose.lite.yml` | Proxy + SQLite |
+| `deploy/compose/docker-compose.test.yml` | Test stack |
+| `deploy/compose/docker-compose.redis-l2.yml` | Redis L2 example |
+| `deploy/compose/docker-compose.hierarchy.yml` | Cache hierarchy example |
+| `deploy/compose/docker-compose.ha.yml` | HA lab sketch |
+| `deploy/compose/docker-compose.awg.yml` | Experimental AWG sidecar |
 
 Основной Compose включает `dns-sinkhole` в базовом стеке; профили опциональных
 компонентов: `alerts`, `ml`, `icap`. Legacy Trust-UI запускается только явным

@@ -29,10 +29,10 @@ replacement for SNI/MITM policy.
 
 ```bash
 # Full stack (dns-sinkhole is a base service, not a profile):
-docker compose -f docker-compose.yml -f docker-compose.pilot.yml up -d --build dns-sinkhole
+docker compose -f docker-compose.yml -f deploy/compose/docker-compose.pilot.yml up -d --build dns-sinkhole
 
 # Or entire pilot stack:
-docker compose -f docker-compose.yml -f docker-compose.pilot.yml up -d --build
+docker compose -f docker-compose.yml -f deploy/compose/docker-compose.pilot.yml up -d --build
 ```
 
 Defaults:
@@ -50,7 +50,7 @@ Custom zone:
 
 ```bash
 export DNS_ZONE_HOST=./config/my-pilot.rpz
-docker compose -f docker-compose.yml -f docker-compose.pilot.yml up -d dns-sinkhole
+docker compose -f docker-compose.yml -f deploy/compose/docker-compose.pilot.yml up -d dns-sinkhole
 ```
 
 ---

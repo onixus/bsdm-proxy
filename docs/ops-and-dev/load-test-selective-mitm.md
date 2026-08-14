@@ -59,7 +59,7 @@ should be reflected in the results table.
 
 ```bash
 ./scripts/gen-ca.sh
-docker compose -f docker-compose.lite.yml up -d --build
+docker compose -f deploy/compose/docker-compose.lite.yml up -d --build
 # wait for health
 curl -fsS http://127.0.0.1:9090/health
 
@@ -76,7 +76,7 @@ export ACL_API_TOKEN="$(openssl rand -hex 16)"
 export SEARCH_API_TOKEN="$(openssl rand -hex 16)"
 
 ./scripts/gen-ca.sh
-docker compose -f docker-compose.yml -f docker-compose.pilot.yml up -d --build
+docker compose -f docker-compose.yml -f deploy/compose/docker-compose.pilot.yml up -d --build
 
 ./scripts/run-dns-pilot-smoke.sh   # dig @127.0.0.1 -p 5353
 
