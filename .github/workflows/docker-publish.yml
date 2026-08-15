@@ -1,9 +1,14 @@
 name: Docker Publish GHCR
 
+# ОТКЛЮЧЕНО: заменено локальным Jenkins (Jenkinsfile.publish, джоба
+# bsdm-proxy-publish). Образы по-прежнему уезжают в ghcr.io — лимит у нас на
+# минуты раннеров, а не на реестр, поэтому деплой и k8s-манифесты не меняются.
+# Автоматические триггеры сняты; ручной запуск оставлен.
+# Вернуть: раскомментировать push.tags ниже.
 on:
-  push:
-    tags:
-      - "v*"
+  # push:
+  #   tags:
+  #     - "v*"
   workflow_dispatch:
 
 concurrency:
