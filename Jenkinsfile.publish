@@ -1,0 +1,125 @@
+// Публикация образа в ghcr.io — замена .github/workflows/docker-publish.yml.
+//
+// Лимиты GitHub, из-за которых мы ушли с Actions, считаются в минутах раннеров;
+// сам ghcr.io тарифицируется отдельно. Поэтому реестр остаётся прежним, и
+// k8s-манифесты с compose править не нужно — меняется только то, КТО пушит.
+//
+// Запуск ручной и параметризованный, а не по каждому коммиту: пуш образа —
+// действие наружу, оно должно быть осознанным. DRY_RUN по умолчанию включён,
+// то есть первый прогон ничего не публикует.
+
+pipeline {
+  agent any
+
+  parameters {
+    string(
+      name: 'TAG',
+      defaultValue: '',
+      description: 'Тег релиза, например v0.9.11. Собирается именно он, не HEAD ветки.'
+    )
+    booleanParam(
+      name: 'DRY_RUN',
+      defaultValue: true,
+      description: 'Собрать и залогиниться, но НЕ пушить. Снять галочку для реальной публикации.'
+    )
+    booleanParam(
+      name: 'MULTIARCH',
+      defaultValue: true,
+      description: 'linux/amd64 + linux/arm64. amd64 на этой машине эмулируется QEMU и заметно медленнее.'
+    )
+  }
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    buildDiscarder(logRotator(numToKeepStr: '30'))
+    timeout(time: 90, unit: 'MINUTES')
+  }
+
+  environment {
+    REGISTRY = 'ghcr.io'
+    IMAGE    = 'ghcr.io/onixus/bsdm-proxy'
+  }
+
+  stages {
+    stage('Checkout tag') {
+      steps {
+        script {
+          if (!params.TAG?.trim()) {
+            error('TAG обязателен: укажи тег релиза, например v0.9.11')
+          }
+        }
+        // Собираем строго содержимое тега. refspec с тегами обязателен:
+        // джоба смотрит в локальный каталог, а не в GitHub.
+        checkout([
+          $class: 'GitSCM',
+          branches: [[name: "refs/tags/${params.TAG}"]],
+          userRemoteConfigs: [[
+            url: '/Users/onixus/Git/BSDM/bsdm-proxy',
+            refspec: '+refs/tags/*:refs/tags/*',
+          ]],
+        ])
+        sh 'git --no-pager log --oneline -1'
+      }
+    }
+
+    stage('Login') {
+      steps {
+        withCredentials([
+          string(credentialsId: 'GHCR_USER', variable: 'GHCR_USER'),
+          string(credentialsId: 'GHCR_TOKEN', variable: 'GHCR_TOKEN'),
+        ]) {
+          sh '''
+            set -eu
+            if [ -z "${GHCR_TOKEN}" ] || [ -z "${GHCR_USER}" ]; then
+              echo "GHCR_USER/GHCR_TOKEN пустые — заполни их в Manage Jenkins → Credentials." >&2
+              echo "Нужен PAT с правом write:packages." >&2
+              exit 1
+            fi
+            # --password-stdin: токен не попадает ни в ps, ни в лог.
+            printf '%s' "${GHCR_TOKEN}" | docker login ${REGISTRY} -u "${GHCR_USER}" --password-stdin
+          '''
+        }
+      }
+    }
+
+    stage('Build & push') {
+      steps {
+        script {
+          // Теги как в docker-publish.yml: semver и latest.
+          def version = params.TAG.replaceFirst(/^v/, '')
+          def tags = ["-t ${env.IMAGE}:${version}", "-t ${env.IMAGE}:latest"].join(' ')
+          def platforms = params.MULTIARCH ? 'linux/amd64,linux/arm64' : 'linux/arm64'
+          // Мультиарх требует драйвера docker-container: штатный docker
+          // собирать под несколько платформ не умеет.
+          def output = params.DRY_RUN ? '' : '--push'
+
+          sh """
+            set -eu
+            docker buildx inspect bsdm-publisher >/dev/null 2>&1 \
+              || docker buildx create --name bsdm-publisher --driver docker-container --bootstrap
+
+            docker buildx build --builder bsdm-publisher \
+              --platform ${platforms} \
+              --target proxy \
+              --provenance mode=max --sbom true \
+              ${tags} ${output} \
+              -f Dockerfile .
+          """
+
+          if (params.DRY_RUN) {
+            echo "DRY_RUN: образ собран, публикации не было. Теги были бы: ${version}, latest"
+          } else {
+            echo "Опубликовано: ${env.IMAGE}:${version} и :latest"
+          }
+        }
+      }
+    }
+  }
+
+  post {
+    always {
+      sh 'docker logout ${REGISTRY} || true'
+    }
+  }
+}
