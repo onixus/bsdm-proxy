@@ -15,7 +15,7 @@ import { Button } from '../components/ui/Button'
 import { ErrorState, Skeleton, SourceBadge } from '../components/ui/DataState'
 import { PageHeader } from '../components/ui/PageHeader'
 import { useSourcedQuery } from '../hooks/useSourced'
-import { translations, useLanguage } from '../lib/i18n'
+import { fmt, translations, useLanguage } from '../lib/i18n'
 
 const POLL_MS = 10_000
 
@@ -34,7 +34,7 @@ export function DashboardPage() {
       <div className="surface-panel rounded-2xl p-5">
         <PageHeader
           title={tr.dashboard.title}
-          subtitle={`${tr.dashboard.subtitle} · авто-обновление каждые ${POLL_MS / 1000} сек`}
+          subtitle={`${tr.dashboard.subtitle} · ${fmt(tr.widgets.autoRefresh, { seconds: POLL_MS / 1000 })}`}
           badge={telemetry.data ? <SourceBadge source={telemetry.data.source} /> : undefined}
           actions={
             <Button variant="secondary" onClick={() => telemetry.refetch()} disabled={telemetry.isFetching}>
@@ -55,7 +55,7 @@ export function DashboardPage() {
 
       {telemetry.isError && (
         <ErrorState
-          title="API управления прокси недоступен (Control API Unreachable)"
+          title={tr.widgets.controlApiError}
           detail={telemetry.error.message}
           onRetry={() => telemetry.refetch()}
         />

@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { X, Check, Copy } from 'lucide-react'
+import { useT } from '../../lib/i18n'
 import { Button } from './Button'
 
 interface ModalProps {
@@ -12,6 +13,8 @@ interface ModalProps {
 }
 
 export function Modal({ open, onClose, title, children, footer, wide }: ModalProps) {
+  const t = useT()
+
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
@@ -30,15 +33,15 @@ export function Modal({ open, onClose, title, children, footer, wide }: ModalPro
       role="presentation"
     >
       <div
-        className={`animate-modal-pop flex max-h-[90vh] w-full flex-col rounded-t-2xl border border-border bg-surface-1/95 shadow-2xl backdrop-blur-xl sm:rounded-2xl ${wide ? 'sm:max-w-3xl' : 'sm:max-w-lg'}`}
+        className={`animate-modal-pop flex max-h-[92vh] w-full flex-col sm:max-h-[88vh] rounded-t-2xl border border-border bg-surface-1/95 shadow-2xl backdrop-blur-xl sm:rounded-2xl ${wide ? 'sm:max-w-4xl' : 'sm:max-w-xl'}`}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="modal-title"
       >
-        <div className="flex items-center justify-between border-b border-border/80 px-5 py-4 sm:px-6">
-          <div className="flex items-center gap-3">
-            <h2 id="modal-title" className="text-lg font-bold text-text-primary tracking-tight">
+        <div className="flex items-center justify-between gap-3 border-b border-border/80 px-5 py-4 sm:px-6">
+          <div className="flex min-w-0 items-center gap-3">
+            <h2 id="modal-title" className="truncate text-base font-bold tracking-tight text-text-primary sm:text-lg">
               {title}
             </h2>
             <span className="hidden sm:inline-flex items-center rounded border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-text-secondary">
@@ -48,15 +51,16 @@ export function Modal({ open, onClose, title, children, footer, wide }: ModalPro
           <button
             type="button"
             onClick={onClose}
-            className="touch-target flex items-center justify-center rounded-lg p-2 text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-colors cursor-pointer"
-            aria-label="Close"
+            className="touch-target flex shrink-0 cursor-pointer items-center justify-center rounded-lg p-2 text-text-secondary transition-colors hover:bg-surface-2 hover:text-text-primary"
+            aria-label={t.ui.close}
+            title={t.ui.close}
           >
             <X className="size-5" />
           </button>
         </div>
         <div className="flex-1 overflow-y-auto px-5 py-5 sm:px-6">{children}</div>
         {footer && (
-          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border/80 px-5 py-3.5 bg-surface-1/50 rounded-b-2xl sm:px-6">
+          <div className="flex flex-col-reverse gap-2 border-t border-border/80 bg-surface-1/50 px-5 py-3.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:rounded-b-2xl sm:px-6">
             {footer}
           </div>
         )}
@@ -77,6 +81,7 @@ export function CodePreview({ content }: { content: string }) {
 
 export function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
+  const t = useT()
   return (
     <Button
       variant="secondary"
@@ -90,12 +95,12 @@ export function CopyButton({ text }: { text: string }) {
       {copied ? (
         <>
           <Check className="size-4 text-success" />
-          <span>Copied!</span>
+          <span>{t.ui.copied}</span>
         </>
       ) : (
         <>
           <Copy className="size-4" />
-          <span>Copy</span>
+          <span>{t.ui.copy}</span>
         </>
       )}
     </Button>

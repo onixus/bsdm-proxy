@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom'
-import { Command, Search, Menu, ChevronRight } from 'lucide-react'
-import { resolveRouteScope } from '../../lib/routeScope'
+import { ChevronRight, Command, Menu, Search, Settings } from 'lucide-react'
+import { useLanguage } from '../../lib/i18n'
+import { localizedRouteScope } from '../../lib/routeCopy'
 import { StatusPill } from '../ui/StatusPill'
 
 interface TopBarProps {
@@ -12,47 +13,63 @@ interface TopBarProps {
 
 export function TopBar({ onMenuOpen, onCommandOpen, credentialsAttached, pathname }: TopBarProps) {
   const navigate = useNavigate()
-  const route = resolveRouteScope(pathname)
+  const [lang] = useLanguage()
+  const { route, title, category, t } = localizedRouteScope(pathname, lang)
 
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-border bg-surface-1/80 px-4 backdrop-blur-xl sm:px-6">
-      <div className="flex items-center gap-3">
+    <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-3 border-b border-border bg-surface-1/80 px-4 backdrop-blur-xl sm:px-6">
+      <div className="flex min-w-0 items-center gap-3">
         <button
           type="button"
-          className="touch-target flex items-center justify-center rounded-lg p-2 text-text-primary hover:bg-surface-2 lg:hidden"
+          className="touch-target flex shrink-0 items-center justify-center rounded-lg p-2 text-text-primary hover:bg-surface-2 lg:hidden"
           onClick={onMenuOpen}
-          aria-label="Open menu"
+          aria-label={t.topbar.openMenu}
         >
           <Menu className="size-6" />
         </button>
 
-        <div className="flex items-center gap-2">
-          <span className="hidden rounded-md border border-border bg-surface-2 px-2 py-0.5 text-xs font-bold uppercase text-text-secondary sm:inline">
-            {route.category}
+        <nav className="flex min-w-0 items-center gap-2" aria-label="Breadcrumb">
+          <span className="hidden shrink-0 rounded-md border border-border bg-surface-2 px-2 py-0.5 text-xs font-bold uppercase text-text-secondary sm:inline">
+            {category}
           </span>
-          <ChevronRight className="hidden size-3.5 text-text-secondary sm:inline" />
-          <span className="text-sm font-bold text-text-primary sm:text-base">{route.title}</span>
-        </div>
+          <ChevronRight className="hidden size-3.5 shrink-0 text-text-secondary sm:inline" />
+          <span className="truncate text-sm font-bold text-text-primary sm:text-base" title={title}>
+            {title}
+          </span>
+          {route.maturity === 'frozen' && (
+            <StatusPill tone="danger" className="hidden shrink-0 md:inline-flex">
+              {t.routes.categories.experimental}
+            </StatusPill>
+          )}
+        </nav>
       </div>
 
-      <div className="flex items-center gap-3">
-        <StatusPill tone={credentialsAttached ? 'success' : 'warning'}>
-          {credentialsAttached ? 'API token attached' : 'Read-only'}
+      <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+        <StatusPill
+          tone={credentialsAttached ? 'success' : 'warning'}
+          className="max-w-[9rem] truncate sm:max-w-none"
+        >
+          <span className="hidden sm:inline">
+            {credentialsAttached ? t.topbar.tokenAttached : t.topbar.readOnly}
+          </span>
+          <span className="sm:hidden">{credentialsAttached ? 'API' : 'RO'}</span>
         </StatusPill>
 
         <button
           type="button"
           onClick={() => navigate('/settings?tab=api')}
-          className="hidden rounded-lg border border-border bg-surface-0 px-3 py-1.5 text-xs text-text-secondary transition-colors hover:border-accent/50 hover:text-text-primary md:inline-flex"
+          className="touch-target hidden items-center gap-2 rounded-lg border border-border bg-surface-0 px-3 text-xs text-text-secondary transition-colors hover:border-accent/50 hover:text-text-primary md:inline-flex"
         >
-          <Search className="mr-2 size-3.5 text-accent" />
-          Settings
+          <Settings className="size-3.5 text-accent" />
+          {t.topbar.settings}
         </button>
 
         <button
           type="button"
           onClick={onCommandOpen}
-          className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface-0 px-3 py-1.5 text-xs text-text-secondary hover:border-accent/50"
+          aria-label={t.topbar.openPalette}
+          title={t.topbar.openPalette}
+          className="touch-target inline-flex items-center gap-2 rounded-lg border border-border bg-surface-0 px-3 text-xs text-text-secondary transition-colors hover:border-accent/50 hover:text-text-primary"
         >
           <Search className="size-3.5 text-accent" />
           <kbd className="hidden rounded border border-border bg-surface-2 px-1 font-mono sm:inline">

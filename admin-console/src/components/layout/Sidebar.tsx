@@ -64,14 +64,14 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         type="button"
         className={`fixed inset-0 z-40 bg-black/60 backdrop-blur-xs transition-opacity lg:hidden ${open ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
         onClick={onClose}
-        aria-label={lang === 'ru' ? 'Закрыть меню' : 'Close navigation'}
+        aria-label={t.profile.closeMenu}
         tabIndex={open ? 0 : -1}
       />
 
       <aside
         id="sidebar-navigation"
-        className={`surface-panel fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-border transition-transform duration-200 lg:static lg:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full'}`}
-        aria-label={lang === 'ru' ? 'Основная навигация' : 'Main navigation'}
+        className={`surface-panel fixed inset-y-0 left-0 z-50 flex w-[17.5rem] max-w-[85vw] flex-col border-r border-border transition-transform duration-200 lg:static lg:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full'}`}
+        aria-label={t.profile.mainNav}
       >
         <div className="flex h-14 items-center justify-between border-b border-border px-4">
           <div className="flex min-w-0 items-center gap-2.5">
@@ -102,8 +102,8 @@ export function Sidebar({ open, onClose }: SidebarProps) {
               type="button"
               className="interactive-surface flex items-center justify-center rounded-md p-1.5 text-text-secondary hover:bg-surface-2 hover:text-text-primary"
               onClick={toggleTheme}
-              aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-              title={theme === 'dark' ? 'Light theme' : 'Dark theme'}
+              aria-label={theme === 'dark' ? t.profile.lightThemeSwitch : t.profile.darkThemeSwitch}
+              title={theme === 'dark' ? t.profile.lightTheme : t.profile.darkTheme}
             >
               {theme === 'dark' ? <Sun className="size-4 text-warning" /> : <Moon className="size-4 text-accent" />}
             </button>
@@ -112,7 +112,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
               type="button"
               className="touch-target interactive-surface flex items-center justify-center rounded-md p-2 text-text-secondary hover:bg-surface-2 lg:hidden"
               onClick={onClose}
-              aria-label={lang === 'ru' ? 'Закрыть меню' : 'Close navigation'}
+              aria-label={t.profile.closeMenu}
             >
               <X className="size-5" />
             </button>
@@ -137,7 +137,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                   onClick={onClose}
                   title={description}
                   className={({ isActive }) =>
-                    `interactive-surface group relative flex min-h-[var(--touch-min)] items-center gap-3 rounded-lg border px-3 py-2 text-sm font-medium ${
+                    `interactive-surface group relative flex min-h-[var(--touch-min)] items-center gap-3 rounded-lg border px-3 py-2 text-left text-sm font-medium ${
                       isActive
                         ? 'border-accent/20 bg-accent/15 font-semibold text-accent shadow-sm'
                         : 'border-transparent text-text-secondary hover:bg-surface-2 hover:text-text-primary'
@@ -154,7 +154,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                           isActive ? 'text-accent' : 'text-text-secondary group-hover:text-text-primary'
                         }`}
                       />
-                      <span className="truncate">{label}</span>
+                      <span className="min-w-0 leading-snug">{label}</span>
                     </>
                   )}
                 </NavLink>
@@ -175,10 +175,10 @@ export function Sidebar({ open, onClose }: SidebarProps) {
               </div>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-xs font-bold text-text-primary">
-                  {lang === 'ru' ? 'Локальная консоль' : 'Local console'}
+                  {t.profile.localConsole}
                 </p>
                 <p className="truncate text-[10px] text-warning">
-                  {lang === 'ru' ? 'Без аутентифицированной сессии' : 'No authenticated session'}
+                  {t.profile.noSession}
                 </p>
               </div>
             </div>

@@ -3,7 +3,7 @@ import { KeyRound, MonitorCog, Moon, Settings, ShieldAlert, Sun } from 'lucide-r
 import { useNavigate } from 'react-router-dom'
 import { loadApiSettings } from '../../api/settings'
 import { APP_VERSION } from '../../lib/build'
-import { useLanguage } from '../../lib/i18n'
+import { useT } from '../../lib/i18n'
 import { applyTheme, loadTheme, type Theme } from '../../lib/theme'
 import { Button } from '../ui/Button'
 import { Modal } from '../ui/Modal'
@@ -15,14 +15,12 @@ interface UserProfileModalProps {
 
 export function UserProfileModal({ open, onClose }: UserProfileModalProps) {
   const [theme, setTheme] = useState<Theme>(loadTheme)
-  const [lang] = useLanguage()
+  const t = useT()
   const navigate = useNavigate()
   const settings = loadApiSettings()
   const hasApiCredentials = Boolean(
     settings.controlPlaneToken || settings.searchToken || settings.aclToken || settings.controlToken,
   )
-  const ru = lang === 'ru'
-
   const toggleTheme = () => {
     const next = theme === 'dark' ? 'light' : 'dark'
     setTheme(next)
@@ -38,7 +36,7 @@ export function UserProfileModal({ open, onClose }: UserProfileModalProps) {
     <Modal
       open={open}
       onClose={onClose}
-      title={ru ? 'Доступ к консоли' : 'Console access'}
+      title={t.profile.title}
       wide
     >
       <div className="space-y-5">
@@ -50,27 +48,25 @@ export function UserProfileModal({ open, onClose }: UserProfileModalProps) {
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="text-lg font-bold text-text-primary">
-                  {ru ? 'Локальная консоль' : 'Local console'}
+                  {t.profile.localConsole}
                 </h3>
                 <span className="rounded-full border border-warning/40 bg-warning/15 px-2 py-0.5 text-xs font-semibold text-warning">
-                  {ru ? 'Без аутентификации' : 'Unauthenticated'}
+                  {t.profile.unauthenticated}
                 </span>
               </div>
               <p className="mt-1 text-xs text-text-secondary">
-                {ru
-                  ? 'Backend не предоставляет этой UI подтверждённую личность пользователя или роль.'
-                  : 'The backend does not provide this UI with a verified user identity or role.'}
+                {t.profile.noIdentity}
               </p>
             </div>
           </div>
           <Button type="button" variant="secondary" className="shrink-0 text-xs" onClick={toggleTheme}>
             {theme === 'dark' ? (
               <>
-                <Sun className="size-4 text-warning" /> {ru ? 'Светлая тема' : 'Light theme'}
+                <Sun className="size-4 text-warning" /> {t.profile.lightTheme}
               </>
             ) : (
               <>
-                <Moon className="size-4 text-accent" /> {ru ? 'Тёмная тема' : 'Dark theme'}
+                <Moon className="size-4 text-accent" /> {t.profile.darkTheme}
               </>
             )}
           </Button>
@@ -79,37 +75,35 @@ export function UserProfileModal({ open, onClose }: UserProfileModalProps) {
         <div className="grid gap-4 sm:grid-cols-3">
           <StatusCard
             icon={MonitorCog}
-            label={ru ? 'Режим доступа' : 'Access mode'}
-            value={ru ? 'Локальная browser-сессия' : 'Local browser session'}
+            label={t.profile.accessMode}
+            value={t.profile.browserSession}
           />
           <StatusCard
             icon={KeyRound}
-            label={ru ? 'API credentials' : 'API credentials'}
+            label={t.profile.apiCredentials}
             value={
               hasApiCredentials
-                ? (ru ? 'Заданы для этой вкладки' : 'Configured for this tab')
-                : (ru ? 'Не заданы' : 'Not configured')
+                ? t.profile.credentialsSet
+                : t.profile.credentialsUnset
             }
             warning={!hasApiCredentials}
           />
           <StatusCard
             icon={Settings}
-            label={ru ? 'Версия продукта' : 'Product version'}
+            label={t.profile.productVersion}
             value={`v${APP_VERSION}`}
           />
         </div>
 
         <div className="rounded-lg border border-border bg-surface-1 p-4 text-sm text-text-secondary">
-          {ru
-            ? 'API-токены авторизуют отдельные запросы к сервисам, но не создают пользовательскую сессию в Admin Console. Не публикуйте консоль в недоверенную сеть без внешнего access gateway.'
-            : 'API tokens authorize individual service requests; they do not create an Admin Console user session. Do not expose the console to an untrusted network without an external access gateway.'}
+          {t.profile.tokenNotice}
         </div>
 
         <div className="flex items-center justify-between border-t border-border pt-4">
           <span className="text-xs text-text-secondary">BSDM Admin Console v{APP_VERSION}</span>
           <Button variant="primary" onClick={openSettings} className="text-xs">
             <Settings className="size-4" />
-            {ru ? 'Открыть настройки API' : 'Open API settings'}
+            {t.profile.openApiSettings}
           </Button>
         </div>
       </div>

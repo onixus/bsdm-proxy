@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import type { ThreatScoreSnapshot } from '../../../api/threatScores'
 import { ThreatIndicator } from '../../xai/ThreatIndicator'
 import { severityBadge } from '../../../theme/tokens'
+import { useT } from '../../../lib/i18n'
 import { EmptyState, SourceBadge } from '../../ui/DataState'
 import { Panel } from '../MetricWidget'
 import type { DataSource } from '../../../api/source'
@@ -14,10 +15,12 @@ interface ThreatOverviewProps {
 }
 
 export function ThreatOverview({ snapshot, source, error }: ThreatOverviewProps) {
+  const t = useT()
+
   return (
-    <Panel title="Обнаруженные аномалии ML (UEBA)" icon={Brain} action={source && <SourceBadge source={source} />}>
-      {error && <EmptyState message="Модуль ml-worker недоступен — оценки аномалий отсутствуют." />}
-      {snapshot && snapshot.scores.length === 0 && <EmptyState message="Активные угрозы в текущем снапшоте не обнаружены." />}
+    <Panel title={t.widgets.threats} icon={Brain} action={source && <SourceBadge source={source} />}>
+      {error && <EmptyState message={t.widgets.threatsError} />}
+      {snapshot && snapshot.scores.length === 0 && <EmptyState message={t.widgets.threatsEmpty} />}
       {snapshot && snapshot.scores.length > 0 && (
         <ul className="space-y-3">
           {[...snapshot.scores]

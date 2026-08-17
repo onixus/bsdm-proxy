@@ -3,7 +3,7 @@ import { Panel } from '../../../components/dashboard/MetricWidget'
 import { fetchProxyStats, formatUptime } from '../../../api/metrics'
 import { fetchUpstreamTls } from '../../../api/node'
 import { useSourcedQuery } from '../../../hooks/useSourced'
-import { useLanguage } from '../../../lib/i18n'
+import { translations, type Language } from '../../../lib/i18n'
 
 function summarizeTls(tls: Record<string, unknown>): string {
   const entries = Object.entries(tls).slice(0, 3)
@@ -11,9 +11,9 @@ function summarizeTls(tls: Record<string, unknown>): string {
   return entries.map(([k, v]) => `${k}=${String(v)}`).join(' · ')
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function LiveNodePanel({ tr }: { tr: any }) {
-  const [lang] = useLanguage()
+type Copy = (typeof translations)[Language]
+
+export function LiveNodePanel({ tr }: { tr: Copy }) {
   const stats = useQuery({
     queryKey: ['settings-stats'],
     queryFn: fetchProxyStats,
@@ -37,14 +37,14 @@ export function LiveNodePanel({ tr }: { tr: any }) {
             <dd className="font-mono text-xs text-text-primary">{s.service}</dd>
           </div>
           <div>
-            <dt className="text-xs text-text-secondary">{lang === 'ru' ? 'Аптайм' : 'Uptime'}</dt>
+            <dt className="text-xs text-text-secondary">{tr.settings.uptime}</dt>
             <dd className="text-text-primary">{formatUptime(s.uptime_secs)}</dd>
           </div>
           <div>
-            <dt className="text-xs text-text-secondary">{lang === 'ru' ? 'L1 кэш' : 'L1 cache'}</dt>
+            <dt className="text-xs text-text-secondary">{tr.settings.l1Cache}</dt>
             <dd className="tabular-nums text-text-primary">
               {s.cache.entries.toLocaleString()}/{s.cache.capacity.toLocaleString()} · {s.cache.shards}{' '}
-              {lang === 'ru' ? 'шардов' : 'shards'}
+              {tr.settings.shards}
             </dd>
           </div>
           <div>

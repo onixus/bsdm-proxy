@@ -32,7 +32,7 @@ export function Button({
     <button
       type="button"
       disabled={disabled || isLoading}
-      className={`touch-target inline-flex items-center justify-center gap-2 rounded-lg border px-4 py-2 text-sm font-semibold transition-all active:scale-[0.97] cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100 ${variants[variant]} ${className}`}
+      className={`touch-target inline-flex cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-lg border px-4 py-2 text-sm font-semibold transition-all active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100 [&>svg]:shrink-0 ${variants[variant]} ${className}`}
       {...props}
     >
       {isLoading ? (

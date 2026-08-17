@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import type { Telemetry } from '../../../api/metrics'
 import { seriesColor, STATUS_VARS } from '../../charts/common'
 import { SegmentBar, type Segment } from '../../charts/SegmentBar'
+import { useT } from '../../../lib/i18n'
 import { EmptyState } from '../../ui/DataState'
 import { Panel } from '../MetricWidget'
 
@@ -11,23 +12,25 @@ interface DecisionSourcePanelProps {
 }
 
 export function DecisionSourcePanel({ telemetry }: DecisionSourcePanelProps) {
+  const t = useT()
+
   return (
     <Panel
-      title="Hybrid decision_source (dns / sni / mitm / pin)"
+      title={t.widgets.decisionSource}
       icon={ShieldCheck}
       action={
         <Link to="/logs" className="text-xs font-semibold text-accent hover:underline">
-          Open logs
+          {t.widgets.openLogs}
         </Link>
       }
     >
       {Object.keys(telemetry.decisionSources).length === 0 ? (
-        <EmptyState message="Счётчики decision_source появятся после HTTPS/DNS трафика через proxy (bsdm_proxy_policy_decision_source_total)." />
+        <EmptyState message={t.widgets.decisionSourceEmpty} />
       ) : (
         <>
           <SegmentBar segments={decisionSourceSegments(telemetry.decisionSources)} />
           <p className="mt-3 text-xs text-text-secondary">
-            Grafana: panel «Policy Decision Sources» · metric{' '}
+            {t.widgets.decisionSourceHint}{' '}
             <code className="font-mono">bsdm_proxy_policy_decision_source_total</code>
           </p>
         </>
