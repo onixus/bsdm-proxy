@@ -24,10 +24,10 @@ export function StatusPill({
 }: StatusPillProps) {
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${toneClasses[tone]} ${className}`}
+      className={`inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold whitespace-nowrap ${toneClasses[tone]} ${className}`}
     >
       {icon}
-      <span>{children}</span>
+      <span className="truncate">{children}</span>
     </span>
   )
 }

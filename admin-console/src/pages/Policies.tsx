@@ -17,7 +17,7 @@ import { ErrorState } from '../components/ui/DataState'
 import { FormField, FormGrid } from '../components/ui/Form'
 import { Modal } from '../components/ui/Modal'
 import { useToast } from '../components/ui/Toast'
-import { useLanguage, translations } from '../lib/i18n'
+import { fmt, useLanguage, translations } from '../lib/i18n'
 import {
   ACL_CATEGORIES,
   CATEGORY_GROUP_ORDER,
@@ -183,7 +183,7 @@ export function PoliciesPage() {
     const payload: AclRule = withCategory(
       {
         id: draft.id,
-        name: draft.name.trim() || (lang === 'ru' ? `Блок: ${category}` : `Block ${category}`),
+        name: draft.name.trim() || fmt(tr.policies.defaultRuleName, { category }),
         enabled: draft.enabled,
         priority,
         action: draft.action,

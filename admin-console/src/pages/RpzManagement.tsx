@@ -41,9 +41,16 @@ import {
 import { Button } from '../components/ui/Button'
 import { Modal } from '../components/ui/Modal'
 import { FormField } from '../components/ui/Form'
-import { PreviewBanner } from '../components/ui/DataState'
+import { PageHeader } from '../components/ui/PageHeader'
+import { EmptyState, PreviewBanner, SkeletonRows } from '../components/ui/DataState'
+import { fmt, useT } from '../lib/i18n'
+
+/** Shared control styling so RPZ inputs match the rest of the console. */
+const controlClass =
+  'touch-target w-full rounded-md border border-border bg-surface-0 px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20'
 
 export function RpzManagementPage() {
+  const t = useT()
   const [, startTransition] = useTransition()
   const [lists, setLists] = useState<RpzList[]>([])
   const [customRules, setCustomRules] = useState<RpzRule[]>([])
@@ -296,33 +303,28 @@ export function RpzManagementPage() {
 
   return (
     <div className="space-y-6">
-      <PreviewBanner feature="RPZ feed management" />
-      {/* Page Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="flex items-center gap-2.5 text-2xl font-bold text-text-primary">
-            <Radio className="size-7 text-accent" />
-            RPZ & DNS Sinkhole Management
-          </h1>
-          <p className="mt-1 text-sm text-text-secondary">
-            Upload BIND RPZ lists, subscribe to threat feeds, and configure DNS sinkhole policies.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="secondary" onClick={() => setConfigModalOpen(true)}>
-            <Settings className="size-4" />
-            Sinkhole Config
-          </Button>
-          <Button variant="secondary" onClick={() => setUrlModalOpen(true)}>
-            <Link className="size-4" />
-            Add Feed URL
-          </Button>
-          <Button variant="primary" onClick={() => setUploadModalOpen(true)}>
-            <Upload className="size-4" />
-            Upload RPZ List
-          </Button>
-        </div>
-      </div>
+      <PreviewBanner feature={t.rpz.previewFeature} />
+      <PageHeader
+        title={t.rpz.title}
+        subtitle={t.rpz.subtitle}
+        badge={<Radio className="size-6 text-accent" />}
+        actions={
+          <>
+            <Button variant="secondary" onClick={() => setConfigModalOpen(true)}>
+              <Settings className="size-4" />
+              {t.rpz.sinkholeConfig}
+            </Button>
+            <Button variant="secondary" onClick={() => setUrlModalOpen(true)}>
+              <Link className="size-4" />
+              {t.rpz.addFeedUrl}
+            </Button>
+            <Button variant="primary" onClick={() => setUploadModalOpen(true)}>
+              <Upload className="size-4" />
+              {t.rpz.uploadList}
+            </Button>
+          </>
+        }
+      />
 
       {/* KPI Cards Grid */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -330,7 +332,7 @@ export function RpzManagementPage() {
         <div className="rounded-lg border border-border bg-surface-1 p-4 shadow-sm">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-              Sinkhole Status
+              {t.rpz.kpiStatus}
             </span>
             <button
               type="button"
@@ -347,15 +349,16 @@ export function RpzManagementPage() {
                   : 'bg-danger/20 text-danger hover:bg-danger/30'
               }`}
             >
-              {sinkholeConfig?.enabled ? 'ACTIVE' : 'PAUSED'}
+              {sinkholeConfig?.enabled ? t.rpz.kpiActive : t.rpz.kpiPaused}
             </button>
           </div>
-          <div className="mt-3 flex items-baseline justify-between">
+          <div className="mt-3 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
             <span className="text-2xl font-bold text-text-primary">
-              {sinkholeConfig?.enabled ? 'Protected' : 'Disabled'}
+              {sinkholeConfig?.enabled ? t.rpz.kpiProtected : t.rpz.kpiDisabled}
             </span>
             <span className="text-xs text-text-secondary">
-              Action: <strong className="text-accent">{sinkholeConfig?.defaultAction || 'SINKHOLE'}</strong>
+              {t.rpz.kpiAction}{' '}
+              <strong className="text-accent">{sinkholeConfig?.defaultAction || 'SINKHOLE'}</strong>
             </span>
           </div>
           <div className="mt-2 text-xs text-text-secondary">
@@ -367,20 +370,20 @@ export function RpzManagementPage() {
         <div className="rounded-lg border border-border bg-surface-1 p-4 shadow-sm">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-              Active RPZ Rules
+              {t.rpz.kpiRules}
             </span>
             <Database className="size-4 text-accent" />
           </div>
-          <div className="mt-3 flex items-baseline justify-between">
+          <div className="mt-3 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
             <span className="text-2xl font-bold text-text-primary">
               {stats ? stats.totalRules.toLocaleString() : '0'}
             </span>
             <span className="text-xs text-success font-medium flex items-center">
-              <ShieldCheck className="size-3.5 mr-0.5 inline" /> {stats?.activeLists || 0} active feeds
+              <ShieldCheck className="size-3.5 mr-0.5 inline" /> {stats?.activeLists || 0} {t.rpz.kpiActiveFeeds}
             </span>
           </div>
           <div className="mt-2 text-xs text-text-secondary">
-            Across {stats?.totalLists || 0} total subscribed zones
+            {fmt(t.rpz.kpiAcrossZones, { count: stats?.totalLists || 0 })}
           </div>
         </div>
 
@@ -388,18 +391,18 @@ export function RpzManagementPage() {
         <div className="rounded-lg border border-border bg-surface-1 p-4 shadow-sm">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-              DNS Blocks (24h)
+              {t.rpz.kpiBlocks}
             </span>
             <ShieldAlert className="size-4 text-warning" />
           </div>
-          <div className="mt-3 flex items-baseline justify-between">
+          <div className="mt-3 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
             <span className="text-2xl font-bold text-text-primary">
               {stats ? stats.blocked24h.toLocaleString() : '0'}
             </span>
-            <span className="text-xs text-text-secondary">queries</span>
+            <span className="text-xs text-text-secondary">{t.rpz.kpiQueries}</span>
           </div>
           <div className="mt-2 text-xs text-text-secondary">
-            Sinkholed & resolved to 0.0.0.0
+            {t.rpz.kpiSinkholed}
           </div>
         </div>
 
@@ -407,16 +410,16 @@ export function RpzManagementPage() {
         <div className="rounded-lg border border-border bg-surface-1 p-4 shadow-sm">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-              Threat Feed Sync
+              {t.rpz.kpiSync}
             </span>
             <RefreshCw className="size-4 text-accent" />
           </div>
-          <div className="mt-3 flex items-baseline justify-between">
-            <span className="text-2xl font-bold text-success">Healthy</span>
-            <span className="text-xs text-text-secondary">Auto-sync 1h</span>
+          <div className="mt-3 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+            <span className="text-2xl font-bold text-success">{t.rpz.kpiHealthy}</span>
+            <span className="text-xs text-text-secondary">{t.rpz.kpiAutoSync}</span>
           </div>
           <div className="mt-2 text-xs text-text-secondary">
-            Last updated: 12 min ago
+            {t.rpz.kpiLastUpdated}
           </div>
         </div>
       </div>
@@ -426,14 +429,14 @@ export function RpzManagementPage() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <ShieldCheck className="size-5 text-success" />
-            <h2 className="text-base font-semibold text-text-primary">Encrypted DNS Gateways (DoH & DoT RFC Compliance)</h2>
+            <h2 className="text-base font-semibold text-text-primary">{t.rpz.dohDotTitle}</h2>
           </div>
           <span className="rounded-full bg-success/20 px-2.5 py-0.5 text-xs font-bold text-success">
-            ENCRYPTED RESOLUTION ACTIVE
+            {t.rpz.dohDotBadge}
           </span>
         </div>
         <p className="text-xs text-text-secondary">
-          Protects DNS queries against eavesdropping using DNS-over-HTTPS (DoH, RFC 8484) and DNS-over-TLS (DoT, RFC 7858).
+          {t.rpz.dohDotDesc}
         </p>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -447,7 +450,12 @@ export function RpzManagementPage() {
               https://{sinkholeConfig?.dohBind || '0.0.0.0:8443'}{sinkholeConfig?.dohPath || '/dns-query'}
             </div>
             <div className="flex justify-between text-xs text-text-secondary pt-1 border-t border-border/50">
-              <span>24h Encrypted Queries: <strong className="text-text-primary font-mono">{stats?.dohQueries24h?.toLocaleString() || '68,420'}</strong></span>
+              <span>
+                {t.rpz.encryptedQueries24h}{' '}
+                <strong className="font-mono text-text-primary">
+                  {stats?.dohQueries24h?.toLocaleString() || '68,420'}
+                </strong>
+              </span>
               <span className="text-success font-semibold">GET / POST wireformat</span>
             </div>
           </div>
@@ -462,7 +470,12 @@ export function RpzManagementPage() {
               tls://{sinkholeConfig?.dotBind || '0.0.0.0:853'}
             </div>
             <div className="flex justify-between text-xs text-text-secondary pt-1 border-t border-border/50">
-              <span>24h Encrypted Queries: <strong className="text-text-primary font-mono">{stats?.dotQueries24h?.toLocaleString() || '31,200'}</strong></span>
+              <span>
+                {t.rpz.encryptedQueries24h}{' '}
+                <strong className="font-mono text-text-primary">
+                  {stats?.dotQueries24h?.toLocaleString() || '31,200'}
+                </strong>
+              </span>
               <span className="text-success font-semibold">TCP 853 TLS 2-byte frame</span>
             </div>
           </div>
@@ -473,10 +486,10 @@ export function RpzManagementPage() {
       <div className="rounded-xl border border-border bg-surface-1 p-5 shadow-sm">
         <div className="flex items-center gap-2 mb-3">
           <Globe className="size-5 text-accent" />
-          <h2 className="text-base font-semibold text-text-primary">RPZ Rule Inspector & Query Tester</h2>
+          <h2 className="text-base font-semibold text-text-primary">{t.rpz.testerTitle}</h2>
         </div>
         <p className="text-xs text-text-secondary mb-4">
-          Test any hostname or domain to simulate how the DNS Sinkhole engine evaluates incoming requests against loaded RPZ zones.
+          {t.rpz.testerDesc}
         </p>
 
         <form onSubmit={handleTestDomain} className="flex flex-col gap-3 sm:flex-row">
@@ -484,15 +497,16 @@ export function RpzManagementPage() {
             <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-text-secondary" />
             <input
               type="text"
-              placeholder="Enter domain to test (e.g. malware-drop.badsite.ru or tracker.adtech-analytics.com)..."
+              placeholder={t.rpz.testerPlaceholder}
+              aria-label={t.rpz.testerPlaceholder}
               value={testDomainInput}
               onChange={(e) => setTestDomainInput(e.target.value)}
-              className="w-full rounded-md border border-border bg-surface-0 py-2 pl-9 pr-3 text-sm text-text-primary placeholder:text-text-secondary focus:border-accent focus:outline-none"
+              className={`${controlClass} py-2 pl-9 pr-3`}
             />
           </div>
           <Button type="submit" disabled={testing}>
             {testing ? <RefreshCw className="size-4 animate-spin" /> : <Search className="size-4" />}
-            Test Domain
+            {t.rpz.testerSubmit}
           </Button>
         </form>
 
@@ -529,13 +543,13 @@ export function RpzManagementPage() {
 
             <div className="mt-3 grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
               <div>
-                <span className="text-text-secondary">Target Response: </span>
+                <span className="text-text-secondary">{t.rpz.testerTargetResponse} </span>
                 <span className="font-mono font-medium text-text-primary">{testResult.targetResponse}</span>
               </div>
               <div>
-                <span className="text-text-secondary">Matching List: </span>
+                <span className="text-text-secondary">{t.rpz.testerMatchingList} </span>
                 <span className="font-medium text-text-primary">
-                  {testResult.matchedRule ? testResult.matchedRule.listName : 'None (Default Upstream Pass)'}
+                  {testResult.matchedRule ? testResult.matchedRule.listName : t.rpz.testerNoMatch}
                 </span>
               </div>
             </div>
@@ -544,40 +558,40 @@ export function RpzManagementPage() {
       </div>
 
       {/* Main Tabs Header */}
-      <div className="flex flex-col justify-between border-b border-border sm:flex-row sm:items-center">
-        <div className="flex space-x-4">
+      <div className="flex flex-col justify-between gap-2 border-b border-border sm:flex-row sm:items-center">
+        <div className="scrollbar-stable -mb-px flex gap-4 overflow-x-auto" role="tablist">
           <button
             type="button"
             onClick={() => setActiveTab('lists')}
-            className={`border-b-2 py-3 px-1 text-sm font-semibold transition-colors ${
+            className={`touch-target whitespace-nowrap border-b-2 px-1 py-3 text-sm font-semibold transition-colors ${
               activeTab === 'lists'
                 ? 'border-accent text-accent'
                 : 'border-transparent text-text-secondary hover:text-text-primary'
             }`}
           >
-            RPZ Feeds & Lists ({lists.length})
+            {t.rpz.tabLists} ({lists.length})
           </button>
           <button
             type="button"
             onClick={() => setActiveTab('rules')}
-            className={`border-b-2 py-3 px-1 text-sm font-semibold transition-colors ${
+            className={`touch-target whitespace-nowrap border-b-2 px-1 py-3 text-sm font-semibold transition-colors ${
               activeTab === 'rules'
                 ? 'border-accent text-accent'
                 : 'border-transparent text-text-secondary hover:text-text-primary'
             }`}
           >
-            Custom Overrides ({customRules.length})
+            {t.rpz.tabRules} ({customRules.length})
           </button>
           <button
             type="button"
             onClick={() => setActiveTab('top')}
-            className={`border-b-2 py-3 px-1 text-sm font-semibold transition-colors ${
+            className={`touch-target whitespace-nowrap border-b-2 px-1 py-3 text-sm font-semibold transition-colors ${
               activeTab === 'top'
                 ? 'border-accent text-accent'
                 : 'border-transparent text-text-secondary hover:text-text-primary'
             }`}
           >
-            Top Threat Blocks (24h)
+            {t.rpz.tabTop}
           </button>
         </div>
 
@@ -585,20 +599,22 @@ export function RpzManagementPage() {
           <div className="flex items-center gap-2 py-2">
             <input
               type="text"
-              placeholder="Search lists..."
+              placeholder={t.rpz.searchLists}
+              aria-label={t.rpz.searchLists}
               value={searchQuery}
               onChange={(e) => startTransition(() => setSearchQuery(e.target.value))}
-              className="rounded-md border border-border bg-surface-0 px-3 py-1 text-xs text-text-primary focus:border-accent focus:outline-none"
+              className="min-w-0 flex-1 rounded-md border border-border bg-surface-0 px-3 py-1.5 text-xs text-text-primary placeholder:text-text-secondary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 sm:flex-none"
             />
             <select
               value={filterFormat}
               onChange={(e) => setFilterFormat(e.target.value)}
-              className="rounded-md border border-border bg-surface-0 px-2 py-1 text-xs text-text-primary focus:border-accent focus:outline-none"
+              aria-label={t.rpz.colFormat}
+              className="shrink-0 rounded-md border border-border bg-surface-0 px-2 py-1.5 text-xs text-text-primary focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
             >
-              <option value="all">All Formats</option>
-              <option value="rpz-zone">BIND RPZ Zone</option>
-              <option value="hosts">Hosts File</option>
-              <option value="domain-list">Domain List</option>
+              <option value="all">{t.rpz.allFormats}</option>
+              <option value="rpz-zone">{t.rpz.formatRpzZone}</option>
+              <option value="hosts">{t.rpz.formatHosts}</option>
+              <option value="domain-list">{t.rpz.formatDomainList}</option>
             </select>
           </div>
         )}
@@ -607,7 +623,7 @@ export function RpzManagementPage() {
           <div className="py-2">
             <Button variant="secondary" onClick={() => setRuleModalOpen(true)}>
               <Plus className="size-4" />
-              Add Domain Rule
+              {t.rpz.addDomainRule}
             </Button>
           </div>
         )}
@@ -617,23 +633,23 @@ export function RpzManagementPage() {
       {activeTab === 'lists' && (
         <div className="space-y-4">
           {loading ? (
-            <div className="p-8 text-center text-text-secondary">Loading RPZ lists...</div>
+            <SkeletonRows rows={5} />
           ) : filteredLists.length === 0 ? (
-            <div className="rounded-lg border border-border bg-surface-1 p-8 text-center text-text-secondary">
-              No RPZ lists found matching your search.
+            <div className="rounded-lg border border-border bg-surface-1">
+              <EmptyState message={t.rpz.noLists} icon={Search} />
             </div>
           ) : (
             <div className="overflow-x-auto rounded-lg border border-border bg-surface-1">
-              <table className="w-full text-left text-sm">
+              <table className="w-full min-w-[900px] text-left text-sm">
                 <thead className="border-b border-border bg-surface-2 text-xs uppercase text-text-secondary">
                   <tr>
-                    <th className="px-4 py-3">List Name & Source</th>
-                    <th className="px-4 py-3">Format</th>
-                    <th className="px-4 py-3">Rule Count</th>
-                    <th className="px-4 py-3">Action</th>
-                    <th className="px-4 py-3">Last Updated</th>
-                    <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3 text-right">Actions</th>
+                    <th className="whitespace-nowrap px-4 py-3">{t.rpz.colListName}</th>
+                    <th className="whitespace-nowrap px-4 py-3">{t.rpz.colFormat}</th>
+                    <th className="whitespace-nowrap px-4 py-3">{t.rpz.colRuleCount}</th>
+                    <th className="whitespace-nowrap px-4 py-3">{t.rpz.colAction}</th>
+                    <th className="whitespace-nowrap px-4 py-3">{t.rpz.colLastUpdated}</th>
+                    <th className="whitespace-nowrap px-4 py-3">{t.rpz.colStatus}</th>
+                    <th className="whitespace-nowrap px-4 py-3 text-right">{t.rpz.colActions}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border text-text-primary">
@@ -651,7 +667,7 @@ export function RpzManagementPage() {
                           {list.tags.map((t) => (
                             <span
                               key={t}
-                              className="rounded border border-border bg-surface-0 px-1.5 py-0.2 text-[10px] text-text-secondary"
+                              className="rounded border border-border bg-surface-0 px-1.5 py-0.5 text-[10px] text-text-secondary"
                             >
                               {t}
                             </span>
@@ -685,7 +701,7 @@ export function RpzManagementPage() {
                               : 'bg-surface-3 text-text-secondary hover:bg-surface-2'
                           }`}
                         >
-                          {list.active ? 'ACTIVE' : 'DISABLED'}
+                          {list.active ? t.rpz.listActive : t.rpz.listDisabled}
                         </button>
                       </td>
                       <td className="px-4 py-3 text-right">
@@ -696,7 +712,8 @@ export function RpzManagementPage() {
                               onClick={() => handleSyncList(list.id)}
                               disabled={syncingId === list.id}
                               className="rounded p-1.5 text-text-secondary hover:bg-surface-2 hover:text-text-primary"
-                              title="Force Sync Feed"
+                              title={t.rpz.forceSync}
+                              aria-label={t.rpz.forceSync}
                             >
                               <RefreshCw
                                 className={`size-4 ${syncingId === list.id ? 'animate-spin text-accent' : ''}`}
@@ -707,7 +724,8 @@ export function RpzManagementPage() {
                             type="button"
                             onClick={() => handleDeleteList(list.id)}
                             className="rounded p-1.5 text-danger/70 hover:bg-danger/20 hover:text-danger"
-                            title="Delete List"
+                            title={t.rpz.deleteList}
+                            aria-label={t.rpz.deleteList}
                           >
                             <Trash2 className="size-4" />
                           </button>
@@ -729,11 +747,11 @@ export function RpzManagementPage() {
             <table className="w-full text-left text-sm">
               <thead className="border-b border-border bg-surface-2 text-xs uppercase text-text-secondary">
                 <tr>
-                  <th className="px-4 py-3">Domain Name</th>
-                  <th className="px-4 py-3">Action</th>
-                  <th className="px-4 py-3">Comment / Note</th>
-                  <th className="px-4 py-3">Added Date</th>
-                  <th className="px-4 py-3 text-right">Actions</th>
+                  <th className="whitespace-nowrap px-4 py-3">{t.rpz.colDomain}</th>
+                  <th className="whitespace-nowrap px-4 py-3">{t.rpz.colAction}</th>
+                  <th className="whitespace-nowrap px-4 py-3">{t.rpz.colComment}</th>
+                  <th className="whitespace-nowrap px-4 py-3">{t.rpz.colAdded}</th>
+                  <th className="whitespace-nowrap px-4 py-3 text-right">{t.rpz.colActions}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border text-text-primary">
@@ -776,7 +794,7 @@ export function RpzManagementPage() {
       {activeTab === 'top' && (
         <div className="space-y-4">
           <div className="rounded-lg border border-border bg-surface-1 p-4">
-            <h3 className="text-sm font-bold text-text-primary mb-3">Top Blocked Hostnames (Last 24 Hours)</h3>
+            <h3 className="mb-3 text-sm font-bold text-text-primary">{t.rpz.topTitle}</h3>
             <div className="space-y-3">
               {stats?.topDomains.map((item, i) => (
                 <div
@@ -794,7 +812,7 @@ export function RpzManagementPage() {
                   </div>
                   <div className="mt-2 flex items-center gap-4 sm:mt-0">
                     <span className="font-mono text-sm font-bold text-accent">
-                      {item.count.toLocaleString()} blocks
+                      {item.count.toLocaleString()} {t.rpz.blocksSuffix}
                     </span>
                     <span className="rounded bg-accent/15 px-2 py-0.5 text-xs font-bold text-accent">
                       {item.action}
@@ -811,68 +829,68 @@ export function RpzManagementPage() {
       <Modal
         open={uploadModalOpen}
         onClose={() => setUploadModalOpen(false)}
-        title="Upload RPZ or Hosts File"
+        title={t.rpz.uploadTitle}
         footer={
           <>
             <Button variant="ghost" onClick={() => setUploadModalOpen(false)}>
-              Cancel
+              {t.common.cancel}
             </Button>
             <Button variant="primary" onClick={handleCreateUploadList} disabled={!uploadName || !uploadContent}>
               <Upload className="size-4" />
-              Upload & Parse
+              {t.rpz.uploadSubmit}
             </Button>
           </>
         }
       >
         <form onSubmit={handleCreateUploadList} className="space-y-4">
-          <FormField label="List Name" required>
+          <FormField label={t.rpz.fieldListName} required>
             <input
               type="text"
-              placeholder="e.g. Custom Corporate Blocklist"
+              placeholder={t.rpz.fieldListNamePh}
               value={uploadName}
               onChange={(e) => setUploadName(e.target.value)}
-              className="w-full rounded-md border border-border bg-surface-0 px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
+              className={controlClass}
             />
           </FormField>
 
           <FormField label="Description">
             <input
               type="text"
-              placeholder="Short notes about this blocklist source"
+              placeholder={t.rpz.fieldDescriptionPh}
               value={uploadDesc}
               onChange={(e) => setUploadDesc(e.target.value)}
-              className="w-full rounded-md border border-border bg-surface-0 px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
+              className={controlClass}
             />
           </FormField>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <FormField label="List Format">
+            <FormField label={t.rpz.fieldListFormat}>
               <select
                 value={uploadFormat}
                 onChange={(e) => setUploadFormat(e.target.value as RpzListFormat)}
-                className="w-full rounded-md border border-border bg-surface-0 px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
+                className={controlClass}
               >
-                <option value="rpz-zone">BIND RPZ Zone (.rpz)</option>
-                <option value="hosts">Hosts File (/etc/hosts)</option>
-                <option value="domain-list">Plain Domain List (.txt)</option>
+                <option value="rpz-zone">{t.rpz.optRpzZoneExt}</option>
+                <option value="hosts">{t.rpz.optHostsExt}</option>
+                <option value="domain-list">{t.rpz.optDomainListExt}</option>
               </select>
             </FormField>
 
-            <FormField label="Default Block Action">
+            <FormField label={t.rpz.fieldDefaultBlockAction}>
               <select
                 value={uploadAction}
                 onChange={(e) => setUploadAction(e.target.value as RpzAction)}
-                className="w-full rounded-md border border-border bg-surface-0 px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
+                className={controlClass}
               >
-                <option value="NXDOMAIN">NXDOMAIN (Name Error)</option>
-                <option value="SINKHOLE">SINKHOLE IP (0.0.0.0)</option>
-                <option value="DROP">DROP (Silent Discard)</option>
-                <option value="NODATA">NODATA (No A Record)</option>
+                <option value="NXDOMAIN">{t.rpz.optNxdomainFull}</option>
+                <option value="SINKHOLE">{t.rpz.optSinkholeFull}</option>
+                <option value="DROP">{t.rpz.optDropFull}</option>
+                <option value="NODATA">{t.rpz.optNodataFull}</option>
               </select>
             </FormField>
           </div>
 
-          <FormField label="Select File to Upload">
+          <FormField label={t.rpz.fieldFile}>
             <input
               type="file"
               accept=".txt,.rpz,.hosts,.zone,.conf"
@@ -881,25 +899,25 @@ export function RpzManagementPage() {
             />
           </FormField>
 
-          <FormField label="File Content Preview / Direct Paste">
+          <FormField label={t.rpz.fieldContent}>
             <textarea
               rows={5}
-              placeholder="Paste raw BIND RPZ zone, hosts file, or line-delimited domains..."
+              placeholder={t.rpz.fieldContentPh}
               value={uploadContent}
               onChange={(e) => setUploadContent(e.target.value)}
-              className="w-full rounded-md border border-border bg-surface-0 p-3 font-mono text-xs text-text-primary focus:border-accent focus:outline-none"
+              className={`${controlClass} font-mono text-xs`}
             />
           </FormField>
 
           {uploadContent && (
             <div className="rounded border border-success/30 bg-success/10 p-2.5 text-xs text-success flex items-center justify-between">
-              <span>Parsed Preview:</span>
+              <span>{t.rpz.parsedPreview}</span>
               <strong className="font-mono">
                 ~
                 {uploadContent
                   .split('\n')
                   .filter((l) => l.trim().length > 0 && !l.trim().startsWith('#')).length}{' '}
-                valid entries detected
+                {t.rpz.validEntries}
               </strong>
             </div>
           )}
@@ -910,68 +928,68 @@ export function RpzManagementPage() {
       <Modal
         open={urlModalOpen}
         onClose={() => setUrlModalOpen(false)}
-        title="Subscribe to Remote RPZ Feed URL"
+        title={t.rpz.feedTitle}
         footer={
           <>
             <Button variant="ghost" onClick={() => setUrlModalOpen(false)}>
-              Cancel
+              {t.common.cancel}
             </Button>
             <Button variant="primary" onClick={handleCreateUrlFeed} disabled={!feedName || !feedUrl}>
               <Link className="size-4" />
-              Add Feed Subscription
+              {t.rpz.feedSubmit}
             </Button>
           </>
         }
       >
         <form onSubmit={handleCreateUrlFeed} className="space-y-4">
-          <FormField label="Feed Name" required>
+          <FormField label={t.rpz.fieldFeedName} required>
             <input
               type="text"
-              placeholder="e.g. Abuse.ch Threat Feed"
+              placeholder={t.rpz.fieldFeedNamePh}
               value={feedName}
               onChange={(e) => setFeedName(e.target.value)}
-              className="w-full rounded-md border border-border bg-surface-0 px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
+              className={controlClass}
             />
           </FormField>
 
-          <FormField label="Feed HTTP/HTTPS URL" required>
+          <FormField label={t.rpz.fieldFeedUrl} required>
             <input
               type="url"
               placeholder="https://example.com/downloads/rpz-zone.txt"
               value={feedUrl}
               onChange={(e) => setFeedUrl(e.target.value)}
-              className="w-full rounded-md border border-border bg-surface-0 px-3 py-2 text-sm font-mono text-text-primary focus:border-accent focus:outline-none"
+              className={`${controlClass} font-mono`}
             />
           </FormField>
 
           <FormField label="Description">
             <input
               type="text"
-              placeholder="Source description or maintainer details"
+              placeholder={t.rpz.fieldFeedDescPh}
               value={feedDesc}
               onChange={(e) => setFeedDesc(e.target.value)}
-              className="w-full rounded-md border border-border bg-surface-0 px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
+              className={controlClass}
             />
           </FormField>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <FormField label="Format">
+            <FormField label={t.rpz.fieldFormat}>
               <select
                 value={feedFormat}
                 onChange={(e) => setFeedFormat(e.target.value as RpzListFormat)}
-                className="w-full rounded-md border border-border bg-surface-0 px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
+                className={controlClass}
               >
-                <option value="rpz-zone">BIND RPZ Zone</option>
-                <option value="hosts">Hosts File</option>
-                <option value="domain-list">Plain Domain List</option>
+                <option value="rpz-zone">{t.rpz.formatRpzZone}</option>
+                <option value="hosts">{t.rpz.formatHosts}</option>
+                <option value="domain-list">{t.rpz.formatDomainList}</option>
               </select>
             </FormField>
 
-            <FormField label="Default Action">
+            <FormField label={t.rpz.fieldDefaultAction}>
               <select
                 value={feedAction}
                 onChange={(e) => setFeedAction(e.target.value as RpzAction)}
-                className="w-full rounded-md border border-border bg-surface-0 px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
+                className={controlClass}
               >
                 <option value="NXDOMAIN">NXDOMAIN</option>
                 <option value="SINKHOLE">SINKHOLE</option>
@@ -986,50 +1004,50 @@ export function RpzManagementPage() {
       <Modal
         open={ruleModalOpen}
         onClose={() => setRuleModalOpen(false)}
-        title="Add Custom Domain Rule"
+        title={t.rpz.ruleTitle}
         footer={
           <>
             <Button variant="ghost" onClick={() => setRuleModalOpen(false)}>
-              Cancel
+              {t.common.cancel}
             </Button>
             <Button variant="primary" onClick={handleAddCustomRule} disabled={!ruleDomain}>
               <Plus className="size-4" />
-              Save Domain Rule
+              {t.rpz.ruleSubmit}
             </Button>
           </>
         }
       >
         <form onSubmit={handleAddCustomRule} className="space-y-4">
-          <FormField label="Domain Name" required>
+          <FormField label={t.rpz.colDomain} required>
             <input
               type="text"
-              placeholder="e.g. malicious-test-site.org"
+              placeholder={t.rpz.fieldDomainPh}
               value={ruleDomain}
               onChange={(e) => setRuleDomain(e.target.value)}
-              className="w-full rounded-md border border-border bg-surface-0 px-3 py-2 font-mono text-sm text-text-primary focus:border-accent focus:outline-none"
+              className={`${controlClass} font-mono`}
             />
           </FormField>
 
-          <FormField label="Action">
+          <FormField label={t.rpz.colAction}>
             <select
               value={ruleAction}
               onChange={(e) => setRuleAction(e.target.value as RpzAction)}
-              className="w-full rounded-md border border-border bg-surface-0 px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
+              className={controlClass}
             >
-              <option value="NXDOMAIN">NXDOMAIN (Block with Name Error)</option>
-              <option value="SINKHOLE">SINKHOLE (Redirect to 0.0.0.0)</option>
-              <option value="PASSTHRU">PASSTHRU (Whitelist / Allow)</option>
-              <option value="DROP">DROP (Discard query)</option>
+              <option value="NXDOMAIN">{t.rpz.optNxdomainRule}</option>
+              <option value="SINKHOLE">{t.rpz.optSinkholeRule}</option>
+              <option value="PASSTHRU">{t.rpz.optPassthruRule}</option>
+              <option value="DROP">{t.rpz.optDropRule}</option>
             </select>
           </FormField>
 
-          <FormField label="Comment / Note">
+          <FormField label={t.rpz.colComment}>
             <input
               type="text"
-              placeholder="Reason for manual override..."
+              placeholder={t.rpz.fieldCommentPh}
               value={ruleComment}
               onChange={(e) => setRuleComment(e.target.value)}
-              className="w-full rounded-md border border-border bg-surface-0 px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
+              className={controlClass}
             />
           </FormField>
         </form>
@@ -1039,14 +1057,14 @@ export function RpzManagementPage() {
       <Modal
         open={configModalOpen}
         onClose={() => setConfigModalOpen(false)}
-        title="Global DNS Sinkhole Settings"
+        title={t.rpz.configTitle}
         footer={
           <>
             <Button variant="ghost" onClick={() => setConfigModalOpen(false)}>
-              Cancel
+              {t.common.cancel}
             </Button>
             <Button variant="primary" onClick={handleSaveConfig}>
-              Save Settings
+              {t.rpz.configSubmit}
             </Button>
           </>
         }
@@ -1054,8 +1072,8 @@ export function RpzManagementPage() {
         <form onSubmit={handleSaveConfig} className="space-y-4">
           <div className="flex items-center justify-between rounded-md border border-border bg-surface-0 p-3">
             <div>
-              <div className="text-sm font-semibold text-text-primary">Enable DNS Sinkhole Engine</div>
-              <div className="text-xs text-text-secondary">Enforces active RPZ policy rules on incoming DNS traffic</div>
+              <div className="text-sm font-semibold text-text-primary">{t.rpz.cfgEnable}</div>
+              <div className="text-xs text-text-secondary">{t.rpz.cfgEnableHint}</div>
             </div>
             <input
               type="checkbox"
@@ -1066,42 +1084,42 @@ export function RpzManagementPage() {
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <FormField label="Sinkhole IPv4 Target">
+            <FormField label={t.rpz.cfgIpv4}>
               <input
                 type="text"
                 value={cfgIpv4}
                 onChange={(e) => setCfgIpv4(e.target.value)}
-                className="w-full rounded-md border border-border bg-surface-0 px-3 py-2 font-mono text-sm text-text-primary focus:border-accent focus:outline-none"
+                className={`${controlClass} font-mono`}
               />
             </FormField>
 
-            <FormField label="Sinkhole IPv6 Target">
+            <FormField label={t.rpz.cfgIpv6}>
               <input
                 type="text"
                 value={cfgIpv6}
                 onChange={(e) => setCfgIpv6(e.target.value)}
-                className="w-full rounded-md border border-border bg-surface-0 px-3 py-2 font-mono text-sm text-text-primary focus:border-accent focus:outline-none"
+                className={`${controlClass} font-mono`}
               />
             </FormField>
           </div>
 
-          <FormField label="Sinkhole CNAME Alias (Optional)">
+          <FormField label={t.rpz.cfgCname}>
             <input
               type="text"
-              placeholder="e.g. sinkhole.bsdm-proxy.local"
+              placeholder={t.rpz.cfgCnamePh}
               value={cfgCname}
               onChange={(e) => setCfgCname(e.target.value)}
-              className="w-full rounded-md border border-border bg-surface-0 px-3 py-2 font-mono text-sm text-text-primary focus:border-accent focus:outline-none"
+              className={`${controlClass} font-mono`}
             />
           </FormField>
 
-          <FormField label="Default RPZ Action">
+          <FormField label={t.rpz.cfgDefaultAction}>
             <select
               value={cfgAction}
               onChange={(e) => setCfgAction(e.target.value as RpzAction)}
-              className="w-full rounded-md border border-border bg-surface-0 px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
+              className={controlClass}
             >
-              <option value="SINKHOLE">SINKHOLE (Return 0.0.0.0)</option>
+              <option value="SINKHOLE">{t.rpz.optSinkholeReturn}</option>
               <option value="NXDOMAIN">NXDOMAIN</option>
               <option value="DROP">DROP</option>
             </select>
@@ -1115,7 +1133,7 @@ export function RpzManagementPage() {
                 onChange={(e) => setCfgLogBlocks(e.target.checked)}
                 className="size-4 rounded border-border text-accent focus:ring-accent"
               />
-              Log all sinkholed DNS queries to ClickHouse / Prometheus metrics
+              {t.rpz.cfgLogBlocks}
             </label>
             <label className="flex items-center gap-2 text-xs text-text-primary">
               <input
@@ -1124,7 +1142,7 @@ export function RpzManagementPage() {
                 onChange={(e) => setCfgWildcard(e.target.checked)}
                 className="size-4 rounded border-border text-accent focus:ring-accent"
               />
-              Match all subdomains automatically (*.domain.com)
+              {t.rpz.cfgWildcard}
             </label>
           </div>
         </form>

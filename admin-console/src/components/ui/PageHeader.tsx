@@ -11,15 +11,17 @@ export function PageHeader({ title, subtitle, actions, badge }: PageHeaderProps)
   return (
     <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
       <div className="min-w-0">
-        <div className="flex items-center gap-2">
-          <h1 className="text-2xl font-bold tracking-tight text-text-primary">{title}</h1>
+        <div className="flex flex-wrap items-center gap-2">
+          <h1 className="text-xl font-bold leading-tight tracking-tight text-text-primary sm:text-2xl">
+            {title}
+          </h1>
           {badge}
         </div>
         {subtitle && (
-          <p className="mt-1 max-w-3xl text-sm text-text-secondary">{subtitle}</p>
+          <p className="mt-1.5 max-w-3xl text-sm leading-relaxed text-text-secondary">{subtitle}</p>
         )}
       </div>
-      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+      {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
     </header>
   )
 }

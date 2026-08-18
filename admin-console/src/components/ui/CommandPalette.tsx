@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowRight, Command, Search } from 'lucide-react'
-import { useLanguage } from '../../lib/i18n'
+import { ArrowRight, Command, Search, SearchX } from 'lucide-react'
+import { translations, useLanguage } from '../../lib/i18n'
 import { getNavigationItems } from '../../navigation/menu'
 
 interface CommandPaletteProps {
@@ -14,6 +14,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
   const [selectedIndex, setSelectedIndex] = useState(0)
   const navigate = useNavigate()
   const [lang] = useLanguage()
+  const t = translations[lang]
 
   const items = useMemo(() => getNavigationItems(lang), [lang])
 
@@ -87,7 +88,8 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
             autoFocus
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search navigation..."
+            placeholder={t.palette.placeholder}
+            aria-label={t.palette.placeholder}
             className="w-full bg-transparent text-sm text-text-primary outline-none placeholder:text-text-secondary"
           />
           <kbd className="hidden rounded border border-border bg-surface-2 px-1.5 py-0.5 text-[10px] font-mono sm:inline">
@@ -95,7 +97,13 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
           </kbd>
         </div>
 
-        <div className="max-h-96 overflow-y-auto p-2">
+        <div className="max-h-[min(24rem,50vh)] overflow-y-auto p-2">
+          {filtered.length === 0 && (
+            <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
+              <SearchX className="size-6 text-text-secondary opacity-60" />
+              <p className="text-sm font-medium text-text-secondary">{t.palette.noResults}</p>
+            </div>
+          )}
           {filtered.map((item, index) => {
             const Icon = item.icon
             return (
@@ -108,7 +116,9 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
                   onClose()
                 }}
                 className={`group flex w-full items-center justify-between gap-3 rounded-lg p-2.5 text-left transition-colors ${
-                  index === selectedIndex ? 'bg-surface-2' : 'hover:bg-surface-2'
+                  index === selectedIndex
+                    ? 'bg-accent/12 ring-1 ring-accent/30'
+                    : 'hover:bg-surface-2'
                 }`}
               >
                 <div className="flex min-w-0 items-center gap-3">
@@ -125,7 +135,8 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
         </div>
 
         <div className="border-t border-border bg-surface-0/30 px-4 py-2 text-[11px] text-text-secondary">
-          <Command className="mr-1 inline size-3" /> ↑↓ navigate · Enter open · Esc close
+          <Command className="mr-1 inline size-3" /> ↑↓ {t.palette.hintNavigate} · {t.palette.hintOpen} ·{' '}
+          {t.palette.hintClose}
         </div>
       </div>
     </div>

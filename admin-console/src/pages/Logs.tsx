@@ -188,9 +188,9 @@ export function LogsPage() {
         cacheStatuses={cacheStatuses}
         decisionSources={decisionSources}
         labels={{
-          quick: lang === 'ru' ? 'Быстрый фильтр' : 'Quick filter',
-          allEvents: lang === 'ru' ? 'Все события' : 'All events',
-          serverErrors: lang === 'ru' ? '5xx ошибки' : '5xx errors',
+          quick: tr.logs.quickFilter,
+          allEvents: tr.logs.allEvents,
+          serverErrors: tr.logs.serverErrors,
           aclBlocked: tr.logs.aclBlocked,
           mlBlocked: tr.logs.mlBlocked,
           cacheMiss: 'Cache MISS',

@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react'
 import { CheckCircle2, AlertTriangle, XCircle, Info, X } from 'lucide-react'
+import { useT } from '../../lib/i18n'
 
 export type ToastKind = 'success' | 'error' | 'warning' | 'info'
 
@@ -29,6 +30,7 @@ const kindStyles: Record<ToastKind, { box: string; Icon: typeof Info }> = {
 }
 
 export function ToastProvider({ children }: { children: ReactNode }) {
+  const t = useT()
   const [items, setItems] = useState<ToastItem[]>([])
   const nextId = useRef(0)
 
@@ -58,14 +60,18 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               key={id}
               role="status"
               className={`animate-modal-pop pointer-events-auto flex w-full max-w-md items-start gap-3 rounded-xl border bg-surface-1/95 p-3.5 shadow-2xl backdrop-blur-xl transition-all ${box}`}
+              aria-live={kind === 'error' ? 'assertive' : 'polite'}
             >
               <Icon className="mt-0.5 size-5 shrink-0" />
-              <p className="flex-1 text-sm font-medium text-text-primary leading-snug">{message}</p>
+              <p className="min-w-0 flex-1 text-sm font-medium leading-snug break-words text-text-primary">
+                {message}
+              </p>
               <button
                 type="button"
-                className="rounded-lg p-1 text-text-secondary hover:bg-surface-2 hover:text-text-primary transition-colors cursor-pointer"
+                className="shrink-0 cursor-pointer rounded-lg p-1 text-text-secondary transition-colors hover:bg-surface-2 hover:text-text-primary"
                 onClick={() => dismiss(id)}
-                aria-label="Dismiss"
+                aria-label={t.ui.dismiss}
+                title={t.ui.dismiss}
               >
                 <X className="size-4" />
               </button>

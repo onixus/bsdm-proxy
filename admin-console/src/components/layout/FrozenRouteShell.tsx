@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react'
 import { useLocation } from 'react-router-dom'
 import { FrozenModuleBanner } from '../ui/DataState'
-import { resolveRouteScope } from '../../lib/routeScope'
+import { useLanguage } from '../../lib/i18n'
+import { localizedRouteScope } from '../../lib/routeCopy'
 
 /**
  * Wraps deep-linked experimental pages so operators never mistake them for
@@ -9,11 +10,12 @@ import { resolveRouteScope } from '../../lib/routeScope'
  */
 export function FrozenRouteShell({ children }: { children: ReactNode }) {
   const { pathname } = useLocation()
-  const scope = resolveRouteScope(pathname)
+  const [lang] = useLanguage()
+  const { route, title } = localizedRouteScope(pathname, lang)
 
   return (
     <div className="space-y-4">
-      <FrozenModuleBanner feature={scope.title} note={scope.frozenNote} />
+      <FrozenModuleBanner feature={title} note={route.frozenNote} />
       <div className="opacity-95">{children}</div>
     </div>
   )

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { TsPoint } from '../../lib/timeseries'
 import { formatNumber, formatTime, niceTicks, seriesColor, useMeasuredWidth } from './common'
+import { useT } from '../../lib/i18n'
 
 export interface LineSeries {
   name: string
@@ -25,6 +26,7 @@ const PAD = { top: 8, right: 12, bottom: 20, left: 42 }
  * Legend renders for ≥2 series; a single series is named by the panel title.
  */
 export function LineChart({ series, height = 180, unit = '', area = false, yMax }: LineChartProps) {
+  const t = useT()
   const [wrapRef, width] = useMeasuredWidth<HTMLDivElement>()
   const [hoverX, setHoverX] = useState<number | null>(null)
 
@@ -44,7 +46,7 @@ export function LineChart({ series, height = 180, unit = '', area = false, yMax 
   if (visible.length === 0 || allPoints.length < 2) {
     return (
       <div className="flex items-center justify-center rounded-md border border-border bg-surface-0/40 text-xs text-text-secondary" style={{ height }}>
-        Collecting samples… charts fill in as the console polls.
+        {t.widgets.collectingSamples}
       </div>
     )
   }

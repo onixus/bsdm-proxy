@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useT } from '../../lib/i18n'
 
 interface AppShellProps {
   sidebar: ReactNode
@@ -9,13 +10,15 @@ interface AppShellProps {
 }
 
 export function AppShell({ sidebar, topBar, statusBar, children, overlays }: AppShellProps) {
+  const t = useT()
+
   return (
     <div className="flex min-h-screen bg-surface-0 font-sans">
       <a
         href="#main-content"
         className="sr-only fixed left-4 top-4 z-[60] rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white focus:not-sr-only"
       >
-        Skip to content
+        {t.ui.skipToContent}
       </a>
 
       {sidebar}

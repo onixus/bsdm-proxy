@@ -1,5 +1,6 @@
-import { RefreshCw } from 'lucide-react'
+import { ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react'
 import type { EnrichedLog } from '../../api/search'
+import { fmt, useT } from '../../lib/i18n'
 import { BlockReasonBadge } from '../xai/ThreatIndicator'
 import { Button } from '../ui/Button'
 import { getStatusBadgeStyle } from './logUtils'
@@ -27,21 +28,23 @@ export function LogResults({
   onSelect,
   onOpenSession,
 }: LogResultsProps) {
+  const t = useT()
+
   return (
     <>
       <div className="hidden overflow-x-auto rounded-xl border border-border/80 bg-surface-1/90 md:block">
         <table className="w-full min-w-[760px] text-left text-sm">
           <thead className="border-b border-border bg-surface-2/70 text-xs font-bold uppercase text-text-secondary">
             <tr>
-              <th className="px-4 py-3">Time</th>
-              <th className="px-4 py-3">Client</th>
-              <th className="px-4 py-3">User</th>
-              <th className="px-4 py-3">Method</th>
-              <th className="px-4 py-3">Domain</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Cache</th>
-              <th className="px-4 py-3">Decision</th>
-              <th className="px-4 py-3">Session</th>
+              <th className="whitespace-nowrap px-4 py-3">{t.logs.time}</th>
+              <th className="whitespace-nowrap px-4 py-3">{t.logs.client}</th>
+              <th className="whitespace-nowrap px-4 py-3">{t.logs.user}</th>
+              <th className="whitespace-nowrap px-4 py-3">{t.logs.method}</th>
+              <th className="whitespace-nowrap px-4 py-3">{t.logs.domain}</th>
+              <th className="whitespace-nowrap px-4 py-3">{t.logs.status}</th>
+              <th className="whitespace-nowrap px-4 py-3">{t.logs.cacheStatus}</th>
+              <th className="whitespace-nowrap px-4 py-3">{t.logs.decision}</th>
+              <th className="whitespace-nowrap px-4 py-3">{t.logs.session}</th>
             </tr>
           </thead>
           <tbody>
@@ -111,13 +114,22 @@ export function LogResults({
 
       <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-text-secondary">
         <span>
-          {filteredCount} rows{filteredCount !== fetchedCount ? ` (of ${fetchedCount} fetched)` : ''}
+          {fmt(t.ui.rowsCount, { count: filteredCount })}
+          {filteredCount !== fetchedCount
+            ? ` (${fmt(t.ui.ofFetched, { total: fetchedCount })})`
+            : ''}
           {isFetching && <RefreshCw className="ml-2 inline size-3.5 animate-spin" />}
         </span>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" disabled={page === 0} onClick={() => onPageChange(page - 1)}>← Prev</Button>
-          <span className="tabular-nums">{page + 1} / {pages}</span>
-          <Button variant="ghost" disabled={page >= pages - 1} onClick={() => onPageChange(page + 1)}>Next →</Button>
+          <Button variant="ghost" disabled={page === 0} onClick={() => onPageChange(page - 1)}>
+            <ChevronLeft className="size-4" /> {t.ui.prev}
+          </Button>
+          <span className="whitespace-nowrap tabular-nums">
+            {fmt(t.ui.pageOf, { page: page + 1, pages })}
+          </span>
+          <Button variant="ghost" disabled={page >= pages - 1} onClick={() => onPageChange(page + 1)}>
+            {t.ui.next} <ChevronRight className="size-4" />
+          </Button>
         </div>
       </div>
     </>
