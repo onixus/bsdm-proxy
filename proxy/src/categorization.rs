@@ -9,6 +9,7 @@
 
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -126,16 +127,74 @@ impl Category {
     }
 }
 
-/// Domain suffix chain for local blacklist lookup (`www.foo.example.com` → `foo.example.com` → `example.com`).
-fn domain_suffixes(domain: &str) -> Vec<String> {
-    let domain = domain.trim().trim_end_matches('.').to_ascii_lowercase();
-    let parts: Vec<&str> = domain.split('.').filter(|p| !p.is_empty()).collect();
-    if parts.len() < 2 {
-        return vec![domain];
+/// Normalize a host for suffix matching: trimmed, no trailing dot, lowercase,
+/// no empty labels.
+///
+/// Borrows when the host is already normalized — which is the case for
+/// virtually every real request — so the hot path allocates nothing.
+fn normalize_host(domain: &str) -> Cow<'_, str> {
+    let trimmed = domain.trim().trim_end_matches('.');
+    let needs_lowercase = trimmed.bytes().any(|b| b.is_ascii_uppercase());
+    let has_empty_label = trimmed.starts_with('.') || trimmed.contains("..");
+    if !needs_lowercase && !has_empty_label {
+        return Cow::Borrowed(trimmed);
     }
-    (2..=parts.len())
-        .rev()
-        .map(|n| parts[parts.len() - n..].join("."))
+
+    let mut normalized = String::with_capacity(trimmed.len());
+    for label in trimmed.split('.').filter(|part| !part.is_empty()) {
+        if !normalized.is_empty() {
+            normalized.push('.');
+        }
+        normalized.push_str(label);
+    }
+    normalized.make_ascii_lowercase();
+    Cow::Owned(normalized)
+}
+
+/// Suffix chain of a normalized host, as borrowed slices of it:
+/// `www.foo.example.com` → `foo.example.com` → `example.com`.
+///
+/// Stops before the bare TLD: a registry entry for `com` must never match
+/// every `.com` host.
+struct HostSuffixes<'a> {
+    remaining: Option<&'a str>,
+}
+
+impl<'a> HostSuffixes<'a> {
+    fn new(host: &'a str) -> Self {
+        Self {
+            remaining: Some(host),
+        }
+    }
+}
+
+impl<'a> Iterator for HostSuffixes<'a> {
+    type Item = &'a str;
+
+    fn next(&mut self) -> Option<&'a str> {
+        let current = self.remaining.take()?;
+        if let Some((_, parent)) = current.split_once('.') {
+            // Keep going only while the parent still has two or more labels.
+            if parent.contains('.') {
+                self.remaining = Some(parent);
+            }
+        }
+        Some(current)
+    }
+}
+
+/// Domain suffix chain for local blacklist lookup (`www.foo.example.com` → `foo.example.com` → `example.com`).
+///
+/// Allocation-free in the common case: the returned slices borrow from `host`,
+/// which itself borrows from `domain` unless normalization was needed.
+///
+/// Callers on the request path iterate [`HostSuffixes`] directly; this owned
+/// form exists to pin the chain's shape in tests.
+#[cfg(test)]
+fn domain_suffixes(domain: &str) -> Vec<String> {
+    let host = normalize_host(domain);
+    HostSuffixes::new(host.as_ref())
+        .map(str::to_string)
         .collect()
 }
 
@@ -542,11 +601,12 @@ impl CategorizationEngine {
         }
 
         let domain = parsed_url.host_str().unwrap_or("");
-        for suffix in domain_suffixes(domain) {
-            if registry.domains.contains(&suffix) {
+        let host = normalize_host(domain);
+        for suffix in HostSuffixes::new(host.as_ref()) {
+            if registry.domains.contains(suffix) {
                 return Some(RknMatch {
                     match_type: "domain",
-                    value: suffix,
+                    value: suffix.to_string(),
                     revision: registry.revision,
                     source: registry.source.clone(),
                 });
@@ -840,8 +900,9 @@ impl CategorizationEngine {
 
     fn check_local_db(&self, domain: &str) -> Option<HashSet<Category>> {
         let db = self.local_db.as_ref()?;
-        for suffix in domain_suffixes(domain) {
-            if let Some(cats) = db.get(&suffix) {
+        let host = normalize_host(domain);
+        for suffix in HostSuffixes::new(host.as_ref()) {
+            if let Some(cats) = db.get(suffix) {
                 return Some(cats.clone());
             }
         }
@@ -1067,6 +1128,35 @@ mod tests {
             domain_suffixes("WWW.Example.COM."),
             vec!["www.example.com", "example.com"]
         );
+    }
+
+    #[test]
+    fn domain_suffixes_stops_before_the_bare_tld() {
+        // A registry entry for "com" must not match every .com host.
+        assert_eq!(domain_suffixes("example.com"), vec!["example.com"]);
+        assert!(!domain_suffixes("a.b.example.com").contains(&"com".to_string()));
+    }
+
+    #[test]
+    fn domain_suffixes_handles_degenerate_hosts() {
+        assert_eq!(domain_suffixes("localhost"), vec!["localhost"]);
+        assert_eq!(domain_suffixes(""), vec![""]);
+        assert_eq!(domain_suffixes("."), vec![""]);
+        // Empty labels are dropped before the chain is built.
+        assert_eq!(
+            domain_suffixes("foo..example.com"),
+            domain_suffixes("foo.example.com")
+        );
+    }
+
+    #[test]
+    fn normalize_host_borrows_when_already_normal() {
+        assert!(matches!(
+            normalize_host("www.example.com"),
+            Cow::Borrowed("www.example.com")
+        ));
+        assert!(matches!(normalize_host("WWW.example.com"), Cow::Owned(_)));
+        assert!(matches!(normalize_host("www..example.com"), Cow::Owned(_)));
     }
 
     #[test]

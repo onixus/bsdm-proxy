@@ -1,5 +1,6 @@
 //! HTTP cache freshness: `Cache-Control`, validators, and negative caching.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -60,8 +61,25 @@ pub fn miss_x_cache_status_header(streaming: bool, precheck: &CacheStoreDecision
 }
 
 /// Prometheus / internal label (underscores).
-pub fn cache_status_metric_label(header_label: &str) -> String {
-    header_label.replace('-', "_")
+///
+/// The `X-Cache-Status` header values come from a closed set, so the mapping is
+/// a match returning `&'static str` — no allocation on the request path. Any
+/// value outside the set still translates correctly, just with a copy.
+pub fn cache_status_metric_label(header_label: &str) -> Cow<'static, str> {
+    match header_label {
+        "HIT" => Cow::Borrowed("HIT"),
+        "MISS" => Cow::Borrowed("MISS"),
+        "BYPASS" => Cow::Borrowed("BYPASS"),
+        "MISS-STREAMING" => Cow::Borrowed("MISS_STREAMING"),
+        "NEGATIVE-MISS" => Cow::Borrowed("NEGATIVE_MISS"),
+        "NEGATIVE-MISS-STREAMING" => Cow::Borrowed("NEGATIVE_MISS_STREAMING"),
+        "NEGATIVE-HIT" => Cow::Borrowed("NEGATIVE_HIT"),
+        "L2-HIT" => Cow::Borrowed("L2_HIT"),
+        "REVALIDATED" => Cow::Borrowed("REVALIDATED"),
+        "COALESCED-HIT" => Cow::Borrowed("COALESCED_HIT"),
+        "LLM-MISS-STREAMING" => Cow::Borrowed("LLM_MISS_STREAMING"),
+        other => Cow::Owned(other.replace('-', "_")),
+    }
 }
 
 pub fn parse_cache_control(value: &str) -> CacheControlDirectives {
@@ -325,5 +343,36 @@ mod tests {
             cache_status_metric_label("MISS-STREAMING"),
             "MISS_STREAMING"
         );
+    }
+
+    #[test]
+    fn metric_labels_cover_every_miss_header_without_allocating() {
+        for header in [
+            "HIT",
+            "MISS",
+            "BYPASS",
+            "MISS-STREAMING",
+            "NEGATIVE-MISS",
+            "NEGATIVE-MISS-STREAMING",
+            "NEGATIVE-HIT",
+            "L2-HIT",
+            "REVALIDATED",
+            "COALESCED-HIT",
+            "LLM-MISS-STREAMING",
+        ] {
+            let label = cache_status_metric_label(header);
+            assert!(
+                matches!(label, Cow::Borrowed(_)),
+                "{header} should map to a static label"
+            );
+            assert_eq!(label, header.replace('-', "_"));
+        }
+    }
+
+    #[test]
+    fn unknown_metric_labels_still_translate() {
+        let label = cache_status_metric_label("SOME-NEW-STATUS");
+        assert!(matches!(label, Cow::Owned(_)));
+        assert_eq!(label, "SOME_NEW_STATUS");
     }
 }

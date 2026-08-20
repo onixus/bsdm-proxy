@@ -11,6 +11,7 @@ use prometheus::{
     Counter, CounterVec, Encoder, Gauge, Histogram, HistogramOpts, HistogramVec, Opts, Registry,
     TextEncoder,
 };
+use std::borrow::Cow;
 use std::sync::Arc;
 
 /// Global metrics registry
@@ -626,39 +627,80 @@ impl Default for Metrics {
     }
 }
 
-/// Helper to record request metrics with RAII pattern
+/// Decimal rendering of a `u16` without touching the heap.
+///
+/// Prometheus label values are `&str`, and `u16::to_string()` on the request
+/// hot path is an allocation per request purely to name a status code.
+pub struct StatusLabel {
+    buf: [u8; 5],
+    len: usize,
+}
+
+impl StatusLabel {
+    pub fn new(value: u16) -> Self {
+        let mut buf = [0u8; 5];
+        let mut len = 0;
+        let mut remaining = value;
+        loop {
+            buf[len] = b'0' + (remaining % 10) as u8;
+            len += 1;
+            remaining /= 10;
+            if remaining == 0 {
+                break;
+            }
+        }
+        buf[..len].reverse();
+        Self { buf, len }
+    }
+
+    pub fn as_str(&self) -> &str {
+        // Every written byte is an ASCII digit.
+        std::str::from_utf8(&self.buf[..self.len]).unwrap_or("0")
+    }
+}
+
+/// Helper to record request metrics with RAII pattern.
+///
+/// Labels are `Cow<'static, str>`: HTTP methods and cache statuses come from a
+/// fixed vocabulary, so the common case borrows a `&'static str` and the guard
+/// allocates nothing.
 pub struct RequestMetricsGuard {
     metrics: Arc<Metrics>,
     start: std::time::Instant,
-    method: String,
-    cache_status: String,
+    method: Cow<'static, str>,
+    cache_status: Cow<'static, str>,
 }
 
 impl RequestMetricsGuard {
-    pub fn new(metrics: Arc<Metrics>, method: String) -> Self {
+    pub fn new(metrics: Arc<Metrics>, method: impl Into<Cow<'static, str>>) -> Self {
         metrics.requests_in_flight.inc();
         Self {
             metrics,
             start: std::time::Instant::now(),
-            method,
-            cache_status: "unknown".to_string(),
+            method: method.into(),
+            cache_status: Cow::Borrowed("unknown"),
         }
     }
 
-    pub fn set_cache_status(&mut self, status: &str) {
-        self.cache_status = status.to_string();
+    pub fn set_cache_status(&mut self, status: impl Into<Cow<'static, str>>) {
+        self.cache_status = status.into();
     }
 
     pub fn finish(self, status_code: u16, request_size: usize, response_size: usize) {
         let duration = self.start.elapsed().as_secs_f64();
+        let status = StatusLabel::new(status_code);
         self.metrics.requests_in_flight.dec();
         self.metrics
             .requests_total
-            .with_label_values(&[&self.method, &status_code.to_string(), &self.cache_status])
+            .with_label_values(&[
+                self.method.as_ref(),
+                status.as_str(),
+                self.cache_status.as_ref(),
+            ])
             .inc();
         self.metrics
             .request_duration_seconds
-            .with_label_values(&[&self.method, &self.cache_status])
+            .with_label_values(&[self.method.as_ref(), self.cache_status.as_ref()])
             .observe(duration);
         self.metrics.request_size_bytes.observe(request_size as f64);
         self.metrics
@@ -735,6 +777,33 @@ mod tests {
         assert!(out.contains(r#"source="pinning-bypass"} 1"#));
         assert!(out.contains(r#"source="unknown"} 1"#));
         assert!(!out.contains("untrusted-arbitrary-value"));
+    }
+
+    #[test]
+    fn status_label_renders_without_allocating() {
+        assert_eq!(StatusLabel::new(200).as_str(), "200");
+        assert_eq!(StatusLabel::new(0).as_str(), "0");
+        assert_eq!(StatusLabel::new(7).as_str(), "7");
+        assert_eq!(StatusLabel::new(404).as_str(), "404");
+        assert_eq!(StatusLabel::new(65535).as_str(), "65535");
+    }
+
+    #[test]
+    fn request_guard_records_static_labels() {
+        let m = Arc::new(Metrics::new().expect("metrics"));
+        let mut guard = RequestMetricsGuard::new(m.clone(), "GET");
+        guard.set_cache_status("HIT");
+        guard.finish(200, 0, 12);
+
+        let exported = String::from_utf8(m.export().expect("export")).expect("utf8");
+        assert!(
+            exported.contains("cache_status=\"HIT\""),
+            "cache status label missing: {exported}"
+        );
+        assert!(
+            exported.contains("status=\"200\""),
+            "status label missing: {exported}"
+        );
     }
 
     #[test]

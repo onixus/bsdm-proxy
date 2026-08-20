@@ -494,7 +494,7 @@ async fn handle_connect_tunnel(
     upgraded: hyper::upgrade::Upgraded,
     authority: String,
     service: Arc<ProxyService>,
-    client_ip: String,
+    client_ip: Arc<str>,
     request_start: Instant,
     proxy_user: Option<Arc<UserInfo>>,
     tls_decision: TlsPolicyDecision,
@@ -513,54 +513,59 @@ async fn handle_connect_tunnel(
                     let domain = parse_authority(&authority).0;
                     let (user_id, username) = ProxyService::user_fields(proxy_user.as_deref());
 
-                    if let Ok(timestamp) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)
-                    {
-                        let event_id = new_event_id();
-                        let url = format!("https://{}", authority);
-                        let corr = service.sessions().begin_request(
-                            &client_ip,
-                            username.as_deref(),
-                            None,
-                            &url,
-                        );
-                        let event = CacheEvent {
-                            url,
-                            method: "CONNECT".to_string(),
-                            status: 200,
-                            cache_key: service
-                                .generate_cache_key("CONNECT", &authority)
-                                .to_string(),
-                            cache_status: "BYPASS".to_string(),
-                            timestamp: timestamp.as_secs(),
-                            headers: HashMap::new(),
-                            user_id,
-                            username,
-                            client_ip,
-                            domain,
-                            response_size: bytes_u2c,
-                            request_duration_ms: duration_ms,
-                            content_type: None,
-                            user_agent: None,
-                            categories: vec![],
-                            threat_sources: vec![],
-                            acl_action: None,
-                            acl_rule_id: None,
-                            acl_reason: None,
-                            session_id: corr.session_id,
-                            parent_event_id: corr.parent_event_id,
-                            redirect_url: None,
-                            dlp_violation: None,
-                            casb_alert: None,
-                            decision_source: Some(tls_decision.decision_source.to_string()),
-                            bypass_reason: Some(
-                                tls_decision
-                                    .bypass_reason
-                                    .unwrap_or("connect_tunnel")
+                    // Same rule as the request path: with no analytics sink wired
+                    // up, do not build the event or touch the session correlator.
+                    if service.has_event_sink() {
+                        if let Ok(timestamp) =
+                            SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)
+                        {
+                            let event_id = new_event_id();
+                            let url = format!("https://{}", authority);
+                            let corr = service.sessions().begin_request(
+                                &client_ip,
+                                username.as_deref(),
+                                None,
+                                &url,
+                            );
+                            let event = CacheEvent {
+                                url,
+                                method: "CONNECT".to_string(),
+                                status: 200,
+                                cache_key: service
+                                    .generate_cache_key("CONNECT", &authority)
                                     .to_string(),
-                            ),
-                            event_id,
-                        };
-                        service.send_cache_event(event);
+                                cache_status: "BYPASS".to_string(),
+                                timestamp: timestamp.as_secs(),
+                                headers: HashMap::new(),
+                                user_id,
+                                username,
+                                client_ip: client_ip.to_string(),
+                                domain,
+                                response_size: bytes_u2c,
+                                request_duration_ms: duration_ms,
+                                content_type: None,
+                                user_agent: None,
+                                categories: vec![],
+                                threat_sources: vec![],
+                                acl_action: None,
+                                acl_rule_id: None,
+                                acl_reason: None,
+                                session_id: corr.session_id,
+                                parent_event_id: corr.parent_event_id,
+                                redirect_url: None,
+                                dlp_violation: None,
+                                casb_alert: None,
+                                decision_source: Some(tls_decision.decision_source.to_string()),
+                                bypass_reason: Some(
+                                    tls_decision
+                                        .bypass_reason
+                                        .unwrap_or("connect_tunnel")
+                                        .to_string(),
+                                ),
+                                event_id,
+                            };
+                            service.send_cache_event(event);
+                        }
                     }
                     debug!("CONNECT tunnel closed: {}↑ {}↓", bytes_c2u, bytes_u2c);
                 }
@@ -585,7 +590,7 @@ async fn handle_connect_mitm(
     upgraded: hyper::upgrade::Upgraded,
     authority: String,
     service: Arc<ProxyService>,
-    client_ip: String,
+    client_ip: Arc<str>,
     proxy_user: Option<Arc<UserInfo>>,
 ) {
     let (domain, _port) = parse_authority(&authority);
@@ -658,9 +663,7 @@ async fn handle_connect_mitm(
             );
 
             #[allow(unused_mut)]
-            let mut resp = service
-                .handle_request(req, client_ip.clone(), proxy_user)
-                .await;
+            let mut resp = service.handle_request(req, &client_ip, proxy_user).await;
 
             #[cfg(feature = "wasm")]
             service.run_wasm_hook_response(
@@ -691,7 +694,7 @@ pub async fn handle_connection(
     stream: TcpStream,
     addr: SocketAddr,
     service: Arc<ProxyService>,
-    client_ip: String,
+    client_ip: Arc<str>,
     tasks: TaskTracker,
 ) {
     tune_client_tcp(&stream, addr);
@@ -867,9 +870,7 @@ pub async fn handle_connection(
             );
 
             #[allow(unused_mut)]
-            let mut resp = service
-                .handle_request(req, client_ip.clone(), proxy_user)
-                .await;
+            let mut resp = service.handle_request(req, &client_ip, proxy_user).await;
 
             #[cfg(feature = "wasm")]
             service.run_wasm_hook_response(

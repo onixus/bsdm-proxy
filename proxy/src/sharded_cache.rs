@@ -1,9 +1,9 @@
 //! Sharded L1 HTTP cache — reduces lock contention under multi-worker load.
 
 use crate::cache::CachedResponse;
+use crate::hashing::fx_hash_str;
 use crate::tag_index::{parse_cache_tags, TagIndex};
 use quick_cache::sync::Cache;
-use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 /// Sharded in-memory L1 cache (one `quick_cache` per shard).
@@ -28,11 +28,16 @@ impl HttpL1Cache {
         }
     }
 
+    /// Pick a shard.
+    ///
+    /// Keys here are SHA-256 hex digests produced by `http_cache_key` /
+    /// `content_cache_key`, so a client cannot steer keys into one shard. That
+    /// makes SipHash (the `DefaultHasher`) pure overhead on every lookup — a
+    /// 64-byte keyed hash whose collision resistance buys nothing. `quick_cache`
+    /// still hashes the key with its own hasher inside the shard.
     #[inline]
     fn shard_index(&self, key: &str) -> usize {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        key.hash(&mut hasher);
-        (hasher.finish() as usize) & self.shard_mask
+        (fx_hash_str(key) as usize) & self.shard_mask
     }
 
     #[inline]
