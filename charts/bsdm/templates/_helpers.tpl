@@ -65,6 +65,12 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/component: ml-worker
 {{- end }}
 
+{{- define "bsdm.threatIntelSelectorLabels" -}}
+app.kubernetes.io/name: {{ include "bsdm.name" . }}-threat-intel
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: threat-intel
+{{- end }}
+
 {{- define "bsdm.dnsSinkholeSelectorLabels" -}}
 app.kubernetes.io/name: {{ include "bsdm.name" . }}-dns-sinkhole
 app.kubernetes.io/instance: {{ .Release.Name }}

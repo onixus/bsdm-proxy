@@ -23,6 +23,7 @@ Cargo workspace members (see `Cargo.toml`):
 - `alert-worker/` — security incident handling, dedup, webhooks; bin `alert-worker`.
 - `ml-worker/` — UEBA / threat scoring against ClickHouse; bin `ml-worker`.
 - `dns-sinkhole/` — UDP RPZ-lite sidecar, bin `dns-sinkhole`.
+- `threat-intel/` — IOC feed collector, bin `threat-intel` (experimental).
 - `bsdm-events/` — shared event types.
 - `e2e/` — test harness.
 - `bsdm-wasm-sdk/`, `examples/wasm/rust_plugin/`, `examples/agent-spike/` — WASM

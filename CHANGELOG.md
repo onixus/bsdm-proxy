@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Threat intelligence feed collector** (`threat-intel`, TASK-TI-001) — optional
+  worker that ingests OpenPhish, PhishStats, Phishing.Database and URLhaus on a
+  schedule through per-source plugins, with per-source retry/backoff, intra-batch
+  deduplication, response-size and per-fetch caps, Prometheus metrics on
+  `:8093/metrics`, JSONL snapshots plus `report.json`, and a `TI_RUN_ONCE`
+  one-shot mode. Ships as a Compose profile (`--profile threat-intel`), a Helm
+  toggle (`threatIntel.enabled`), a systemd unit and a packaged env example.
+  Collection is metadata-only: the collector never requests a collected
+  indicator. Storage, scoring and ACL/RPZ enforcement are not part of this
+  change. See
+  [docs/features/threat-intel-collector.md](docs/features/threat-intel-collector.md).
+
 ## [0.9.12] - 2026-08-12
 
 Patch after **0.9.11**: hardened RKN registry ACL enforcement and registry-source resilience.

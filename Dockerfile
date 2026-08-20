@@ -58,12 +58,14 @@ COPY cache-indexer/Cargo.toml ./cache-indexer/Cargo.toml
 COPY alert-worker/Cargo.toml ./alert-worker/Cargo.toml
 COPY ml-worker/Cargo.toml ./ml-worker/Cargo.toml
 COPY dns-sinkhole/Cargo.toml ./dns-sinkhole/Cargo.toml
+COPY threat-intel/Cargo.toml ./threat-intel/Cargo.toml
 COPY e2e/Cargo.toml ./e2e/Cargo.toml
 COPY bsdm-wasm-sdk/Cargo.toml ./bsdm-wasm-sdk/Cargo.toml
 
 # Создаём минимальные lib.rs/main.rs-заглушки чтобы cargo fetch + build deps
 RUN mkdir -p bsdm-events/src proxy/src cache-indexer/src \
              alert-worker/src ml-worker/src dns-sinkhole/src \
+             threat-intel/src \
              e2e/src bsdm-wasm-sdk/src && \
     echo "pub fn _stub() {}" > bsdm-events/src/lib.rs && \
     echo "fn main() {}" > proxy/src/main.rs && \
@@ -72,6 +74,7 @@ RUN mkdir -p bsdm-events/src proxy/src cache-indexer/src \
     echo "fn main() {}" > alert-worker/src/main.rs && \
     echo "fn main() {}" > ml-worker/src/main.rs && \
     echo "fn main() {}" > dns-sinkhole/src/main.rs && \
+    echo "fn main() {}" > threat-intel/src/main.rs && \
     echo "pub fn _stub() {}" > e2e/src/lib.rs && \
     echo "pub fn _stub() {}" > bsdm-wasm-sdk/src/lib.rs
 
@@ -84,7 +87,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/build/target,sharing=locked \
     cargo build --release --locked --target $(cat /rust_target.txt) \
       -p bsdm-events -p bsdm-proxy -p cache-indexer \
-      -p alert-worker -p ml-worker -p dns-sinkhole 2>/dev/null || true
+      -p alert-worker -p ml-worker -p dns-sinkhole -p threat-intel 2>/dev/null || true
 
 # ---- Source copy (invalidates cache only when source changes) ----
 COPY bsdm-events ./bsdm-events
@@ -93,6 +96,7 @@ COPY cache-indexer ./cache-indexer
 COPY alert-worker ./alert-worker
 COPY ml-worker ./ml-worker
 COPY dns-sinkhole ./dns-sinkhole
+COPY threat-intel ./threat-intel
 COPY e2e ./e2e
 COPY bsdm-wasm-sdk ./bsdm-wasm-sdk
 COPY examples ./examples
@@ -112,10 +116,11 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
         --no-default-features -p cache-indexer; \
     else \
       cargo build --release --locked --target $(cat /rust_target.txt) \
-        -p bsdm-proxy -p cache-indexer -p alert-worker -p ml-worker -p dns-sinkhole; \
+        -p bsdm-proxy -p cache-indexer -p alert-worker -p ml-worker -p dns-sinkhole \
+        -p threat-intel; \
     fi; \
     mkdir -p /dist; \
-    for bin in proxy cache-indexer alert-worker ml-worker dns-sinkhole; do \
+    for bin in proxy cache-indexer alert-worker ml-worker dns-sinkhole threat-intel; do \
       cp "/build/target/$(cat /rust_target.txt)/release/$bin" /dist/ 2>/dev/null || true; \
     done
 
@@ -225,6 +230,27 @@ EXPOSE 53/udp 8092
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD wget -q -O- --spider http://127.0.0.1:8092/health || exit 1
 CMD ["dns-sinkhole"]
+
+# ============================================================
+# Threat-intel collector (IOC feed ingestion, TASK-TI-001)
+# ============================================================
+FROM runtime-base AS threat-intel
+
+# runtime-base runs as USER bsdm; create the snapshot dir as root so the
+# collector can write it after privileges are dropped again.
+USER root
+COPY --from=builder --chmod=755 /dist/threat-intel /usr/local/bin/threat-intel
+RUN mkdir -p /var/lib/bsdm-proxy/threat-intel && \
+    chown -R bsdm:bsdm /var/lib/bsdm-proxy/threat-intel
+USER bsdm
+
+ENV TI_OUTPUT_DIR=/var/lib/bsdm-proxy/threat-intel \
+    METRICS_PORT=8093
+
+EXPOSE 8093
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget -q -O- --spider http://127.0.0.1:8093/health || exit 1
+CMD ["threat-intel"]
 
 # ============================================================
 # Experimental legacy Trust-UI reference (not part of default deployments)

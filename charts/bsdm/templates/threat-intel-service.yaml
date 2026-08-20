@@ -1,0 +1,37 @@
+{{- if and .Values.threatIntel .Values.threatIntel.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "bsdm.fullname" . }}-threat-intel
+  labels:
+    {{- include "bsdm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: threat-intel
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.threatIntel.service.port }}
+      targetPort: admin
+      protocol: TCP
+      name: admin
+  selector:
+    {{- include "bsdm.threatIntelSelectorLabels" . | nindent 4 }}
+{{- end }}
+{{- if and .Values.threatIntel .Values.threatIntel.enabled .Values.threatIntel.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "bsdm.fullname" . }}-threat-intel
+  labels:
+    {{- include "bsdm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: threat-intel
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- with .Values.threatIntel.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.threatIntel.persistence.size | quote }}
+{{- end }}

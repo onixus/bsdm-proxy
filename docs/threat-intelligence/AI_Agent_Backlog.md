@@ -10,6 +10,9 @@ Implement automated Threat Intelligence pipeline integrated with BSDM Proxy.
 
 ## TASK-TI-001 Feed Collector Framework
 
+**Status: implemented** — `threat-intel` crate,
+[docs/features/threat-intel-collector.md](../features/threat-intel-collector.md).
+
 Create modular feed collector architecture.
 
 Requirements:

@@ -30,6 +30,7 @@
 | Detection | alert-worker | Beta | Запросы правил выполняются периодически; нужен контроль ClickHouse latency. |
 | ML | UEBA, phishing, beacon, threat-score write-back | Beta | Один процесс `ml-worker` = одна модель. Пилот: UEBA `ueba_zscore_v0` + write-back ([pilot-ml.md](getting-started/pilot-ml.md)); proxy `THREAT_SCORE_*` opt-in, block off. |
 | DNS | DNS Sinkhole + RPZ (Core component) | Основной | DoH/DoT gateways; control-plane **RPZ API** (`/api/dns/rpz/*`) + zone reload. |
+| Threat Intelligence | IOC feed collector (`threat-intel`) | Experimental | TASK-TI-001: плагины источников, расписание, retry и метрики. Пишет JSONL-снапшоты; хранилище, scoring и enforcement не реализованы ([threat-intel-collector.md](features/threat-intel-collector.md)). |
 | AI cache | Exact LLM POST cache, local/Qdrant near-hit | Beta | Поддерживает векторный бэкенд Qdrant (`SEMANTIC_VECTOR_BACKEND=qdrant`) и квотирование по API ключам. |
 | Extensions | WASM request hook | Experimental (Frozen) | Заморожено. PoC hook с fuel limits. |
 | Inspection | ICAP REQMOD/RESPMOD | Experimental (Frozen) | Заморожено. RESPMOD требует buffered MISS (`STREAMING_MISS_ENABLED=false`). |
@@ -57,7 +58,11 @@
 6. Native DLP выключен по умолчанию (`DLP_ENABLED=false` / unset). Для lab-оценки
    сигнатур: `DLP_ENABLED=true`. Runtime: `POST /api/security/dlp` с `[]` очищает
    паттерны (требует Bearer); состояние не персистится между рестартами.
-7. `GlobalSessionStore`, Redis rate-limit path и `ThreatSyncEngine` добавлены как
+7. `threat-intel` только собирает фиды в файловые снапшоты. IOC-база
+   (TASK-TI-002), нормализация (TASK-TI-003), confidence scoring (TASK-TI-010) и
+   применение в ACL/RPZ (TASK-TI-020/021) не реализованы — вывод коллектора не
+   влияет на решения проксирования.
+8. `GlobalSessionStore`, Redis rate-limit path и `ThreatSyncEngine` добавлены как
    scaffolding. Текущий `main.rs` создаёт session/threat stores без Redis, а
    proxy request path не вызывает distributed rate-limit check. Название
    «global/real-time sync» пока не означает рабочий multi-node сценарий.

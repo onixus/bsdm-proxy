@@ -219,6 +219,36 @@ mlWorker:
   clickhouseUrl: "http://clickhouse-bsdm.bsdm-analytics.svc.cluster.local:8123"
   rustLog: "info,ml_worker=info"
 
+# Optional threat-intel collector (IOC feed ingestion)
+threatIntel:
+  enabled: false
+  replicaCount: 1
+  image:
+    repository: ghcr.io/onixus/bsdm-threat-intel
+    tag: "0.6.1-1"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: "50m"
+      memory: 64Mi
+    limits:
+      cpu: "500m"
+      memory: 512Mi
+  service:
+    port: 8093
+  sources: "openphish,phishstats,phishing_database,urlhaus"
+  pollIntervalSecs: 900
+  httpTimeoutSecs: 30
+  maxAttempts: 3
+  outputDir: /var/lib/bsdm-proxy/threat-intel
+  # Snapshots are rebuilt on every cycle, so an emptyDir is enough unless the
+  # IOC store (TASK-TI-002) needs them to survive a restart.
+  persistence:
+    enabled: false
+    size: 1Gi
+    storageClass: ""
+  rustLog: "info,threat_intel=info"
+
 # Optional DNS sinkhole sidecar (RPZ-lite UDP proxy)
 dnsSinkhole:
   enabled: false
