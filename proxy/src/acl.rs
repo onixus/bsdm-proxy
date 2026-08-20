@@ -240,8 +240,9 @@ impl AclEngineHandle {
 pub struct AclEngine {
     rules: Vec<AclRule>,
     default_action: AclAction,
-    /// Regex patterns precompiled at rule load — no Mutex on hot path (#109).
-    compiled_regex: HashMap<String, Regex>,
+    /// Regex precompiled at rule load, indexed by rule position — the hot path
+    /// resolves it with a `Vec` index instead of hashing the pattern string (#109).
+    rule_regex: Vec<Option<Arc<Regex>>>,
 }
 
 impl AclEngine {
@@ -253,7 +254,7 @@ impl AclEngine {
         Self {
             rules: Vec::new(),
             default_action,
-            compiled_regex: HashMap::new(),
+            rule_regex: Vec::new(),
         }
     }
 
@@ -265,16 +266,25 @@ impl AclEngine {
         })
     }
 
+    /// Rebuild the per-rule compiled-regex index. Identical patterns are compiled
+    /// once and shared through `Arc`; every rule slot keeps its own entry so the
+    /// hot path never hashes a pattern string.
     fn rebuild_regex_cache(&mut self) {
-        let mut compiled = HashMap::new();
+        let mut interned: HashMap<&str, Arc<Regex>> = HashMap::new();
+        let mut compiled: Vec<Option<Arc<Regex>>> = Vec::with_capacity(self.rules.len());
         for rule in &self.rules {
-            if let AclRuleType::Regex(pattern) = &rule.rule_type {
-                compiled
-                    .entry(pattern.clone())
-                    .or_insert_with(|| Self::compile_regex_pattern(pattern));
-            }
+            let entry = match &rule.rule_type {
+                AclRuleType::Regex(pattern) => Some(
+                    interned
+                        .entry(pattern.as_str())
+                        .or_insert_with(|| Arc::new(Self::compile_regex_pattern(pattern)))
+                        .clone(),
+                ),
+                _ => None,
+            };
+            compiled.push(entry);
         }
-        self.compiled_regex = compiled;
+        self.rule_regex = compiled;
     }
 
     /// Add ACL rule
@@ -354,16 +364,14 @@ impl AclEngine {
             url, domain, categories, user, groups
         );
 
-        // Check each rule in priority order
-        let rules: Vec<AclRule> = self
-            .rules
-            .iter()
-            .filter(|rule| rule.enabled)
-            .cloned()
-            .collect();
-
-        for rule in rules {
-            if self.matches_rule(&rule, url, domain, categories, user, groups, client_ip) {
+        // Check each rule in priority order. `self` is an immutable snapshot
+        // (`ArcSwap`), so rules are matched in place — cloning the rule set per
+        // request cost one heap allocation per rule field on every hit (#109).
+        for (idx, rule) in self.rules.iter().enumerate() {
+            if !rule.enabled {
+                continue;
+            }
+            if self.matches_rule(rule, idx, url, domain, categories, user, groups, client_ip) {
                 debug!("Matched ACL rule: {} ({})", rule.name, rule.id);
 
                 return match rule.action {
@@ -398,6 +406,7 @@ impl AclEngine {
     fn matches_rule(
         &self,
         rule: &AclRule,
+        rule_index: usize,
         url: &str,
         domain: &str,
         categories: &[&str],
@@ -408,7 +417,7 @@ impl AclEngine {
         match &rule.rule_type {
             AclRuleType::Domain(pattern) => self.match_domain(domain, pattern),
             AclRuleType::UrlPrefix(prefix) => url.starts_with(prefix),
-            AclRuleType::Regex(pattern) => self.match_regex(url, pattern),
+            AclRuleType::Regex(_) => self.match_regex(url, rule_index),
             AclRuleType::Category(cat) => categories.iter().any(|c| *c == cat),
             AclRuleType::IpRange { start, end } => {
                 if let Some(ip) = client_ip {
@@ -461,10 +470,11 @@ impl AclEngine {
         }
     }
 
-    /// Match regex pattern (precompiled at rule load).
-    fn match_regex(&self, text: &str, pattern: &str) -> bool {
-        self.compiled_regex
-            .get(pattern)
+    /// Match regex pattern (precompiled at rule load, resolved by rule index).
+    fn match_regex(&self, text: &str, rule_index: usize) -> bool {
+        self.rule_regex
+            .get(rule_index)
+            .and_then(Option::as_ref)
             .is_some_and(|regex| regex.is_match(text))
     }
 
@@ -756,6 +766,121 @@ mod tests {
                 )
                 .action,
             AclAction::Deny
+        );
+    }
+
+    /// The regex index is positional, so any path that reorders or edits rules
+    /// must keep each rule pointing at its own pattern.
+    #[test]
+    fn regex_index_survives_priority_reordering_and_edits() {
+        fn regex_rule(id: &str, priority: u32, pattern: &str) -> AclRule {
+            AclRule {
+                id: id.to_string(),
+                name: format!("rule-{id}"),
+                enabled: true,
+                priority,
+                action: AclAction::Deny,
+                rule_type: AclRuleType::Regex(pattern.to_string()),
+                redirect_url: None,
+                comment: None,
+            }
+        }
+
+        let mut engine = AclEngine::new(AclAction::Allow);
+        engine.load_rules(vec![
+            regex_rule("low", 1, r"\.exe$"),
+            regex_rule("high", 100, r"\.zip$"),
+        ]);
+        // Sorting by priority puts "high" first; each slot must keep its pattern.
+        assert_eq!(
+            engine
+                .check_access("https://h.test/a.zip", "h.test", &[], None, &[], None)
+                .rule_id
+                .as_deref(),
+            Some("high")
+        );
+        assert_eq!(
+            engine
+                .check_access("https://h.test/a.exe", "h.test", &[], None, &[], None)
+                .rule_id
+                .as_deref(),
+            Some("low")
+        );
+
+        // Inserting a higher-priority rule shifts every index by one.
+        engine.add_rule(regex_rule("top", 200, r"\.iso$"));
+        assert_eq!(
+            engine
+                .check_access("https://h.test/a.iso", "h.test", &[], None, &[], None)
+                .rule_id
+                .as_deref(),
+            Some("top")
+        );
+        assert_eq!(
+            engine
+                .check_access("https://h.test/a.exe", "h.test", &[], None, &[], None)
+                .rule_id
+                .as_deref(),
+            Some("low")
+        );
+
+        // Removing one keeps the survivors bound to their own patterns.
+        assert!(engine.remove_rule("high"));
+        assert_eq!(
+            engine
+                .check_access("https://h.test/a.zip", "h.test", &[], None, &[], None)
+                .action,
+            AclAction::Allow
+        );
+        assert_eq!(
+            engine
+                .check_access("https://h.test/a.exe", "h.test", &[], None, &[], None)
+                .rule_id
+                .as_deref(),
+            Some("low")
+        );
+    }
+
+    /// A disabled rule must not shift the index of the rules after it.
+    #[test]
+    fn disabled_rules_do_not_shift_the_regex_index() {
+        let mut engine = AclEngine::new(AclAction::Allow);
+        engine.load_rules(vec![
+            AclRule {
+                id: "off".to_string(),
+                name: "disabled".to_string(),
+                enabled: false,
+                priority: 100,
+                action: AclAction::Deny,
+                rule_type: AclRuleType::Regex(r"\.exe$".to_string()),
+                redirect_url: None,
+                comment: None,
+            },
+            AclRule {
+                id: "on".to_string(),
+                name: "enabled".to_string(),
+                enabled: true,
+                priority: 50,
+                action: AclAction::Deny,
+                rule_type: AclRuleType::Regex(r"\.zip$".to_string()),
+                redirect_url: None,
+                comment: None,
+            },
+        ]);
+        // The disabled rule is skipped ...
+        assert_eq!(
+            engine
+                .check_access("https://h.test/a.exe", "h.test", &[], None, &[], None)
+                .action,
+            AclAction::Allow
+        );
+        // ... and the enabled one still resolves its own pattern.
+        assert_eq!(
+            engine
+                .check_access("https://h.test/a.zip", "h.test", &[], None, &[], None)
+                .rule_id
+                .as_deref(),
+            Some("on")
         );
     }
 

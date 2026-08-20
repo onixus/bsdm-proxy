@@ -27,6 +27,7 @@ pub mod control_mtls;
 pub mod device_registry;
 pub mod dlp;
 pub mod ebpf;
+pub mod hashing;
 pub mod hierarchy;
 pub mod hierarchy_config;
 pub mod htcp;
@@ -108,7 +109,9 @@ pub use policy_config::{
     load_policy_config, validate_mitm_policy, DeploymentProfile, PolicyConfig, PolicyMode,
 };
 pub use proxy_service::{ProxyPolicy, ProxyService};
-pub use rate_limit::{extract_api_key, RateLimitConfig, RateLimitViolation, RateLimiter};
+pub use rate_limit::{
+    extract_api_key, extract_api_key_ref, RateLimitConfig, RateLimitViolation, RateLimiter,
+};
 pub use reverse_proxy::{OidcConfig, ReverseProxyConfig};
 pub use security_defaults::{
     control_api_fail_closed, control_api_token_from_env, metrics_auth_token, metrics_bind_addr,

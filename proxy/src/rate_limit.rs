@@ -136,15 +136,25 @@ fn parse_positive_f64(name: &str, default: f64) -> f64 {
 }
 
 /// Extract API key from request headers using config (header and/or Bearer).
-pub fn extract_api_key(headers: &HeaderMap, config: &RateLimitConfig) -> Option<String> {
-    let header_name = config.api_key_header.as_str();
-    for (name, value) in headers.iter() {
-        if name.as_str().eq_ignore_ascii_case(header_name) {
-            if let Ok(v) = value.to_str() {
-                let key = v.trim();
-                if !key.is_empty() {
-                    return Some(key.to_string());
-                }
+///
+/// Borrows from the header map — callers that only inspect the key never copy
+/// it. Returns `None` when rate limiting is off, so a disabled limiter costs
+/// nothing per request.
+pub fn extract_api_key_ref<'a>(
+    headers: &'a HeaderMap,
+    config: &RateLimitConfig,
+) -> Option<&'a str> {
+    if !config.enabled {
+        return None;
+    }
+
+    // `HeaderMap` keys are already lowercase and `api_key_header` is lowercased
+    // at load, so a single hashed lookup replaces a full scan of every header.
+    if let Some(value) = headers.get(config.api_key_header.as_str()) {
+        if let Ok(v) = value.to_str() {
+            let key = v.trim();
+            if !key.is_empty() {
+                return Some(key);
             }
         }
     }
@@ -157,13 +167,19 @@ pub fn extract_api_key(headers: &HeaderMap, config: &RateLimitConfig) -> Option<
             {
                 let key = token.trim();
                 if !key.is_empty() {
-                    return Some(key.to_string());
+                    return Some(key);
                 }
             }
         }
     }
 
     None
+}
+
+/// Owned-key variant of [`extract_api_key_ref`], for callers that need to keep
+/// the key past the borrow of `headers`.
+pub fn extract_api_key(headers: &HeaderMap, config: &RateLimitConfig) -> Option<String> {
+    extract_api_key_ref(headers, config).map(str::to_string)
 }
 
 use redis::aio::ConnectionManager;
@@ -200,6 +216,12 @@ impl RateLimiter {
 
     pub fn is_distributed(&self) -> bool {
         self.redis_conn.is_some()
+    }
+
+    /// Whether any limit is in force. Hot paths check this before doing work.
+    #[inline]
+    pub fn is_enabled(&self) -> bool {
+        self.config.enabled
     }
 
     /// Async rate limit check supporting distributed Redis counters with fallback to local token buckets.
@@ -326,7 +348,13 @@ impl RateLimiter {
             .lock()
             .expect("rate limit bucket map mutex poisoned");
 
-        if guard.len() >= self.config.max_keys && !guard.contains_key(key) {
+        // Steady state is an existing bucket: probe by reference first so the
+        // common path does not allocate an owned key just to look one up.
+        if let Some(bucket) = guard.get_mut(key) {
+            return bucket.try_acquire(rate, burst);
+        }
+
+        if guard.len() >= self.config.max_keys {
             if let Some(evict_key) = guard.keys().next().cloned() {
                 guard.remove(&evict_key);
             }
@@ -442,7 +470,7 @@ mod tests {
 
     #[test]
     fn extract_api_key_from_header_and_bearer() {
-        let config = RateLimitConfig::default();
+        let config = enabled_config(10.0, 10.0);
         let mut headers = HeaderMap::new();
         headers.insert("x-api-key", HeaderValue::from_static("from-header"));
         assert_eq!(
@@ -453,6 +481,54 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer tok-1"));
         assert_eq!(extract_api_key(&headers, &config).as_deref(), Some("tok-1"));
+    }
+
+    #[test]
+    fn extract_api_key_matches_header_name_case_insensitively() {
+        let config = enabled_config(10.0, 10.0);
+        let mut headers = HeaderMap::new();
+        headers.insert("X-Api-Key", HeaderValue::from_static("  spaced  "));
+        assert_eq!(extract_api_key_ref(&headers, &config), Some("spaced"));
+    }
+
+    #[test]
+    fn extract_api_key_skips_work_when_rate_limiting_is_off() {
+        let config = RateLimitConfig::default();
+        assert!(!config.enabled);
+        let mut headers = HeaderMap::new();
+        headers.insert("x-api-key", HeaderValue::from_static("from-header"));
+        // A disabled limiter ignores the key anyway; not extracting it keeps the
+        // header scan and the copy off every request.
+        assert_eq!(extract_api_key_ref(&headers, &config), None);
+    }
+
+    #[test]
+    fn empty_api_key_header_falls_through_to_bearer() {
+        let config = enabled_config(10.0, 10.0);
+        let mut headers = HeaderMap::new();
+        headers.insert("x-api-key", HeaderValue::from_static("   "));
+        headers.insert(AUTHORIZATION, HeaderValue::from_static("bearer tok-2"));
+        assert_eq!(extract_api_key_ref(&headers, &config), Some("tok-2"));
+    }
+
+    #[test]
+    fn existing_buckets_are_reused_without_reallocating_keys() {
+        let limiter = RateLimiter::new(enabled_config(1_000.0, 1_000.0));
+        for _ in 0..100 {
+            assert!(limiter.check("10.0.0.1", None, None).is_none());
+        }
+        assert_eq!(limiter.ip_buckets.lock().expect("bucket lock").len(), 1);
+    }
+
+    #[test]
+    fn bucket_map_stays_bounded() {
+        let mut config = enabled_config(1_000.0, 1_000.0);
+        config.max_keys = 8;
+        let limiter = RateLimiter::new(config);
+        for i in 0..200 {
+            let _ = limiter.check(&format!("10.0.{}.{}", i / 256, i % 256), None, None);
+        }
+        assert!(limiter.ip_buckets.lock().expect("bucket lock").len() <= 8);
     }
 
     #[test]

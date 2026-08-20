@@ -29,7 +29,7 @@ use crate::hierarchy::{HierarchyManager, HierarchyResult};
 use crate::http_types::{empty, full, Body};
 use crate::icap::{IcapClient, IcapOutcome};
 use crate::l2_cache::RedisL2Cache;
-use crate::metrics::{FastRequestScope, Metrics, RequestMetricsGuard};
+use crate::metrics::{FastRequestScope, Metrics, RequestMetricsGuard, StatusLabel};
 use crate::miss_coalesce::{CoalesceJoin, MissFlightMap, MissFlightPermit};
 use crate::peer_fetch::{fetch_via_peer, PeerTlsConfig};
 use crate::peers::CachePeer;
@@ -39,7 +39,7 @@ use crate::pipeline::{dispatch_cache_event, new_event_id, CacheEvent, HttpEventP
 #[cfg(feature = "kafka")]
 use crate::pipeline::{flush_kafka, KafkaEventPipeline};
 use crate::policy_cache::PolicyDecisionCache;
-use crate::rate_limit::{extract_api_key, RateLimitViolation, RateLimiter};
+use crate::rate_limit::{extract_api_key_ref, RateLimitViolation, RateLimiter};
 use crate::semantic_cache::{
     content_cache_key, evaluate_llm_store, extract_embed_text, normalize_llm_body,
     SemanticCacheConfig, SemanticIndex,
@@ -127,6 +127,26 @@ fn classify_tls_policy_decision(
     }
 }
 
+/// Prometheus label for an HTTP method.
+///
+/// Standard methods map to a `&'static str`, so the request path does not
+/// allocate a label string; anything exotic still gets a correct (copied) label.
+fn method_metric_label(method: &hyper::Method) -> std::borrow::Cow<'static, str> {
+    use std::borrow::Cow;
+    match *method {
+        hyper::Method::GET => Cow::Borrowed("GET"),
+        hyper::Method::POST => Cow::Borrowed("POST"),
+        hyper::Method::HEAD => Cow::Borrowed("HEAD"),
+        hyper::Method::PUT => Cow::Borrowed("PUT"),
+        hyper::Method::DELETE => Cow::Borrowed("DELETE"),
+        hyper::Method::OPTIONS => Cow::Borrowed("OPTIONS"),
+        hyper::Method::PATCH => Cow::Borrowed("PATCH"),
+        hyper::Method::CONNECT => Cow::Borrowed("CONNECT"),
+        hyper::Method::TRACE => Cow::Borrowed("TRACE"),
+        _ => Cow::Owned(method.as_str().to_string()),
+    }
+}
+
 fn request_decision_source(url: &str) -> &'static str {
     if url.starts_with("https://") {
         "mitm"
@@ -174,6 +194,16 @@ impl MissCompletionHandle {
                 l2.set(cache_key.as_ref(), &cached_response).await;
             });
         }
+    }
+
+    /// See [`ProxyService::has_event_sink`].
+    #[inline]
+    fn has_event_sink(&self) -> bool {
+        #[cfg(feature = "kafka")]
+        if self.kafka_pipeline.is_some() {
+            return true;
+        }
+        self.http_pipeline.is_some()
     }
 
     fn send_cache_event(&self, event: CacheEvent) {
@@ -296,7 +326,10 @@ impl MissCompletionHandle {
             "BYPASS"
         };
 
-        if self.perf.should_emit_kafka_event() {
+        // Sink presence only: `send_cache_event` applies KAFKA_SAMPLE_RATE. Testing
+        // the sampler here as well drew it twice per event, which made the
+        // effective emit rate 1-in-N² instead of the configured 1-in-N.
+        if self.has_event_sink() {
             if let Ok(timestamp) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
                 let event_id = new_event_id();
                 let redirect_url =
@@ -627,6 +660,9 @@ impl ProxyService {
         threat_sources: &[String],
         request_start: Instant,
     ) {
+        if !self.has_event_sink() {
+            return;
+        }
         if let Ok(timestamp) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
             let event_id = new_event_id();
             let redirect_url = cached
@@ -706,6 +742,9 @@ impl ProxyService {
             action = %decision.action,
             "ACL policy decision"
         );
+        if !self.has_event_sink() {
+            return;
+        }
         if let Ok(timestamp) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
             let status = match decision.action {
                 AclAction::Deny => 403,
@@ -1023,7 +1062,7 @@ impl ProxyService {
         let status = response.status();
         self.metrics
             .upstream_requests_total
-            .with_label_values(&[&domain, &status.as_u16().to_string()])
+            .with_label_values(&[domain.as_str(), StatusLabel::new(status.as_u16()).as_str()])
             .inc();
         self.metrics
             .upstream_duration_seconds
@@ -1044,7 +1083,7 @@ impl ProxyService {
             let refreshed = cached.refreshed_after_not_modified(ttl);
             self.store_in_l1_and_l2(cache_key.clone(), refreshed.clone());
             debug!("Cache REVALIDATED (304): {} {}", method, url);
-            let user_agent = Self::request_header_str(req, "user-agent");
+            let user_agent = Self::request_header(req, "user-agent");
             return Some(self.serve_l1_hit(
                 &refreshed,
                 cache_key,
@@ -1052,7 +1091,7 @@ impl ProxyService {
                 method,
                 user_id,
                 username,
-                user_agent.as_deref(),
+                user_agent,
                 client_ip,
                 categories,
                 threat_sources,
@@ -1403,13 +1442,16 @@ impl ProxyService {
         username: Option<&str>,
         headers: &hyper::HeaderMap,
     ) -> Option<Response<Body>> {
-        let api_key = extract_api_key(headers, self.rate_limiter.config());
+        // Disabled is the default: bail before touching headers or metrics so a
+        // deployment that does not rate limit pays nothing per request.
+        if !self.rate_limiter.is_enabled() {
+            return None;
+        }
+        let api_key = extract_api_key_ref(headers, self.rate_limiter.config());
         if self.rate_limiter.is_distributed() {
             self.metrics.distributed_rate_limit_hits_total.inc();
         }
-        let violation = self
-            .rate_limiter
-            .check(client_ip, username, api_key.as_deref())?;
+        let violation = self.rate_limiter.check(client_ip, username, api_key)?;
         let (limit_type, status, body) = match violation {
             RateLimitViolation::Ip => (
                 "ip",
@@ -1436,10 +1478,7 @@ impl ProxyService {
             .rate_limit_rejected_total
             .with_label_values(&[limit_type])
             .inc();
-        let key_prefix = api_key
-            .as_deref()
-            .map(|k| &k[..k.len().min(4)])
-            .unwrap_or("-");
+        let key_prefix = api_key.map(|k| &k[..k.len().min(4)]).unwrap_or("-");
         warn!(
             "Rate limit ({}) for client_ip={} user={} api_key_prefix={}",
             limit_type,
@@ -1504,19 +1543,69 @@ impl ProxyService {
         }
     }
 
+    /// Host of an absolute URL, or `"unknown"` when it has none.
+    ///
+    /// Runs on every request (metrics labels, ACL matching, policy-cache keys,
+    /// analytics events). A full `Url::parse` for that is an outsized cost, so
+    /// plain ASCII authorities — effectively all real traffic — are sliced out
+    /// directly and anything else falls back to the real parser, which keeps
+    /// IDNA/punycode, percent escapes and IPv6 literals byte-identical.
     #[inline]
     fn extract_domain(url_str: &str) -> String {
+        if let Some(domain) = Self::extract_domain_fast(url_str) {
+            return domain;
+        }
         url::Url::parse(url_str)
             .ok()
             .and_then(|u| u.host().map(|h| h.to_string()))
             .unwrap_or_else(|| "unknown".to_string())
     }
 
+    /// Slice the host out of `scheme://[userinfo@]host[:port]/...`.
+    ///
+    /// Returns `None` — deferring to `Url::parse` — for any authority that is
+    /// not a straightforward ASCII `[a-zA-Z0-9.-]` hostname, which is exactly
+    /// the set where the URL spec's host parser does more than lowercase.
+    fn extract_domain_fast(url_str: &str) -> Option<String> {
+        let after_scheme = url_str.split_once("://")?.1;
+        let authority = after_scheme
+            .split(['/', '?', '#'])
+            .next()
+            .filter(|a| !a.is_empty())?;
+        // Strip userinfo; the last '@' wins, as in the URL spec.
+        let host_port = match authority.rsplit_once('@') {
+            Some((_, host_port)) => host_port,
+            None => authority,
+        };
+        // IPv6 literals ("[::1]") keep their brackets and normalization rules.
+        if host_port.starts_with('[') {
+            return None;
+        }
+        let host = host_port.split(':').next().filter(|h| !h.is_empty())?;
+
+        let plain = host
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.')
+            && !host.starts_with('.')
+            && !host.ends_with('.')
+            && !host.contains("..");
+        if !plain {
+            return None;
+        }
+
+        Some(host.to_ascii_lowercase())
+    }
+
+    /// Borrowed header value — no copy. Use this whenever the value is only read
+    /// while `req` is still alive.
+    #[inline]
+    fn request_header<'a>(req: &'a Request<Incoming>, name: &str) -> Option<&'a str> {
+        req.headers().get(name).and_then(|v| v.to_str().ok())
+    }
+
+    /// Owned header value, for callers that outlive the borrow of `req`.
     fn request_header_str(req: &Request<Incoming>, name: &str) -> Option<String> {
-        req.headers()
-            .get(name)
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string())
+        Self::request_header(req, name).map(str::to_string)
     }
 
     fn extract_user_info(req: &Request<Incoming>) -> (Option<String>, Option<String>) {
@@ -1534,6 +1623,21 @@ impl ProxyService {
             }
         }
         (None, None)
+    }
+
+    /// Whether any analytics sink is configured.
+    ///
+    /// Building a `CacheEvent` costs ~20 allocations plus session-correlator
+    /// bookkeeping. With no sink wired up (the lite / no-analytics deployment)
+    /// every one of those events is dropped, so callers check this before doing
+    /// the work rather than after.
+    #[inline]
+    pub(crate) fn has_event_sink(&self) -> bool {
+        #[cfg(feature = "kafka")]
+        if self.kafka_pipeline.is_some() {
+            return true;
+        }
+        self.http_pipeline.is_some()
     }
 
     pub(crate) fn send_cache_event(&self, event: CacheEvent) {
@@ -1576,15 +1680,29 @@ impl ProxyService {
     }
 
     fn headers_map_from_response(response: &Response<Incoming>) -> HashMap<String, String> {
-        response
-            .headers()
-            .iter()
-            .filter_map(|(k, v)| {
-                v.to_str()
-                    .ok()
-                    .map(|v| (k.as_str().to_string(), v.to_string()))
-            })
-            .collect()
+        Self::headers_map(response.headers())
+    }
+
+    fn headers_map_from_parts(parts: &hyper::http::request::Parts) -> HashMap<String, String> {
+        Self::headers_map(&parts.headers)
+    }
+
+    fn headers_map(headers: &hyper::HeaderMap) -> HashMap<String, String> {
+        let mut map = HashMap::with_capacity(headers.len());
+        for (name, value) in headers.iter() {
+            if let Ok(value) = value.to_str() {
+                map.insert(name.as_str().to_string(), value.to_string());
+            }
+        }
+        map
+    }
+
+    /// Whether an ICAP stage will read the request headers on this request.
+    #[inline]
+    fn icap_wants_request_headers(&self) -> bool {
+        self.icap
+            .as_ref()
+            .is_some_and(|client| client.reqmod_enabled() || client.respmod_enabled())
     }
 
     fn apply_response_headers(headers_map: &HashMap<String, String>, resp: &mut Response<Body>) {
@@ -1678,7 +1796,9 @@ impl ProxyService {
         let no_user: Option<String> = None;
         let no_cats: Vec<String> = Vec::new();
         let no_threats: Vec<String> = Vec::new();
-        let user_agent = Self::request_header_str(req, "user-agent");
+        // Borrowed: `req` outlives every use below, so the fast path does not
+        // copy the User-Agent just to hand it to an event builder.
+        let user_agent = Self::request_header(req, "user-agent");
         let cache_lookup_start = Instant::now();
 
         if let Some(cached) = self.http_cache.get(cache_key) {
@@ -1704,7 +1824,7 @@ impl ProxyService {
                     method,
                     &no_user,
                     &no_user,
-                    user_agent.as_deref(),
+                    user_agent,
                     client_ip,
                     &no_cats,
                     &no_threats,
@@ -1765,7 +1885,7 @@ impl ProxyService {
                     &cached,
                     &no_user,
                     &no_user,
-                    user_agent.as_deref(),
+                    user_agent,
                     client_ip,
                     &no_cats,
                     &no_threats,
@@ -1788,7 +1908,7 @@ impl ProxyService {
     pub(crate) async fn handle_request(
         &self,
         mut req: Request<Incoming>,
-        client_ip: String,
+        client_ip: &str,
         mut proxy_user: Option<Arc<UserInfo>>,
     ) -> Response<Body> {
         let mut rp_username = None;
@@ -1804,7 +1924,7 @@ impl ProxyService {
                 // Try AuthManager for AD / HTTP Basic / Negotiate
                 if let Some(auth) = &self.auth {
                     if auth.is_enabled() {
-                        match auth.handle_proxy_auth(&client_ip, &req, None, true).await {
+                        match auth.handle_proxy_auth(client_ip, &req, None, true).await {
                             crate::auth::ProxyAuthOutcome::Authenticated(user) => {
                                 let mut allowed = true;
                                 if let Some(admin_group) = &rp_config.admin_group {
@@ -1892,7 +2012,7 @@ impl ProxyService {
         let mut guard = if detailed_metrics {
             Some(RequestMetricsGuard::new(
                 self.metrics.clone(),
-                method.to_string(),
+                method_metric_label(&http_method),
             ))
         } else {
             None
@@ -1916,8 +2036,7 @@ impl ProxyService {
         };
         let user_agent = Self::request_header_str(req_ref, "user-agent");
 
-        if let Some(resp) =
-            self.check_rate_limit(&client_ip, username.as_deref(), req_ref.headers())
+        if let Some(resp) = self.check_rate_limit(client_ip, username.as_deref(), req_ref.headers())
         {
             let code = resp.status().as_u16();
             if let Some(g) = guard.take() {
@@ -1935,7 +2054,7 @@ impl ProxyService {
                     &cache_key,
                     &url,
                     method,
-                    &client_ip,
+                    client_ip,
                     request_start,
                     detailed_metrics,
                     &mut guard,
@@ -1958,7 +2077,7 @@ impl ProxyService {
             if let Some(resp) = self.run_wasm_hook(
                 method,
                 &url,
-                &client_ip,
+                client_ip,
                 username.as_deref(),
                 req_mut.headers_mut(),
             ) {
@@ -1974,7 +2093,7 @@ impl ProxyService {
 
         let domain = Self::extract_domain(&url);
         let (policy_decision, categories, threat_sources) = self
-            .check_policy(&url, &domain, username.as_deref(), &user_groups, &client_ip)
+            .check_policy(&url, &domain, username.as_deref(), &user_groups, client_ip)
             .await;
         if let Some(decision) = policy_decision {
             self.emit_policy_event(
@@ -1985,7 +2104,7 @@ impl ProxyService {
                 &user_id,
                 &username,
                 user_agent.as_deref(),
-                &client_ip,
+                client_ip,
                 &domain,
                 &categories,
                 &threat_sources,
@@ -2021,7 +2140,7 @@ impl ProxyService {
                         *resp.status_mut() = StatusCode::FORBIDDEN;
                         Self::finish_request_metrics(&mut guard, &mut fast_scope, 403, 0, 30);
 
-                        if self.perf.should_emit_kafka_event() {
+                        if self.has_event_sink() {
                             let event = CacheEvent {
                                 url: url.to_string(),
                                 method: method.to_string(),
@@ -2094,7 +2213,7 @@ impl ProxyService {
                         &user_id,
                         &username,
                         user_agent.as_deref(),
-                        &client_ip,
+                        client_ip,
                         &categories,
                         &threat_sources,
                         request_start,
@@ -2129,7 +2248,7 @@ impl ProxyService {
                                             &user_id,
                                             &username,
                                             user_agent.as_deref(),
-                                            &client_ip,
+                                            client_ip,
                                             &categories,
                                             &threat_sources,
                                             request_start,
@@ -2180,7 +2299,7 @@ impl ProxyService {
                     &user_id,
                     &username,
                     user_agent.as_deref(),
-                    &client_ip,
+                    client_ip,
                     &categories,
                     &threat_sources,
                     request_start,
@@ -2201,7 +2320,7 @@ impl ProxyService {
                     method,
                     &user_id,
                     &username,
-                    &client_ip,
+                    client_ip,
                     &categories,
                     &threat_sources,
                     request_start,
@@ -2244,7 +2363,7 @@ impl ProxyService {
                         &user_id,
                         &username,
                         user_agent.as_deref(),
-                        &client_ip,
+                        client_ip,
                         &categories,
                         &threat_sources,
                         request_start,
@@ -2284,7 +2403,7 @@ impl ProxyService {
                             &user_id,
                             &username,
                             user_agent.as_deref(),
-                            &client_ip,
+                            client_ip,
                             &categories,
                             &threat_sources,
                             request_start,
@@ -2306,7 +2425,7 @@ impl ProxyService {
                                 &user_id,
                                 &username,
                                 user_agent.as_deref(),
-                                &client_ip,
+                                client_ip,
                                 &categories,
                                 &threat_sources,
                                 request_start,
@@ -2349,7 +2468,7 @@ impl ProxyService {
                         *resp.status_mut() = StatusCode::FORBIDDEN;
                         Self::finish_request_metrics(&mut guard, &mut fast_scope, 403, 0, 30);
 
-                        if self.perf.should_emit_kafka_event() {
+                        if self.has_event_sink() {
                             let event = CacheEvent {
                                 url: url.to_string(),
                                 method: method.to_string(),
@@ -2397,7 +2516,7 @@ impl ProxyService {
                             };
                             if !event.session_id.is_empty() {
                                 self.sessions.begin_request(
-                                    &client_ip,
+                                    client_ip,
                                     username.as_deref(),
                                     user_agent.as_deref(),
                                     &url,
@@ -2419,16 +2538,15 @@ impl ProxyService {
         };
         let request_body_size = body_bytes.len();
 
-        // ICAP REQMOD (optional): before peer/upstream fetch.
-        let icap_req_headers: HashMap<String, String> = parts
-            .headers
-            .iter()
-            .filter_map(|(k, v)| {
-                v.to_str()
-                    .ok()
-                    .map(|s| (k.as_str().to_string(), s.to_string()))
-            })
-            .collect();
+        // ICAP REQMOD (optional): before peer/upstream fetch. ICAP is opt-in, so
+        // the header map is only materialized when an adaptation stage will
+        // actually read it — otherwise it was two allocations per header on
+        // every MISS, discarded unread.
+        let icap_req_headers: HashMap<String, String> = if self.icap_wants_request_headers() {
+            Self::headers_map_from_parts(&parts)
+        } else {
+            HashMap::new()
+        };
         if let Some(resp) = self
             .run_icap_reqmod(method, &url, &icap_req_headers, &body_bytes)
             .await
@@ -2441,17 +2559,23 @@ impl ProxyService {
             return resp;
         }
 
-        let req_for_peer = Request::from_parts(parts.clone(), full(body_bytes.clone()));
+        // Cloning the parts deep-copies every request header. Only a hierarchy
+        // peer fetch needs that second copy, so skip it when no hierarchy is
+        // configured or the request can never go to a peer.
+        let peer_fetch_possible =
+            !llm_mode && self.hierarchy.is_some() && CACHEABLE_METHODS.contains(&method);
+        let req_for_peer = peer_fetch_possible
+            .then(|| Request::from_parts(parts.clone(), full(body_bytes.clone())));
         let req = Request::from_parts(parts, full(body_bytes));
 
-        let domain = Self::extract_domain(&url);
         let upstream_start = Instant::now();
 
-        let peer_fetch = if llm_mode {
-            None
-        } else {
-            self.try_fetch_via_hierarchy(method, &url, req_for_peer)
-                .await
+        let peer_fetch = match req_for_peer {
+            Some(req_for_peer) => {
+                self.try_fetch_via_hierarchy(method, &url, req_for_peer)
+                    .await
+            }
+            None => None,
         };
         let hierarchy_peer = peer_fetch.as_ref().map(|(peer, _)| peer.clone());
 
@@ -2469,7 +2593,7 @@ impl ProxyService {
 
                 self.metrics
                     .upstream_requests_total
-                    .with_label_values(&[&domain, &status_code.to_string()])
+                    .with_label_values(&[domain.as_str(), StatusLabel::new(status_code).as_str()])
                     .inc();
                 self.metrics
                     .upstream_duration_seconds
@@ -2496,7 +2620,7 @@ impl ProxyService {
                         miss_x_cache_status_header(true, &store_precheck)
                     };
                     if let Some(g) = guard.as_mut() {
-                        g.set_cache_status(&cache_status_metric_label(x_cache));
+                        g.set_cache_status(cache_status_metric_label(x_cache));
                     }
 
                     // Completion path finishes the flight; disarm Drop.
@@ -2518,7 +2642,7 @@ impl ProxyService {
                     let user_id_cb = user_id.clone();
                     let username_cb = username.clone();
                     let user_agent_cb = user_agent.clone();
-                    let client_ip_cb = client_ip.clone();
+                    let client_ip_cb = client_ip.to_string();
                     let categories_cb = categories.clone();
                     let threat_sources_cb = threat_sources.clone();
                     let hierarchy_peer_cb = hierarchy_peer.clone();
@@ -2660,7 +2784,7 @@ impl ProxyService {
                             user_id,
                             username,
                             user_agent,
-                            &client_ip,
+                            client_ip,
                             &categories,
                             &threat_sources,
                             request_start,
@@ -2683,7 +2807,7 @@ impl ProxyService {
                         user_id,
                         username,
                         user_agent,
-                        &client_ip,
+                        client_ip,
                         &categories,
                         &threat_sources,
                         request_start,
@@ -2731,7 +2855,9 @@ impl ProxyService {
 
 #[cfg(test)]
 mod decision_source_tests {
-    use super::{classify_tls_policy_decision, request_decision_source, TlsPolicyDecision};
+    use super::{
+        classify_tls_policy_decision, request_decision_source, ProxyService, TlsPolicyDecision,
+    };
     use crate::policy_config::PolicyMode;
 
     #[test]
@@ -2840,5 +2966,85 @@ mod decision_source_tests {
     fn classifies_decrypted_and_plain_http_events() {
         assert_eq!(request_decision_source("https://example.com/path"), "mitm");
         assert_eq!(request_decision_source("http://example.com/path"), "sni");
+    }
+
+    /// The reference the fast path must never disagree with.
+    fn extract_domain_reference(url_str: &str) -> String {
+        url::Url::parse(url_str)
+            .ok()
+            .and_then(|u| u.host().map(|h| h.to_string()))
+            .unwrap_or_else(|| "unknown".to_string())
+    }
+
+    #[test]
+    fn fast_domain_extraction_matches_the_url_parser() {
+        let urls = [
+            "http://example.com/",
+            "http://example.com",
+            "https://example.com/path?q=1#frag",
+            "https://EXAMPLE.COM/Path",
+            "https://sub.domain.example.com:8443/x",
+            "http://user:pass@example.com/x",
+            "http://user@host.example/x",
+            "https://192.0.2.10:443/x",
+            "https://example.com:8080",
+            "https://a-b--c.example/x",
+            "https://xn--80ak6aa92e.com/x",
+            // Below here the fast path must defer to the parser.
+            "https://[2001:db8::1]:8443/x",
+            "https://[::1]/x",
+            "https://пример.рф/x",
+            "https://ex%41mple.com/x",
+            "https://example.com./x",
+            "https://.example.com/x",
+            "https://exa..mple.com/x",
+            "http:///no-host",
+            "not a url",
+            "",
+            "/relative/path",
+        ];
+        for url in urls {
+            assert_eq!(
+                ProxyService::extract_domain(url),
+                extract_domain_reference(url),
+                "domain mismatch for {url}"
+            );
+        }
+    }
+
+    #[test]
+    fn fast_domain_extraction_defers_on_unusual_authorities() {
+        // Anything the URL spec does more than lowercase to must reach the parser.
+        for url in [
+            "https://[2001:db8::1]/x",
+            "https://пример.рф/x",
+            "https://ex%41mple.com/x",
+            "https://example.com./x",
+            "http:///no-host",
+            "relative/only",
+        ] {
+            assert!(
+                ProxyService::extract_domain_fast(url).is_none(),
+                "{url} should fall back to Url::parse"
+            );
+        }
+    }
+
+    #[test]
+    fn fast_domain_extraction_handles_the_common_shapes() {
+        assert_eq!(
+            ProxyService::extract_domain_fast("https://EXAMPLE.com:8443/a?b#c"),
+            Some("example.com".to_string())
+        );
+        assert_eq!(
+            ProxyService::extract_domain_fast("http://user:pw@host.example/x"),
+            Some("host.example".to_string())
+        );
+    }
+
+    #[test]
+    fn unparseable_urls_report_unknown_domain() {
+        assert_eq!(ProxyService::extract_domain("not a url"), "unknown");
+        assert_eq!(ProxyService::extract_domain(""), "unknown");
     }
 }

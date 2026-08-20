@@ -1,7 +1,7 @@
 //! L1 in-memory HTTP response cache types.
 
 use bytes::Bytes;
-use hyper::header::{HeaderName, HeaderValue};
+use hyper::header::{HeaderName, HeaderValue, CONTENT_LENGTH};
 use hyper::{Response, StatusCode};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -107,10 +107,14 @@ impl CachedResponse {
 
     pub fn to_response_with_cache_status(&self, cache_status: &str) -> Response<Body> {
         let body = self.response_body();
-        let mut response = Response::new(full(body.clone()));
+        let body_len = body.len();
+        let mut response = Response::new(full(body));
         *response.status_mut() = StatusCode::from_u16(self.status).unwrap_or(StatusCode::OK);
 
         let headers_mut = response.headers_mut();
+        // Size the map once instead of growing (and rehashing) it header by
+        // header on every cache hit. `+2` covers content-length and x-cache-status.
+        headers_mut.reserve(self.headers.len() + 2);
         for (key, value) in self.headers.iter() {
             // Drop hop-by-hop / framing headers: body is already fully buffered and
             // (when decoded) uncompressed. Re-emitting transfer-encoding or a stale
@@ -126,10 +130,9 @@ impl CachedResponse {
             }
         }
 
-        // Always set content-length to the body we actually send.
-        if let Ok(val) = HeaderValue::from_str(&body.len().to_string()) {
-            headers_mut.insert("content-length", val);
-        }
+        // Always set content-length to the body we actually send. `HeaderValue`
+        // formats integers on the stack, so this costs no allocation.
+        headers_mut.insert(CONTENT_LENGTH, HeaderValue::from(body_len));
 
         if let Ok(val) = HeaderValue::from_str(cache_status) {
             headers_mut.insert("x-cache-status", val);

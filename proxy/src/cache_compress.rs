@@ -216,6 +216,15 @@ pub fn prepare_body_for_cache(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    /// `CACHE_COMPRESSION` is process-global, and `cargo test` runs these on
+    /// separate threads: without this the two env tests race and either can read
+    /// the other's value. Same pattern as `upstream::tests::env_lock`.
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     fn sample_body() -> Bytes {
         Bytes::from("x".repeat(2048))
@@ -223,6 +232,7 @@ mod tests {
 
     #[test]
     fn compression_config_defaults_off() {
+        let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         std::env::remove_var("CACHE_COMPRESSION");
         let cfg = CompressionConfig::from_env();
         assert!(!cfg.is_enabled());
@@ -230,6 +240,7 @@ mod tests {
 
     #[test]
     fn compression_config_parses_zstd() {
+        let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         std::env::remove_var("CACHE_COMPRESSION");
         std::env::set_var("CACHE_COMPRESSION", "zstd");
         let cfg = CompressionConfig::from_env();

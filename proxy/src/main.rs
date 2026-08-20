@@ -51,7 +51,9 @@ async fn run_accept_loop(
                     }
                 };
                 let service_clone = service.clone();
-                let client_ip = addr.ip().to_string();
+                // Shared per connection: every request on it borrows this instead
+                // of copying the address string.
+                let client_ip: Arc<str> = Arc::from(addr.ip().to_string());
                 let tasks = connection_tasks.clone();
                 connection_tasks.spawn(async move {
                     handle_connection(stream, addr, service_clone, client_ip, tasks).await;

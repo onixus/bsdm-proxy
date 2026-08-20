@@ -21,6 +21,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   change. See
   [docs/features/threat-intel-collector.md](docs/features/threat-intel-collector.md).
 
+### Changed
+
+- **Request hot-path optimization** — reduced per-request allocations and lock
+  contention across the proxy core. No configuration, wire format, or policy
+  semantics change; the cache key stays SHA-256 hex so ICP/HTCP/cache-digest
+  peers are unaffected.
+  - `AclEngine::check_access` no longer deep-clones the whole rule set on every
+    request; rules are matched in place on the `ArcSwap` snapshot, and regexes
+    resolve by rule index instead of by hashing the pattern string.
+  - `PolicyDecisionCache` is sharded (`RwLock` per shard) instead of one global
+    `Mutex`, looks up through a thread-local key buffer instead of allocating a
+    principal and domain `String` per request, and evicts from a bounded sample
+    instead of scanning every entry under the lock.
+  - Domain extraction slices the host out of plain ASCII URLs directly, falling
+    back to `Url::parse` for IDNA/punycode, percent escapes and IPv6 literals;
+    a differential test pins the fast path to the parser's output.
+  - Category suffix matching (`UT1` / custom DB / RKN) walks borrowed slices of
+    the host instead of building a `Vec<String>` of joined suffixes.
+  - Cache-event construction is skipped entirely when no Kafka or HTTP sink is
+    configured, and the ICAP request-header map is only built when an
+    adaptation stage will read it.
+  - MISS requests only clone their headers for a peer fetch when a cache
+    hierarchy is actually configured, and the redundant second URL parse on the
+    MISS path is gone.
+  - Rate limiting short-circuits before touching headers when disabled (the
+    default), matches the API-key header by hashed lookup instead of scanning
+    every header, and reuses existing token buckets without re-allocating keys.
+  - Prometheus labels for method, status code, and cache status come from a
+    static vocabulary instead of a `String` per request.
+  - L1 cache shard selection uses a fast mixer rather than SipHash over the
+    64-byte digest key; per-request event/metric sampling uses an atomic counter
+    rather than an RNG draw, which also makes the 1-in-N rate exact.
+  - `client_ip` is shared per connection as `Arc<str>` instead of copied per
+    request.
+
+### Fixed
+
+- **Event sampling rate** — `KAFKA_SAMPLE_RATE` was consulted twice on the cache
+  MISS and DLP-violation paths, so the effective emit rate was 1-in-N² rather
+  than the configured 1-in-N. Sampling is now applied once, at dispatch.
+- **Flaky compression config test** — `cache_compress` unit tests mutated the
+  process-global `CACHE_COMPRESSION` without synchronizing, so the two env tests
+  raced and either could observe the other's value. They now take the same
+  `env_lock()` guard used by the `upstream` tests. Pre-existing on `main`;
+  reproduced there in 3 of 8 runs.
+
+
 ## [0.9.12] - 2026-08-12
 
 Patch after **0.9.11**: hardened RKN registry ACL enforcement and registry-source resilience.
