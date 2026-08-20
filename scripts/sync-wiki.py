@@ -59,6 +59,7 @@ PAGES: tuple[Page, ...] = (
     Page("docs/features/acl-policy.md", "ACL-Policy.md", "Security & policy", "ACL", "Правила доступа, reload и persist."),
     Page("docs/features/categorization.md", "Domain-Categorization.md", "Security & policy", "Categorization", "UT1, локальные и online threat feeds."),
     Page("docs/features/certificate-pinning.md", "Certificate-Pinning-Exceptions.md", "Security & policy", "Certificate pinning", "Управляемые MITM bypass-исключения."),
+    Page("docs/features/threat-intel-collector.md", "Threat-Intelligence-Collector.md", "Security & policy", "TI collector", "Сбор IOC-фидов: плагины источников, расписание, метрики."),
     Page("docs/features/control-plane.md", "Control-Plane-API.md", "Security & policy", "Control plane API", "REST/gRPC endpoints и auth model."),
     Page("docs/features/admin-console-security.md", "Admin-Console-Security.md", "Security & policy", "Admin Console security", "Trust boundaries и mutation token gate."),
     Page("docs/features/dns-sinkhole.md", "DNS-Sinkhole.md", "Security & policy", "DNS sinkhole", "RPZ filtering, UDP, DoH и DoT."),

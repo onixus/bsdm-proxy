@@ -4115,6 +4115,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "threat-intel"
+version = "0.9.12"
+dependencies = [
+ "chrono",
+ "prometheus",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "time"
 version = "0.3.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"

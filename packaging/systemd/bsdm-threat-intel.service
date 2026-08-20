@@ -1,0 +1,20 @@
+[Unit]
+Description=BSDM-Proxy threat-intel collector (IOC feed ingestion)
+Documentation=https://github.com/onixus/bsdm-proxy/blob/main/docs/features/threat-intel-collector.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bsdm-proxy
+Group=bsdm-proxy
+EnvironmentFile=-/etc/bsdm-proxy/threat-intel.env
+ExecStart=/opt/bsdm-proxy/bin/threat-intel
+StateDirectory=bsdm-proxy/threat-intel
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

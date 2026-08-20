@@ -480,6 +480,49 @@ services:
         reservations:
           memory: 128M
 
+  # IOC feed collector (TASK-TI-001). Opt-in: `--profile threat-intel`.
+  # Needs egress to the configured feeds; writes snapshots to a local volume
+  # for the IOC store and the scoring engine.
+  threat-intel:
+    profiles: ["threat-intel"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: threat-intel
+      cache_from:
+        - type=registry,ref=ghcr.io/onixus/bsdm-proxy:threat-intel
+    ports:
+      - "8093:8093"
+    environment:
+      - TI_SOURCES=${TI_SOURCES:-openphish,phishstats,phishing_database,urlhaus}
+      - TI_POLL_INTERVAL_SECS=${TI_POLL_INTERVAL_SECS:-900}
+      - TI_HTTP_TIMEOUT_SECS=${TI_HTTP_TIMEOUT_SECS:-30}
+      - TI_MAX_ATTEMPTS=${TI_MAX_ATTEMPTS:-3}
+      - TI_RETRY_BACKOFF_SECS=${TI_RETRY_BACKOFF_SECS:-5}
+      - TI_MAX_BODY_MB=${TI_MAX_BODY_MB:-64}
+      - TI_MAX_INDICATORS_PER_FETCH=${TI_MAX_INDICATORS_PER_FETCH:-500000}
+      - TI_OUTPUT_DIR=/var/lib/bsdm-proxy/threat-intel
+      - METRICS_PORT=8093
+      - RUST_LOG=info,threat_intel=info
+    volumes:
+      - threat-intel-data:/var/lib/bsdm-proxy/threat-intel
+    networks:
+      - bsdm-net
+    restart: unless-stopped
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8093/health | grep -q ok"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+
 networks:
   bsdm-net:
     driver: bridge
@@ -499,4 +542,6 @@ volumes:
   pinning-audit:
     driver: local
   agent-devices:
+    driver: local
+  threat-intel-data:
     driver: local

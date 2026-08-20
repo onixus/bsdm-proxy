@@ -49,6 +49,7 @@
 | [Admin Console security](features/admin-console-security.md) | Trust boundaries и mutation token gate |
 | [Semantic cache](features/semantic-cache.md) | beta |
 | [DNS sinkhole, DoH, DoT](features/dns-sinkhole.md) | основной |
+| [Threat intel collector](features/threat-intel-collector.md) | experimental |
 | [WASM plugins](features/wasm-plugins.md) | experimental |
 | [ICAP](features/icap-inspection.md) | experimental |
 

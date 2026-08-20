@@ -299,6 +299,27 @@ ML worker:
 
 Подробнее: [DNS sinkhole](../features/dns-sinkhole.md).
 
+## Threat intel collector
+
+Отдельный опциональный worker `threat-intel` (профиль Compose `threat-intel`).
+
+| Переменная | Default |
+|---|---|
+| `TI_SOURCES` | `openphish,phishstats,phishing_database,urlhaus` |
+| `TI_<SOURCE>_URL` | endpoint вендора |
+| `TI_POLL_INTERVAL_SECS` | `900` |
+| `TI_HTTP_TIMEOUT_SECS` | `30` |
+| `TI_MAX_ATTEMPTS` | `3` |
+| `TI_RETRY_BACKOFF_SECS` | `5` |
+| `TI_MAX_BODY_MB` | `64` |
+| `TI_MAX_INDICATORS_PER_FETCH` | `500000` |
+| `TI_OUTPUT_DIR` | `./data/threat-intel` |
+| `TI_RUN_ONCE` | `false` |
+| `METRICS_PORT` | `8093` |
+
+Полный пример: `packaging/config/threat-intel.env.example`. Подробнее:
+[Threat intel collector](../features/threat-intel-collector.md).
+
 ## Experimental modules
 
 ### WASM

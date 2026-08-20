@@ -1,0 +1,72 @@
+{{- if and .Values.threatIntel .Values.threatIntel.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "bsdm.fullname" . }}-threat-intel
+  labels:
+    {{- include "bsdm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: threat-intel
+spec:
+  replicas: {{ .Values.threatIntel.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "bsdm.threatIntelSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "bsdm.threatIntelSelectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "bsdm.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: threat-intel
+          image: "{{ .Values.threatIntel.image.repository }}:{{ .Values.threatIntel.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.threatIntel.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: admin
+              containerPort: {{ .Values.threatIntel.service.port }}
+              protocol: TCP
+          env:
+            - name: TI_SOURCES
+              value: {{ .Values.threatIntel.sources | quote }}
+            - name: TI_POLL_INTERVAL_SECS
+              value: {{ .Values.threatIntel.pollIntervalSecs | quote }}
+            - name: TI_HTTP_TIMEOUT_SECS
+              value: {{ .Values.threatIntel.httpTimeoutSecs | quote }}
+            - name: TI_MAX_ATTEMPTS
+              value: {{ .Values.threatIntel.maxAttempts | quote }}
+            - name: TI_OUTPUT_DIR
+              value: {{ .Values.threatIntel.outputDir | quote }}
+            - name: METRICS_PORT
+              value: {{ .Values.threatIntel.service.port | quote }}
+            - name: RUST_LOG
+              value: {{ .Values.threatIntel.rustLog | quote }}
+          volumeMounts:
+            - name: snapshots
+              mountPath: {{ .Values.threatIntel.outputDir }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: admin
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: admin
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.threatIntel.resources | nindent 12 }}
+      volumes:
+        - name: snapshots
+        {{- if .Values.threatIntel.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "bsdm.fullname" . }}-threat-intel
+        {{- else }}
+          emptyDir: {}
+        {{- end }}
+{{- end }}

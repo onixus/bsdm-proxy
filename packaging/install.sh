@@ -91,6 +91,9 @@ fi
 if [[ -x "${SCRIPT_DIR}/bin/dns-sinkhole" ]]; then
   install -m 0755 "${SCRIPT_DIR}/bin/dns-sinkhole" "${PREFIX}/bin/dns-sinkhole"
 fi
+if [[ -x "${SCRIPT_DIR}/bin/threat-intel" ]]; then
+  install -m 0755 "${SCRIPT_DIR}/bin/threat-intel" "${PREFIX}/bin/threat-intel"
+fi
 
 install -d -m 0755 "${ETC_DIR}"
 if [[ ! -f "${ETC_DIR}/bsdm-proxy.env" ]]; then
@@ -113,6 +116,10 @@ if [[ -f "${SCRIPT_DIR}/config/ml-worker.env.example" && ! -f "${ETC_DIR}/ml-wor
   install -m 0640 "${SCRIPT_DIR}/config/ml-worker.env.example" "${ETC_DIR}/ml-worker.env"
   echo "Installed ${ETC_DIR}/ml-worker.env"
 fi
+if [[ -f "${SCRIPT_DIR}/config/threat-intel.env.example" && ! -f "${ETC_DIR}/threat-intel.env" ]]; then
+  install -m 0640 "${SCRIPT_DIR}/config/threat-intel.env.example" "${ETC_DIR}/threat-intel.env"
+  echo "Installed ${ETC_DIR}/threat-intel.env"
+fi
 if [[ ! -f "${ETC_DIR}/acl-rules.json" ]]; then
   install -m 0644 "${SCRIPT_DIR}/config/acl-rules.example.json" "${ETC_DIR}/acl-rules.json"
   echo "Installed ${ETC_DIR}/acl-rules.json"
@@ -125,7 +132,7 @@ if $CREATE_USER; then
 fi
 
 if $INSTALL_SYSTEMD; then
-  for unit in bsdm-proxy bsdm-cache-indexer bsdm-alert-worker bsdm-ml-worker bsdm-dns-sinkhole; do
+  for unit in bsdm-proxy bsdm-cache-indexer bsdm-alert-worker bsdm-ml-worker bsdm-dns-sinkhole bsdm-threat-intel; do
     if [[ -f "${SCRIPT_DIR}/systemd/${unit}.service" ]]; then
       sed "s|/opt/bsdm-proxy|${PREFIX}|g" \
         "${SCRIPT_DIR}/systemd/${unit}.service" \
@@ -139,6 +146,7 @@ if $INSTALL_SYSTEMD; then
   echo "  systemctl enable --now bsdm-alert-worker   # optional; set ALERT_WEBHOOK_URL first"
   echo "  systemctl enable --now bsdm-ml-worker      # optional; M5 feature store"
   echo "  systemctl enable --now bsdm-dns-sinkhole   # optional; DoH/DoT DNS gateway"
+  echo "  systemctl enable --now bsdm-threat-intel   # optional; IOC feed collector"
 fi
 
 cat <<EOF
