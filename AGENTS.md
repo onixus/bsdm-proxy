@@ -1,114 +1,136 @@
 # AGENTS.md
 
-Single source of truth for AI coding agents in this repository. `.cursorrules`
-points here — keep guidance in this file rather than duplicating it elsewhere.
+## Project Overview
 
-## Project overview
+BSDM-Proxy — высокопроизводительный корпоративный прокси-сервер (Secure Web Gateway),
+написанный на Rust. Основные возможности: MITM TLS-инспекция, многоуровневое
+кэширование (L1 in-memory / L2 Redis), ACL/policy engine, аутентификация
+(Basic/LDAP/NTLM/Kerberos), Prometheus-метрики и опциональный аналитический пайплайн
+Kafka → cache-indexer → ClickHouse. Дополнительные сервисы: `alert-worker` (вебхук-алерты),
+`ml-worker` (UEBA-скоринг), `dns-sinkhole` (UDP RPZ-lite DNS-sайдкар).
 
-BSDM-Proxy is a single Rust/Cargo product: a caching HTTPS forward proxy (Secure
-Web Gateway) with MITM TLS, auth, ACL, Prometheus metrics, and an optional
-Kafka → cache-indexer → ClickHouse analytics pipeline (plus optional
-`alert-worker` webhook alerts, `ml-worker` feature-store scoring, and
-`dns-sinkhole` UDP RPZ-lite sidecar).
+## Workspace Crates
 
-Standard build, lint, test, and run commands live in `README.md` and
-`docs/ops-and-dev/development.md` — use those as the source of truth.
+| Crate | Binary | Purpose |
+|---|---|---|
+| `proxy/` | `proxy` | Ядро прокси: HTTP/HTTPS forward proxy, MITM, auth, ACL, cache, events |
+| `cache-indexer/` | `cache-indexer` | Kafka → SQLite/ClickHouse аналитический индексатор |
+| `alert-worker/` | `alert-worker` | Обработка инцидентов ИБ, дедупликация, вебхук-рассылка |
+| `ml-worker/` | `ml-worker` | ML feature-store скоринг (phishing, beacon detection, UEBA) |
+| `dns-sinkhole/` | `dns-sinkhole` | UDP RPZ-lite DNS-сайдкар |
+| `bsdm-events/` | *(lib)* | Shared `CacheEvent` и типы событий |
+| `bsdm-wasm-sdk/` | *(lib)* | SDK для написания WASM-плагинов |
+| `e2e/` | *(lib)* | End-to-end тестовый харнесс с in-process mock upstream |
 
-## Repository layout
+### Inter-crate dependencies
 
-Cargo workspace members (see `Cargo.toml`):
+```
+proxy         → bsdm-events  (emits CacheEvent)
+cache-indexer → bsdm-events  (consumes CacheEvent from Kafka)
+ml-worker     → bsdm-events  (scoring input types)
+alert-worker  → bsdm-events  (alert trigger types)
+```
 
-- `proxy/` — proxy core, bin `proxy` (HTTP/HTTPS parsing, ACL, auth, L1 cache).
-- `cache-indexer/` — cache indexing, bin `cache-indexer` (Kafka integration).
-- `alert-worker/` — security incident handling, dedup, webhooks; bin `alert-worker`.
-- `ml-worker/` — UEBA / threat scoring against ClickHouse; bin `ml-worker`.
-- `dns-sinkhole/` — UDP RPZ-lite sidecar, bin `dns-sinkhole`.
-- `threat-intel/` — IOC feed collector, bin `threat-intel` (experimental).
-- `bsdm-events/` — shared event types.
-- `e2e/` — test harness.
-- `bsdm-wasm-sdk/`, `examples/wasm/rust_plugin/`, `examples/agent-spike/` — WASM
-  plugin SDK and example crates.
+## Build & Run
 
-Supporting directories:
+### Quick commands (Makefile)
 
-- `admin-console/` — React + Tailwind SPA, the current administration UI.
-- `trust-ui/` — React UI for trust/consent flows.
-- `web-config/` — **legacy** zero-dependency static config generator. Kept as a
-  fallback only; new UI work belongs in `admin-console/`.
-- `deploy/compose/` — profile Compose files (lite, pilot, ha, hierarchy,
-  redis-l2, test, awg). The default `docker-compose.yml` stays in the repo root.
-- `charts/bsdm/` — Helm charts.
-- `grafana/`, `prometheus/`, `alertmanager/` — monitoring configuration.
-- `scripts/` — benchmarking (wrk), HTTP-archive generation, ClickHouse
-  migrations, installer, CI helpers.
-- `packaging/config/` — packaged `.env.example` files.
+```bash
+make setup        # Сгенерировать CA-сертификаты для MITM
+make build        # cargo build --release --workspace
+make run          # Запустить proxy локально (default features)
+make run-lite     # Запустить proxy без Kafka
+make test         # cargo test --workspace
+make lint         # cargo fmt --all && cargo clippy ...
+make docker-lite  # Docker Compose: proxy + SQLite Search API
+make docker-full  # Docker Compose: полный стек (Kafka, CH, Prometheus, Grafana)
+```
 
-## Formatting and linting
+### Manual run
 
-- **ALWAYS** run `cargo fmt --all` before committing Rust changes. CI strictly
-  enforces formatting and will fail if the code is not formatted.
-- **ALWAYS** run `cargo clippy --workspace --all-targets --all-features -- -D warnings`
-  before committing logical changes.
+```bash
+# Генерация CA (обязательно при MITM_ENABLED=true)
+./scripts/gen-ca.sh
 
-## Rust guidelines
+# Запуск proxy
+HTTP_PORT=3128 METRICS_PORT=9090 cargo run -p bsdm-proxy --bin proxy
 
-- Idiomatic Rust, edition 2021. Requires Rust 1.85+.
-- Prefer `tokio` for async.
-- Error handling via `Result` with `anyhow` or `thiserror` as appropriate. Never
-  use `.unwrap()` / `.expect()` in production code — tests are fine.
-- Cache code (`sharded_cache.rs`, `hierarchy.rs`) is concurrency-sensitive: mind
-  `Arc`, `RwLock`, `Mutex`.
-- Add Prometheus metrics for new features (`proxy/src/metrics.rs`).
-- This is a proxy — optimize for low latency.
+# Проверка
+curl http://127.0.0.1:9090/health
+curl -x http://127.0.0.1:3128 http://httpbin.org/get
 
-## Databases
-
-- ClickHouse handles heavy analytics. When adding fields to ML models, provide
-  matching SQL migrations in `scripts/clickhouse/migrations/`.
-- Optimize SQL for a columnar store: avoid `SELECT *`, use partitioning.
-
-## Infrastructure and CI/CD
-
-- When changing configuration, update the corresponding `.env.example` in
-  `packaging/config/`.
-- When adding a service, update `charts/bsdm/` and `docker-compose.yml`.
+# HTTPS через MITM
+curl --cacert certs/ca.crt -x http://127.0.0.1:3128 https://httpbin.org/uuid
+```
 
 ## Testing
 
-- Propose E2E tests in `e2e/` for new functionality.
-- Use the existing benchmark scripts in `scripts/` (e.g. `run-proxy-benchmark.sh`)
-  for performance checks.
-- `cargo test --workspace` (plus the `smoke`/`e2e` suites) needs **no** Docker,
-  Kafka, or ClickHouse — the e2e harness spawns `proxy` as a subprocess with an
-  in-process mock upstream (`e2e/src/lib.rs`). The suites do require outbound
-  localhost networking.
+- `cargo test --workspace` — запускает все юнит- и интеграционные тесты.
+  Не требует Docker, Kafka или ClickHouse.
+- E2E-харнесс (`e2e/src/lib.rs`) поднимает `proxy` как субпроцесс с in-process
+  mock upstream. Требует outbound localhost networking.
+- Для plain forward-proxy тестирования без MITM: `MITM_ENABLED=false`.
+- Полный Docker-стек (`docker-compose.yml`) нужен только для end-to-end тестирования
+  аналитического пайплайна и дашбордов.
 
-## Environment notes
+## Environment
 
-The update script already runs `cargo fetch`; system packages and the Rust
-toolchain are baked into the VM image.
+### Toolchain & system dependencies
 
-- Requires Rust 1.85+. The image ships a newer stable toolchain
-  (`rustup default stable`); the previously preinstalled 1.83 is too old and will
-  fail to compile some deps.
-- Native builds need `libssl-dev pkg-config cmake librdkafka-dev libclang-dev`
-  (see `docs/ops-and-dev/development.md`). `rdkafka` links against `librdkafka-dev`.
+- **Rust 1.85+** (Edition 2021). Более ранние версии не скомпилируют часть зависимостей.
+- System packages (Linux): `libssl-dev pkg-config cmake librdkafka-dev libclang-dev`
+  (см. `docs/ops-and-dev/development.md`).
 
-## Running locally
+### MITM certificates
 
-- To run with `MITM_ENABLED=true` (the default), a CA keypair must exist at
-  `./certs/ca.key` and `./certs/ca.crt`. These are git-ignored and NOT in the
-  repo, so generate them first (`./scripts/gen-ca.sh`, or "Быстрый старт" in
-  `README.md`), otherwise MITM startup fails. For plain forward-proxy testing set
-  `MITM_ENABLED=false` and skip the certs.
-- Lite node (proxy + SQLite indexer, no Kafka/CH):
-  `./scripts/gen-ca.sh && docker compose -f deploy/compose/docker-compose.lite.yml up -d --build`
-  (see `docs/getting-started/lite-mode.md`).
-- Run natively: `HTTP_PORT=3128 METRICS_PORT=9090 cargo run -p bsdm-proxy --bin proxy`
-  (or the built `./target/debug/proxy`). Verify with
-  `curl http://127.0.0.1:9090/health` and
-  `curl -x http://127.0.0.1:3128 http://httpbin.org/get`. HTTPS through MITM:
-  `curl --cacert certs/ca.crt -x http://127.0.0.1:3128 https://httpbin.org/uuid`.
-- The full Docker stack (`docker-compose.yml`: Kafka, ClickHouse, Prometheus,
-  Grafana) is optional and only needed to exercise the analytics pipeline /
-  dashboards end to end. Lite compose does not start that plane.
+При `MITM_ENABLED=true` (по умолчанию) требуются `./certs/ca.key` и `./certs/ca.crt`.
+Они git-ignored и НЕ в репозитории — сгенерируй через `./scripts/gen-ca.sh`.
+Для тестирования без MITM: `MITM_ENABLED=false`.
+
+### Key environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `HTTP_PORT` | `3128` | Порт прокси |
+| `METRICS_PORT` | `9090` | Порт Prometheus-метрик |
+| `MITM_ENABLED` | `true` | Включить TLS MITM-инспекцию |
+| `AUTH_ENABLED` | `false` | Включить аутентификацию |
+| `AGENT_DEVICES_PATH` | — | JSON-файл для персистенции устройств |
+| `REDIS_URL` | — | URL Redis для L2-кэша |
+
+## Feature Flags
+
+| Flag | Default | Enables |
+|---|---|---|
+| `auth-basic` | ✅ | Basic-аутентификация |
+| `kafka` | ✅ | Kafka event pipeline (`pipeline.rs`) |
+| `auth-ldap` | — | LDAP/AD backend (`auth/ldap.rs`) |
+| `auth-ntlm` | — | NTLM handshake (`auth/basic.rs`) |
+| `auth-kerberos` | — | Kerberos/SPNEGO (`auth/basic.rs`) |
+| `auth-all` | — | Все auth-бэкенды |
+| `grpc` | — | gRPC control plane (`control_grpc.rs`) |
+| `wasm` | — | WASM plugin hooks (`proxy_service/icap_wasm.rs`) |
+| `acl` | — | ACL engine |
+| `categorization` | — | URL categorization (включает `acl`) |
+
+## Repository Layout
+
+```
+proxy/          — ядро прокси-сервера
+cache-indexer/  — Kafka → SQLite/ClickHouse индексатор
+alert-worker/   — обработка инцидентов, вебхуки
+ml-worker/      — ML-скоринг (UEBA, phishing, beacon)
+dns-sinkhole/   — DNS RPZ-lite сайдкар
+bsdm-events/    — shared event types (lib)
+bsdm-wasm-sdk/  — SDK для WASM-плагинов (lib)
+e2e/            — E2E тестовый харнесс
+admin-console/  — веб-интерфейс администрирования (Vue/TypeScript)
+trust-ui/       — UI доверенных сертификатов
+web-config/     — легковесные страницы блокировки (vanilla HTML/CSS/JS)
+docs/           — документация проекта
+scripts/        — утилиты: бенчмарки, миграции, генерация сертификатов
+charts/         — Helm-чарты для Kubernetes
+grafana/        — дашборды и конфигурации алертинга
+config/         — конфигурационные файлы
+packaging/      — скрипты сборки Linux-пакетов
+```
