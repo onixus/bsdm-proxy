@@ -1,0 +1,42 @@
+# Files and directories to exclude from LLM context loading
+# (exact paths or glob patterns, one per line)
+
+# Dependency lock — 131 KB, never needs editing
+Cargo.lock
+
+# Build artefacts
+target/
+
+# Runtime logs
+*.log
+proxy-native.log
+
+# Generated TLS certs (git-ignored anyway)
+certs/
+
+# Docker volumes / data dirs
+data/
+clickhouse-data/
+grafana-data/
+kafka-data/
+
+# Temporary files
+*.tmp
+tmp/
+
+# macOS metadata
+.DS_Store
+
+# Node.js dependencies & build output
+node_modules/
+admin-console/dist/
+trust-ui/dist/
+
+# Package artefacts
+*.tar.gz
+*.deb
+*.rpm
+packaging/
+
+# Generated proto files
+*.pb.go
