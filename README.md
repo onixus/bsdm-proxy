@@ -2,15 +2,16 @@
 
 <div align="center">
 
-[![Build Status](https://github.com/onixus/bsdm-proxy/actions/workflows/rust.yml/badge.svg)](https://github.com/onixus/bsdm-proxy/actions/workflows/rust.yml)
-[![E2E Tests](https://github.com/onixus/bsdm-proxy/actions/workflows/e2e.yml/badge.svg)](https://github.com/onixus/bsdm-proxy/actions/workflows/e2e.yml)
+[![CI](https://github.com/onixus/bsdm-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/onixus/bsdm-proxy/actions/workflows/ci.yml)
+[![Docs](https://github.com/onixus/bsdm-proxy/actions/workflows/docs.yml/badge.svg)](https://github.com/onixus/bsdm-proxy/actions/workflows/docs.yml)
+[![Admin Console](https://github.com/onixus/bsdm-proxy/actions/workflows/admin-console.yml/badge.svg)](https://github.com/onixus/bsdm-proxy/actions/workflows/admin-console.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.9.13-blue.svg)](https://github.com/onixus/bsdm-proxy/releases)
 [![Rust](https://img.shields.io/badge/Rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 
 **Высокопроизводительный корпоративный кеширующий HTTP/HTTPS Forward Proxy & Secure Web Gateway (SWG) на Rust.**
 
-[Возможности](#-основные-возможности) • [Архитектура](#-архитектура) • [Быстрый старт](#-быстрый-старт) • [Сборка](#-сборка-и-feature-flags) • [Документация](#-документация)
+[Возможности](#основные-возможности) • [Архитектура](#архитектура) • [Быстрый старт](#быстрый-старт) • [Сборка](#сборка-и-feature-flags) • [Документация](#документация)
 
 </div>
 
@@ -28,19 +29,19 @@
 
 ## 📋 Содержание
 
-- [Основные возможности](#-основные-возможности)
-- [Архитектура системы](#-архитектура)
+- [Основные возможности](#основные-возможности)
+- [Архитектура системы](#архитектура)
 - [Сетевые порты](#сетевые-порты)
-- [Структура репозитория](#-структура-репозитория)
-- [Быстрый старт](#-быстрый-старт)
+- [Структура репозитория](#структура-репозитория)
+- [Быстрый старт](#быстрый-старт)
   - [Интерактивный установщик](#1-интерактивный-установщик)
   - [Lite Mode (локальная разработка: Proxy + SQLite)](#2-lite-mode-proxy--sqlite)
   - [Full Analytics Stack (полный стек с Kafka и ClickHouse)](#3-full-analytics-stack)
   - [Пилотное развёртывание на 100 пользователей](#4-пилотный-профиль-на-100-пользователей)
-- [Сборка и Feature Flags](#-сборка-и-feature-flags)
-- [Тестирование и проверка качества](#-тестирование-и-качество-кода)
-- [Документация](#-документация)
-- [Лицензия](#-лицензия)
+- [Сборка и Feature Flags](#сборка-и-feature-flags)
+- [Тестирование и качество кода](#тестирование-и-качество-кода)
+- [Документация](#документация)
+- [Лицензия](#лицензия)
 
 ---
 
