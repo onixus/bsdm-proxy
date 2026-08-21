@@ -134,16 +134,6 @@ admin_console() {
   )
 }
 
-trust_ui() {
-  require_commands node npm
-  log "Trust UI"
-  (
-    cd trust-ui
-    npm ci
-    npm run build
-  )
-}
-
 sast() {
   require_commands docker
   # An array, not a string: these have to reach semgrep as separate argv
@@ -260,7 +250,6 @@ Tasks:
   admin-console      Lint, test, build, and optionally UI-test the admin console
   admin-console-core Lint, test, and build the admin console
   admin-console-ui   Run the Admin Console Chromium smoke test
-  trust-ui           Build the experimental trust UI
   sast               Run the semgrep SAST gate (needs Docker)
   secrets            Scan commit history for leaked secrets (needs Docker)
   security-audit     Run cargo-audit (must be installed on the agent)
@@ -286,7 +275,6 @@ case "$task" in
   admin-console) admin_console ;;
   admin-console-core) admin_console_core ;;
   admin-console-ui) admin_console_ui ;;
-  trust-ui) trust_ui ;;
   sast) sast ;;
   secrets) secrets ;;
   security-audit) security_audit ;;

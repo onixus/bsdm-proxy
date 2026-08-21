@@ -11,8 +11,7 @@ Proxy serves one supported operator UI directly from the control origin:
 - **Admin Console**: `http://127.0.0.1:9090/admin/` (or the equivalent gateway origin).
 - `/` and legacy `/trust` paths return a permanent redirect to `/admin/`.
 
-Standalone Trust-UI is an experimental legacy reference and is not part of the
-default deployment. See [ADR 0006](../adr/0006-single-operator-console.md).
+Standalone Trust-UI has been decommissioned in favor of Admin Console. See [ADR 0006](../adr/0006-single-operator-console.md).
 
 The Admin Console runs in read-only safety mode until an API token is attached
 for the current browser tab. This UI guard is defense in depth and does not

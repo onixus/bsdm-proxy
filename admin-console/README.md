@@ -6,7 +6,7 @@ This is the only supported operator UI. The canonical embedded entry point is
 `/admin/`; `/` and legacy `/trust` paths redirect there. See
 [ADR 0006](../docs/adr/0006-single-operator-console.md).
 
-Replaces the legacy static [`web-config/`](../web-config/) generator with a modern React SPA.
+Replaces the legacy static `web-config` generator with a modern React SPA.
 
 ## Stack
 
@@ -202,6 +202,6 @@ src/
   theme/         # Design tokens
 ```
 
-## Legacy web-config
+## Configuration generator
 
-The original [`web-config/`](../web-config/) static generator remains for backward compatibility. New development should use this console.
+Configuration export logic has been fully ported into `src/lib/config/`. All `.env`, `docker-compose.yml`, and `acl-rules.json` exports are managed directly through the Settings and Policies tabs.

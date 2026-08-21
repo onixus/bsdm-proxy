@@ -326,28 +326,6 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:9093/-/healthy || exit 1"]
 
-  trust-ui:
-    profiles: ["experimental-trust-ui"]
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: trust-ui
-    environment:
-      SEARCH_API_TOKEN: "${SEARCH_API_TOKEN:-}"
-      CONTROL_API_TOKEN: "${CONTROL_API_TOKEN:-}"
-      NGINX_ENVSUBST_FILTER: "SEARCH_API_TOKEN|CONTROL_API_TOKEN"
-    ports:
-      - "3001:80"
-    restart: unless-stopped
-    networks:
-      - bsdm-net
-    deploy:
-      resources:
-        limits:
-          memory: 256M
-        reservations:
-          memory: 128M
-
   prometheus:
     image: prom/prometheus:v3.12.0
     ports:

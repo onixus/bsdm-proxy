@@ -26,11 +26,8 @@ entry point is `/admin/` on the proxy control origin. `/` and every legacy
 The Admin Console build and client router both use `/admin/` as their base path,
 so direct links, refreshes, and static assets share the same deployment contract.
 
-The existing `trust-ui/` source remains temporarily as an experimental design
-reference for endpoint posture concepts. It is not started by default, does not
-define a production security boundary, and receives no new operator features.
-Its Compose service is available only through the `experimental-trust-ui`
-profile while remaining in CI to prevent accidental source decay.
+The legacy `trust-ui/` prototype has been fully decommissioned and removed from the repository.
+Admin Console is the sole supported interface, and legacy `/trust` requests continue to redirect to `/admin/`.
 
 Admin Console owns the supported overlapping workflows:
 

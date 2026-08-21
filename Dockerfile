@@ -251,19 +251,3 @@ EXPOSE 8093
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD wget -q -O- --spider http://127.0.0.1:8093/health || exit 1
 CMD ["threat-intel"]
-
-# ============================================================
-# Experimental legacy Trust-UI reference (not part of default deployments)
-# ============================================================
-FROM node:22-alpine AS trust-ui-builder
-WORKDIR /app
-COPY trust-ui/package.json trust-ui/package-lock.json ./
-RUN npm ci
-COPY trust-ui/ ./
-RUN npm run build
-
-FROM nginx:alpine AS trust-ui
-COPY --from=trust-ui-builder /app/dist /usr/share/nginx/html
-COPY trust-ui/nginx.conf.template /etc/nginx/templates/default.conf.template
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]

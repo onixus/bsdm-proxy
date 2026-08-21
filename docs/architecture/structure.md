@@ -34,7 +34,6 @@ bsdm-proxy/
 ├── bsdm-wasm-sdk/          # WASM SDK
 ├── e2e/                    # Integration test harness
 ├── admin-console/          # Поддерживаемая operator SPA (`/admin/`)
-├── trust-ui/               # Experimental/deprecated posture reference
 ├── charts/bsdm/            # Helm chart
 ├── packaging/              # systemd package и env examples
 ├── config/                 # ACL examples
@@ -63,8 +62,7 @@ bsdm-proxy/
 | `deploy/compose/docker-compose.awg.yml` | Experimental AWG sidecar |
 
 Основной Compose включает `dns-sinkhole` в базовом стеке; профили опциональных
-компонентов: `alerts`, `ml`, `icap`, `threat-intel`. Legacy Trust-UI запускается только явным
-профилем `experimental-trust-ui`; поддерживаемая операторская UI — Admin Console.
+компонентов: `alerts`, `ml`, `icap`, `threat-intel`. Единая поддерживаемая операторская UI — Admin Console (`/admin/`).
 
 ## Конфигурация и данные
 

@@ -47,7 +47,7 @@ $runProxy = Read-Host "Do you want to run the proxy now in Lite mode? (Y/n)"
 if ($runProxy -eq "" -or $runProxy.ToLower() -eq "y" -or $runProxy.ToLower() -eq "yes") {
     Write-Host "Starting proxy..." -ForegroundColor Cyan
     
-    $env:HTTP_PORT = "1488"
+    $env:HTTP_PORT = "3128"
     $env:METRICS_PORT = "9090"
     $env:MITM_ENABLED = "true"
     

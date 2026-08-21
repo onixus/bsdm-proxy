@@ -43,7 +43,6 @@ Experimental / frozen scope — **не** поднимать в первом пи
 - AmneziaWG / BSDM Connect
 - eBPF / XDP
 - WASM plugins как security boundary
-- Standalone Trust-UI (`--profile experimental-trust-ui`)
 - Global session / threat-sync multi-node scaffolding
 - DLP/CASB enforcement (engine может существовать в процессе — см. ниже)
 - Production HA / multi-cluster

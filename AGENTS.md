@@ -124,9 +124,7 @@ dns-sinkhole/   — DNS RPZ-lite сайдкар
 bsdm-events/    — shared event types (lib)
 bsdm-wasm-sdk/  — SDK для WASM-плагинов (lib)
 e2e/            — E2E тестовый харнесс
-admin-console/  — веб-интерфейс администрирования (Vue/TypeScript)
-trust-ui/       — UI доверенных сертификатов
-web-config/     — легковесные страницы блокировки (vanilla HTML/CSS/JS)
+admin-console/  — веб-интерфейс администрирования (React/TypeScript)
 docs/           — документация проекта
 scripts/        — утилиты: бенчмарки, миграции, генерация сертификатов
 charts/         — Helm-чарты для Kubernetes

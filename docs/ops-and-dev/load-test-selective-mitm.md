@@ -136,7 +136,7 @@ BASIC_AUTH='pilot:your-strong-password' \
 | Error rate | ≤ 5% (lab with public upstream may be higher — note in report) |
 | Results file written | `docs/ops-and-dev/load-test-results/<run-id>.md` + `latest.md` |
 | decision_source counters move | At least one of sni/mitm/dns increases when path is configured |
-| No experimental profiles required | Lite or pilot compose without `icap` / AWG / trust-ui profiles |
+| No experimental profiles required | Lite or pilot compose without `icap` / AWG profiles |
 
 Hard SLOs (p99 budgets) are **site-specific**. Record measured values; do not
 treat the example table in older notes as a product guarantee.

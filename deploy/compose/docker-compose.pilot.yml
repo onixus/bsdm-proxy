@@ -9,8 +9,8 @@ name: bsdm-proxy
 #   ../../scripts/gen-ca.sh
 #   docker compose -f docker-compose.yml -f deploy/compose/docker-compose.pilot.yml up -d --build
 #
-# Hybrid defaults only. Experimental modules stay behind compose profiles
-# (alerts, ml, icap, experimental-trust-ui) and are NOT enabled by this file.
+# Hybrid defaults only. Optional/experimental modules stay behind compose profiles
+# (alerts, ml, icap) and are NOT enabled by this file.
 #
 # Docs: docs/getting-started/pilot-deployment.md
 #       docs/ops-and-dev/load-test-selective-mitm.md

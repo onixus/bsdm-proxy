@@ -30,7 +30,6 @@ tmp/
 # Node.js dependencies & build output
 node_modules/
 admin-console/dist/
-trust-ui/dist/
 
 # Package artefacts
 *.tar.gz

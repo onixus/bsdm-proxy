@@ -1,4 +1,4 @@
-.PHONY: help setup rotate-ca-drill backup-drill build run run-lite test lint docker-lite docker-full docker-down install package clean ci ci-rust ci-docs ci-admin ci-trust ci-release-validate
+.PHONY: help setup rotate-ca-drill backup-drill build run run-lite test lint docker-lite docker-full docker-down install package clean ci ci-rust ci-docs ci-admin ci-release-validate
 
 # Default target
 help:
@@ -24,7 +24,6 @@ help:
 	@echo "  ci-rust       Run the complete Rust CI gate"
 	@echo "  ci-docs       Validate documentation and Wiki mappings"
 	@echo "  ci-admin      Validate the Admin Console"
-	@echo "  ci-trust      Validate the experimental Trust UI"
 	@echo "  ci-release-validate  Validate release metadata without publishing"
 	@echo "  clean         Clean Cargo build artifacts"
 	@echo ""
@@ -75,7 +74,7 @@ package:
 	@echo "Building release package..."
 	./scripts/build-package.sh
 
-ci: ci-rust ci-docs ci-admin ci-trust
+ci: ci-rust ci-docs ci-admin
 
 ci-rust:
 	./scripts/ci/run.sh rust-all
@@ -85,9 +84,6 @@ ci-docs:
 
 ci-admin:
 	./scripts/ci/run.sh admin-console
-
-ci-trust:
-	./scripts/ci/run.sh trust-ui
 
 ci-release-validate:
 	./scripts/ci/run.sh release-validate

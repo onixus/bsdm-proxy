@@ -66,7 +66,6 @@ CONNECT работает в двух режимах:
 | ml-worker | `ml-worker/` | Feature extraction, scoring и write-back |
 | dns-sinkhole | `dns-sinkhole/` | UDP DNS, DoH (8484), DoT (853) и RPZ filtering |
 | admin-console | `admin-console/` | Единственная поддерживаемая операторская консоль (`/admin/`) |
-| trust-ui | `trust-ui/` | Experimental/deprecated reference; legacy `/trust` перенаправляется в Admin Console |
 | agent-spike | `examples/agent-spike/` | Референсный локальный агент согласно Agent Contract v0.1 |
 | monitoring | `prometheus/`, `grafana/`, `alertmanager/` | Metrics, dashboards и alerts |
 

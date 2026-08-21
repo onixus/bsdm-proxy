@@ -183,15 +183,6 @@ pipeline {
                         }
                     }
                 }
-
-                stage('Trust UI') {
-                    agent { label "${params.CI_AGENT_LABEL}" }
-                    steps {
-                        deleteDir()
-                        checkout scm
-                        sh './scripts/ci/run.sh trust-ui'
-                    }
-                }
             }
         }
 

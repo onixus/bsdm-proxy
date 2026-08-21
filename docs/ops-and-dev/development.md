@@ -43,7 +43,6 @@ bsdm-proxy/
 ├── scripts/            # build-package, run-*-tests, pre-push-check, clickhouse SQL
 ├── grafana/            # Datasources + dashboards (Prometheus, ClickHouse)
 ├── prometheus/         # Scrape config
-├── web-config/         # Legacy static config generator
 ├── deploy/compose/     # Профильные compose-файлы (lite, pilot, ha, ...)
 └── docs/               # Документация
 ```
@@ -109,7 +108,6 @@ cargo clippy --workspace --all-targets -- -D warnings
 ./scripts/ci/run.sh rust-all
 ./scripts/ci/run.sh docs
 RUN_UI_TESTS=0 ./scripts/ci/run.sh admin-console
-./scripts/ci/run.sh trust-ui
 ./scripts/ci/run.sh release-validate
 ```
 
@@ -414,7 +412,6 @@ ls scripts/archive/
 | Workflow | Trigger | Description |
 |----------|---------|-------------|
 | [ci.yml](../../.github/workflows/ci.yml) | push/PR → main | fmt, clippy, build, tests (unit + e2e + smoke), cargo-audit |
-| [trust-ui.yml](../../.github/workflows/trust-ui.yml) | push/PR → main | build-check experimental/deprecated Trust-UI reference |
 | [admin-console.yml](../../.github/workflows/admin-console.yml) | push/PR → main | npm lint, build, unit tests + local UI smoke test (Chromium over every route) |
 | [load-test.yml](../../.github/workflows/load-test.yml) | push/PR → main | wrk high-intensity load test |
 | [release.yml](../../.github/workflows/release.yml) | push tag `v*` / manual | test, build packages, GitHub Release |

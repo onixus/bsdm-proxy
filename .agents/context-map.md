@@ -125,9 +125,7 @@ control_mtls.rs      mTLS control plane
 
 | Directory | Stack | Purpose |
 |---|---|---|
-| `admin-console/` | Vue 3 + TypeScript + Vite | Веб-консоль администрирования |
-| `trust-ui/` | — | UI управления доверенными сертификатами |
-| `web-config/` | Vanilla HTML/CSS/JS | Легковесные страницы блокировки |
+| `admin-console/` | React 19 + TypeScript + Vite + Tailwind | Единая веб-консоль администрирования оператора |
 
 ## Files NOT to Load into LLM Context
 
