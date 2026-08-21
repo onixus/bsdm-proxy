@@ -74,7 +74,7 @@ function collectConfig() {
     const spillKb = parseInt(val('spill_threshold', '256'), 10) || 0;
 
     const config = {
-        HTTP_PORT: val('http_port', '1488'),
+        HTTP_PORT: val('http_port', '3128'),
         METRICS_PORT: val('metrics_port', '9090'),
         RUST_LOG: val('log_level', 'info,bsdm_proxy=info'),
         SHUTDOWN_TIMEOUT_SECONDS: val('shutdown_timeout', '30'),

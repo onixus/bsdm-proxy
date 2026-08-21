@@ -13,7 +13,7 @@ fullnameOverride: ""
 
 service:
   type: ClusterIP
-  proxyPort: 1488
+  proxyPort: 3128
   metricsPort: 9090
   sessionAffinity: None
 

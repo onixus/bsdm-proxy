@@ -587,6 +587,7 @@ impl AuthManager {
                 display_name,
             }) => {
                 self.handshake_sessions.write().await.remove(client_key);
+                #[allow(unused_mut)]
                 let mut user = UserInfo {
                     username: username.clone(),
                     display_name,

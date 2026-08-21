@@ -16,7 +16,7 @@ if [[ "$EXTERNAL" == "false" ]]; then
   cargo test -p bsdm-proxy-e2e --test smoke -- --nocapture
 else
   echo "Running smoke tests against deploy/compose/docker-compose.test.yml stack..."
-  PROXY_URL="${PROXY_URL:-http://127.0.0.1:1488}"
+  PROXY_URL="${PROXY_URL:-http://127.0.0.1:3128}"
   METRICS_URL="${METRICS_URL:-http://127.0.0.1:9090}"
 
   curl -fsS "${METRICS_URL}/health" | grep -q '"status":"ok"'

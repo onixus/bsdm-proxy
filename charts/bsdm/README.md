@@ -62,7 +62,7 @@ the [CA lifecycle and rotation guide](../../docs/ops-and-dev/ca-lifecycle.md).
 | File | Resource |
 |------|----------|
 | `deployment.yaml` | proxy Deployment (`replicaCount > 0`) |
-| `service.yaml` | ClusterIP :1488, :9090 |
+| `service.yaml` | ClusterIP :3128, :9090 |
 | `configmap-env.yaml` | proxy non-secret env |
 | `indexer-*.yaml` | cache-indexer when `indexer.enabled` |
 | `alert-worker-*.yaml` | alert-worker when `alertWorker.enabled` |

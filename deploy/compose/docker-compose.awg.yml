@@ -32,7 +32,7 @@ services:
       - AWG_H2=10000002
       - AWG_H3=10000003
       - AWG_H4=10000004
-      - PROXY_ENDPOINT=proxy:1488
+      - PROXY_ENDPOINT=proxy:3128
     volumes:
       - awg-config:/etc/amnezia/amneziawg
     networks:

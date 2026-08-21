@@ -10,7 +10,7 @@ name: bsdm-proxy
 #   ../../scripts/run-e2e-tests.sh --external   # cache HIT for HTTPS may fail (MITM_ENABLED=false)
 #   docker compose -f deploy/compose/docker-compose.test.yml down
 #
-# See docs/docker.md for details.
+# See docs/getting-started/deployment.md for details.
 
 services:
   upstream:
@@ -21,10 +21,10 @@ services:
       dockerfile: Dockerfile
       target: proxy
     ports:
-      - "1488:1488"
+      - "3128:3128"
       - "9090:9090"
     environment:
-      - HTTP_PORT=1488
+      - HTTP_PORT=3128
       - METRICS_PORT=9090
       - MITM_ENABLED=false
       - AUTH_ENABLED=false

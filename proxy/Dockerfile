@@ -1,4 +1,4 @@
-FROM rust:1.83-bookworm AS builder
+FROM rust:1.85-bookworm AS builder
 
 WORKDIR /build
 
@@ -24,7 +24,7 @@ WORKDIR /app
 
 COPY --from=builder /build/target/release/proxy /app/proxy
 
-# Port 1488 for HTTPS proxy
-EXPOSE 1488
+# Port 3128 for HTTP/HTTPS proxy
+EXPOSE 3128
 
 CMD ["/app/proxy"]

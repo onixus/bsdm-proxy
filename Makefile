@@ -43,10 +43,10 @@ build:
 	cargo build --release --workspace
 
 run:
-	HTTP_PORT=1488 METRICS_PORT=9090 MITM_ENABLED=true cargo run -p bsdm-proxy --bin proxy
+	HTTP_PORT=3128 METRICS_PORT=9090 MITM_ENABLED=true cargo run -p bsdm-proxy --bin proxy
 
 run-lite:
-	HTTP_PORT=1488 METRICS_PORT=9090 MITM_ENABLED=true cargo run -p bsdm-proxy --bin proxy --no-default-features --features auth-basic
+	HTTP_PORT=3128 METRICS_PORT=9090 MITM_ENABLED=true cargo run -p bsdm-proxy --bin proxy --no-default-features --features auth-basic
 
 test:
 	cargo test --workspace

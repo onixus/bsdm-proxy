@@ -6,11 +6,11 @@ name: bsdm-proxy
 #
 # Usage:
 #   docker compose -f deploy/compose/docker-compose.redis-l2.yml up -d --build
-#   curl -x http://127.0.0.1:1488 http://upstream/get   # MISS
+#   curl -x http://127.0.0.1:3128 http://upstream/get   # MISS
 #   docker compose -f deploy/compose/docker-compose.redis-l2.yml restart proxy-a
-#   curl -x http://127.0.0.1:1488 http://upstream/get   # L2-HIT (x-cache-status)
+#   curl -x http://127.0.0.1:3128 http://upstream/get   # L2-HIT (x-cache-status)
 #
-# Requires two proxies (proxy-a / proxy-b) sharing Redis; only proxy-a is exposed on 1488.
+# Requires two proxies (proxy-a / proxy-b) sharing Redis; only proxy-a is exposed on 3128.
 
 services:
   redis:
@@ -36,10 +36,10 @@ services:
       dockerfile: Dockerfile
       target: proxy
     ports:
-      - "1488:1488"
+      - "3128:3128"
       - "9090:9090"
     environment:
-      - HTTP_PORT=1488
+      - HTTP_PORT=3128
       - METRICS_PORT=9090
       - MITM_ENABLED=false
       - AUTH_ENABLED=false
@@ -70,7 +70,7 @@ services:
       dockerfile: Dockerfile
       target: proxy
     environment:
-      - HTTP_PORT=1488
+      - HTTP_PORT=3128
       - METRICS_PORT=9090
       - MITM_ENABLED=false
       - AUTH_ENABLED=false

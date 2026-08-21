@@ -18,6 +18,7 @@ use tracing::info;
 use crate::control_api::{ControlApiState, PurgeRequest as ApiPurgeRequest};
 
 pub mod proto {
+    #![allow(clippy::all)]
     tonic::include_proto!("bsdm.control.v1");
 }
 

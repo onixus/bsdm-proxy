@@ -371,10 +371,12 @@ fn keytab_entry_spn(entry: &kerberos_keytab::KeytabEntry) -> String {
 }
 
 fn format_sspi_username(username: &Username) -> String {
-    if let Some(domain) = username.domain_name() {
-        format!("{}@{}", username.account_name(), domain)
-    } else {
-        username.account_name().to_string()
+    match username.parts() {
+        sspi::UsernameParts::UserPrincipalName(u) => u.upn().to_string(),
+        sspi::UsernameParts::DownLevelLogonName(d) => match d.netbios_domain() {
+            Some(domain) => format!("{}@{}", d.account_name(), domain),
+            None => d.account_name().to_string(),
+        },
     }
 }
 

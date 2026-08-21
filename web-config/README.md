@@ -49,7 +49,7 @@ docker run -d -p 8080:80 -v $(pwd)/web-config:/usr/share/nginx/html:ro nginx:alp
 ### 1. Configure Settings
 
 **General Tab:**
-- Proxy port (default: 1488)
+- Proxy port (default: 3128)
 - Metrics port (default: 9090)
 - Log level (error/warn/info/debug/trace)
 - Max body size (MB)
@@ -67,12 +67,10 @@ docker run -d -p 8080:80 -v $(pwd)/web-config:/usr/share/nginx/html:ro nginx:alp
 
 **Authentication Tab:**
 - Enable/disable
-- Backend selection (Basic/LDAP; NTLM shown in generator but **not supported** in proxy v0.2.x — use LDAP for AD)
+- Backend selection (Basic/LDAP/NTLM/Kerberos/OIDC)
 - LDAP configuration
   - Servers, Base DN, Bind DN
   - User filter, TLS
-
-> **NTLM:** not implemented — see [docs/authentication.md](../docs/features/authentication.md). Do not deploy `AUTH_BACKEND=ntlm`.
 
 **Monitoring Tab:**
 - Prometheus toggle
@@ -91,7 +89,7 @@ Click **"Generate Configuration"** to:
 
 **Export .env:**
 ```bash
-HTTP_PORT=1488
+HTTP_PORT=3128
 METRICS_PORT=9090
 RUST_LOG=info
 CACHE_CAPACITY=10000
