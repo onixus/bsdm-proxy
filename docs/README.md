@@ -86,7 +86,7 @@
 - [ADR 0005: Local policy agent](adr/0005-local-policy-agent-vs-tunnel-first.md)
 - [ADR 0006: One supported operator console](adr/0006-single-operator-console.md)
 - [Roadmap](roadmap.md)
-- [Latest release notes (v0.9.11)](releases/v0.9.11.md)
+- [Latest release notes (v0.9.13)](releases/v0.9.13.md)
 - [Release history](releases/)
 
 Исторические release notes сохраняют версии и ограничения соответствующего

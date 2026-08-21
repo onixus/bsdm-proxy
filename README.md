@@ -3,13 +3,13 @@
 [![Build Status](https://github.com/onixus/bsdm-proxy/actions/workflows/rust.yml/badge.svg)](https://github.com/onixus/bsdm-proxy/actions/workflows/rust.yml)
 [![E2E Tests](https://github.com/onixus/bsdm-proxy/actions/workflows/e2e.yml/badge.svg)](https://github.com/onixus/bsdm-proxy/actions/workflows/e2e.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.9.1-blue.svg)](https://github.com/onixus/bsdm-proxy/releases)
+[![Version](https://img.shields.io/badge/version-0.9.13-blue.svg)](https://github.com/onixus/bsdm-proxy/releases)
 
 BSDM-Proxy — кеширующий HTTP/HTTPS forward proxy на Rust с MITM TLS,
 аутентификацией, ACL, категоризацией, аналитикой трафика и опциональными
 security-модулями.
 
-Текущая версия workspace: **`0.9.1`**.
+Текущая версия workspace: **`0.9.13`**.
 
 > Проект содержит функции разной зрелости. Перед развёртыванием прочитайте
 > [матрицу статуса](docs/project-status.md): наличие кода или UI не означает
@@ -27,8 +27,9 @@ security-модулями.
 | Политики | Basic/LDAP/NTLM/Kerberos auth, ACL, categorization, rate limiting |
 | Аналитика | Kafka, cache-indexer, ClickHouse, Search API, Grafana |
 | Detection | alert-worker, UEBA/phishing/beacon ML, threat-score write-back |
+| Threat Intel | threat-intel (scheduled IOC collection: OpenPhish, PhishStats, Phishing.Database, URLhaus) |
 | Extensions | DNS sinkhole/DoH/DoT, semantic cache, WASM, ICAP, AWG |
-| Operations | REST/gRPC control plane, Prometheus, Helm, systemd packaging |
+| Operations | REST/gRPC control plane, Prometheus, Helm, systemd packaging, interactive installer |
 | Operator UI | Admin Console at `/admin/` (single supported UI) |
 
 Большинство optional/experimental-компонентов выключено по умолчанию. Исключения,
@@ -54,8 +55,12 @@ flowchart LR
 | Компонент | Порт | Назначение |
 |---|---:|---|
 | proxy | 3128 | HTTP proxy / CONNECT |
-| proxy control | 9090 | `/health`, `/ready`, `/metrics`, REST control API |
+| proxy control | 9090 | `/health`, `/ready`, `/metrics`, REST control API, `/admin/` |
 | cache-indexer | 8080 | `/health`, `/metrics`, `/api/search` |
+| alert-worker | 8090 | `/health`, `/metrics` |
+| ml-worker | 8091 | `/health`, `/metrics` |
+| dns-sinkhole | 8092 | `/health`, `/metrics` (DNS on 5353/udp) |
+| threat-intel | 8093 | `/health`, `/metrics` (feed collector) |
 | ICP | 3130/udp | cache hierarchy, opt-in |
 | Kafka | 9092 | cache events |
 | ClickHouse | 8123 / 9000 | HTTP / native |
@@ -66,6 +71,12 @@ flowchart LR
 [структура репозитория](docs/architecture/structure.md).
 
 ## Быстрый старт
+
+### Интерактивная установка
+
+```bash
+./install.sh
+```
 
 ### Lite: proxy + SQLite
 
@@ -96,6 +107,7 @@ docker compose ps
 Prometheus, Alertmanager и Grafana. Дополнительные профили:
 
 ```bash
+docker compose --profile threat-intel up -d --build
 docker compose --profile alerts --profile ml up -d --build
 docker compose --profile dns-sinkhole up -d --build
 docker compose --profile icap up -d

@@ -12,6 +12,7 @@ should not hardcode a stale version.
 | `bin/alert-worker` | ClickHouse to SIEM/webhook alerts |
 | `bin/ml-worker` | Feature and ML score worker |
 | `bin/dns-sinkhole` | RPZ DNS sinkhole sidecar |
+| `bin/threat-intel` | Threat intelligence feed collector |
 | `config/*.example` | Environment and ACL templates |
 | `systemd/` | systemd unit files |
 | `install.sh` | Installer script |
@@ -23,7 +24,7 @@ The release publishes `<archive>.sha256` beside every tarball.
 ## Quick start
 
 ```bash
-VERSION=0.9.11
+VERSION=0.9.13
 ARCH=x86_64
 sha256sum -c bsdm-proxy-${VERSION}-linux-${ARCH}.tar.gz.sha256
 tar xzf bsdm-proxy-${VERSION}-linux-${ARCH}.tar.gz
@@ -41,4 +42,5 @@ cat VERSION
 ```
 
 Default ports: proxy `3128`, control/metrics `9090`, cache-indexer `8080`,
-alert-worker `8090`, ML worker `8091`, DNS sinkhole metrics `8092`.
+alert-worker `8090`, ML worker `8091`, DNS sinkhole metrics `8092`,
+threat-intel metrics `8093`.

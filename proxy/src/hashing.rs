@@ -19,15 +19,14 @@ fn mix(hash: u64, word: u64) -> u64 {
 #[inline]
 pub fn fx_hash_bytes(bytes: &[u8]) -> u64 {
     let mut hash = 0u64;
-    let mut chunks = bytes.chunks_exact(8);
-    for chunk in &mut chunks {
-        let word = u64::from_le_bytes(chunk.try_into().unwrap_or([0; 8]));
+    let (chunks, remainder) = bytes.as_chunks::<8>();
+    for chunk in chunks {
+        let word = u64::from_le_bytes(*chunk);
         hash = mix(hash, word);
     }
-    let rest = chunks.remainder();
-    if !rest.is_empty() {
+    if !remainder.is_empty() {
         let mut tail = [0u8; 8];
-        tail[..rest.len()].copy_from_slice(rest);
+        tail[..remainder.len()].copy_from_slice(remainder);
         hash = mix(hash, u64::from_le_bytes(tail));
     }
     mix(hash, bytes.len() as u64)

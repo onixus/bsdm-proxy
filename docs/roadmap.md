@@ -1,8 +1,8 @@
 # Roadmap BSDM-Proxy (Hybrid + Agent Architecture)
 
-Текущая версия workspace: **`0.9.11`**.
+Текущая версия workspace: **`0.9.13`**.
 
-Roadmap определяет порядок работ в рамках стратегии **Hybrid Policy (DNS -> SNI -> Selective MITM)** и переход к **On-Device Local Policy Agent**. Фактическая зрелость функционала фиксируется в [матрице статуса](project-status.md).
+Roadmap определяет порядок работ в рамках стратегии **Hybrid Policy (DNS -> SNI -> Selective MITM)**, переход к **On-Device Local Policy Agent** и интеграцию **Threat Intelligence**. Фактическая зрелость функционала фиксируется в [матрице статуса](project-status.md).
 
 ---
 
@@ -12,6 +12,7 @@ Roadmap определяет порядок работ в рамках стра�
 2. **SNI (ClientHello) — контроль до расшифровки**: применение правил (Allow/Deny/Redirect) без терминирования TLS.
 3. **Selective MITM — селективная расшифровка**: расшифровка HTTPS применяется исключительно для целевых категорий высокого риска (`MITM_CATEGORIES`).
 4. **Local Agent — фильтрация на устройствах**: исполнение правил на эндпоинтах пользователя (On-Device SWG) вместо централизованного туннелирования.
+5. **Threat Intelligence — упреждающая защита**: автоматический сбор и актуализация IOC-индикаторов (фишинг, вредоносное ПО) для DNS RPZ и прокси-политик.
 
 ---
 
@@ -35,6 +36,7 @@ Roadmap определяет порядок работ в рамках стра�
 - [x] Профиль нагрузочного тестирования пилота: Selective MITM + DNS + Auth (100 пользователей) — `scripts/run-hybrid-load-test.sh`, [docs](ops-and-dev/load-test-selective-mitm.md), CI hybrid job (#269).
 - [x] Pilot compose + acceptance criteria (Hybrid defaults, no experimental day-1) — `deploy/compose/docker-compose.pilot.yml`, [pilot-deployment.md](getting-started/pilot-deployment.md) (#270).
 - [x] Проверка резервного копирования и восстановления ClickHouse / ротации CA — [backup-restore.md](ops-and-dev/backup-restore.md), `scripts/drill-backup-restore.sh`, `scripts/backup-clickhouse.sh` / `restore-clickhouse.sh`, CA archive rollback.
+- [x] **Request hot-path performance & lock optimization** — zero-allocation domain/category matching, sharded `PolicyDecisionCache` (`RwLock`), index-based regex resolution, atomic sampling and static Prometheus metrics labels.
 
 ---
 
@@ -51,6 +53,16 @@ Roadmap определяет порядок работ в рамках стра�
 - [x] Multi-OS pilot installers + system-proxy hooks (`packaging/agent`, agent-spike CLI).
 - [x] MDM/GPO **silent fleet packaging scaffolding** — silent installers, Intune Win32 scripts, GPO ADMX, macOS pkgbuild + mobileconfig example, fleet drop script (`packaging/agent/fleet/`, [pilot-agent-fleet.md](getting-started/pilot-agent-fleet.md)).
 - [ ] **Notarized / Authenticode-signed store distribution** — customer signing pipeline only (out of lab; no Apple/Microsoft certs in CI).
+
+---
+
+## Фаза D — Threat Intelligence & Feed Collector
+
+- [x] **Threat intelligence feed collector** (`threat-intel`, TASK-TI-001) — сбор OpenPhish, PhishStats, Phishing.Database и URLhaus по расписанию, retry/backoff, дедупликация, метрики на `:8093/metrics`, JSONL-снапшоты + `report.json`, Compose profile и Helm toggle ([threat-intel-collector.md](features/threat-intel-collector.md)).
+- [ ] **IOC storage & SQLite/ClickHouse persistence** (TASK-TI-002) — структурированное хранение индикаторов, дедупликация, TTL и быстрый индекс.
+- [ ] **IOC normalization and category tagging** (TASK-TI-003) — канонизация URL/доменов/IP, риск-скоринг и confidence rating (TASK-TI-010).
+- [ ] **Automated RPZ zone generation & DNS enforcement** (TASK-TI-020) — автоматическая компиляция фидов в RPZ-зоны для dns-sinkhole с hot reload.
+- [ ] **Proxy ACL threat feed sync & automatic blocking** (TASK-TI-021) — динамическое применение собранных индикаторов в политиках proxy data-plane.
 
 ---
 

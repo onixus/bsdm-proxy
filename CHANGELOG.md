@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.13] - 2026-08-21
+
+Patch after **0.9.12**: Threat intelligence feed collector framework (`threat-intel`), proxy hot-path zero-allocation and lock-free optimizations, ACL category policies and domain fallbacks, redesigned interactive installer, and security/dependency updates.
+
 ### Added
 
 - **Threat intelligence feed collector** (`threat-intel`, TASK-TI-001) — optional
@@ -20,6 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   indicator. Storage, scoring and ACL/RPZ enforcement are not part of this
   change. See
   [docs/features/threat-intel-collector.md](docs/features/threat-intel-collector.md).
+- **ACL category fallbacks & default policies** — added built-in dataset definitions
+  for social networks (`acl-social-networks.txt`), cloud file hosting
+  (`acl-cloud-file-hosting.txt`), and cloud CDN/API endpoints (`acl-cloud-cdn-apis.txt`)
+  with deny policies for social networks and cloud file hosting.
+- **Redesigned interactive installer** — streamlined `./install.sh` and
+  `scripts/interactive-install.sh` with portable helper logic, root requirement
+  deferral, and installer validation workflow.
+- **Local Jenkins pipeline** — restored Docker-based pipeline in `Jenkinsfile.local`
+  and tag publisher `Jenkinsfile.publish` with SAST (Semgrep) and Gitleaks gates.
 
 ### Changed
 
@@ -55,12 +68,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     rather than an RNG draw, which also makes the 1-in-N rate exact.
   - `client_ip` is shared per connection as `Arc<str>` instead of copied per
     request.
+- **Compose profiles path** — consolidated deployment profile compose files under
+  `deploy/compose/`.
+- **Admin Console polish** — repaired mixed-language UI strings and polished layout.
 
 ### Fixed
 
+- **Dependency security** — bumped `h2` to `0.4.16` for RUSTSEC-2026-0258.
 - **Event sampling rate** — `KAFKA_SAMPLE_RATE` was consulted twice on the cache
   MISS and DLP-violation paths, so the effective emit rate was 1-in-N² rather
   than the configured 1-in-N. Sampling is now applied once, at dispatch.
+- **Admin Console configuration and tokens** — fixed config persistence on Apply
+  and API token bootstrapping.
 - **Flaky compression config test** — `cache_compress` unit tests mutated the
   process-global `CACHE_COMPRESSION` without synchronizing, so the two env tests
   raced and either could observe the other's value. They now take the same
@@ -606,6 +625,22 @@ Beta — hierarchical caching Phase 3, optional MITM CA.
 
 [GitHub Releases](https://github.com/onixus/bsdm-proxy/releases/tag/v0.2.2b)
 
+[Unreleased]: https://github.com/onixus/bsdm-proxy/compare/v0.9.13...HEAD
+[0.9.13]: https://github.com/onixus/bsdm-proxy/compare/v0.9.12...v0.9.13
+[0.9.12]: https://github.com/onixus/bsdm-proxy/compare/v0.9.11...v0.9.12
+[0.9.11]: https://github.com/onixus/bsdm-proxy/compare/v0.9.10...v0.9.11
+[0.9.10]: https://github.com/onixus/bsdm-proxy/compare/v0.9.9...v0.9.10
+[0.9.9]: https://github.com/onixus/bsdm-proxy/compare/v0.9.8...v0.9.9
+[0.9.8]: https://github.com/onixus/bsdm-proxy/compare/v0.9.7...v0.9.8
+[0.9.7]: https://github.com/onixus/bsdm-proxy/compare/v0.9.6...v0.9.7
+[0.9.6]: https://github.com/onixus/bsdm-proxy/compare/v0.9.5...v0.9.6
+[0.9.5]: https://github.com/onixus/bsdm-proxy/compare/v0.9.4...v0.9.5
+[0.9.4]: https://github.com/onixus/bsdm-proxy/compare/v0.9.3...v0.9.4
+[0.9.3]: https://github.com/onixus/bsdm-proxy/compare/v0.9.2...v0.9.3
+[0.9.2]: https://github.com/onixus/bsdm-proxy/compare/v0.9.1...v0.9.2
+[0.9.1]: https://github.com/onixus/bsdm-proxy/compare/v0.9.0...v0.9.1
+[0.9.0]: https://github.com/onixus/bsdm-proxy/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/onixus/bsdm-proxy/compare/v0.5.7+033...v0.8.0
 [0.5.7+033]: https://github.com/onixus/bsdm-proxy/compare/v0.5.0...v0.5.7+033
 [0.5.0]: https://github.com/onixus/bsdm-proxy/compare/v0.3.2...v0.5.0
 [0.3.2]: https://github.com/onixus/bsdm-proxy/compare/v0.3.1...v0.3.2

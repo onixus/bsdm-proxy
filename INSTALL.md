@@ -1,8 +1,21 @@
 # Установка BSDM-Proxy
 
-Актуальная версия проекта — `0.9.1`. Этот файл оставлен как короткая
+Актуальная версия проекта — `0.9.13`. Этот файл оставлен как короткая
 точка входа; подробные инструкции поддерживаются в
 [руководстве по развёртыванию](docs/getting-started/deployment.md).
+
+## Интерактивный установщик
+
+Для быстрого развёртывания в Linux/macOS доступен интерактивный мастер:
+
+```bash
+git clone https://github.com/onixus/bsdm-proxy.git
+cd bsdm-proxy
+./install.sh
+```
+
+Мастер проверит пререквизиты, сгенерирует CA-сертификаты, поможет выбрать
+профиль развёртывания (Docker Compose, Native systemd, Lite) и подготовит `.env`.
 
 ## Пилот на 100 пользователей
 
@@ -12,7 +25,8 @@
 
 Рекомендуемый стартовый сервер: **12 vCPU, 24 GiB RAM, 200 GB NVMe, 1 GbE**.
 Это расчётная отправная точка; перед вводом в эксплуатацию выполните нагрузочный
-тест на реальном профиле трафика.
+тест на реальном профиле трафика. Готовый compose-override:
+`deploy/compose/docker-compose.pilot.yml`.
 
 ## Docker Compose
 
@@ -25,16 +39,29 @@ docker compose ps
 ```
 
 Основной Compose поднимает proxy, Kafka, ClickHouse, indexer, Prometheus и
-Grafana. Опциональные сервисы запускаются своими profiles; точный состав
-описан в [deployment.md](docs/getting-started/deployment.md).
+Grafana. Дополнительные сервисы запускаются через профили:
+
+```bash
+# Threat Intelligence коллектор (OpenPhish, PhishStats, Phishing.Database, URLhaus)
+docker compose --profile threat-intel up -d --build
+
+# SIEM вебхуки и ML-скоринг
+docker compose --profile alerts --profile ml up -d --build
+
+# DNS Sinkhole / RPZ сайдкар
+docker compose --profile dns-sinkhole up -d --build
+```
 
 Проверка:
 
 ```bash
 curl http://127.0.0.1:9090/health
+curl http://127.0.0.1:9090/ready
 curl -x http://127.0.0.1:3128 http://httpbin.org/get
 curl --cacert certs/ca.crt -x http://127.0.0.1:3128 https://httpbin.org/uuid
 ```
+
+Admin Console доступна по адресу `http://127.0.0.1:9090/admin/`.
 
 ## Lite и локальная разработка
 
@@ -46,8 +73,8 @@ docker compose -f deploy/compose/docker-compose.lite.yml up -d --build
 cargo build -p bsdm-proxy --bin proxy
 ```
 
-Для Cargo-сборки используйте актуальный Rust stable, совместимый с lockfile;
-toolchain в репозитории сейчас не зафиксирован. Системные зависимости перечислены в
+Для Cargo-сборки используйте актуальный Rust stable (1.85+), совместимый с lockfile.
+Системные зависимости перечислены в
 [руководстве разработчика](docs/ops-and-dev/development.md).
 
 ## Native package и Kubernetes

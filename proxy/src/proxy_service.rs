@@ -1397,6 +1397,7 @@ impl ProxyService {
         }
     }
 
+    #[allow(clippy::result_large_err)]
     pub(crate) async fn authenticate_proxy(
         &self,
         req: &Request<Incoming>,
