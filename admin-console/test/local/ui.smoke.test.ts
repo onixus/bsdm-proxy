@@ -70,7 +70,7 @@ const ROUTES: RouteCase[] = [
   { path: '/wasm', name: 'Wasm plugins (frozen)', marker: 'header-scrubber', frozen: true },
   { path: '/cluster', name: 'Cluster mesh (frozen)', marker: 'bsdm-proxy-node-beta', frozen: true },
   { path: '/ai-cache', name: 'AI semantic cache (frozen)', marker: 'gpt-4o-mini', frozen: true },
-  { path: '/amneziawg', name: 'AmneziaWG (frozen)', marker: '10.8.0.1/24', frozen: true },
+  { path: '/amneziawg', name: 'AmneziaWG', marker: '10.8.0.1/24' },
 ]
 
 let mock: MockApiInstance
