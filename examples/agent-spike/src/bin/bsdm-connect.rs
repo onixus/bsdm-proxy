@@ -1,13 +1,19 @@
 //! BSDM Connect — Alternative Native Rust Client for AmneziaWG & BSDM Secure Web Gateway
 //!
 //! Provides enrollment, AmneziaWG obfuscated tunnel lifecycle management (up/down/status),
+//! domain-based route steering (Split Routing / PAC generation), Web/Mobile UI server,
 //! real-time policy synchronization via WebSocket/long-poll, and client telemetry reporting.
 
 use agent_spike::engine::{demo_evaluate, AgentEngine, AgentState};
+use agent_spike::pac::generate_pac;
+use agent_spike::router::{RouteRule, RouteTable, RouteTarget};
 use agent_spike::tunnel::{tunnel_down, tunnel_status, tunnel_up, AwgClientConfig};
+use agent_spike::ui_server::{run_ui_server, UiServerState};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
 fn default_state_path() -> PathBuf {
@@ -32,6 +38,17 @@ fn default_conf_path() -> PathBuf {
     }
 }
 
+fn default_routes_path() -> PathBuf {
+    if let Ok(p) = std::env::var("BSDM_ROUTES_FILE") {
+        return PathBuf::from(p);
+    }
+    if let Some(home) = dirs_home() {
+        home.join(".bsdm").join("routes.json")
+    } else {
+        PathBuf::from("./routes.json")
+    }
+}
+
 fn dirs_home() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
@@ -47,11 +64,13 @@ USAGE:
 
 SUBCOMMANDS:
     enroll             Enroll this device with the BSDM Control Plane
+    ui                 Start Agent Web/Mobile UI and PAC server (default port 8765)
+    routes             Manage local domain split-routing table (list, add, delete, export-pac)
     tunnel up          Activate AmneziaWG tunnel interface
     tunnel down        Deactivate AmneziaWG tunnel interface
     tunnel status      Show current tunnel interface status and telemetry
     tunnel get-config  Download latest tunnel configuration from control plane
-    run / daemon       Run continuous agent with policy sync, tunnel, and heartbeats
+    run / daemon       Run continuous agent with UI server, policy sync, tunnel, and heartbeats
     help               Print this help message
 
 OPTIONS (Global / Command-specific):
@@ -60,8 +79,10 @@ OPTIONS (Global / Command-specific):
     --device-id <ID>       Unique device identifier (default: $DEVICE_ID)
     --device-name <NAME>   Human-readable device name (default: $DEVICE_NAME)
     --state-file <PATH>    Path to local JSON state file (default: ~/.bsdm/state.json)
+    --routes-file <PATH>   Path to domain routes file (default: ~/.bsdm/routes.json)
     --config <PATH>        Path to AmneziaWG .conf file (default: ~/.bsdm/awg0.conf)
     --interface <NAME>     AmneziaWG interface name for status query (default: awg0)
+    --port <PORT>          UI & PAC server port (default: 8765)
     --format <FORMAT>      Config export format: 'conf' or 'json' (default: conf)
     --dry-run              Print commands without modifying system network interfaces
     --with-tunnel          Request AmneziaWG VPN tunnel provisioning during enroll
@@ -99,6 +120,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match subcommand {
         "enroll" => cmd_enroll(&args).await?,
+        "ui" => cmd_ui(&args).await?,
+        "routes" => {
+            if args.len() < 3 {
+                eprintln!("Error: 'routes' requires a sub-action: list, add, delete, export-pac");
+                print_usage();
+                std::process::exit(1);
+            }
+            match args[2].as_str() {
+                "list" => cmd_routes_list(&args)?,
+                "add" => cmd_routes_add(&args)?,
+                "delete" => cmd_routes_delete(&args)?,
+                "export-pac" => cmd_routes_export_pac(&args)?,
+                other => {
+                    eprintln!("Unknown routes action: '{other}'");
+                    print_usage();
+                    std::process::exit(1);
+                }
+            }
+        }
         "tunnel" => {
             if args.len() < 3 {
                 eprintln!("Error: 'tunnel' requires a sub-action: up, down, status, get-config");
@@ -125,6 +165,140 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    Ok(())
+}
+
+async fn cmd_ui(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let port: u16 = get_arg_value(args, "--port")
+        .or_else(|| std::env::var("AGENT_UI_PORT").ok())
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(8765);
+
+    let state_file = get_arg_value(args, "--state-file")
+        .map(PathBuf::from)
+        .unwrap_or_else(default_state_path);
+
+    let state = if state_file.exists() {
+        AgentState::load(&state_file).ok()
+    } else {
+        None
+    };
+
+    let control_url = get_arg_value(args, "--control-url")
+        .or_else(|| state.as_ref().map(|s| s.control_plane_url.clone()))
+        .unwrap_or_else(|| "http://127.0.0.1:9090".to_string());
+
+    let device_id = state
+        .as_ref()
+        .map(|s| s.device_id.clone())
+        .unwrap_or_else(|| "agent-local".to_string());
+
+    let routes_path = get_arg_value(args, "--routes-file")
+        .map(PathBuf::from)
+        .unwrap_or_else(default_routes_path);
+
+    let routes = Arc::new(RwLock::new(RouteTable::load_or_default(&routes_path)));
+    let conf_path = default_conf_path();
+
+    let ui_state = Arc::new(UiServerState {
+        routes,
+        routes_path,
+        conf_path,
+        control_url,
+        proxy_authority: "127.0.0.1:3128".to_string(),
+        tunnel_active: Arc::new(RwLock::new(false)),
+        device_id,
+    });
+
+    let bind_addr = SocketAddr::from(([127, 0, 0, 1], port));
+    info!("🚀 Launching BSDM Connect Agent UI at http://127.0.0.1:{port}");
+    println!("Web / Mobile UI running at: http://127.0.0.1:{port}");
+    println!("PAC Proxy script running at: http://127.0.0.1:{port}/proxy.pac");
+
+    run_ui_server(bind_addr, ui_state).await?;
+    Ok(())
+}
+
+fn cmd_routes_list(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let routes_path = get_arg_value(args, "--routes-file")
+        .map(PathBuf::from)
+        .unwrap_or_else(default_routes_path);
+
+    let table = RouteTable::load_or_default(&routes_path);
+    let json = serde_json::to_string_pretty(&table)?;
+    println!("{json}");
+    Ok(())
+}
+
+fn cmd_routes_add(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let pattern = get_arg_value(args, "--pattern")
+        .ok_or("Missing --pattern (e.g. --pattern '*.corp.com')")?;
+    let target_str = get_arg_value(args, "--target").unwrap_or_else(|| "proxy".to_string());
+    let comment = get_arg_value(args, "--comment");
+
+    let target = match target_str.to_ascii_lowercase().as_str() {
+        "direct" => RouteTarget::Direct,
+        "tunnel" | "vpn" => RouteTarget::Tunnel,
+        "block" | "deny" => RouteTarget::Block,
+        _ => RouteTarget::Proxy,
+    };
+
+    let routes_path = get_arg_value(args, "--routes-file")
+        .map(PathBuf::from)
+        .unwrap_or_else(default_routes_path);
+
+    let mut table = RouteTable::load_or_default(&routes_path);
+    let id = format!("rule-{}", hex::encode(rand::random::<[u8; 3]>()));
+
+    table.upsert_rule(RouteRule {
+        id: id.clone(),
+        pattern,
+        target,
+        enabled: true,
+        comment,
+    });
+
+    table.save(&routes_path)?;
+    println!("Added route rule {id} -> {target}");
+    Ok(())
+}
+
+fn cmd_routes_delete(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    if args.len() < 4 {
+        eprintln!("Usage: bsdm-connect routes delete <RULE_ID>");
+        std::process::exit(1);
+    }
+    let id = &args[3];
+
+    let routes_path = get_arg_value(args, "--routes-file")
+        .map(PathBuf::from)
+        .unwrap_or_else(default_routes_path);
+
+    let mut table = RouteTable::load_or_default(&routes_path);
+    if table.remove_rule(id) {
+        table.save(&routes_path)?;
+        println!("Deleted route rule {id}");
+    } else {
+        println!("Route rule {id} not found");
+    }
+    Ok(())
+}
+
+fn cmd_routes_export_pac(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let routes_path = get_arg_value(args, "--routes-file")
+        .map(PathBuf::from)
+        .unwrap_or_else(default_routes_path);
+
+    let proxy = get_arg_value(args, "--proxy").unwrap_or_else(|| "127.0.0.1:3128".to_string());
+    let table = RouteTable::load_or_default(&routes_path);
+    let pac = generate_pac(&table, &proxy, None);
+
+    if let Some(out) = get_arg_value(args, "--output").map(PathBuf::from) {
+        std::fs::write(&out, &pac)?;
+        println!("PAC script exported to {}", out.display());
+    } else {
+        print!("{pac}");
+    }
     Ok(())
 }
 
@@ -380,7 +554,7 @@ async fn cmd_daemon(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     device_name,
                     device_type: "desktop".to_string(),
                     platform: std::env::consts::OS.to_string(),
-                    control_plane_url: control_url,
+                    control_plane_url: control_url.clone(),
                     device_token: Some(res.device_token),
                     client_cert_pem: res.client_cert_pem,
                     ca_cert_pem: res.ca_cert_pem,
@@ -417,15 +591,41 @@ async fn cmd_daemon(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         agent_ws.watch_policy_ws_loop().await;
     });
 
-    // Bring up AmneziaWG tunnel if requested
-    let mut tunnel_active = false;
+    // Start embedded Web/Mobile UI server in background
+    let routes_path = default_routes_path();
+    let routes = Arc::new(RwLock::new(RouteTable::load_or_default(&routes_path)));
     let conf_path = default_conf_path();
+    let tunnel_active = Arc::new(RwLock::new(false));
+
+    let ui_state = Arc::new(UiServerState {
+        routes,
+        routes_path,
+        conf_path: conf_path.clone(),
+        control_url: control_url.clone(),
+        proxy_authority: "127.0.0.1:3128".to_string(),
+        tunnel_active: tunnel_active.clone(),
+        device_id: device_id.clone(),
+    });
+
+    let ui_port: u16 = get_arg_value(args, "--port")
+        .or_else(|| std::env::var("AGENT_UI_PORT").ok())
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(8765);
+    let bind_addr = SocketAddr::from(([127, 0, 0, 1], ui_port));
+    tokio::spawn(async move {
+        let _ = run_ui_server(bind_addr, ui_state).await;
+    });
+
+    println!("🌐 BSDM Connect UI active: http://127.0.0.1:{ui_port}");
+    println!("⚙️  Dynamic PAC file active: http://127.0.0.1:{ui_port}/proxy.pac");
+
+    // Bring up AmneziaWG tunnel if requested
     if auto_tunnel && conf_path.exists() {
         info!(path = %conf_path.display(), "Activating AmneziaWG tunnel...");
         match tunnel_up(&conf_path, false) {
             Ok(msg) => {
                 info!(%msg, "Tunnel is active");
-                tunnel_active = true;
+                *tunnel_active.write().await = true;
             }
             Err(e) => warn!("Could not bring up tunnel: {e}"),
         }
@@ -434,7 +634,7 @@ async fn cmd_daemon(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     info!("BSDM Connect daemon running. Press Ctrl+C to terminate.");
     tokio::signal::ctrl_c().await?;
 
-    if tunnel_active {
+    if *tunnel_active.read().await {
         info!("Shutting down AmneziaWG tunnel...");
         if let Err(e) = tunnel_down(&conf_path, false) {
             error!("Tunnel shutdown error: {e}");

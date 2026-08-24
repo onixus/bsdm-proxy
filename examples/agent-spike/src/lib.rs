@@ -3,9 +3,12 @@
 //! Optional multi-OS system-proxy apply/clear for pilot installers.
 
 pub mod engine;
+pub mod pac;
 pub mod policy;
+pub mod router;
 pub mod system_proxy;
 pub mod tunnel;
+pub mod ui_server;
 
 use engine::{demo_evaluate, AgentEngine};
 use std::sync::Arc;
