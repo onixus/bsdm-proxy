@@ -579,6 +579,166 @@ impl ControlApiState {
             }
         }
     }
+
+    fn circuit_breaker_status(&self) -> Response<Body> {
+        let status = self.mitm_circuit_breaker.status();
+        match serde_json::to_string(&status) {
+            Ok(json) => json_response(StatusCode::OK, &json),
+            Err(e) => json_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!(r#"{{"error":"{}"}}"#, escape_json(&e.to_string())),
+            ),
+        }
+    }
+
+    fn circuit_breaker_reset(&self, body: Bytes) -> Response<Body> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct ResetRequest {
+            #[serde(default = "default_all_domains")]
+            domain: String,
+            actor: String,
+            reason: String,
+        }
+        fn default_all_domains() -> String {
+            "*".into()
+        }
+
+        let request: ResetRequest = match serde_json::from_slice(&body) {
+            Ok(req) => req,
+            Err(e) => {
+                return json_response(
+                    StatusCode::BAD_REQUEST,
+                    &serde_json::json!({
+                        "error": format!("invalid reset payload: {e}"),
+                    })
+                    .to_string(),
+                );
+            }
+        };
+
+        match self
+            .mitm_circuit_breaker
+            .reset(&request.domain, &request.actor, &request.reason)
+        {
+            Ok(report) => match serde_json::to_string(&report) {
+                Ok(payload) => json_response(StatusCode::OK, &payload),
+                Err(e) => json_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    &serde_json::json!({"error": e.to_string()}).to_string(),
+                ),
+            },
+            Err(error) => json_response(
+                StatusCode::BAD_REQUEST,
+                &serde_json::json!({"error": error}).to_string(),
+            ),
+        }
+    }
+
+    fn pinning_upsert_exception(&self, body: Bytes) -> Response<Body> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct UpsertRequest {
+            actor: String,
+            change_reason: String,
+            exception: crate::pinning::PinningException,
+        }
+
+        let request: UpsertRequest = match serde_json::from_slice(&body) {
+            Ok(req) => req,
+            Err(e) => {
+                return json_response(
+                    StatusCode::BAD_REQUEST,
+                    &serde_json::json!({
+                        "error": format!("invalid upsert payload: {e}"),
+                    })
+                    .to_string(),
+                );
+            }
+        };
+
+        match self.pinning_registry.upsert_exception(
+            &request.actor,
+            &request.change_reason,
+            request.exception,
+        ) {
+            Ok(report) => {
+                info!(
+                    actor = %request.actor,
+                    reason = %request.change_reason,
+                    "Pinning exception upserted via control API"
+                );
+                let _ = self.policy_hub.publish_from_runtime(
+                    &self.pinning_registry,
+                    &format!("pinning-upsert:{}", request.change_reason),
+                );
+                match serde_json::to_string(&report) {
+                    Ok(payload) => json_response(StatusCode::OK, &payload),
+                    Err(e) => json_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        &serde_json::json!({"error": e.to_string()}).to_string(),
+                    ),
+                }
+            }
+            Err(error) => json_response(
+                StatusCode::BAD_REQUEST,
+                &serde_json::json!({"error": error}).to_string(),
+            ),
+        }
+    }
+
+    fn pinning_delete_exception(&self, body: Bytes) -> Response<Body> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct DeleteRequest {
+            actor: String,
+            change_reason: String,
+            domain: String,
+        }
+
+        let request: DeleteRequest = match serde_json::from_slice(&body) {
+            Ok(req) => req,
+            Err(e) => {
+                return json_response(
+                    StatusCode::BAD_REQUEST,
+                    &serde_json::json!({
+                        "error": format!("invalid delete payload: {e}"),
+                    })
+                    .to_string(),
+                );
+            }
+        };
+
+        match self.pinning_registry.remove_exception(
+            &request.actor,
+            &request.change_reason,
+            &request.domain,
+        ) {
+            Ok(report) => {
+                info!(
+                    actor = %request.actor,
+                    reason = %request.change_reason,
+                    domain = %request.domain,
+                    "Pinning exception deleted via control API"
+                );
+                let _ = self.policy_hub.publish_from_runtime(
+                    &self.pinning_registry,
+                    &format!("pinning-delete:{}", request.change_reason),
+                );
+                match serde_json::to_string(&report) {
+                    Ok(payload) => json_response(StatusCode::OK, &payload),
+                    Err(e) => json_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        &serde_json::json!({"error": e.to_string()}).to_string(),
+                    ),
+                }
+            }
+            Err(error) => json_response(
+                StatusCode::BAD_REQUEST,
+                &serde_json::json!({"error": error}).to_string(),
+            ),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -598,6 +758,7 @@ pub struct ControlApiState {
     casb_engine: Arc<crate::casb::CasbEngine>,
     dlp_engine: Arc<crate::dlp::DlpEngine>,
     pub(crate) pinning_registry: Arc<PinningRegistry>,
+    pub(crate) mitm_circuit_breaker: Arc<crate::mitm_breaker::MitmCircuitBreaker>,
     auth_manager: Option<Arc<crate::auth::AuthManager>>,
     pub(crate) awg_server: Arc<tokio::sync::RwLock<crate::amneziawg::AwgServerConfig>>,
     session_store: crate::session_store::GlobalSessionStore,
@@ -654,6 +815,7 @@ impl ControlApiState {
             casb_engine,
             dlp_engine,
             pinning_registry,
+            mitm_circuit_breaker: Arc::new(crate::mitm_breaker::MitmCircuitBreaker::from_env()),
             auth_manager,
             awg_server: Arc::new(tokio::sync::RwLock::new(
                 crate::amneziawg::AwgServerConfig::default(),
@@ -681,6 +843,15 @@ impl ControlApiState {
             acl_api: None,
             rpz_api: Some(crate::rpz_api::RpzApiState::from_env()),
         }
+    }
+
+    /// Attach MitmCircuitBreaker from ProxyService.
+    pub fn with_mitm_circuit_breaker(
+        mut self,
+        breaker: Arc<crate::mitm_breaker::MitmCircuitBreaker>,
+    ) -> Self {
+        self.mitm_circuit_breaker = breaker;
+        self
     }
 
     /// Attach CertCache so enroll can sign mTLS client certificates from CSR.
@@ -939,7 +1110,15 @@ impl ControlApiState {
                 self.threat_sync_broadcast(body).await
             }
             (&Method::GET, "/api/pinning/exceptions") => self.pinning_exceptions(),
+            (&Method::POST, "/api/pinning/exceptions") => self.pinning_upsert_exception(body),
+            (&Method::DELETE, "/api/pinning/exceptions") => self.pinning_delete_exception(body),
             (&Method::POST, "/api/pinning/exceptions/reload") => self.pinning_reload(body),
+            (&Method::GET, "/api/mitm/circuit-breaker")
+            | (&Method::GET, "/api/pinning/circuit-breaker") => self.circuit_breaker_status(),
+            (&Method::POST, "/api/mitm/circuit-breaker/reset")
+            | (&Method::POST, "/api/pinning/circuit-breaker/reset") => {
+                self.circuit_breaker_reset(body)
+            }
             #[cfg(feature = "wasm")]
             (&Method::POST, "/api/wasm/reload") => self.wasm_reload(),
             _ => {
@@ -1632,6 +1811,36 @@ mod tests {
             )
             .await;
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+        let mutating_endpoints = [
+            (&Method::POST, "/api/config/apply", "{}"),
+            (&Method::POST, "/api/hierarchy/reload", "{}"),
+            (&Method::POST, "/api/upstream/tls/reload", "{}"),
+            (&Method::POST, "/api/security/casb", "[]"),
+            (&Method::POST, "/api/security/dlp", "[]"),
+            (&Method::POST, "/api/auth/basic/users", "{}"),
+            (&Method::DELETE, "/api/auth/basic/users", "{}"),
+            (&Method::POST, "/api/pinning/exceptions", "{}"),
+            (&Method::DELETE, "/api/pinning/exceptions", "{}"),
+            (&Method::POST, "/api/pinning/exceptions/reload", "{}"),
+            (&Method::POST, "/api/mitm/circuit-breaker/reset", "{}"),
+        ];
+
+        for (method, path, body) in mutating_endpoints {
+            let res = state
+                .dispatch(
+                    method,
+                    path,
+                    Bytes::from(body.to_string()),
+                    &HeaderMap::new(),
+                )
+                .await;
+            assert_eq!(
+                res.status(),
+                StatusCode::UNAUTHORIZED,
+                "endpoint {method} {path} must deny without token in fail_closed mode"
+            );
+        }
 
         // Public monitoring stays open.
         let stats = state
@@ -2523,5 +2732,132 @@ mod tests {
         let t_json: serde_json::Value = serde_json::from_slice(&t_body).unwrap();
         assert_eq!(t_json["device_id"], device_id);
         assert_eq!(t_json["assigned_ip"], "10.8.0.2");
+    }
+
+    #[tokio::test]
+    async fn circuit_breaker_control_api_status_and_reset() {
+        let state = state_plain(
+            Arc::new(Metrics::new().unwrap()),
+            Arc::new(HttpL1Cache::new(100, 4)),
+        );
+        state
+            .mitm_circuit_breaker
+            .record_attempt("bad.example.com", false, "tls fail");
+        state
+            .mitm_circuit_breaker
+            .record_attempt("bad.example.com", false, "tls fail");
+        state
+            .mitm_circuit_breaker
+            .record_attempt("bad.example.com", false, "tls fail");
+        state
+            .mitm_circuit_breaker
+            .record_attempt("bad.example.com", false, "tls fail");
+        state
+            .mitm_circuit_breaker
+            .record_attempt("bad.example.com", false, "tls fail");
+
+        // GET /api/mitm/circuit-breaker
+        let resp = state
+            .dispatch(
+                &Method::GET,
+                "/api/mitm/circuit-breaker",
+                Bytes::new(),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = BodyExt::collect(resp.into_body()).await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["tripped_count"], 1);
+        assert_eq!(json["tripped_domains"][0]["domain"], "bad.example.com");
+
+        // POST /api/mitm/circuit-breaker/reset
+        let reset_payload = serde_json::json!({
+            "domain": "bad.example.com",
+            "actor": "operator-test",
+            "reason": "upstream certificate fixed"
+        });
+        let reset_resp = state
+            .dispatch(
+                &Method::POST,
+                "/api/mitm/circuit-breaker/reset",
+                Bytes::from(reset_payload.to_string()),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(reset_resp.status(), StatusCode::OK);
+        let reset_body = BodyExt::collect(reset_resp.into_body())
+            .await
+            .unwrap()
+            .to_bytes();
+        let reset_json: serde_json::Value = serde_json::from_slice(&reset_body).unwrap();
+        assert_eq!(reset_json["status"], "reset");
+        assert_eq!(reset_json["reset_domains"][0], "bad.example.com");
+
+        assert!(!state.mitm_circuit_breaker.is_tripped("bad.example.com"));
+    }
+
+    #[tokio::test]
+    async fn pinning_exceptions_control_api_crud() {
+        let state = state_plain(
+            Arc::new(Metrics::new().unwrap()),
+            Arc::new(HttpL1Cache::new(100, 4)),
+        );
+
+        // POST /api/pinning/exceptions
+        let add_payload = serde_json::json!({
+            "actor": "sec-team",
+            "change_reason": "vendor certificate pinning",
+            "exception": {
+                "domain": "pinned.example.com",
+                "reason": "native app pins cert",
+                "owner": "sec-ops",
+                "ticket": "SEC-555"
+            }
+        });
+        let add_resp = state
+            .dispatch(
+                &Method::POST,
+                "/api/pinning/exceptions",
+                Bytes::from(add_payload.to_string()),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(add_resp.status(), StatusCode::OK);
+        assert!(state.pinning_registry.matches("pinned.example.com"));
+
+        // GET /api/pinning/exceptions
+        let get_resp = state
+            .dispatch(
+                &Method::GET,
+                "/api/pinning/exceptions",
+                Bytes::new(),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(get_resp.status(), StatusCode::OK);
+        let body = BodyExt::collect(get_resp.into_body())
+            .await
+            .unwrap()
+            .to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["count"], 1);
+
+        // DELETE /api/pinning/exceptions
+        let del_payload = serde_json::json!({
+            "actor": "sec-team",
+            "change_reason": "exception no longer required",
+            "domain": "pinned.example.com"
+        });
+        let del_resp = state
+            .dispatch(
+                &Method::DELETE,
+                "/api/pinning/exceptions",
+                Bytes::from(del_payload.to_string()),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(del_resp.status(), StatusCode::OK);
+        assert!(!state.pinning_registry.matches("pinned.example.com"));
     }
 }

@@ -55,7 +55,27 @@ should be reflected in the results table.
 
 ## How to run
 
-### A. Lite stack (CI / laptop)
+### A. Phase 1: 20-User Baseline Profile (Day 1–14)
+
+Рекомендуемый стартовый профиль для начала пилота (20 пользователей):
+
+```bash
+CONCURRENT_USERS=20 TEST_DURATION=60 \
+  RESULTS_DIR=docs/ops-and-dev/load-test-results \
+  ./scripts/run-hybrid-load-test.sh
+```
+
+### B. Phase 2: 100-User Scale Profile (Day 15–28)
+
+Пиковая нагрузка 100 пользователей:
+
+```bash
+CONCURRENT_USERS=100 TEST_DURATION=120 \
+  RESULTS_DIR=docs/ops-and-dev/load-test-results \
+  ./scripts/run-hybrid-load-test.sh
+```
+
+### C. Lite stack (CI / laptop)
 
 ```bash
 ./scripts/gen-ca.sh
@@ -64,11 +84,11 @@ docker compose -f deploy/compose/docker-compose.lite.yml up -d --build
 curl -fsS http://127.0.0.1:9090/health
 
 # DNS share needs dig + sinkhole (full compose). Lite has no DNS — 5% share degrades.
-CONCURRENT_USERS=50 TEST_DURATION=30 \
+CONCURRENT_USERS=20 TEST_DURATION=30 \
   ./scripts/run-hybrid-load-test.sh
 ```
 
-### B. Full pilot compose
+### D. Full pilot compose (Hybrid stack)
 
 ```bash
 export CONTROL_API_TOKEN="$(openssl rand -hex 16)"

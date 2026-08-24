@@ -31,6 +31,7 @@ use crate::icap::{IcapClient, IcapOutcome};
 use crate::l2_cache::RedisL2Cache;
 use crate::metrics::{FastRequestScope, Metrics, RequestMetricsGuard, StatusLabel};
 use crate::miss_coalesce::{CoalesceJoin, MissFlightMap, MissFlightPermit};
+use crate::mitm_breaker::MitmCircuitBreaker;
 use crate::peer_fetch::{fetch_via_peer, PeerTlsConfig};
 use crate::peers::CachePeer;
 use crate::perf::PerfConfig;
@@ -57,6 +58,7 @@ pub struct ProxyPolicy {
     pub policy_mode: crate::policy_config::PolicyMode,
     pub mitm_categories: Vec<String>,
     pub pinning_registry: Arc<PinningRegistry>,
+    pub mitm_circuit_breaker: Arc<MitmCircuitBreaker>,
     pub acl_engine: Option<Arc<AclEngineHandle>>,
     pub categorization: Option<Arc<CategorizationEngine>>,
 }
@@ -77,6 +79,7 @@ pub(crate) struct TlsPolicyDecision {
 fn classify_tls_policy_decision(
     mitm_enabled: bool,
     pinned: bool,
+    tripped: bool,
     policy_mode: crate::policy_config::PolicyMode,
     selective_mitm: bool,
 ) -> TlsPolicyDecision {
@@ -101,6 +104,13 @@ fn classify_tls_policy_decision(
             mitm: false,
             decision_source: "pinning-bypass",
             bypass_reason: Some("certificate_pinning_exception"),
+        };
+    }
+    if tripped {
+        return TlsPolicyDecision {
+            mitm: false,
+            decision_source: "pinning-bypass",
+            bypass_reason: Some("circuit_breaker_tripped"),
         };
     }
     match policy_mode {
@@ -407,6 +417,7 @@ pub struct ProxyService {
     pub(crate) policy_mode: crate::policy_config::PolicyMode,
     pub(crate) mitm_categories: std::collections::HashSet<String>,
     pub(crate) pinning_registry: Arc<PinningRegistry>,
+    pub(crate) mitm_circuit_breaker: Arc<MitmCircuitBreaker>,
     pub(crate) mitm_enabled: bool,
     auth: Option<Arc<AuthManager>>,
     acl_engine: Option<Arc<AclEngineHandle>>,
@@ -441,6 +452,7 @@ impl ProxyService {
             let decision = classify_tls_policy_decision(
                 self.mitm_enabled,
                 false,
+                false,
                 crate::policy_config::PolicyMode::Sni,
                 false,
             );
@@ -459,9 +471,11 @@ impl ProxyService {
         }
 
         let pinned = self.pinning_registry.matches(domain);
+        let tripped = self.mitm_circuit_breaker.is_tripped(domain);
 
         let selective_mitm = if self.mitm_enabled
             && !pinned
+            && !tripped
             && self.policy_mode == crate::policy_config::PolicyMode::SelectiveMitm
         {
             let url = format!("https://{}", domain);
@@ -475,6 +489,7 @@ impl ProxyService {
         let decision = classify_tls_policy_decision(
             self.mitm_enabled,
             pinned,
+            tripped,
             self.policy_mode,
             selective_mitm,
         );
@@ -530,6 +545,10 @@ impl ProxyService {
 
     pub fn pinning_registry(&self) -> Arc<PinningRegistry> {
         self.pinning_registry.clone()
+    }
+
+    pub fn mitm_circuit_breaker(&self) -> Arc<MitmCircuitBreaker> {
+        self.mitm_circuit_breaker.clone()
     }
 
     fn miss_completion_handle(&self) -> MissCompletionHandle {
@@ -635,6 +654,7 @@ impl ProxyService {
             policy_mode: policy.policy_mode,
             mitm_categories: policy.mitm_categories.iter().cloned().collect(),
             pinning_registry: policy.pinning_registry.clone(),
+            mitm_circuit_breaker: policy.mitm_circuit_breaker.clone(),
             mitm_enabled,
             auth,
             acl_engine: policy.acl_engine.clone(),
@@ -2937,6 +2957,7 @@ mod decision_source_tests {
             (
                 false,
                 false,
+                false,
                 PolicyMode::FullMitm,
                 false,
                 TlsPolicyDecision {
@@ -2948,6 +2969,7 @@ mod decision_source_tests {
             (
                 true,
                 true,
+                false,
                 PolicyMode::FullMitm,
                 false,
                 TlsPolicyDecision {
@@ -2958,6 +2980,19 @@ mod decision_source_tests {
             ),
             (
                 true,
+                false,
+                true,
+                PolicyMode::FullMitm,
+                false,
+                TlsPolicyDecision {
+                    mitm: false,
+                    decision_source: "pinning-bypass",
+                    bypass_reason: Some("circuit_breaker_tripped"),
+                },
+            ),
+            (
+                true,
+                false,
                 false,
                 PolicyMode::Sni,
                 false,
@@ -2970,6 +3005,7 @@ mod decision_source_tests {
             (
                 true,
                 false,
+                false,
                 PolicyMode::FullMitm,
                 false,
                 TlsPolicyDecision {
@@ -2981,6 +3017,7 @@ mod decision_source_tests {
             (
                 true,
                 false,
+                false,
                 PolicyMode::SelectiveMitm,
                 true,
                 TlsPolicyDecision {
@@ -2992,6 +3029,7 @@ mod decision_source_tests {
             (
                 true,
                 false,
+                false,
                 PolicyMode::SelectiveMitm,
                 false,
                 TlsPolicyDecision {
@@ -3002,9 +3040,9 @@ mod decision_source_tests {
             ),
         ];
 
-        for (enabled, pinned, mode, selective_mitm, expected) in cases {
+        for (enabled, pinned, tripped, mode, selective_mitm, expected) in cases {
             assert_eq!(
-                classify_tls_policy_decision(enabled, pinned, mode, selective_mitm),
+                classify_tls_policy_decision(enabled, pinned, tripped, mode, selective_mitm),
                 expected
             );
         }
@@ -3015,19 +3053,22 @@ mod decision_source_tests {
     fn policy_mode_sni_never_sets_mitm_true() {
         for mitm_enabled in [false, true] {
             for pinned in [false, true] {
-                for selective_mitm in [false, true] {
-                    let d = classify_tls_policy_decision(
-                        mitm_enabled,
-                        pinned,
-                        PolicyMode::Sni,
-                        selective_mitm,
-                    );
-                    assert!(
-                        !d.mitm,
-                        "Sni mode mitm=true for enabled={mitm_enabled} pinned={pinned} selective={selective_mitm}"
-                    );
-                    assert_eq!(d.decision_source, "sni");
-                    assert_eq!(d.bypass_reason, Some("policy_mode_sni"));
+                for tripped in [false, true] {
+                    for selective_mitm in [false, true] {
+                        let d = classify_tls_policy_decision(
+                            mitm_enabled,
+                            pinned,
+                            tripped,
+                            PolicyMode::Sni,
+                            selective_mitm,
+                        );
+                        assert!(
+                            !d.mitm,
+                            "Sni mode mitm=true for enabled={mitm_enabled} pinned={pinned} tripped={tripped} selective={selective_mitm}"
+                        );
+                        assert_eq!(d.decision_source, "sni");
+                        assert_eq!(d.bypass_reason, Some("policy_mode_sni"));
+                    }
                 }
             }
         }

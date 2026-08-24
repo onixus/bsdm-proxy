@@ -37,6 +37,7 @@ pub mod icp;
 pub mod l2_cache;
 pub mod metrics;
 pub mod miss_coalesce;
+pub mod mitm_breaker;
 pub mod peer_discovery;
 pub mod peer_fetch;
 pub mod peers;
@@ -96,6 +97,10 @@ pub use htcp::{HtcpClient, HtcpOpcode, HtcpServer};
 pub use icp::{IcpClient, IcpMessage, IcpOpcode, IcpServer};
 pub use l2_cache::{L2CacheConfig, RedisL2Cache};
 pub use metrics::{FastRequestScope, Metrics, RequestMetricsGuard};
+pub use mitm_breaker::{
+    BreakerResetReport, MitmCircuitBreaker, MitmCircuitBreakerConfig, MitmCircuitBreakerStatus,
+    TrippedInfo,
+};
 pub use peer_discovery::{run_peer_discovery, PeerDiscoveryConfig};
 pub use peer_fetch::{fetch_via_peer, PeerFetchError, PeerTlsConfig};
 pub use peers::{CachePeer, PeerConfig, PeerRegistry, PeerType, ReplaceStaticStats};

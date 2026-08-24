@@ -3,6 +3,7 @@
 use crate::acl::{AclAction, AclEngine, AclEngineHandle};
 use crate::acl_config::{load_acl_engine_from_file, parse_acl_action};
 use crate::categorization::{CategorizationConfig, CategorizationEngine, DEFAULT_RKN_FALLBACK_URL};
+use crate::mitm_breaker::MitmCircuitBreaker;
 use crate::pinning::PinningRegistry;
 use std::sync::Arc;
 use std::time::Duration;
@@ -94,6 +95,7 @@ pub struct PolicyConfig {
     pub policy_mode: PolicyMode,
     pub mitm_categories: Vec<String>,
     pub pinning_registry: Arc<PinningRegistry>,
+    pub mitm_circuit_breaker: Arc<MitmCircuitBreaker>,
     pub acl_enabled: bool,
     pub acl_engine: Option<Arc<AclEngineHandle>>,
     pub acl_rules_path: Option<String>,
@@ -288,10 +290,13 @@ pub fn load_policy_config() -> PolicyConfig {
         None
     };
 
+    let mitm_circuit_breaker = Arc::new(MitmCircuitBreaker::from_env());
+
     PolicyConfig {
         policy_mode,
         mitm_categories,
         pinning_registry,
+        mitm_circuit_breaker,
         acl_enabled,
         acl_engine,
         acl_rules_path: rules_path,

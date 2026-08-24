@@ -471,3 +471,94 @@ async fn e2e_selective_mitm_pinning_bypass_fallback() {
         "upstream-tls:/direct-tls"
     );
 }
+
+#[tokio::test]
+async fn e2e_mitm_circuit_breaker_and_pinning_control_api() {
+    let _guard = proxy_test_guard().await;
+
+    let mut extra_env = std::collections::HashMap::new();
+    extra_env.insert(
+        "MITM_CIRCUIT_BREAKER_ENABLED".to_string(),
+        "true".to_string(),
+    );
+    extra_env.insert(
+        "MITM_CIRCUIT_BREAKER_MIN_SAMPLES".to_string(),
+        "2".to_string(),
+    );
+    extra_env.insert(
+        "MITM_CIRCUIT_BREAKER_FAILURE_RATE".to_string(),
+        "0.5".to_string(),
+    );
+
+    let harness = ProxyHarness::start(HarnessConfig {
+        mitm_enabled: true,
+        extra_env,
+        ..Default::default()
+    })
+    .await
+    .expect("start proxy");
+
+    let client = reqwest::Client::new();
+
+    // 1. Check GET /api/mitm/circuit-breaker
+    let breaker_status_url = harness.metrics_url("/api/mitm/circuit-breaker");
+    let resp = client
+        .get(&breaker_status_url)
+        .send()
+        .await
+        .expect("get breaker status");
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    let status_json: serde_json::Value = resp.json().await.expect("json");
+    assert_eq!(status_json["enabled"], true);
+    assert_eq!(status_json["tripped_count"], 0);
+
+    // 2. Add pinning exception via POST /api/pinning/exceptions
+    let add_exception_url = harness.metrics_url("/api/pinning/exceptions");
+    let add_payload = serde_json::json!({
+        "actor": "sec-ops",
+        "change_reason": "e2e pinning test",
+        "exception": {
+            "domain": "pinned-e2e.example.com",
+            "reason": "app certificate pinning",
+            "owner": "qa",
+            "ticket": "E2E-1"
+        }
+    });
+    let add_resp = client
+        .post(&add_exception_url)
+        .json(&add_payload)
+        .send()
+        .await
+        .expect("add pinning exception");
+    assert_eq!(add_resp.status(), reqwest::StatusCode::OK);
+
+    // 3. Verify GET /api/pinning/exceptions returns the new domain
+    let list_exceptions_url = harness.metrics_url("/api/pinning/exceptions");
+    let list_resp = client
+        .get(&list_exceptions_url)
+        .send()
+        .await
+        .expect("list exceptions");
+    assert_eq!(list_resp.status(), reqwest::StatusCode::OK);
+    let list_json: serde_json::Value = list_resp.json().await.expect("json");
+    assert!(list_json["exceptions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|e| e["domain"] == "pinned-e2e.example.com"));
+
+    // 4. Test POST /api/mitm/circuit-breaker/reset
+    let reset_url = harness.metrics_url("/api/mitm/circuit-breaker/reset");
+    let reset_payload = serde_json::json!({
+        "domain": "*",
+        "actor": "operator-e2e",
+        "reason": "clean test reset"
+    });
+    let reset_resp = client
+        .post(&reset_url)
+        .json(&reset_payload)
+        .send()
+        .await
+        .expect("reset circuit breaker");
+    assert_eq!(reset_resp.status(), reqwest::StatusCode::OK);
+}

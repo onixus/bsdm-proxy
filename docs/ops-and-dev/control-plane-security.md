@@ -9,16 +9,30 @@ See also: [control-plane.md](../features/control-plane.md) ·
 
 ---
 
+## Чек-лист безопасности Control Plane для пилота (Pilot Security Checklist)
+
+Перед допуском реальных пользователей оператор обязан подтвердить выполнение всех пунктов:
+
+- [ ] **1. Fail-Closed для мутирующих API:** Все `POST`/`PUT`/`DELETE` запросы (`/api/config/apply`, `/api/cache/purge`, `/api/pinning/exceptions`, `/api/mitm/circuit-breaker/reset`, `/api/auth/*`, `/api/security/*`) требуют валидный Bearer token. При отсутствии токена запрос отклоняется с кодом `401 Unauthorized`.
+- [ ] **2. Admin Console:** Действия мутации в консоли управления требуют ввода токена в `Settings → Console API`. Без токена мутации блокируются на клиенте и сервере (исключен silent success).
+- [ ] **3. Сетевая изоляция портов:** Порт `:9090` (Control API / Metrics) и `:8080` (Search API) привязаны к внутренней management-сети либо `127.0.0.1` (`METRICS_BIND=127.0.0.1`). Доступ из публичного интернета закрыт фаерволом хоста (iptables / nftables / security group).
+- [ ] **4. Защита приватного ключа CA:** Файл ключа `./certs/ca.key` (или `/etc/bsdm-proxy/ca.key`) имеет права `0600` (`chmod 600`) и доступен исключительно системному пользователю демона прокси (`bsdm`).
+- [ ] **5. Конфигурация Compose:** В production/pilot overlay отключен `CONTROL_API_ALLOW_INSECURE` (`CONTROL_API_ALLOW_INSECURE=false`), заданы непустые `CONTROL_API_TOKEN`, `ACL_API_TOKEN` и `SEARCH_API_TOKEN`.
+- [ ] **6. Threat Model:** Модель угроз и сценарии компрометации задокументированы (см. таблицу ниже).
+
+---
+
 ## Threat model (short)
 
 | Surface | Risk if open | Default posture (production) |
 |---|---|---|
-| Mutating control APIs (`POST /api/cache/purge`, config apply, TLS reload, …) | Cache wipe, config rewrite, CA/pinning abuse | **Bearer required** (`CONTROL_API_TOKEN`) |
+| Mutating control APIs (`POST /api/cache/purge`, config apply, TLS reload, breaker reset, exceptions) | Cache wipe, config rewrite, CA/pinning abuse | **Bearer required** (`CONTROL_API_TOKEN`) |
 | ACL REST (`/api/acl/*`) | Policy bypass | **Bearer required** (ACL or CONTROL token) |
 | Search / ingest (`/api/search`, `POST /api/events`) | Traffic metadata leak / event injection | **Bearer required** (`SEARCH_API_TOKEN`) |
 | `GET /metrics` | Internal counters / cardinality leak | Open unless `METRICS_AUTH_TOKEN` / `METRICS_REQUIRE_AUTH` |
 | `GET /health`, `/ready` | Low | Always open (probes) |
 | `GET /api/stats` | Cache hit ratios | Open (local monitoring) |
+| `GET /api/mitm/circuit-breaker` | Visibility of tripped domains | **Bearer required** |
 
 ---
 

@@ -232,17 +232,17 @@ docker compose --profile icap up -d
 
 ---
 
-### 4. Пилотный профиль на 100 пользователей
+### 4. Пилотный профиль на 100 пользователей (Hybrid Day-1)
 
-Референсные системные требования для пилотной эксплуатации (срок хранения 5 суток, без тяжелых DLP/ICAP):
+Референсный стек **Day-1** для пилотной эксплуатации (срок хранения 5 суток, Hybrid Policy `DNS → SNI → Selective MITM`, без экспериментальных модулей):
 
-- **CPU:** 12 vCPU
-- **RAM:** 24 GiB
-- **Диск:** 200 GB NVMe
-- **Сеть:** 1 Gbit/s
+- **Включено в Day-1:** Forward Proxy, Selective MITM, DNS Sinkhole, ACL/Auth, Admin Console, ClickHouse (5d TTL), Prometheus/Grafana, MITM Circuit Breaker.
+- **Исключено из Day-1 (Lab / Post-pilot):** Agent fleet, AmneziaWG, Threat-Intel block mode (только shadow mode), ML block mode, ICAP/WASM.
+- **Ресурсы (один хост):** 12 vCPU, 24 GiB RAM, 200 GB NVMe, 1 Gbit/s.
 
-Готовая конфигурация Compose находится в [`deploy/compose/docker-compose.pilot.yml`](deploy/compose/docker-compose.pilot.yml).  
-Методика расчёта и чек-лист приёмки: [Pilot Deployment Guide](docs/getting-started/pilot-deployment.md).
+Готовая конфигурация Compose: [`deploy/compose/docker-compose.pilot.yml`](deploy/compose/docker-compose.pilot.yml).  
+Чек-лист оператора и критерии приёмки: [Pilot Deployment Guide](docs/getting-started/pilot-deployment.md).
+
 
 ---
 
