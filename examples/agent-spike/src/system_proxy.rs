@@ -4,6 +4,7 @@
 //! the BSDM data-plane (`HTTP_PORT`, default 3128). This is **not** MDM-grade
 //! product packaging — installers wrap these hooks with clear privilege notes.
 
+#[cfg(target_os = "linux")]
 use std::process::Command;
 
 /// Forward-proxy endpoint the OS should use.
@@ -207,10 +208,9 @@ fn clear_auto_proxy_impl() -> Result<String, String> {
 }
 
 fn run(cmd: &str, args: &[&str]) -> Result<String, String> {
-    let out = Command::new(cmd)
-        .args(args)
-        .output()
-        .map_err(|e| format!("exec {cmd}: {e}"))?;
+    let os_args: Vec<&std::ffi::OsStr> = args.iter().copied().map(std::ffi::OsStr::new).collect();
+    let out =
+        crate::tunnel::run_command_with_timeout(cmd, &os_args, std::time::Duration::from_secs(10))?;
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
         let stdout = String::from_utf8_lossy(&out.stdout);

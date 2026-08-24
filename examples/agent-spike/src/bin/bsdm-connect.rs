@@ -256,7 +256,7 @@ fn cmd_routes_add(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         target,
         enabled: true,
         comment,
-    });
+    })?;
 
     table.save(&routes_path)?;
     println!("Added route rule {id} -> {target}");

@@ -1,13 +1,25 @@
+//! Embedded Agent Web & Mobile UI Server (macOS & Android adaptive)
+//! Serves the responsive Agent UI, live PAC configuration (/proxy.pac), and REST APIs.
+//! Hardened with CSRF / DNS-rebinding protection, Security Headers (CSP, Frame Options),
+//! request size bounds, and connection read timeouts.
+
 use crate::pac::generate_pac;
 use crate::router::{RouteRule, RouteTable};
 use crate::tunnel::{tunnel_down, tunnel_status, tunnel_up};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
+
+/// Maximum allowed HTTP request size in bytes (64 KB)
+pub const MAX_REQUEST_SIZE: usize = 65536;
+
+/// Connection socket read timeout
+pub const SOCKET_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub struct UiServerState {
     pub routes: Arc<RwLock<RouteTable>>,
@@ -24,7 +36,7 @@ pub async fn run_ui_server(
     state: Arc<UiServerState>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let listener = TcpListener::bind(bind_addr).await?;
-    info!(addr = %bind_addr, "🌐 BSDM Agent Web/Mobile UI & PAC server listening");
+    info!(addr = %bind_addr, "🌐 BSDM Agent Web/Mobile UI & PAC server listening (hardened)");
 
     loop {
         let (mut socket, _) = match listener.accept().await {
@@ -38,9 +50,11 @@ pub async fn run_ui_server(
 
         let state = state.clone();
         tokio::spawn(async move {
-            let mut buf = [0u8; 8192];
-            let n = match socket.read(&mut buf).await {
-                Ok(n) if n > 0 => n,
+            let mut buf = vec![0u8; MAX_REQUEST_SIZE];
+            let read_res = tokio::time::timeout(SOCKET_TIMEOUT, socket.read(&mut buf)).await;
+
+            let n = match read_res {
+                Ok(Ok(n)) if n > 0 => n,
                 _ => return,
             };
 
@@ -48,7 +62,23 @@ pub async fn run_ui_server(
             let (method, path) = parse_request_line(&req_str);
 
             let body_offset = req_str.find("\r\n\r\n").map(|i| i + 4).unwrap_or(n);
+            let headers_part = &req_str[..body_offset];
             let body_bytes = &buf[body_offset..n];
+
+            // Verify CSRF & Cross-Origin restrictions for state mutations
+            if let Err(csrf_err) = check_csrf_and_origin(headers_part, &method) {
+                let resp = json_response(
+                    403,
+                    &serde_json::json!({
+                        "error": "Forbidden",
+                        "details": csrf_err
+                    })
+                    .to_string(),
+                );
+                let _ = socket.write_all(&resp).await;
+                let _ = socket.flush().await;
+                return;
+            }
 
             let response = handle_request(&method, &path, body_bytes, &state).await;
 
@@ -66,6 +96,44 @@ fn parse_request_line(req: &str) -> (String, String) {
         }
     }
     ("GET".to_string(), "/".to_string())
+}
+
+/// Validate incoming mutative request against Cross-Site Request Forgery (CSRF) & DNS rebinding
+pub fn check_csrf_and_origin(headers: &str, method: &str) -> Result<(), String> {
+    // Safe read methods bypass CSRF token requirement
+    if method == "GET" || method == "HEAD" || method == "OPTIONS" {
+        return Ok(());
+    }
+
+    let mut has_custom_header = false;
+    let mut origin_valid = true;
+
+    for line in headers.lines() {
+        let lower = line.to_ascii_lowercase();
+        if lower.starts_with("x-bsdm-request:") {
+            has_custom_header = true;
+        } else if lower.starts_with("origin:") {
+            let origin_val = line[7..].trim().to_ascii_lowercase();
+            // Allow loopback origins and null (native app / webview)
+            if origin_val != "null"
+                && !origin_val.starts_with("http://127.0.0.1")
+                && !origin_val.starts_with("http://localhost")
+                && !origin_val.starts_with("https://127.0.0.1")
+                && !origin_val.starts_with("https://localhost")
+            {
+                origin_valid = false;
+            }
+        }
+    }
+
+    if !origin_valid {
+        return Err("Cross-origin request rejected (disallowed Origin)".to_string());
+    }
+    if !has_custom_header {
+        return Err("Missing required 'X-BSDM-Request: 1' security header".to_string());
+    }
+
+    Ok(())
 }
 
 async fn handle_request(
@@ -132,11 +200,18 @@ async fn handle_request(
         ("POST", "/api/routes") => match serde_json::from_slice::<RouteRule>(body) {
             Ok(rule) => {
                 let mut routes = state.routes.write().await;
-                routes.upsert_rule(rule);
-                let _ = routes.save(&state.routes_path);
-                json_response(200, r#"{"status":"saved"}"#)
+                match routes.upsert_rule(rule) {
+                    Ok(()) => {
+                        let _ = routes.save(&state.routes_path);
+                        json_response(200, r#"{"status":"saved"}"#)
+                    }
+                    Err(e) => json_response(400, &serde_json::json!({"error": e}).to_string()),
+                }
             }
-            Err(e) => json_response(400, &format!(r#"{{"error":"{e}"}}"#)),
+            Err(e) => json_response(
+                400,
+                &serde_json::json!({"error": format!("Invalid JSON: {e}")}).to_string(),
+            ),
         },
         ("DELETE", p) if p.starts_with("/api/routes/") => {
             let id = p.trim_start_matches("/api/routes/");
@@ -181,11 +256,14 @@ async fn handle_request(
     }
 }
 
+/// Formats HTTP response with strict Security Headers (CSP, X-Frame-Options, no-sniff, no-store)
 fn http_response(status: u16, content_type: &str, body: &[u8]) -> Vec<u8> {
     let status_text = match status {
         200 => "OK",
         400 => "Bad Request",
+        403 => "Forbidden",
         404 => "Not Found",
+        413 => "Payload Too Large",
         500 => "Internal Server Error",
         _ => "Status",
     };
@@ -193,8 +271,11 @@ fn http_response(status: u16, content_type: &str, body: &[u8]) -> Vec<u8> {
         "HTTP/1.1 {status} {status_text}\r\n\
          Content-Type: {content_type}\r\n\
          Content-Length: {}\r\n\
-         Access-Control-Allow-Origin: *\r\n\
-         Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS\r\n\
+         Content-Security-Policy: default-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self';\r\n\
+         X-Content-Type-Options: nosniff\r\n\
+         X-Frame-Options: DENY\r\n\
+         Referrer-Policy: no-referrer\r\n\
+         Cache-Control: no-store, max-age=0\r\n\
          Connection: close\r\n\r\n",
         body.len()
     )
@@ -377,9 +458,19 @@ body { background: var(--bg); color: var(--text); padding-bottom: 70px; -webkit-
 let currentStatus = null;
 let currentRoutes = [];
 
+// Base fetch helper with security headers (CSRF defense)
+async function apiFetch(url, options = {}) {
+  const opts = Object.assign({}, options);
+  opts.headers = Object.assign({
+    'X-BSDM-Request': '1',
+    'Accept': 'application/json'
+  }, opts.headers || {});
+  return fetch(url, opts);
+}
+
 async function refreshStatus() {
   try {
-    const res = await fetch('/api/status');
+    const res = await apiFetch('/api/status');
     const data = await res.json();
     currentStatus = data;
     
@@ -427,7 +518,7 @@ function formatBytes(bytes) {
 
 async function toggleTunnel() {
   try {
-    const res = await fetch('/api/tunnel/toggle', { method: 'POST' });
+    const res = await apiFetch('/api/tunnel/toggle', { method: 'POST' });
     await refreshStatus();
   } catch(e) {
     alert('Ошибка переключения: ' + e);
@@ -440,7 +531,7 @@ async function setMode(mode) {
   if (mode === 'global') document.getElementById('modeGlobal').classList.add('active');
   if (mode === 'off') document.getElementById('modeOff').classList.add('active');
   
-  await fetch('/api/system-proxy/toggle', {
+  await apiFetch('/api/system-proxy/toggle', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ mode })
@@ -449,7 +540,7 @@ async function setMode(mode) {
 
 async function loadRoutes() {
   try {
-    const res = await fetch('/api/routes');
+    const res = await apiFetch('/api/routes');
     const data = await res.json();
     currentRoutes = data.rules || [];
     renderRoutes();
@@ -496,11 +587,17 @@ async function saveRule() {
   if (!pattern) return alert('Укажите шаблон домена');
   
   const id = 'rule-' + Math.random().toString(36).substring(2, 9);
-  await fetch('/api/routes', {
+  const res = await apiFetch('/api/routes', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ id, pattern, target, enabled: true, comment: comment || null })
   });
+  
+  if (!res.ok) {
+    const err = await res.json();
+    alert('Ошибка: ' + (err.error || 'Не удалось сохранить правило'));
+    return;
+  }
   
   closeModal();
   await loadRoutes();
@@ -508,7 +605,7 @@ async function saveRule() {
 
 async function deleteRule(id) {
   if (!confirm('Удалить правило?')) return;
-  await fetch('/api/routes/' + id, { method: 'DELETE' });
+  await apiFetch('/api/routes/' + id, { method: 'DELETE' });
   await loadRoutes();
 }
 
@@ -547,7 +644,10 @@ mod tests {
 
         // Test GET /
         let res_html = handle_request("GET", "/", b"", &state).await;
-        assert!(String::from_utf8_lossy(&res_html).contains("BSDM Connect"));
+        let html_str = String::from_utf8_lossy(&res_html);
+        assert!(html_str.contains("BSDM Connect"));
+        assert!(html_str.contains("Content-Security-Policy"));
+        assert!(html_str.contains("X-Frame-Options: DENY"));
 
         // Test GET /proxy.pac
         let res_pac = handle_request("GET", "/proxy.pac", b"", &state).await;
@@ -557,7 +657,7 @@ mod tests {
         let res_status = handle_request("GET", "/api/status", b"", &state).await;
         assert!(String::from_utf8_lossy(&res_status).contains("test-dev-01"));
 
-        // Test POST /api/routes
+        // Test POST /api/routes with valid JSON and pattern
         let new_rule = serde_json::json!({
             "id": "test-rule-custom",
             "pattern": "*.testdomain.internal",
@@ -579,5 +679,28 @@ mod tests {
             current_routes.evaluate("sub.testdomain.internal"),
             RouteTarget::Proxy
         );
+    }
+
+    #[test]
+    fn test_csrf_protection_and_origin_filtering() {
+        // Safe GET request passes without headers
+        assert!(check_csrf_and_origin("Host: 127.0.0.1:8765\r\n", "GET").is_ok());
+
+        // POST without custom header is rejected
+        assert!(check_csrf_and_origin("Host: 127.0.0.1:8765\r\n", "POST").is_err());
+
+        // POST with foreign Origin is rejected even if header is present
+        let evil_headers =
+            "Host: 127.0.0.1:8765\r\nOrigin: http://evil.com\r\nX-BSDM-Request: 1\r\n";
+        assert!(check_csrf_and_origin(evil_headers, "POST").is_err());
+
+        // POST with valid localhost Origin and custom header succeeds
+        let valid_headers =
+            "Host: 127.0.0.1:8765\r\nOrigin: http://127.0.0.1:8765\r\nX-BSDM-Request: 1\r\n";
+        assert!(check_csrf_and_origin(valid_headers, "POST").is_ok());
+
+        // POST with null Origin (WebView / local file) and custom header succeeds
+        let webview_headers = "Host: 127.0.0.1:8765\r\nOrigin: null\r\nX-BSDM-Request: 1\r\n";
+        assert!(check_csrf_and_origin(webview_headers, "POST").is_ok());
     }
 }

@@ -1,10 +1,18 @@
 //! Local Domain-Based Routing Engine for BSDM Agent & BSDM Connect
 //! Evaluates domain routing targets: Direct, Proxy, Tunnel, or Block.
+//! Enforces input sanitization, bounds checking, and atomic persistence.
 
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::net::IpAddr;
 use std::path::Path;
 use tracing::info;
+
+/// Maximum number of domain routing rules allowed to prevent memory exhaustion
+pub const MAX_RULES: usize = 1000;
+
+/// Maximum length of a single pattern string
+pub const MAX_PATTERN_LEN: usize = 2048;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -126,13 +134,21 @@ impl RouteTable {
         self.default_target
     }
 
-    /// Add or update a rule by ID
-    pub fn upsert_rule(&mut self, rule: RouteRule) {
+    /// Add or update a rule by ID with pattern validation and capacity bounds
+    pub fn upsert_rule(&mut self, rule: RouteRule) -> Result<(), String> {
+        validate_pattern(&rule.pattern)?;
+
         if let Some(pos) = self.rules.iter().position(|r| r.id == rule.id) {
             self.rules[pos] = rule;
         } else {
+            if self.rules.len() >= MAX_RULES {
+                return Err(format!(
+                    "Maximum route table capacity reached ({MAX_RULES} rules)"
+                ));
+            }
             self.rules.push(rule);
         }
+        Ok(())
     }
 
     /// Remove a rule by ID
@@ -168,6 +184,48 @@ impl RouteTable {
         }
         Self::default_corporate()
     }
+}
+
+/// Validates rule domain pattern
+pub fn validate_pattern(pattern: &str) -> Result<(), String> {
+    let trimmed = pattern.trim();
+    if trimmed.is_empty() {
+        return Err("Pattern cannot be empty".to_string());
+    }
+    if trimmed.len() > MAX_PATTERN_LEN {
+        return Err(format!(
+            "Pattern exceeds maximum length of {MAX_PATTERN_LEN} characters"
+        ));
+    }
+
+    for chunk in trimmed.split(&[';', ','][..]) {
+        let pat = chunk.trim();
+        if pat.is_empty() {
+            continue;
+        }
+        if pat.contains('\0') || pat.chars().any(|c| c.is_control()) {
+            return Err("Pattern contains illegal control or null characters".to_string());
+        }
+
+        if pat.contains('/') {
+            // Check CIDR format
+            if let Some((ip_str, mask_str)) = pat.split_once('/') {
+                if ip_str.parse::<IpAddr>().is_err() {
+                    return Err(format!("Invalid IP address in CIDR pattern: {ip_str}"));
+                }
+                match mask_str.parse::<u8>() {
+                    Ok(mask) if mask <= 128 => {}
+                    _ => return Err(format!("Invalid mask length in CIDR pattern: {mask_str}")),
+                }
+            }
+        } else if pat.len() > 253 {
+            return Err(format!(
+                "Domain pattern chunk exceeds 253 characters: {pat}"
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 /// Matches hostname against wildcard or suffix patterns
@@ -214,14 +272,14 @@ mod tests {
         assert_eq!(table.evaluate("127.0.0.1"), RouteTarget::Direct);
         assert_eq!(table.evaluate("printer.local"), RouteTarget::Direct);
 
+        // High security -> Tunnel
+        assert_eq!(table.evaluate("db.vpn.corp"), RouteTarget::Tunnel);
+        assert_eq!(table.evaluate("vault.secure.internal"), RouteTarget::Tunnel);
+
         // Corporate Intranet -> Proxy
         assert_eq!(table.evaluate("wiki.corp"), RouteTarget::Proxy);
         assert_eq!(table.evaluate("portal.internal"), RouteTarget::Proxy);
         assert_eq!(table.evaluate("mail.company.com"), RouteTarget::Proxy);
-
-        // High security -> Tunnel
-        assert_eq!(table.evaluate("db.vpn.corp"), RouteTarget::Tunnel);
-        assert_eq!(table.evaluate("vault.secure.internal"), RouteTarget::Tunnel);
 
         // Tracker -> Block
         assert_eq!(table.evaluate("telemetry.evil.com"), RouteTarget::Block);
@@ -233,16 +291,28 @@ mod tests {
     }
 
     #[test]
+    fn test_pattern_validation() {
+        assert!(validate_pattern("*.corp.internal; 10.0.0.0/8").is_ok());
+        assert!(validate_pattern("").is_err());
+        assert!(validate_pattern("invalid/ip/address/33").is_err());
+        assert!(validate_pattern("10.0.0.1/300").is_err());
+        assert!(validate_pattern("test\0domain.com").is_err());
+        assert!(validate_pattern("test\x1b[31mdomain.com").is_err());
+    }
+
+    #[test]
     fn test_route_save_and_load() {
         let tmp = NamedTempFile::new().unwrap();
         let mut table = RouteTable::default_corporate();
-        table.upsert_rule(RouteRule {
-            id: "custom-rule-1".to_string(),
-            pattern: "*.mycustomsite.org".to_string(),
-            target: RouteTarget::Tunnel,
-            enabled: true,
-            comment: Some("Custom tunnel rule".to_string()),
-        });
+        table
+            .upsert_rule(RouteRule {
+                id: "custom-rule-1".to_string(),
+                pattern: "*.mycustomsite.org".to_string(),
+                target: RouteTarget::Tunnel,
+                enabled: true,
+                comment: Some("Custom tunnel rule".to_string()),
+            })
+            .unwrap();
 
         table.save(tmp.path()).unwrap();
 
