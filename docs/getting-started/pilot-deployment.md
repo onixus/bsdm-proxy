@@ -17,43 +17,47 @@ Issue tracking: **#270** (этот документ + compose), **#269** (load-t
 
 ---
 
-## Что входит в пилот (Hybrid core)
+## Pilot Day-1 Scope Freeze
 
-| Компонент | Статус в пилоте |
-|---|---|
-| HTTP/HTTPS forward proxy, CONNECT | **Да** |
-| `POLICY_MODE=selective-mitm` | **Да** (default) |
-| Selective MITM по `MITM_CATEGORIES` | **Да** |
-| SNI path (без расшифровки) | **Да** |
-| ACL | **Да** (`ACL_ENABLED=true` в pilot overlay) |
-| Auth (Basic/LDAP/…) | **Опционально** (`AUTH_ENABLED`) |
-| Categorization / UT1 | **Опционально** (включать после подготовки feeds) |
-| L1 cache + spill | **Да** |
-| Redis L2 (`redis:7.4`, `REDIS_L2_ENABLED`) | **Да** (pilot overlay; `maxmemory 512mb`, `allkeys-lfu`) |
-| Kafka → cache-indexer → ClickHouse → Search API | **Да** (base compose) |
-| Prometheus / Grafana | **Да** |
-| DNS sinkhole (UDP) | **Да (day-1)** — сервис `dns-sinkhole` в base compose; host **:5353** (на macOS часто **:15353** — mDNS занимает 5353; см. [pilot-dns.md](pilot-dns.md)) |
-| Admin Console `/admin/` | **Да** — SPA встроена в proxy image (`ADMIN_CONSOLE_DIR=/opt/bsdm/admin-console`), URL `http://localhost:9090/admin/` |
+Для минимизации операционных рисков и предотвращения scope creep зафиксирован **строгий стек первого дня пилота (Day-1)**.
 
-## Что **не** входит (по умолчанию выключено)
+### Матрица компонентов Day-1 (Что включено / Что выключено)
 
-Experimental / frozen scope — **не** поднимать в первом пилоте:
+| Компонент / Подсистема | Статус Day-1 | Описание / Назначение |
+|---|:---:|---|
+| **Forward Proxy & CONNECT** | ✅ **ON** | Базовое HTTP/HTTPS проксирование (`:3128`) |
+| **Hybrid Policy (`selective-mitm`)** | ✅ **ON** | Селективный MITM по категориям (`MITM_CATEGORIES`) |
+| **DNS Sinkhole (UDP core)** | ✅ **ON** | Первый рубеж блокировок (`dns-sinkhole` на `:5353/udp`) |
+| **ACL & Auth** | ✅ **ON** | Правила фильтрации (`ACL_ENABLED=true`), Basic/LDAP auth |
+| **Admin Console** | ✅ **ON** | Интерфейс оператора (`http://localhost:9090/admin/`) |
+| **ClickHouse + Search API** | ✅ **ON** | Аналитика и поиск событий (5-дневный retention) |
+| **Prometheus & Grafana** | ✅ **ON** | Мониторинг метрик и дашборды (`:9091`, `:3000`) |
+| **MITM Circuit Breaker** | ✅ **ON** | Автоматический blind CONNECT при сбоях TLS/pinning |
+| **Threat Intelligence (Enforcement)** | ❌ **OFF** | **Только Shadow Mode / коллектор**, без блокировки трафика |
+| **ML Worker (Block Mode)** | ❌ **OFF** | В Day-1 выключен (Day-2+: только скоринг/наблюдение) |
+| **Agent / Fleet Installers** | ❌ **OFF** | Исключены из обязательного пути (статус: Lab / Phase C) |
+| **AmneziaWG / bsdm-connect** | ❌ **OFF** | Исключены из production-пути (статус: Lab / Phase C) |
+| **WASM Plugins** | ❌ **OFF** | Не используются как security boundary |
+| **ICAP / ClamAV** | ❌ **OFF** | Выключены (`--profile icap` не поднимается) |
+| **eBPF / XDP / Cluster Mesh** | ❌ **OFF** | Не входят в одноузловой пилот |
+| **DLP Enforcement** | ❌ **OFF** | `DLP_ENABLED=false` |
 
-- ICAP / ClamAV (`--profile icap`)
-- AmneziaWG / BSDM Connect
-- eBPF / XDP
-- WASM plugins как security boundary
-- Global session / threat-sync multi-node scaffolding
-- DLP/CASB enforcement (engine может существовать в процессе — см. ниже)
-- Production HA / multi-cluster
+---
 
-Alert-worker и ml-worker — **второй шаг** (`--profile alerts` / `ml`), не часть
-«дня 1» Hybrid core.
+## Чек-лист оператора Day-1 (Operator Checklist)
 
-### DLP
+Перед запуском пилотного трафика оператор проверяет:
 
-Pilot overlay sets **`DLP_ENABLED=false`** (default in code as well). No control-API
-wipe is required on restart. To evaluate experimental signatures in a lab only:
+- [ ] **Конфигурация:** используется `deploy/compose/docker-compose.pilot.yml`
+- [ ] **Режим:** `POLICY_MODE=selective-mitm` и `DEPLOYMENT_PROFILE=production`
+- [ ] **Токены:** заданы `CONTROL_API_TOKEN`, `ACL_API_TOKEN`, `SEARCH_API_TOKEN`
+- [ ] **Безопасность Control Plane:** `CONTROL_API_ALLOW_INSECURE=false`, порт `:9090` не доступен из публичного интернета
+- [ ] **Экспериментальные профили:** `--profile icap`, agent-fleet, awg **не** активированы
+- [ ] **Threat Intel:** правила блокировки TI выключены (enforcement=off)
+- [ ] **Хранилище:** ClickHouse TTL 5 дней (`pilot_retention.sql`), Kafka retention 48h
+- [ ] **CA:** сертификат выпущен (`./scripts/gen-ca.sh`) и установлен на тестовых хостах
+- [ ] **DNS Sinkhole:** резолвит локально и фильтрует тестовые вредоносные домены (`blocked.test`)
+
 
 ```bash
 export DLP_ENABLED=true

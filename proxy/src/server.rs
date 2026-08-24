@@ -626,6 +626,11 @@ async fn handle_connect_mitm(
                 .tls_handshakes_total
                 .with_label_values(&["error"])
                 .inc();
+            service.mitm_circuit_breaker.record_attempt(
+                &domain,
+                false,
+                &format!("cert_gen_error: {e}"),
+            );
             error!(
                 domain = %domain,
                 decision_source = "pinning-bypass",
@@ -644,6 +649,9 @@ async fn handle_connect_mitm(
                 .tls_handshakes_total
                 .with_label_values(&["success"])
                 .inc();
+            service
+                .mitm_circuit_breaker
+                .record_attempt(&domain, true, "ok");
             stream
         }
         Err(e) => {
@@ -652,6 +660,11 @@ async fn handle_connect_mitm(
                 .tls_handshakes_total
                 .with_label_values(&["error"])
                 .inc();
+            service.mitm_circuit_breaker.record_attempt(
+                &domain,
+                false,
+                &format!("tls_handshake_failed: {e}"),
+            );
             error!("TLS handshake failed for {}: {}", domain, e);
             return;
         }

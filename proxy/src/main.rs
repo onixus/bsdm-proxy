@@ -251,6 +251,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         policy_mode: policy_config.policy_mode,
         mitm_categories: policy_config.mitm_categories.clone(),
         pinning_registry: policy_config.pinning_registry.clone(),
+        mitm_circuit_breaker: policy_config.mitm_circuit_breaker.clone(),
         acl_engine: policy_config.acl_engine.clone(),
         categorization: policy_config.categorization.clone(),
     };
@@ -333,6 +334,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         kafka_for_control,
         http_for_control,
     )
+    .with_mitm_circuit_breaker(service.mitm_circuit_breaker())
     .with_cert_cache(cert_cache_for_control)
     .with_config_apply(shutdown_tx.clone(), acl_api.clone());
 

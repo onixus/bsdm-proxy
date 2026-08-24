@@ -223,6 +223,180 @@ impl PinningRegistry {
             audited_at: audit_path.display().to_string(),
         })
     }
+
+    pub fn upsert_exception(
+        &self,
+        actor: &str,
+        change_reason: &str,
+        mut exception: PinningException,
+    ) -> Result<PinningReloadReport, String> {
+        validate_audit_text("actor", actor, 128)?;
+        validate_audit_text("reason", change_reason, 512)?;
+        exception.domain = normalize_domain(&exception.domain)?;
+        validate_audit_text("exception reason", &exception.reason, 512)?;
+        validate_audit_text("exception owner", &exception.owner, 128)?;
+        if let Some(ticket) = &exception.ticket {
+            validate_audit_text("exception ticket", ticket, 128)?;
+        }
+
+        let previous = self.snapshot();
+        let is_update = previous
+            .iter()
+            .any(|entry| entry.domain == exception.domain);
+        let mut next: Vec<PinningException> = previous
+            .iter()
+            .filter(|entry| entry.domain != exception.domain)
+            .cloned()
+            .collect();
+        next.push(exception.clone());
+        next.sort_by(|left, right| left.domain.cmp(&right.domain));
+
+        if next.len() > MAX_EXCEPTIONS {
+            return Err(format!(
+                "too many pinning exceptions (max {MAX_EXCEPTIONS})"
+            ));
+        }
+
+        let added = if is_update {
+            vec![]
+        } else {
+            vec![exception.domain.clone()]
+        };
+        let updated = if is_update {
+            vec![exception.domain.clone()]
+        } else {
+            vec![]
+        };
+        let removed = vec![];
+
+        if let Some(source_path) = self.inner.source_path.as_deref() {
+            save_file(source_path, &next)?;
+        }
+        if let Some(audit_path) = self.inner.audit_path.as_deref() {
+            let old_by_domain: BTreeMap<_, _> = previous
+                .iter()
+                .map(|entry| (entry.domain.as_str(), entry))
+                .collect();
+            let new_by_domain: BTreeMap<_, _> = next
+                .iter()
+                .map(|entry| (entry.domain.as_str(), entry))
+                .collect();
+            let dummy_source = Path::new("in-memory");
+            let source_path = self.inner.source_path.as_deref().unwrap_or(dummy_source);
+            append_audit(
+                audit_path,
+                source_path,
+                actor,
+                change_reason,
+                &added,
+                &removed,
+                &updated,
+                &old_by_domain,
+                &new_by_domain,
+            )?;
+        }
+
+        self.inner.entries.store(Arc::new(next.clone()));
+        let now = unix_now();
+        Ok(PinningReloadReport {
+            status: if is_update { "updated" } else { "added" },
+            source: self.source(),
+            active: next.iter().filter(|entry| entry.active_at(now)).count(),
+            total: next.len(),
+            added,
+            removed,
+            updated,
+            audited_at: self.audit_path().unwrap_or_default(),
+        })
+    }
+
+    pub fn remove_exception(
+        &self,
+        actor: &str,
+        change_reason: &str,
+        domain: &str,
+    ) -> Result<PinningReloadReport, String> {
+        validate_audit_text("actor", actor, 128)?;
+        validate_audit_text("reason", change_reason, 512)?;
+        let domain_norm = normalize_domain(domain)?;
+
+        let previous = self.snapshot();
+        let existing = previous.iter().find(|entry| entry.domain == domain_norm);
+        if existing.is_none() {
+            return Err(format!("pinning exception not found: {domain_norm}"));
+        }
+
+        let next: Vec<PinningException> = previous
+            .iter()
+            .filter(|entry| entry.domain != domain_norm)
+            .cloned()
+            .collect();
+
+        let added = vec![];
+        let updated = vec![];
+        let removed = vec![domain_norm.clone()];
+
+        if let Some(source_path) = self.inner.source_path.as_deref() {
+            save_file(source_path, &next)?;
+        }
+        if let Some(audit_path) = self.inner.audit_path.as_deref() {
+            let old_by_domain: BTreeMap<_, _> = previous
+                .iter()
+                .map(|entry| (entry.domain.as_str(), entry))
+                .collect();
+            let new_by_domain: BTreeMap<_, _> = next
+                .iter()
+                .map(|entry| (entry.domain.as_str(), entry))
+                .collect();
+            let dummy_source = Path::new("in-memory");
+            let source_path = self.inner.source_path.as_deref().unwrap_or(dummy_source);
+            append_audit(
+                audit_path,
+                source_path,
+                actor,
+                change_reason,
+                &added,
+                &removed,
+                &updated,
+                &old_by_domain,
+                &new_by_domain,
+            )?;
+        }
+
+        self.inner.entries.store(Arc::new(next.clone()));
+        let now = unix_now();
+        Ok(PinningReloadReport {
+            status: "removed",
+            source: self.source(),
+            active: next.iter().filter(|entry| entry.active_at(now)).count(),
+            total: next.len(),
+            added,
+            removed,
+            updated,
+            audited_at: self.audit_path().unwrap_or_default(),
+        })
+    }
+}
+
+fn save_file(path: &Path, exceptions: &[PinningException]) -> Result<(), String> {
+    let tmp = path.with_extension(format!("tmp.{}", unix_now()));
+    let file = File::create(&tmp).map_err(|e| format!("create {}: {e}", tmp.display()))?;
+    #[derive(Serialize)]
+    struct PinningFileWrite<'a> {
+        version: u32,
+        exceptions: &'a [PinningException],
+    }
+    serde_json::to_writer_pretty(
+        file,
+        &PinningFileWrite {
+            version: 1,
+            exceptions,
+        },
+    )
+    .map_err(|e| format!("write {}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, path)
+        .map_err(|e| format!("rename {} to {}: {e}", tmp.display(), path.display()))?;
+    Ok(())
 }
 
 fn load_file(path: &Path) -> Result<Vec<PinningException>, String> {
@@ -461,6 +635,45 @@ mod tests {
         assert!(audit_body.contains(r#""action":"added""#));
         assert!(audit_body.contains(r#""action":"removed""#));
         assert!(audit_body.contains(r#""action":"updated""#));
+
+        let _ = std::fs::remove_file(source);
+        let _ = std::fs::remove_file(audit);
+    }
+
+    #[test]
+    fn upsert_and_remove_exceptions_with_audit() {
+        let unique = format!("bsdm-pinning-crud-{}-{}", std::process::id(), unix_now());
+        let source = std::env::temp_dir().join(format!("{unique}.json"));
+        let audit = std::env::temp_dir().join(format!("{unique}.audit.jsonl"));
+        std::fs::write(
+            &source,
+            r#"{"version":1,"exceptions":[{"domain":"existing.example.com","reason":"init","owner":"ops"}]}"#,
+        )
+        .unwrap();
+        let registry = PinningRegistry::new(
+            load_file(&source).unwrap(),
+            Some(source.clone()),
+            Some(audit.clone()),
+        );
+
+        let report = registry
+            .upsert_exception("bob", "add new pinned domain", entry("new.example.com"))
+            .unwrap();
+        assert_eq!(report.status, "added");
+        assert_eq!(report.total, 2);
+        assert!(registry.matches("new.example.com"));
+
+        let report_remove = registry
+            .remove_exception("bob", "cleanup", "existing.example.com")
+            .unwrap();
+        assert_eq!(report_remove.status, "removed");
+        assert_eq!(report_remove.total, 1);
+        assert!(!registry.matches("existing.example.com"));
+
+        let audit_body = std::fs::read_to_string(&audit).unwrap();
+        assert!(audit_body.contains(r#""actor":"bob""#));
+        assert!(audit_body.contains(r#""action":"added""#));
+        assert!(audit_body.contains(r#""action":"removed""#));
 
         let _ = std::fs::remove_file(source);
         let _ = std::fs::remove_file(audit);
