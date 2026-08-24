@@ -24,3 +24,7 @@
 
 # proxy/src/auth_sspi.rs [generic-api-key] — squid-2.5-ntlmssp
 024730a4c47e89c3bf24447c6d10a4f657787285:proxy/src/auth_sspi.rs:generic-api-key:437
+
+# proxy/src/dlp.rs [stripe-access-token] — DLP rule test
+0b935405f8946d742994cf948fd8894ba0419e2a:proxy/src/dlp.rs:stripe-access-token:253
+
