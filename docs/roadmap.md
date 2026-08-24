@@ -52,6 +52,12 @@ Roadmap определяет порядок работ в рамках стра�
 - [x] Multi-node shared device registry + CRL (Redis write-through).
 - [x] Multi-OS pilot installers + system-proxy hooks (`packaging/agent`, agent-spike CLI).
 - [x] MDM/GPO **silent fleet packaging scaffolding** — silent installers, Intune Win32 scripts, GPO ADMX, macOS pkgbuild + mobileconfig example, fleet drop script (`packaging/agent/fleet/`, [pilot-agent-fleet.md](getting-started/pilot-agent-fleet.md)).
+- [x] **AmneziaWG / BSDM Connect endpoint integration** — Curve25519 cryptography, pre-shared keys (PSK), automated peer provisioning, Agent Contract `tunnel` capability, atomic config generation, device revocation sync, and Prometheus telemetry.
+- [x] **Alternative Rust Client (`bsdm-connect`)** — standalone CLI and daemon binary, AWG configuration lifecycle, command execution timeouts, atomic 0600 file save ([bsdm-connect-client.md](getting-started/bsdm-connect-client.md)).
+- [x] **Domain-based split routing & PAC generator** — Local route evaluation (`Direct`, `Proxy`, `Tunnel`, `Block`), standards-compliant JavaScript `FindProxyForURL(url, host)` generation with strict JS escaping and CIDR/pattern validation ([agent-ui-and-split-routing.md](getting-started/agent-ui-and-split-routing.md)).
+- [x] **Hardened Agent Web/Mobile UI server** — Embedded localhost UI server with real-time metrics, Slowloris protection, strict CSP/Frame headers, and CSRF / DNS-rebinding defense (`X-BSDM-Request: 1`).
+- [x] **Cross-platform UI & Packaging Scaffolds** — macOS App bundle creator script (`packaging/agent/macos/create-macos-app.sh`) and Android VPN Service template (`packaging/agent/android/`).
+- [x] **Comprehensive E2E integration test suite** — `e2e/tests/amneziawg_and_agent_e2e.rs` covering AWG server config, keypair generation, agent enrollment, tunnel lifecycle, PAC generation, and UI CSRF rejection.
 - [ ] **Notarized / Authenticode-signed store distribution** — customer signing pipeline only (out of lab; no Apple/Microsoft certs in CI).
 
 ---
@@ -69,7 +75,6 @@ Roadmap определяет порядок работ в рамках стра�
 ## Замороженные модули (Scope Freeze)
 
 Следующие экспериментальные модули заморожены в текущем виде для исключения фичер-крипа:
-- **AmneziaWG / BSDM Connect**: Заморожен до полной реализации Agent Contract v0.1.
 - **eBPF/XDP**: Заморожен, не является основным вектором фильтрации.
 - **Native String DLP**: Заморожен до появления полноценного спека.
 - **Mock OIDC Reverse Proxy**: Заморожен.

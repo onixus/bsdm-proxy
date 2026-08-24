@@ -11,6 +11,13 @@ name: bsdm-proxy
 # Docs: docs/ops-and-dev/configuration.md · docs/roadmap.md
 
 services:
+  proxy:
+    environment:
+      - AWG_CONFIG_PATH=/etc/amnezia/amneziawg/awg0.conf
+      - AWG_SERVER_ENDPOINT=proxy.corp.internal:51820
+    volumes:
+      - awg-config:/etc/amnezia/amneziawg
+
   amneziawg:
     image: amneziavpn/amneziawg-go:latest
     container_name: bsdm-amneziawg
@@ -41,3 +48,4 @@ services:
 
 volumes:
   awg-config:
+

@@ -44,6 +44,42 @@ fn unix_now() -> u64 {
         .as_secs()
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct EnrollResult {
+    pub device_id: String,
+    pub device_token: String,
+    pub client_cert_pem: Option<String>,
+    pub ca_cert_pem: Option<String>,
+    pub tunnel_config: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AgentState {
+    pub device_id: String,
+    pub device_name: String,
+    pub device_type: String,
+    pub platform: String,
+    pub control_plane_url: String,
+    pub device_token: Option<String>,
+    pub client_cert_pem: Option<String>,
+    pub ca_cert_pem: Option<String>,
+    pub tunnel_conf_path: Option<String>,
+    pub updated_at: u64,
+}
+
+impl AgentState {
+    pub fn save(&self, path: &std::path::Path) -> Result<(), String> {
+        let data =
+            serde_json::to_string_pretty(self).map_err(|e| format!("state serialize: {e}"))?;
+        crate::tunnel::save_atomic_0600(path, &data)
+    }
+
+    pub fn load(path: &std::path::Path) -> Result<Self, String> {
+        let text = std::fs::read_to_string(path).map_err(|e| format!("read state file: {e}"))?;
+        serde_json::from_str(&text).map_err(|e| format!("state parse: {e}"))
+    }
+}
+
 pub struct AgentEngine {
     device_id: String,
     device_name: String,
@@ -288,26 +324,32 @@ impl AgentEngine {
         }
     }
 
-    /// Bootstrap enroll → device Bearer token; optional mTLS CSR → client cert PEMs.
+    /// Bootstrap enroll → device Bearer token; optional mTLS CSR → client cert PEMs; optional AWG tunnel config.
     ///
-    /// Returns `(device_id, device_token, optional client_cert_pem, optional ca_cert_pem)`.
+    /// Returns `EnrollResult`.
     pub async fn enroll(
         &self,
         client: &reqwest::Client,
         enroll_token: Option<&str>,
         with_mtls: bool,
-    ) -> Result<(String, String, Option<String>, Option<String>), String> {
+        with_tunnel: bool,
+    ) -> Result<EnrollResult, String> {
         let enroll_url = format!(
             "{}/api/v1/agent/enroll",
             self.control_plane_url.trim_end_matches('/')
         );
+
+        let mut caps = vec!["local-proxy".to_string()];
+        if with_tunnel {
+            caps.push("tunnel".to_string());
+        }
 
         let mut body = serde_json::json!({
             "device_id": self.device_id,
             "name": self.device_name,
             "platform": self.platform,
             "device_type": self.device_type,
-            "capabilities": ["local-proxy"],
+            "capabilities": caps,
         });
 
         // Key material kept only for CSR generation; private key is printed for lab storage.
@@ -356,8 +398,9 @@ impl AgentEngine {
             .to_string();
         let client_cert = v["client_cert_pem"].as_str().map(str::to_string);
         let ca_cert = v["ca_cert_pem"].as_str().map(str::to_string);
+        let tunnel_config = v.get("tunnel_config").cloned();
         let mtls = v["mtls"].as_bool().unwrap_or(false);
-        info!(%device_id, mtls, "Agent enrolled (device_token issued)");
+        info!(%device_id, mtls, has_tunnel = tunnel_config.is_some(), "Agent enrolled (device_token issued)");
         if let Some(key_pem) = private_key_pem {
             if client_cert.is_some() {
                 println!("DEVICE_KEY_PEM_BEGIN");
@@ -375,7 +418,41 @@ impl AgentEngine {
             print!("{ca}");
             println!("CA_CERT_PEM_END");
         }
-        Ok((device_id, device_token, client_cert, ca_cert))
+        Ok(EnrollResult {
+            device_id,
+            device_token,
+            client_cert_pem: client_cert,
+            ca_cert_pem: ca_cert,
+            tunnel_config,
+        })
+    }
+
+    /// Fetch raw WireGuard/AmneziaWG `.conf` or JSON profile from control plane.
+    pub async fn fetch_tunnel_config(
+        &self,
+        client: &reqwest::Client,
+        format: &str,
+    ) -> Result<String, String> {
+        let url = format!(
+            "{}/api/v1/agent/tunnel/config?device_id={}&format={}",
+            self.control_plane_url.trim_end_matches('/'),
+            urlencoding_minimal(&self.device_id),
+            format
+        );
+        let request = self.apply_auth(client.get(&url));
+        let resp = request
+            .send()
+            .await
+            .map_err(|e| format!("tunnel config transport: {e}"))?;
+        let status = resp.status();
+        let text = resp
+            .text()
+            .await
+            .map_err(|e| format!("tunnel config body: {e}"))?;
+        if !status.is_success() {
+            return Err(format!("tunnel config HTTP {status}: {text}"));
+        }
+        Ok(text)
     }
 
     /// POST local decisions to `POST /api/v1/agent/events`.

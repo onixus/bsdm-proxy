@@ -190,7 +190,33 @@ by the proxy/agent CA. Plain `METRICS_PORT` stays HTTP for scrapers/Admin.
 
 ## 4. Capability Negotiation
 
-Agents negotiate capabilities during enrollment:
+Agents negotiate capabilities during enrollment (`POST /api/v1/agent/enroll`):
 - `local-proxy` — HTTP/HTTPS local proxy listener on 127.0.0.1
 - `dns-sinkhole` — Local DNS daemon / RPZ resolver
-- `tunnel` — Optional fallback tunnel transport (AmneziaWG / WireGuard)
+- `tunnel` — Fallback obfuscated tunnel transport (AmneziaWG / WireGuard)
+
+### 4.1 Tunnel Capability Provisioning
+
+When an agent requests `"tunnel"` in `capabilities` or provides `tunnel_public_key`:
+1. Control plane auto-allocates an assigned IP in the AmneziaWG subnet (e.g. `10.8.0.x/32`).
+2. Generates a client Curve25519 keypair if `tunnel_public_key` was not specified.
+3. Automatically provisions the peer in `AwgServerConfig` and syncs with the sidecar interface.
+4. Returns connection & DPI-resistant obfuscation parameters in `tunnel_config`:
+   ```json
+   {
+     "tunnel_config": {
+       "assigned_ip": "10.8.0.2",
+       "client_public_key": "<Curve25519-Base64>",
+       "client_private_key": "<Curve25519-Base64>",
+       "server_public_key": "<Curve25519-Base64>",
+       "server_endpoint": "proxy.corp.internal:51820",
+       "obfuscation": {
+         "jc": 4, "jmin": 40, "jmax": 70, "s1": 15, "s2": 25,
+         "h1": 10000001, "h2": 10000002, "h3": 10000003, "h4": 10000004
+       },
+       "conf_raw": "[Interface]\nPrivateKey = ...\n..."
+     }
+   }
+   ```
+5. Enrolled agents can fetch or refresh their tunnel profile at `GET /api/v1/agent/tunnel/config?device_id=<id>&format=conf`.
+

@@ -459,14 +459,14 @@ impl AclEngine {
     /// Match domain pattern (supports wildcards)
     fn match_domain(&self, domain: &str, pattern: &str) -> bool {
         if let Some(suffix) = pattern.strip_prefix("*.") {
-            // Wildcard subdomain match
-            domain.ends_with(suffix) || domain == suffix
+            // Wildcard subdomain match (requires dot boundary or exact match)
+            crate::security_util::safe_subdomain_matches(domain, suffix)
         } else if let Some(suffix) = pattern.strip_prefix('*') {
             // Wildcard suffix match
             domain.ends_with(suffix)
         } else {
             // Exact match
-            domain == pattern
+            domain.eq_ignore_ascii_case(pattern)
         }
     }
 
@@ -515,6 +515,9 @@ mod tests {
         assert!(engine.match_domain("api.example.com", "*.example.com"));
         assert!(engine.match_domain("example.com", "*.example.com"));
         assert!(!engine.match_domain("example.org", "*.example.com"));
+        // Must NOT match domain with suffix overlap but different domain
+        assert!(!engine.match_domain("notexample.com", "*.example.com"));
+        assert!(!engine.match_domain("evil-example.com", "*.example.com"));
     }
 
     #[test]

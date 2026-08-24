@@ -19,6 +19,8 @@
 | [Pilot ML](getting-started/pilot-ml.md) | Одна модель, write-back и smoke test |
 | [Pilot agent](getting-started/pilot-agent.md) | Phase C lab spike и приёмка |
 | [Agent fleet](getting-started/pilot-agent-fleet.md) | MDM/GPO/Jamf packaging scaffolding |
+| [BSDM Connect Client](getting-started/bsdm-connect-client.md) | Альтернативный клиент на Rust для AmneziaWG и BSDM |
+| [Split Routing & Agent UI](getting-started/agent-ui-and-split-routing.md) | Разграничение маршрутов по доменам, PAC и мобильный UI |
 | [Hybrid load-test profile](ops-and-dev/load-test-selective-mitm.md) | 100-user SNI/MITM/DNS probe + results archive (#269) |
 | [Control plane security](ops-and-dev/control-plane-security.md) | Tokens, bind, network policy for pilot (#271) |
 | [Backup & restore](ops-and-dev/backup-restore.md) | ClickHouse dumps + CA archive rollback drill |

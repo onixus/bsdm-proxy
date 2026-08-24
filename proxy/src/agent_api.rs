@@ -64,11 +64,12 @@ impl ControlApiState {
             return Some(self.registered_devices());
         }
         if method == Method::POST {
-            if let Some(device_id) = path
+            let device_id = path
                 .strip_prefix("/api/v1/devices/")
-                .and_then(|p| p.strip_suffix("/revoke"))
-            {
-                return Some(self.revoke_device(device_id));
+                .or_else(|| path.strip_prefix("/api/v1/agent/devices/"))
+                .and_then(|p| p.strip_suffix("/revoke"));
+            if let Some(id) = device_id {
+                return Some(self.revoke_device(id).await);
             }
         }
 
@@ -80,7 +81,8 @@ impl ControlApiState {
             (&Method::POST, "/api/v1/agent/heartbeat") => self.agent_heartbeat(body).await,
             (&Method::POST, "/api/v1/agent/events") => self.agent_events_ingest(body),
             (&Method::GET, "/api/v1/agent/events/recent") => self.agent_events_recent(),
-            (&Method::POST, "/api/v1/agent/enroll") => self.agent_enroll(body),
+            (&Method::POST, "/api/v1/agent/enroll") => self.agent_enroll(body).await,
+            (&Method::GET, "/api/v1/agent/tunnel/config") => self.agent_tunnel_config(query).await,
             (&Method::GET, "/api/v1/agent/crl") => self.agent_crl_json(),
             (&Method::GET, "/api/v1/agent/crl.pem") => self.agent_crl_pem(),
             (&Method::GET, "/api/v1/agent/ocsp/status") => self.agent_ocsp_status(query),
@@ -96,7 +98,7 @@ impl ControlApiState {
                 deprecated_agent_alias(self.agent_events_ingest(body), "/api/v1/agent/events")
             }
             (&Method::POST, "/api/agent/enroll") => {
-                deprecated_agent_alias(self.agent_enroll(body), "/api/v1/agent/enroll")
+                deprecated_agent_alias(self.agent_enroll(body).await, "/api/v1/agent/enroll")
             }
             _ => return None,
         };
@@ -350,7 +352,7 @@ impl ControlApiState {
         json_response(StatusCode::OK, &serde_json::Value::Array(rows).to_string())
     }
 
-    fn revoke_device(&self, device_id: &str) -> Response<Body> {
+    async fn revoke_device(&self, device_id: &str) -> Response<Body> {
         match self.device_registry.revoke(device_id) {
             Ok((persisted, fingerprint, serial)) => {
                 let crl_added = self.agent_crl.revoke(
@@ -359,6 +361,24 @@ impl ControlApiState {
                     serial.as_deref(),
                     "cessationOfOperation",
                 );
+
+                // Remove associated AmneziaWG peer if present and sync sidecar
+                let mut awg_peer_revoked = false;
+                {
+                    let mut awg = self.awg_server.write().await;
+                    let initial_len = awg.peers.len();
+                    awg.peers.retain(|p| p.id != device_id);
+                    if awg.peers.len() < initial_len {
+                        awg_peer_revoked = true;
+                        let awg_path = std::env::var("AWG_CONFIG_PATH")
+                            .unwrap_or_else(|_| "/etc/amnezia/amneziawg/awg0.conf".to_string());
+                        let _ = crate::amneziawg::sync_sidecar_interface(
+                            std::path::Path::new(&awg_path),
+                            &mut awg,
+                        );
+                    }
+                }
+
                 json_response(
                     StatusCode::OK,
                     &serde_json::json!({
@@ -367,6 +387,7 @@ impl ControlApiState {
                         "persisted": persisted,
                         "crl_added": crl_added,
                         "cert_fingerprint": fingerprint,
+                        "awg_peer_revoked": awg_peer_revoked,
                     })
                     .to_string(),
                 )
@@ -545,7 +566,7 @@ impl ControlApiState {
         )
     }
 
-    fn agent_enroll(&self, body: Bytes) -> Response<Body> {
+    async fn agent_enroll(&self, body: Bytes) -> Response<Body> {
         #[derive(Deserialize)]
         struct EnrollDto {
             #[serde(default)]
@@ -565,6 +586,9 @@ impl ControlApiState {
             /// Client cert validity in days (default 90, max 825).
             #[serde(default)]
             cert_validity_days: Option<u32>,
+            /// Optional client Curve25519 public key (base64) for tunnel capability.
+            #[serde(default)]
+            tunnel_public_key: Option<String>,
         }
         let dto: EnrollDto = match serde_json::from_slice(&body) {
             Ok(dto) => dto,
@@ -630,6 +654,54 @@ impl ControlApiState {
             }
         }
 
+        // Auto-provision AmneziaWG tunnel peer if capability "tunnel" requested or tunnel_public_key provided
+        let mut tunnel_config_val = None;
+        if dto.capabilities.iter().any(|c| c == "tunnel") || dto.tunnel_public_key.is_some() {
+            let mut awg = self.awg_server.write().await;
+            crate::amneziawg::ensure_server_keys(&mut awg);
+            let peer_name = dto.name.as_deref().unwrap_or(&device_id_hint);
+            match crate::amneziawg::provision_peer(
+                &mut awg,
+                peer_name,
+                Some(&device_id_hint),
+                dto.tunnel_public_key.as_deref(),
+            ) {
+                Ok((peer, priv_key_opt)) => {
+                    let server_endpoint = std::env::var("AWG_SERVER_ENDPOINT")
+                        .unwrap_or_else(|_| format!("127.0.0.1:{}", awg.listen_port));
+                    let client_priv = priv_key_opt.as_deref().unwrap_or("");
+                    let conf_raw = crate::amneziawg::generate_client_conf(
+                        &awg.public_key,
+                        &server_endpoint,
+                        &peer,
+                        &awg.obfuscation,
+                        if client_priv.is_empty() {
+                            "CLIENT_PRIVATE_KEY_HERE"
+                        } else {
+                            client_priv
+                        },
+                    );
+                    tunnel_config_val = Some(serde_json::json!({
+                        "assigned_ip": peer.assigned_ip,
+                        "client_public_key": peer.public_key,
+                        "client_private_key": priv_key_opt,
+                        "server_public_key": awg.public_key,
+                        "server_endpoint": server_endpoint,
+                        "obfuscation": awg.obfuscation,
+                        "conf_raw": conf_raw,
+                    }));
+
+                    let conf_path = std::env::var("AWG_CONFIG_PATH")
+                        .unwrap_or_else(|_| "./certs/awg/awg0.conf".to_string());
+                    let path = std::path::Path::new(&conf_path);
+                    let _ = crate::amneziawg::sync_sidecar_interface(path, &mut awg);
+                }
+                Err(e) => {
+                    warn!(error = %e, "Failed to auto-provision AWG tunnel peer during enrollment");
+                }
+            }
+        }
+
         match self.device_registry.enroll(EnrollRequest {
             device_id: Some(device_id_hint),
             platform: dto.platform,
@@ -660,10 +732,12 @@ impl ControlApiState {
                             "policy_watch": "/api/v1/agent/policy/watch",
                             "heartbeat": "/api/v1/agent/heartbeat",
                             "events": "/api/v1/agent/events",
+                            "tunnel_config": "/api/v1/agent/tunnel/config",
                             "crl": "/api/v1/agent/crl",
                             "ocsp": "/api/v1/agent/ocsp",
                             "ocsp_status": "/api/v1/agent/ocsp/status",
                         },
+                        "tunnel_config": tunnel_config_val,
                         "ocsp_status_url": cert_fingerprint.as_ref().map(|fp| {
                             format!("/api/v1/agent/ocsp/status?fingerprint={fp}")
                         }),
@@ -693,6 +767,83 @@ impl ControlApiState {
                 StatusCode::BAD_REQUEST,
                 &serde_json::json!({ "error": err.message() }).to_string(),
             ),
+        }
+    }
+
+    /// Retrieve tunnel configuration for an agent (`GET /api/v1/agent/tunnel/config`)
+    async fn agent_tunnel_config(&self, query: Option<&str>) -> Response<Body> {
+        let mut device_id: Option<String> = None;
+        let mut format_raw = false;
+        if let Some(q) = query {
+            for pair in q.split('&') {
+                if let Some((k, v)) = pair.split_once('=') {
+                    match k {
+                        "device_id" if !v.is_empty() => device_id = Some(v.to_string()),
+                        "format" if v == "conf" || v == "raw" => format_raw = true,
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        let awg = self.awg_server.read().await;
+        let peer = if let Some(id) = device_id.as_deref() {
+            awg.peers.iter().find(|p| p.id == id)
+        } else {
+            awg.peers.first()
+        };
+
+        let Some(peer) = peer else {
+            return json_response(
+                StatusCode::NOT_FOUND,
+                r#"{"error":"tunnel peer not found"}"#,
+            );
+        };
+
+        let server_endpoint = std::env::var("AWG_SERVER_ENDPOINT")
+            .unwrap_or_else(|_| format!("127.0.0.1:{}", awg.listen_port));
+        let client_priv = peer
+            .private_key
+            .as_deref()
+            .unwrap_or("CLIENT_PRIVATE_KEY_HERE");
+        let conf_raw = crate::amneziawg::generate_client_conf(
+            &awg.public_key,
+            &server_endpoint,
+            peer,
+            &awg.obfuscation,
+            client_priv,
+        );
+
+        if format_raw {
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(hyper::header::CONTENT_TYPE, "text/plain; charset=utf-8")
+                .header(
+                    hyper::header::CONTENT_DISPOSITION,
+                    format!("attachment; filename=\"{}.conf\"", peer.id),
+                )
+                .body(full(Bytes::from(conf_raw)))
+                .unwrap_or_else(|_| {
+                    json_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        r#"{"error":"conf body error"}"#,
+                    )
+                })
+        } else {
+            json_response(
+                StatusCode::OK,
+                &serde_json::json!({
+                    "device_id": peer.id,
+                    "assigned_ip": peer.assigned_ip,
+                    "client_public_key": peer.public_key,
+                    "client_private_key": peer.private_key,
+                    "server_public_key": awg.public_key,
+                    "server_endpoint": server_endpoint,
+                    "obfuscation": awg.obfuscation,
+                    "conf_raw": conf_raw,
+                })
+                .to_string(),
+            )
         }
     }
 }

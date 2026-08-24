@@ -4,6 +4,7 @@
 //! the BSDM data-plane (`HTTP_PORT`, default 3128). This is **not** MDM-grade
 //! product packaging — installers wrap these hooks with clear privilege notes.
 
+#[cfg(target_os = "linux")]
 use std::process::Command;
 
 /// Forward-proxy endpoint the OS should use.
@@ -90,6 +91,28 @@ pub fn clear_system_proxy(dry_run: bool) -> Result<String, String> {
     clear_system_proxy_impl()
 }
 
+/// Apply Proxy Auto-Configuration (PAC) script URL to OS network settings.
+pub fn set_auto_proxy(pac_url: &str, dry_run: bool) -> Result<String, String> {
+    if dry_run {
+        return Ok(format!(
+            "dry-run: would set auto proxy (PAC) {pac_url} on {}",
+            platform_tag()
+        ));
+    }
+    set_auto_proxy_impl(pac_url)
+}
+
+/// Clear Proxy Auto-Configuration (PAC) script URL from OS network settings.
+pub fn clear_auto_proxy(dry_run: bool) -> Result<String, String> {
+    if dry_run {
+        return Ok(format!(
+            "dry-run: would clear auto proxy on {}",
+            platform_tag()
+        ));
+    }
+    clear_auto_proxy_impl()
+}
+
 #[cfg(target_os = "macos")]
 fn set_system_proxy_impl(ep: &ProxyEndpoint) -> Result<String, String> {
     set_macos(ep)
@@ -98,6 +121,16 @@ fn set_system_proxy_impl(ep: &ProxyEndpoint) -> Result<String, String> {
 #[cfg(target_os = "macos")]
 fn clear_system_proxy_impl() -> Result<String, String> {
     clear_macos()
+}
+
+#[cfg(target_os = "macos")]
+fn set_auto_proxy_impl(pac_url: &str) -> Result<String, String> {
+    set_auto_macos(pac_url)
+}
+
+#[cfg(target_os = "macos")]
+fn clear_auto_proxy_impl() -> Result<String, String> {
+    clear_auto_macos()
 }
 
 #[cfg(target_os = "linux")]
@@ -110,6 +143,16 @@ fn clear_system_proxy_impl() -> Result<String, String> {
     clear_linux()
 }
 
+#[cfg(target_os = "linux")]
+fn set_auto_proxy_impl(pac_url: &str) -> Result<String, String> {
+    set_auto_linux(pac_url)
+}
+
+#[cfg(target_os = "linux")]
+fn clear_auto_proxy_impl() -> Result<String, String> {
+    clear_auto_linux()
+}
+
 #[cfg(target_os = "windows")]
 fn set_system_proxy_impl(ep: &ProxyEndpoint) -> Result<String, String> {
     set_windows(ep)
@@ -118,6 +161,16 @@ fn set_system_proxy_impl(ep: &ProxyEndpoint) -> Result<String, String> {
 #[cfg(target_os = "windows")]
 fn clear_system_proxy_impl() -> Result<String, String> {
     clear_windows()
+}
+
+#[cfg(target_os = "windows")]
+fn set_auto_proxy_impl(pac_url: &str) -> Result<String, String> {
+    set_auto_windows(pac_url)
+}
+
+#[cfg(target_os = "windows")]
+fn clear_auto_proxy_impl() -> Result<String, String> {
+    clear_auto_windows()
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
@@ -137,11 +190,27 @@ fn clear_system_proxy_impl() -> Result<String, String> {
     ))
 }
 
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+fn set_auto_proxy_impl(pac_url: &str) -> Result<String, String> {
+    let _ = pac_url;
+    Err(format!(
+        "auto proxy (PAC) not implemented on platform {}",
+        platform_tag()
+    ))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+fn clear_auto_proxy_impl() -> Result<String, String> {
+    Err(format!(
+        "auto proxy (PAC) not implemented on platform {}",
+        platform_tag()
+    ))
+}
+
 fn run(cmd: &str, args: &[&str]) -> Result<String, String> {
-    let out = Command::new(cmd)
-        .args(args)
-        .output()
-        .map_err(|e| format!("exec {cmd}: {e}"))?;
+    let os_args: Vec<&std::ffi::OsStr> = args.iter().copied().map(std::ffi::OsStr::new).collect();
+    let out =
+        crate::tunnel::run_command_with_timeout(cmd, &os_args, std::time::Duration::from_secs(10))?;
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
         let stdout = String::from_utf8_lossy(&out.stdout);
@@ -211,6 +280,36 @@ fn clear_macos() -> Result<String, String> {
     }
     Ok(format!(
         "macOS system proxy disabled on {} service(s)",
+        services.len()
+    ))
+}
+
+#[cfg(target_os = "macos")]
+fn set_auto_macos(pac_url: &str) -> Result<String, String> {
+    let services = macos_services()?;
+    if services.is_empty() {
+        return Err("no network services found (networksetup)".into());
+    }
+    let mut applied = Vec::new();
+    for svc in &services {
+        let _ = run("networksetup", &["-setautoproxyurl", svc, pac_url]);
+        let _ = run("networksetup", &["-setautoproxystate", svc, "on"]);
+        applied.push(svc.clone());
+    }
+    Ok(format!(
+        "macOS auto proxy (PAC) set to {pac_url} on services: {}",
+        applied.join(", ")
+    ))
+}
+
+#[cfg(target_os = "macos")]
+fn clear_auto_macos() -> Result<String, String> {
+    let services = macos_services()?;
+    for svc in &services {
+        let _ = run("networksetup", &["-setautoproxystate", svc, "off"]);
+    }
+    Ok(format!(
+        "macOS auto proxy (PAC) disabled on {} service(s)",
         services.len()
     ))
 }
@@ -352,6 +451,41 @@ fn clear_linux() -> Result<String, String> {
     Ok(format!("Linux system proxy cleared ({})", notes.join("; ")))
 }
 
+#[cfg(target_os = "linux")]
+fn set_auto_linux(pac_url: &str) -> Result<String, String> {
+    if Command::new("gsettings").arg("--version").output().is_ok() {
+        let _ = run(
+            "gsettings",
+            &["set", "org.gnome.system.proxy", "mode", "'auto'"],
+        );
+        let _ = run(
+            "gsettings",
+            &[
+                "set",
+                "org.gnome.system.proxy",
+                "autoconfig-url",
+                &format!("'{pac_url}'"),
+            ],
+        );
+        Ok(format!("Linux auto proxy (PAC) set to {pac_url}"))
+    } else {
+        Err("gsettings is not available on this Linux system".into())
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn clear_auto_linux() -> Result<String, String> {
+    if Command::new("gsettings").arg("--version").output().is_ok() {
+        let _ = run(
+            "gsettings",
+            &["set", "org.gnome.system.proxy", "mode", "'none'"],
+        );
+        Ok("Linux auto proxy cleared".into())
+    } else {
+        Ok("Linux auto proxy clear skipped (no gsettings)".into())
+    }
+}
+
 // --- Windows ---------------------------------------------------------------
 
 #[cfg(target_os = "windows")]
@@ -387,6 +521,24 @@ fn clear_windows() -> Result<String, String> {
     run("powershell", &["-NoProfile", "-Command", ps])?;
     let _ = run("netsh", &["winhttp", "reset", "proxy"]);
     Ok("Windows system proxy cleared".into())
+}
+
+#[cfg(target_os = "windows")]
+fn set_auto_windows(pac_url: &str) -> Result<String, String> {
+    let ps = format!(
+        "$p='HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings'; \
+         Set-ItemProperty -Path $p -Name AutoConfigURL -Value '{pac_url}'"
+    );
+    run("powershell", &["-NoProfile", "-Command", &ps])?;
+    Ok(format!("Windows auto proxy (PAC) set to {pac_url}"))
+}
+
+#[cfg(target_os = "windows")]
+fn clear_auto_windows() -> Result<String, String> {
+    let ps = "$p='HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings'; \
+              Remove-ItemProperty -Path $p -Name AutoConfigURL -ErrorAction SilentlyContinue";
+    run("powershell", &["-NoProfile", "-Command", ps])?;
+    Ok("Windows auto proxy cleared".into())
 }
 
 #[cfg(test)]

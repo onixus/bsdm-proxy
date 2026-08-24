@@ -111,15 +111,27 @@ impl ControlApiState {
     async fn amneziawg_update(&self, body: Bytes) -> Response<Body> {
         match serde_json::from_slice::<crate::amneziawg::AwgServerConfig>(&body) {
             Ok(config) => {
+                if let Err(err) = crate::amneziawg::validate_server_config(&config) {
+                    return json_response(
+                        StatusCode::BAD_REQUEST,
+                        &serde_json::json!({"error": err}).to_string(),
+                    );
+                }
                 let mut guard = self.awg_server.write().await;
                 *guard = config;
                 let conf_path = std::env::var("AWG_CONFIG_PATH")
                     .unwrap_or_else(|_| "./certs/awg/awg0.conf".to_string());
                 let path = std::path::Path::new(&conf_path);
-                let reload_msg = match crate::amneziawg::sync_sidecar_interface(path, &mut guard) {
-                    Ok(msg) => msg,
-                    Err(err) => err,
-                };
+                let (reload_msg, is_err) =
+                    match crate::amneziawg::sync_sidecar_interface(path, &mut guard) {
+                        Ok(msg) => (msg, false),
+                        Err(err) => (err, true),
+                    };
+                let status_lbl = if is_err { "error" } else { "success" };
+                self.metrics
+                    .awg_reloads_total
+                    .with_label_values(&[status_lbl])
+                    .inc();
                 let payload = serde_json::json!({
                     "status": "ok",
                     "reload_status": reload_msg,
@@ -133,16 +145,47 @@ impl ControlApiState {
 
     async fn amneziawg_add_peer(&self, body: Bytes) -> Response<Body> {
         match serde_json::from_slice::<crate::amneziawg::AwgPeerConfig>(&body) {
-            Ok(peer) => {
+            Ok(mut peer) => {
+                if let Err(e) = crate::amneziawg::validate_key_b64(&peer.public_key) {
+                    return json_response(
+                        StatusCode::BAD_REQUEST,
+                        &serde_json::json!({"error": format!("Invalid public key: {e}")})
+                            .to_string(),
+                    );
+                }
+                if let Some(psk) = &peer.preshared_key {
+                    if !psk.trim().is_empty() {
+                        if let Err(e) = crate::amneziawg::validate_key_b64(psk) {
+                            return json_response(
+                                StatusCode::BAD_REQUEST,
+                                &serde_json::json!({"error": format!("Invalid pre-shared key: {e}")}).to_string(),
+                            );
+                        }
+                    }
+                }
+                peer.name = crate::amneziawg::sanitize_config_string(&peer.name);
+                peer.id = crate::amneziawg::sanitize_config_string(&peer.id);
+                if peer.id.is_empty() {
+                    peer.id = format!("peer-{}", hex::encode(rand::random::<[u8; 4]>()));
+                }
+
                 let mut guard = self.awg_server.write().await;
+                guard.peers.retain(|p| p.id != peer.id);
                 guard.peers.push(peer);
                 let conf_path = std::env::var("AWG_CONFIG_PATH")
                     .unwrap_or_else(|_| "./certs/awg/awg0.conf".to_string());
                 let path = std::path::Path::new(&conf_path);
-                let reload_msg = match crate::amneziawg::sync_sidecar_interface(path, &mut guard) {
-                    Ok(msg) => msg,
-                    Err(err) => err,
-                };
+                let (reload_msg, is_err) =
+                    match crate::amneziawg::sync_sidecar_interface(path, &mut guard) {
+                        Ok(msg) => (msg, false),
+                        Err(err) => (err, true),
+                    };
+                let status_lbl = if is_err { "error" } else { "success" };
+                self.metrics
+                    .awg_reloads_total
+                    .with_label_values(&[status_lbl])
+                    .inc();
+                crate::amneziawg::update_telemetry_metrics(&guard, &self.metrics);
                 let payload = serde_json::json!({
                     "status": "ok",
                     "reload_status": reload_msg,
@@ -152,6 +195,14 @@ impl ControlApiState {
             }
             Err(e) => json_response(StatusCode::BAD_REQUEST, &format!(r#"{{"error":"{}"}}"#, e)),
         }
+    }
+
+    fn amneziawg_generate_psk(&self) -> Response<Body> {
+        let psk = crate::amneziawg::generate_preshared_key();
+        let payload = serde_json::json!({
+            "preshared_key": psk,
+        });
+        json_response(StatusCode::OK, &payload.to_string())
     }
 
     async fn amneziawg_delete_peer(&self, body: Bytes) -> Response<Body> {
@@ -170,10 +221,17 @@ impl ControlApiState {
                 let conf_path = std::env::var("AWG_CONFIG_PATH")
                     .unwrap_or_else(|_| "./certs/awg/awg0.conf".to_string());
                 let path = std::path::Path::new(&conf_path);
-                let reload_msg = match crate::amneziawg::sync_sidecar_interface(path, &mut guard) {
-                    Ok(msg) => msg,
-                    Err(err) => err,
-                };
+                let (reload_msg, is_err) =
+                    match crate::amneziawg::sync_sidecar_interface(path, &mut guard) {
+                        Ok(msg) => (msg, false),
+                        Err(err) => (err, true),
+                    };
+                let status_lbl = if is_err { "error" } else { "success" };
+                self.metrics
+                    .awg_reloads_total
+                    .with_label_values(&[status_lbl])
+                    .inc();
+                crate::amneziawg::update_telemetry_metrics(&guard, &self.metrics);
                 let payload = serde_json::json!({
                     "status": "deleted",
                     "reload_status": reload_msg,
@@ -183,6 +241,86 @@ impl ControlApiState {
             }
             Err(e) => json_response(StatusCode::BAD_REQUEST, &format!(r#"{{"error":"{}"}}"#, e)),
         }
+    }
+
+    async fn amneziawg_peer_config(&self, peer_id: &str) -> Response<Body> {
+        let guard = self.awg_server.read().await;
+        let Some(peer) = guard.peers.iter().find(|p| p.id == peer_id) else {
+            return json_response(StatusCode::NOT_FOUND, r#"{"error":"peer not found"}"#);
+        };
+
+        let server_endpoint = std::env::var("AWG_SERVER_ENDPOINT")
+            .unwrap_or_else(|_| format!("127.0.0.1:{}", guard.listen_port));
+        let client_priv = peer
+            .private_key
+            .as_deref()
+            .unwrap_or("CLIENT_PRIVATE_KEY_HERE");
+        let conf = crate::amneziawg::generate_client_conf(
+            &guard.public_key,
+            &server_endpoint,
+            peer,
+            &guard.obfuscation,
+            client_priv,
+        );
+
+        Response::builder()
+            .status(StatusCode::OK)
+            .header(hyper::header::CONTENT_TYPE, "text/plain; charset=utf-8")
+            .header(
+                hyper::header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{}.conf\"", peer.id),
+            )
+            .body(full(Bytes::from(conf)))
+            .unwrap_or_else(|_| {
+                json_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    r#"{"error":"conf body error"}"#,
+                )
+            })
+    }
+
+    fn amneziawg_generate_keys(&self) -> Response<Body> {
+        let (priv_k, pub_k) = crate::amneziawg::generate_keypair();
+        json_response(
+            StatusCode::OK,
+            &serde_json::json!({
+                "private_key": priv_k,
+                "public_key": pub_k,
+            })
+            .to_string(),
+        )
+    }
+
+    async fn amneziawg_telemetry(&self, body: Bytes) -> Response<Body> {
+        #[derive(serde::Deserialize)]
+        struct TelemetryReq {
+            #[serde(default)]
+            dump: Option<String>,
+        }
+        let dump_str = match serde_json::from_slice::<TelemetryReq>(&body) {
+            Ok(req) => req.dump.unwrap_or_default(),
+            Err(_) => String::from_utf8_lossy(&body).to_string(),
+        };
+
+        let telemetry_map = crate::amneziawg::parse_interface_telemetry(&dump_str);
+        let mut guard = self.awg_server.write().await;
+        for peer in &mut guard.peers {
+            if let Some(t) = telemetry_map.get(&peer.public_key) {
+                peer.rx_bytes = t.rx_bytes;
+                peer.tx_bytes = t.tx_bytes;
+                peer.latest_handshake_secs = t.latest_handshake_secs;
+            }
+        }
+        crate::amneziawg::update_telemetry_metrics(&guard, &self.metrics);
+
+        json_response(
+            StatusCode::OK,
+            &serde_json::json!({
+                "status": "updated",
+                "peers_updated": telemetry_map.len(),
+            })
+            .to_string(),
+        )
     }
 
     pub fn cluster_session_state(&self) -> Response<Body> {
@@ -461,7 +599,7 @@ pub struct ControlApiState {
     dlp_engine: Arc<crate::dlp::DlpEngine>,
     pub(crate) pinning_registry: Arc<PinningRegistry>,
     auth_manager: Option<Arc<crate::auth::AuthManager>>,
-    awg_server: Arc<tokio::sync::RwLock<crate::amneziawg::AwgServerConfig>>,
+    pub(crate) awg_server: Arc<tokio::sync::RwLock<crate::amneziawg::AwgServerConfig>>,
     session_store: crate::session_store::GlobalSessionStore,
     threat_sync: crate::threat_sync::ThreatSyncEngine,
     admin_console_dir: Option<std::path::PathBuf>,
@@ -657,12 +795,18 @@ impl ControlApiState {
             return self.agent_policy_ws_upgrade(&mut req);
         }
 
+        const MAX_CONTROL_API_BODY_BYTES: usize = 16 * 1024 * 1024; // 16 MB cap
+
         let (parts, body) = req.into_parts();
-        let body = match BodyExt::collect(body).await {
+        let limited = http_body_util::Limited::new(body, MAX_CONTROL_API_BODY_BYTES);
+        let body = match BodyExt::collect(limited).await {
             Ok(collected) => collected.to_bytes(),
             Err(e) => {
-                warn!("Failed to read control API body: {e}");
-                Bytes::new()
+                warn!("Control API body read error or payload too large: {e}");
+                return json_response(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    r#"{"error":"payload too large or read error"}"#,
+                );
             }
         };
         let query = parts.uri.query().map(|s| s.to_string());
@@ -684,8 +828,11 @@ impl ControlApiState {
         body: Bytes,
         headers: &HeaderMap,
     ) -> Response<Body> {
-        self.dispatch_with_query(method, path, None, body, headers)
-            .await
+        let (p, q) = match path.split_once('?') {
+            Some((p, q)) => (p, Some(q)),
+            None => (path, None),
+        };
+        self.dispatch_with_query(method, p, q, body, headers).await
     }
 
     async fn dispatch_with_query(
@@ -752,6 +899,15 @@ impl ControlApiState {
             }
         }
 
+        if method == Method::GET {
+            if let Some(peer_id) = path.strip_prefix("/api/amneziawg/peers/").and_then(|p| {
+                p.strip_suffix("/config")
+                    .or_else(|| p.strip_suffix("/conf"))
+            }) {
+                return self.amneziawg_peer_config(peer_id).await;
+            }
+        }
+
         match (method, path) {
             (&Method::GET, "/api/config") => self.config_get(),
             (&Method::POST, "/api/config/apply") => self.config_apply(body).await,
@@ -768,10 +924,15 @@ impl ControlApiState {
             (&Method::GET, "/api/auth/basic/users") => self.basic_users_list().await,
             (&Method::POST, "/api/auth/basic/users") => self.basic_users_put(body).await,
             (&Method::DELETE, "/api/auth/basic/users") => self.basic_users_delete(body).await,
-            (&Method::GET, "/api/amneziawg/status") => self.amneziawg_status().await,
+            (&Method::GET, "/api/amneziawg/config") | (&Method::GET, "/api/amneziawg/status") => {
+                self.amneziawg_status().await
+            }
             (&Method::POST, "/api/amneziawg/config") => self.amneziawg_update(body).await,
             (&Method::POST, "/api/amneziawg/peers") => self.amneziawg_add_peer(body).await,
             (&Method::DELETE, "/api/amneziawg/peers") => self.amneziawg_delete_peer(body).await,
+            (&Method::POST, "/api/amneziawg/generate-keys") => self.amneziawg_generate_keys(),
+            (&Method::POST, "/api/amneziawg/generate-psk") => self.amneziawg_generate_psk(),
+            (&Method::POST, "/api/amneziawg/telemetry") => self.amneziawg_telemetry(body).await,
             (&Method::GET, "/api/cluster/session-state") => self.cluster_session_state(),
             (&Method::GET, "/api/threats/sync/peers") => self.threat_sync_peers(),
             (&Method::POST, "/api/threats/sync/broadcast") => {
@@ -852,6 +1013,9 @@ impl ControlApiState {
                 Response::builder()
                     .status(StatusCode::OK)
                     .header("Content-Type", mime)
+                    .header("X-Content-Type-Options", "nosniff")
+                    .header("X-Frame-Options", "SAMEORIGIN")
+                    .header("Referrer-Policy", "strict-origin-when-cross-origin")
                     .body(full(content))
                     .unwrap_or_else(|_| {
                         json_response(
@@ -1389,6 +1553,14 @@ pub(crate) fn json_response(status: StatusCode, body: &str) -> Response<Body> {
     Response::builder()
         .status(status)
         .header("Content-Type", "application/json; charset=utf-8")
+        .header("X-Content-Type-Options", "nosniff")
+        .header("X-Frame-Options", "DENY")
+        .header("Referrer-Policy", "no-referrer")
+        .header("Cache-Control", "no-store, no-cache, must-revalidate")
+        .header(
+            "Content-Security-Policy",
+            "default-src 'none'; frame-ancestors 'none'",
+        )
         .body(full(Bytes::from(body.to_string())))
         .unwrap_or_else(|_| Response::new(full(Bytes::from_static(b"500 Internal Server Error"))))
 }
@@ -2198,5 +2370,158 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("PINNING_EXCEPTIONS_PATH"));
+    }
+
+    #[tokio::test]
+    async fn amneziawg_control_api_flow() {
+        let metrics = Arc::new(Metrics::new().unwrap());
+        let cache = Arc::new(HttpL1Cache::new(100, 4));
+        let state = state_plain(metrics, cache);
+
+        // 1. Status
+        let status = state
+            .dispatch(
+                &Method::GET,
+                "/api/amneziawg/status",
+                Bytes::new(),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(status.status(), StatusCode::OK);
+
+        // 2. Generate keys
+        let gen = state
+            .dispatch(
+                &Method::POST,
+                "/api/amneziawg/generate-keys",
+                Bytes::new(),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(gen.status(), StatusCode::OK);
+        let gen_body = BodyExt::collect(gen.into_body()).await.unwrap().to_bytes();
+        let gen_json: serde_json::Value = serde_json::from_slice(&gen_body).unwrap();
+        assert!(gen_json["private_key"].as_str().unwrap().len() == 44);
+        assert!(gen_json["public_key"].as_str().unwrap().len() == 44);
+
+        // 3. Add Peer
+        let add_payload = serde_json::json!({
+            "id": "test-awg-peer-1",
+            "name": "Test Laptop",
+            "public_key": gen_json["public_key"].as_str().unwrap(),
+            "private_key": gen_json["private_key"].as_str().unwrap(),
+            "allowed_ips": "10.8.0.2/32",
+            "assigned_ip": "10.8.0.2",
+            "created_at": "2026-08-24",
+        });
+        let add_resp = state
+            .dispatch(
+                &Method::POST,
+                "/api/amneziawg/peers",
+                Bytes::from(add_payload.to_string()),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(add_resp.status(), StatusCode::OK);
+
+        // 4. Download Peer config
+        let conf_resp = state
+            .dispatch(
+                &Method::GET,
+                "/api/amneziawg/peers/test-awg-peer-1/config",
+                Bytes::new(),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(conf_resp.status(), StatusCode::OK);
+        let conf_bytes = BodyExt::collect(conf_resp.into_body())
+            .await
+            .unwrap()
+            .to_bytes();
+        let conf_str = String::from_utf8(conf_bytes.to_vec()).unwrap();
+        assert!(conf_str.contains("[Interface]"));
+        assert!(conf_str.contains("Address = 10.8.0.2/32"));
+        assert!(conf_str.contains("Jc = 4"));
+        assert!(conf_str.contains("[Peer]"));
+
+        // 5. Update Telemetry
+        let dump_payload = format!(
+            "{}\t(none)\t198.51.100.20:51820\t10.8.0.2/32\t1721812900\t1048576\t2097152\t25\n",
+            gen_json["public_key"].as_str().unwrap()
+        );
+        let telem_req = serde_json::json!({ "dump": dump_payload });
+        let telem_resp = state
+            .dispatch(
+                &Method::POST,
+                "/api/amneziawg/telemetry",
+                Bytes::from(telem_req.to_string()),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(telem_resp.status(), StatusCode::OK);
+
+        // 6. Delete Peer
+        let del_resp = state
+            .dispatch(
+                &Method::DELETE,
+                "/api/amneziawg/peers",
+                Bytes::from(serde_json::json!({ "id": "test-awg-peer-1" }).to_string()),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(del_resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn agent_enroll_with_tunnel_capability() {
+        let metrics = Arc::new(Metrics::new().unwrap());
+        let cache = Arc::new(HttpL1Cache::new(100, 4));
+        let state = state_plain(metrics, cache);
+
+        let enroll_body = serde_json::json!({
+            "platform": "macos",
+            "name": "Alice MacBook",
+            "capabilities": ["local-proxy", "tunnel"],
+        });
+
+        let resp = state
+            .dispatch(
+                &Method::POST,
+                "/api/v1/agent/enroll",
+                Bytes::from(enroll_body.to_string()),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = BodyExt::collect(resp.into_body()).await.unwrap().to_bytes();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let device_id = payload["device_id"].as_str().unwrap();
+
+        assert!(payload["tunnel_config"].is_object());
+        let tc = &payload["tunnel_config"];
+        assert_eq!(tc["assigned_ip"], "10.8.0.2");
+        assert!(tc["client_private_key"].as_str().is_some());
+        assert!(tc["server_public_key"].as_str().is_some());
+        assert!(tc["conf_raw"].as_str().unwrap().contains("[Interface]"));
+        assert!(tc["conf_raw"].as_str().unwrap().contains("Jc = 4"));
+
+        // GET /api/v1/agent/tunnel/config
+        let get_conf_path = format!("/api/v1/agent/tunnel/config?device_id={device_id}");
+        let tunnel_resp = state
+            .dispatch(
+                &Method::GET,
+                &get_conf_path,
+                Bytes::new(),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(tunnel_resp.status(), StatusCode::OK);
+        let t_body = BodyExt::collect(tunnel_resp.into_body())
+            .await
+            .unwrap()
+            .to_bytes();
+        let t_json: serde_json::Value = serde_json::from_slice(&t_body).unwrap();
+        assert_eq!(t_json["device_id"], device_id);
+        assert_eq!(t_json["assigned_ip"], "10.8.0.2");
     }
 }

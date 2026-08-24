@@ -59,12 +59,22 @@ fn default_patterns() -> Vec<(String, String)> {
         ("sk-ant-api".into(), "Anthropic API Key".into()),
         ("sk-proj-".into(), "OpenAI Project Key".into()),
         ("ghp_".into(), "GitHub Personal Access Token".into()),
+        ("github_pat_".into(), "GitHub Fine-Grained Token".into()),
+        ("glpat-".into(), "GitLab Personal Access Token".into()),
         ("xoxb-".into(), "Slack Bot Token".into()),
+        ("xoxp-".into(), "Slack User Token".into()),
+        ("AKIA".into(), "AWS Access Key ID".into()),
+        ("AIzaSy".into(), "Google Cloud API Key".into()),
+        ("sk_live_".into(), "Stripe Live Secret Key".into()),
+        ("rk_live_".into(), "Stripe Restricted Key".into()),
         ("BEGIN RSA PRIVATE KEY".into(), "RSA Private Key".into()),
         (
             "BEGIN OPENSSH PRIVATE KEY".into(),
             "OpenSSH Private Key".into(),
         ),
+        ("BEGIN PRIVATE KEY".into(), "PKCS#8 Private Key".into()),
+        ("BEGIN EC PRIVATE KEY".into(), "EC Private Key".into()),
+        ("BEGIN DSA PRIVATE KEY".into(), "DSA Private Key".into()),
     ]
 }
 
@@ -233,6 +243,18 @@ mod tests {
         assert!(engine.is_enabled());
         let v = engine.scan_chunk(b"header sk-ant-api-123 footer").unwrap();
         assert_eq!(v.detail, "sk-ant-api");
+
+        let aws = engine.scan_chunk(b"AWS_KEY=AKIAIOSFODNN7EXAMPLE").unwrap();
+        assert_eq!(aws.category, "AWS Access Key ID");
+
+        let gcp = engine.scan_chunk(b"api_key=AIzaSyD-sample-key").unwrap();
+        assert_eq!(gcp.category, "Google Cloud API Key");
+
+        let stripe = engine.scan_chunk(b"sk_live_51Abcdef123456").unwrap();
+        assert_eq!(stripe.category, "Stripe Live Secret Key");
+
+        let pkcs8 = engine.scan_chunk(b"-----BEGIN PRIVATE KEY-----").unwrap();
+        assert_eq!(pkcs8.category, "PKCS#8 Private Key");
     }
 
     #[test]

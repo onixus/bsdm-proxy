@@ -56,6 +56,7 @@
 | **Безопасность & ML** | Микросервис `alert-worker` с дедупликацией инцидентов и SIEM-вебхуками; `ml-worker` для скоринга угроз (UEBA, фишинг, DGA/beacon-детекция) с обратной связью (threat-score write-back). |
 | **Threat Intelligence** | Модуль `threat-intel` с автоматическим периодическим сбором и нормализацией индикаторов компрометации (OpenPhish, PhishStats, Phishing.Database, URLhaus). |
 | **Расширения & Сайдкары** | DNS Sinkhole (UDP RPZ-lite, DoH/DoT проксирование), Semantic Cache для LLM/AI-запросов, WASM-плагины через Wasmtime SDK, антивирусная проверка ICAP (ClamAV). |
+| **Клиент & Split Routing** | Standalone Rust-клиент `bsdm-connect`, локальное разделение маршрутов по доменам (`Direct`/`Proxy`/`Tunnel`/`Block`), генератор PAC-файлов с защитой от JS-инъекций, защищенный веб-интерфейс на `:8765`, скаффолды для macOS и Android. |
 | **Администрирование** | Единая веб-панель управления (Admin Console) по адресу `/admin/`, REST и gRPC Control Plane API, Helm-чарты, systemd-пакеты. |
 
 ---

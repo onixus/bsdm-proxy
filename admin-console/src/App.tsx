@@ -35,13 +35,13 @@ export function App() {
           <Route path="/policies" element={<PoliciesPage />} />
           <Route path="/rpz" element={<RpzManagementPage />} />
           <Route path="/devices" element={<DevicesPage />} />
+          <Route path="/amneziawg" element={<AmneziaWgPage />} />
           <Route path="/users" element={<Users />} />
           <Route path="/settings" element={<SettingsPage />} />
           {/* Frozen experimental deep-links — not in primary nav */}
           <Route path="/wasm" element={frozen(<WasmPluginsPage />)} />
           <Route path="/cluster" element={frozen(<ClusterMeshPage />)} />
           <Route path="/ai-cache" element={frozen(<AiSemanticCachePage />)} />
-          <Route path="/amneziawg" element={frozen(<AmneziaWgPage />)} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AppLayout>

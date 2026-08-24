@@ -69,6 +69,7 @@ export const translations = {
       settings: 'Настройки системы',
       users: 'Пользователи',
       devices: 'Устройства агентов',
+      amneziawg: 'VPN Туннель (AmneziaWG)',
     },
     // Header & User Profile
     header: {
@@ -655,6 +656,7 @@ export const translations = {
       settings: 'Settings',
       users: 'Users',
       devices: 'Agent Devices',
+      amneziawg: 'AmneziaWG Tunnel',
     },
     // Header & User Profile
     header: {

@@ -429,6 +429,9 @@ pub struct ProxyService {
     dlp_engine: Arc<crate::dlp::DlpEngine>,
     casb_engine: Arc<crate::casb::CasbEngine>,
     reverse_proxy_config: Option<crate::reverse_proxy::ReverseProxyConfig>,
+    pub(crate) block_cloud_metadata: bool,
+    pub(crate) block_loopback_forwarding: bool,
+    pub(crate) allowed_connect_ports: Option<Vec<u16>>,
 }
 
 impl ProxyService {
@@ -599,6 +602,26 @@ impl ProxyService {
         let wasm_hook = try_load_from_env();
         let icap = IcapClient::try_from_env();
 
+        let block_cloud_metadata = std::env::var("BLOCK_CLOUD_METADATA")
+            .map(|v| {
+                !matches!(
+                    v.to_ascii_lowercase().as_str(),
+                    "0" | "false" | "no" | "off"
+                )
+            })
+            .unwrap_or(true);
+        let block_loopback_forwarding = std::env::var("BLOCK_LOOPBACK_FORWARDING")
+            .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+            .unwrap_or(false);
+        let allowed_connect_ports = std::env::var("ALLOWED_CONNECT_PORTS")
+            .ok()
+            .map(|s| {
+                s.split(',')
+                    .filter_map(|p| p.trim().parse::<u16>().ok())
+                    .collect::<Vec<u16>>()
+            })
+            .filter(|ports| !ports.is_empty());
+
         Self {
             cert_cache,
             http_cache,
@@ -633,7 +656,24 @@ impl ProxyService {
             dlp_engine: Arc::new(crate::dlp::DlpEngine::from_env()),
             casb_engine: Arc::new(crate::casb::CasbEngine::new()),
             reverse_proxy_config,
+            block_cloud_metadata,
+            block_loopback_forwarding,
+            allowed_connect_ports,
         }
+    }
+
+    pub(crate) fn check_destination_security(
+        &self,
+        host: &str,
+        port: u16,
+    ) -> Result<(), &'static str> {
+        crate::security_util::is_destination_allowed(
+            host,
+            port,
+            self.block_cloud_metadata,
+            self.block_loopback_forwarding,
+            self.allowed_connect_ports.as_deref(),
+        )
     }
 
     pub(crate) fn sessions(&self) -> Arc<SessionCorrelator> {
@@ -1116,6 +1156,8 @@ impl ProxyService {
                 Response::builder()
                     .status(StatusCode::FORBIDDEN)
                     .header("Content-Type", "text/plain; charset=utf-8")
+                    .header("X-Content-Type-Options", "nosniff")
+                    .header("X-Frame-Options", "DENY")
                     .body(full(Bytes::from(body)))
                     .unwrap_or_else(|_| Response::new(full(Bytes::from_static(b"403 Forbidden"))))
             }
@@ -1493,7 +1535,9 @@ impl ProxyService {
     fn rate_limit_response(status: StatusCode, body: &'static [u8]) -> Response<Body> {
         let mut builder = Response::builder()
             .status(status)
-            .header("Content-Type", "text/plain; charset=utf-8");
+            .header("Content-Type", "text/plain; charset=utf-8")
+            .header("X-Content-Type-Options", "nosniff")
+            .header("X-Frame-Options", "DENY");
         if status == StatusCode::TOO_MANY_REQUESTS {
             builder = builder.header("Retry-After", "1");
         }
@@ -2093,6 +2137,32 @@ impl ProxyService {
         }
 
         let domain = Self::extract_domain(&url);
+        let (host_dest, port_dest) = req
+            .as_ref()
+            .and_then(|r| r.uri().authority())
+            .map(|a| crate::tls::parse_authority(a.as_str()))
+            .unwrap_or_else(|| (domain.to_string(), 80));
+        if let Err(reason) = self.check_destination_security(&host_dest, port_dest) {
+            warn!(%url, %reason, "Request blocked by destination security policy");
+            self.metrics
+                .ssrf_blocked_total
+                .with_label_values(&[reason])
+                .inc();
+            let response = Response::builder()
+                .status(StatusCode::FORBIDDEN)
+                .header("Content-Type", "text/plain; charset=utf-8")
+                .header("X-Content-Type-Options", "nosniff")
+                .header("X-Frame-Options", "DENY")
+                .body(full(Bytes::from(format!("403 Forbidden: {reason}"))))
+                .unwrap_or_else(|_| Response::new(full(Bytes::from_static(b"403 Forbidden"))));
+            let code = response.status().as_u16();
+            if let Some(g) = guard.take() {
+                g.finish(code, 0, 0);
+            } else if let Some(scope) = fast_scope.take() {
+                scope.finish(code);
+            }
+            return response;
+        }
         let (policy_decision, categories, threat_sources) = self
             .check_policy(&url, &domain, username.as_deref(), &user_groups, client_ip)
             .await;

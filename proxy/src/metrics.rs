@@ -95,6 +95,24 @@ pub struct Metrics {
     pub categorization_blocked_total: CounterVec,
     /// Background URLhaus/PhishTank enrich tasks scheduled.
     pub categorization_online_enrich_scheduled_total: Counter,
+
+    // Security metrics
+    /// Requests blocked due to SSRF / Cloud metadata / prohibited destination policies.
+    pub ssrf_blocked_total: CounterVec,
+    /// Detected DLP violations (streamed chunks).
+    pub dlp_violations_total: Counter,
+
+    // AmneziaWG metrics
+    /// Total configured AmneziaWG peers
+    pub awg_peers_total: Gauge,
+    /// Active AmneziaWG peers (handshake within 180s)
+    pub awg_active_peers: Gauge,
+    /// Cumulative RX bytes received from AmneziaWG peers
+    pub awg_rx_bytes_total: Counter,
+    /// Cumulative TX bytes transmitted to AmneziaWG peers
+    pub awg_tx_bytes_total: Counter,
+    /// AmneziaWG interface config reloads
+    pub awg_reloads_total: CounterVec,
 }
 
 impl Metrics {
@@ -465,6 +483,54 @@ impl Metrics {
             categorization_online_enrich_scheduled_total.clone(),
         ))?;
 
+        let ssrf_blocked_total = CounterVec::new(
+            Opts::new(
+                "bsdm_proxy_security_ssrf_blocked_total",
+                "Total requests blocked due to SSRF / metadata / loopback protection",
+            ),
+            &["reason"],
+        )?;
+        registry.register(Box::new(ssrf_blocked_total.clone()))?;
+
+        let dlp_violations_total = Counter::new(
+            "bsdm_proxy_security_dlp_violations_total",
+            "Total DLP sensitive pattern violations detected in streams",
+        )?;
+        registry.register(Box::new(dlp_violations_total.clone()))?;
+
+        let awg_peers_total = Gauge::new(
+            "bsdm_proxy_awg_peers_total",
+            "Total number of configured AmneziaWG peers",
+        )?;
+        registry.register(Box::new(awg_peers_total.clone()))?;
+
+        let awg_active_peers = Gauge::new(
+            "bsdm_proxy_awg_active_peers",
+            "Number of active AmneziaWG peers with recent handshake",
+        )?;
+        registry.register(Box::new(awg_active_peers.clone()))?;
+
+        let awg_rx_bytes_total = Counter::new(
+            "bsdm_proxy_awg_rx_bytes_total",
+            "Cumulative bytes received from AmneziaWG peers",
+        )?;
+        registry.register(Box::new(awg_rx_bytes_total.clone()))?;
+
+        let awg_tx_bytes_total = Counter::new(
+            "bsdm_proxy_awg_tx_bytes_total",
+            "Cumulative bytes transmitted to AmneziaWG peers",
+        )?;
+        registry.register(Box::new(awg_tx_bytes_total.clone()))?;
+
+        let awg_reloads_total = CounterVec::new(
+            Opts::new(
+                "bsdm_proxy_awg_reloads_total",
+                "Total number of AmneziaWG sidecar reloads",
+            ),
+            &["status"],
+        )?;
+        registry.register(Box::new(awg_reloads_total.clone()))?;
+
         Ok(Metrics {
             registry,
             requests_total,
@@ -517,6 +583,13 @@ impl Metrics {
             categorization_category_total,
             categorization_blocked_total,
             categorization_online_enrich_scheduled_total,
+            ssrf_blocked_total,
+            dlp_violations_total,
+            awg_peers_total,
+            awg_active_peers,
+            awg_rx_bytes_total,
+            awg_tx_bytes_total,
+            awg_reloads_total,
         })
     }
 

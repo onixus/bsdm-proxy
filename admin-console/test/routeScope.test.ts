@@ -8,14 +8,14 @@ import {
 } from '../src/lib/routeScope.ts'
 
 test('primary hybrid surfaces are supported', () => {
-  for (const path of ['/', '/logs', '/policies', '/settings', '/rpz', '/users', '/analytics']) {
+  for (const path of ['/', '/logs', '/policies', '/settings', '/rpz', '/devices', '/amneziawg', '/users', '/analytics']) {
     assert.equal(resolveRouteScope(path).maturity, 'supported', path)
     assert.equal(isFrozenPath(path), false, path)
   }
 })
 
 test('experimental deep-links are frozen', () => {
-  for (const path of ['/wasm', '/cluster', '/ai-cache', '/amneziawg']) {
+  for (const path of ['/wasm', '/cluster', '/ai-cache']) {
     assert.equal(isFrozenPath(path), true, path)
     assert.ok(FROZEN_PATHS.includes(path), path)
     const scope = resolveRouteScope(path)

@@ -18,6 +18,7 @@ export interface AwgPeerConfig {
   name: string
   public_key: string
   private_key?: string
+  preshared_key?: string
   allowed_ips: string
   assigned_ip: string
   created_at: string
