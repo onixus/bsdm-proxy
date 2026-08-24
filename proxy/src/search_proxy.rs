@@ -95,7 +95,10 @@ pub async fn proxy_search_request(
                 Ok(bytes) => {
                     let mut builder = Response::builder()
                         .status(status)
-                        .header(hyper::header::CONTENT_TYPE, content_type);
+                        .header(hyper::header::CONTENT_TYPE, content_type)
+                        .header("X-Content-Type-Options", "nosniff")
+                        .header("X-Frame-Options", "DENY")
+                        .header("Referrer-Policy", "no-referrer");
                     if let Some(o) = acao {
                         builder = builder.header(hyper::header::ACCESS_CONTROL_ALLOW_ORIGIN, o);
                     }
@@ -125,7 +128,13 @@ fn err_json(status: StatusCode, msg: &str) -> Response<Body> {
     let body = format!(r#"{{"error":"{}"}}"#, msg.replace('"', "'"));
     Response::builder()
         .status(status)
-        .header(hyper::header::CONTENT_TYPE, "application/json")
+        .header(
+            hyper::header::CONTENT_TYPE,
+            "application/json; charset=utf-8",
+        )
+        .header("X-Content-Type-Options", "nosniff")
+        .header("X-Frame-Options", "DENY")
+        .header("Referrer-Policy", "no-referrer")
         .body(full(Bytes::from(body)))
         .unwrap_or_else(|_| Response::new(full(Bytes::from_static(b"{\"error\":\"internal\"}"))))
 }

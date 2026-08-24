@@ -682,7 +682,10 @@ impl AuthManager {
         }
         if let Some(user) = guard.get(username) {
             let hash = Self::hash_password_stable(password);
-            if user.password_hash == hash {
+            if crate::security_util::constant_time_eq(
+                user.password_hash.as_bytes(),
+                hash.as_bytes(),
+            ) {
                 return Ok(UserInfo {
                     username: username.to_string(),
                     display_name: Some(username.to_string()),
@@ -976,8 +979,9 @@ impl AuthManager {
         Response::builder()
             .status(status)
             .header(header_name, val_str)
+            .header("X-Content-Type-Options", "nosniff")
             .body(T::default())
-            .unwrap()
+            .unwrap_or_else(|_| Response::new(T::default()))
     }
 
     /// Clean expired cache entries

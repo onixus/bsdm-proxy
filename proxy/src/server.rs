@@ -207,6 +207,8 @@ pub async fn metrics_server(
                                             error!("Metrics export panicked: {:?}", panic_info);
                                             Response::builder()
                                                 .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                                .header("X-Content-Type-Options", "nosniff")
+                                                .header("X-Frame-Options", "DENY")
                                                 .body(full(Bytes::from_static(
                                                     b"500 Panic in metrics export",
                                                 )))
@@ -223,6 +225,8 @@ pub async fn metrics_server(
                                     Response::builder()
                                         .status(StatusCode::OK)
                                         .header("Content-Type", "application/json")
+                                        .header("X-Content-Type-Options", "nosniff")
+                                        .header("X-Frame-Options", "DENY")
                                         .body(full(Bytes::from_static(b"{\"status\":\"ok\"}")))
                                         .unwrap_or_else(|_| {
                                             Response::new(full(Bytes::from_static(
@@ -236,6 +240,8 @@ pub async fn metrics_server(
                                         Response::builder()
                                             .status(StatusCode::SERVICE_UNAVAILABLE)
                                             .header("Content-Type", "application/json")
+                                            .header("X-Content-Type-Options", "nosniff")
+                                            .header("X-Frame-Options", "DENY")
                                             .body(full(Bytes::from_static(
                                                 b"{\"status\":\"draining\"}",
                                             )))
@@ -249,6 +255,8 @@ pub async fn metrics_server(
                                         Response::builder()
                                             .status(StatusCode::SERVICE_UNAVAILABLE)
                                             .header("Content-Type", "application/json")
+                                            .header("X-Content-Type-Options", "nosniff")
+                                            .header("X-Frame-Options", "DENY")
                                             .body(full(Bytes::from_static(
                                                 b"{\"status\":\"not_ready\",\"reason\":\"rkn_registry_unavailable\"}",
                                             )))
@@ -262,6 +270,8 @@ pub async fn metrics_server(
                                         Response::builder()
                                             .status(StatusCode::OK)
                                             .header("Content-Type", "application/json")
+                                            .header("X-Content-Type-Options", "nosniff")
+                                            .header("X-Frame-Options", "DENY")
                                             .body(full(Bytes::from_static(
                                                 b"{\"status\":\"ready\"}",
                                             )))
@@ -276,6 +286,8 @@ pub async fn metrics_server(
                                     warn!("Unknown metrics endpoint: {}", path);
                                     Response::builder()
                                         .status(StatusCode::NOT_FOUND)
+                                        .header("X-Content-Type-Options", "nosniff")
+                                        .header("X-Frame-Options", "DENY")
                                         .body(full(Bytes::from_static(b"404 Not Found")))
                                         .unwrap_or_else(|_| {
                                             Response::new(full(Bytes::from_static(b"404 Not Found")))
@@ -499,6 +511,17 @@ async fn handle_connect_tunnel(
     proxy_user: Option<Arc<UserInfo>>,
     tls_decision: TlsPolicyDecision,
 ) {
+    let (domain, port) = parse_authority(&authority);
+    if let Err(reason) = service.check_destination_security(&domain, port) {
+        warn!(%authority, %reason, "CONNECT tunnel blocked by destination security policy");
+        service
+            .metrics
+            .ssrf_blocked_total
+            .with_label_values(&[reason])
+            .inc();
+        return;
+    }
+
     let mut client_io = TokioIo::new(upgraded);
 
     match TcpStream::connect(&authority).await {

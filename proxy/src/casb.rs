@@ -50,7 +50,34 @@ impl Default for CasbEngine {
 impl CasbEngine {
     /// Returns true if the domain matches a monitored LLM provider.
     pub fn is_llm_provider(&self, domain: &str) -> bool {
-        let lock = self.llm_domains.read().unwrap();
-        lock.iter().any(|d| domain == d || domain.ends_with(d))
+        let lock = match self.llm_domains.read() {
+            Ok(guard) => guard,
+            Err(_) => return false,
+        };
+        lock.iter()
+            .any(|d| crate::security_util::safe_subdomain_matches(domain, d))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn matches_known_llm_providers() {
+        let casb = CasbEngine::new();
+        assert!(casb.is_llm_provider("chatgpt.com"));
+        assert!(casb.is_llm_provider("api.openai.com"));
+        assert!(casb.is_llm_provider("sub.chatgpt.com"));
+        assert!(casb.is_llm_provider("claude.ai"));
+        assert!(casb.is_llm_provider("api.anthropic.com"));
+    }
+
+    #[test]
+    fn rejects_suffix_spoofing_without_dot() {
+        let casb = CasbEngine::new();
+        assert!(!casb.is_llm_provider("notclaude.ai"));
+        assert!(!casb.is_llm_provider("fakechatgpt.com"));
+        assert!(!casb.is_llm_provider("evil-openai.com"));
     }
 }

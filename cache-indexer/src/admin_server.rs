@@ -257,18 +257,28 @@ fn escape_json(s: &str) -> String {
 }
 
 /// Reflect browser Origin for Admin Console cross-port calls (e.g. :9090 → :8080).
-/// Only allow http(s) localhost / 127.0.0.1 / private-ish dev hosts — not `*`.
+/// Only allow http(s) localhost / 127.0.0.1 / [::1] with optional port — not `*` or arbitrary subdomains.
 fn cors_origin_allowed(origin: &str) -> bool {
     let o = origin.trim();
     if o.is_empty() {
         return false;
     }
-    o.starts_with("http://localhost")
-        || o.starts_with("https://localhost")
-        || o.starts_with("http://127.0.0.1")
-        || o.starts_with("https://127.0.0.1")
-        || o.starts_with("http://[::1]")
-        || o.starts_with("https://[::1]")
+    for prefix in &[
+        "http://localhost",
+        "https://localhost",
+        "http://127.0.0.1",
+        "https://127.0.0.1",
+        "http://[::1]",
+        "https://[::1]",
+    ] {
+        if let Some(rest) = o.strip_prefix(prefix) {
+            // Must either be exact end of string or followed by port separator ':'
+            if rest.is_empty() || rest.starts_with(':') {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn http_response(
@@ -288,7 +298,7 @@ fn http_response(
         _ => "500 Internal Server Error",
     };
     let mut header = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n",
+        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: strict-origin-when-cross-origin\r\n",
         body.len()
     );
     if let Some(o) = origin.filter(|o| cors_origin_allowed(o)) {
@@ -322,5 +332,25 @@ mod tests {
         let (end, cl) = parse_header_end_and_cl(req).unwrap();
         assert_eq!(cl, 2);
         assert!(end > 10);
+    }
+
+    #[test]
+    fn cors_origin_validation_allows_safe_local_origins() {
+        assert!(cors_origin_allowed("http://localhost"));
+        assert!(cors_origin_allowed("http://localhost:3000"));
+        assert!(cors_origin_allowed("https://localhost:9090"));
+        assert!(cors_origin_allowed("http://127.0.0.1"));
+        assert!(cors_origin_allowed("http://127.0.0.1:8080"));
+        assert!(cors_origin_allowed("http://[::1]:9090"));
+    }
+
+    #[test]
+    fn cors_origin_validation_rejects_subdomain_spoofing() {
+        assert!(!cors_origin_allowed("http://localhost.evil.com"));
+        assert!(!cors_origin_allowed("http://localhost.attacker.io:3000"));
+        assert!(!cors_origin_allowed("http://127.0.0.1.attacker.com"));
+        assert!(!cors_origin_allowed("https://127.0.0.1.fake.org"));
+        assert!(!cors_origin_allowed("http://evil.com"));
+        assert!(!cors_origin_allowed(""));
     }
 }

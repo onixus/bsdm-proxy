@@ -312,6 +312,14 @@ fn json_response(status: StatusCode, body: &str) -> Response<Body> {
     Response::builder()
         .status(status)
         .header("Content-Type", "application/json; charset=utf-8")
+        .header("X-Content-Type-Options", "nosniff")
+        .header("X-Frame-Options", "DENY")
+        .header("Referrer-Policy", "no-referrer")
+        .header("Cache-Control", "no-store, no-cache, must-revalidate")
+        .header(
+            "Content-Security-Policy",
+            "default-src 'none'; frame-ancestors 'none'",
+        )
         .body(full(Bytes::from(body.to_string())))
         .unwrap_or_else(|_| Response::new(full(Bytes::from_static(b"500 Internal Server Error"))))
 }

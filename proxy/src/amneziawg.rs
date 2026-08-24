@@ -1,10 +1,13 @@
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use base64::Engine;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::Path;
 use std::process::Command;
 use tracing::{info, warn};
+use x25519_dalek::{PublicKey, StaticSecret};
 
 /// Obfuscation parameters for AmneziaWG (AWG)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,6 +48,33 @@ impl Default for AwgObfuscationConfig {
     }
 }
 
+/// Generate a new Curve25519 keypair for WireGuard / AmneziaWG (base64 encoded).
+pub fn generate_keypair() -> (String, String) {
+    let mut rng_bytes = [0u8; 32];
+    rand::fill(&mut rng_bytes);
+    let secret = StaticSecret::from(rng_bytes);
+    let public = PublicKey::from(&secret);
+
+    let priv_b64 = BASE64_STANDARD.encode(secret.to_bytes());
+    let pub_b64 = BASE64_STANDARD.encode(public.as_bytes());
+    (priv_b64, pub_b64)
+}
+
+/// Derive public key from a base64 encoded Curve25519 private key.
+pub fn derive_public_key(private_key_b64: &str) -> Result<String, String> {
+    let bytes = BASE64_STANDARD
+        .decode(private_key_b64.trim())
+        .map_err(|e| format!("Invalid base64 private key: {}", e))?;
+    if bytes.len() != 32 {
+        return Err(format!("Private key must be 32 bytes, got {}", bytes.len()));
+    }
+    let mut key_arr = [0u8; 32];
+    key_arr.copy_from_slice(&bytes);
+    let secret = StaticSecret::from(key_arr);
+    let public = PublicKey::from(&secret);
+    Ok(BASE64_STANDARD.encode(public.as_bytes()))
+}
+
 /// AmneziaWG Server Configuration state
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AwgServerConfig {
@@ -63,11 +93,12 @@ pub struct AwgServerConfig {
 
 impl Default for AwgServerConfig {
     fn default() -> Self {
+        let (priv_k, pub_k) = generate_keypair();
         Self {
             enabled: false,
             listen_port: 51820,
-            private_key: "wP4k...placeholder...key=".to_string(),
-            public_key: "pub...placeholder...key=".to_string(),
+            private_key: priv_k,
+            public_key: pub_k,
             address: "10.8.0.1/24".to_string(),
             obfuscation: AwgObfuscationConfig::default(),
             peers: vec![],
@@ -75,6 +106,56 @@ impl Default for AwgServerConfig {
             last_reload_at: None,
         }
     }
+}
+
+/// Ensure server keypair is genuine and non-placeholder.
+pub fn ensure_server_keys(config: &mut AwgServerConfig) {
+    if config.private_key.is_empty()
+        || config.private_key.contains("placeholder")
+        || config.public_key.is_empty()
+        || config.public_key.contains("placeholder")
+    {
+        let (priv_k, pub_k) = generate_keypair();
+        config.private_key = priv_k;
+        config.public_key = pub_k;
+    }
+}
+
+/// Allocate next available peer IPv4 in the subnet (e.g. 10.8.0.2 .. 10.8.0.254)
+pub fn allocate_next_peer_ip(
+    server_address: &str,
+    existing_peers: &[AwgPeerConfig],
+) -> Result<String, String> {
+    let ip_str = server_address
+        .split('/')
+        .next()
+        .unwrap_or("10.8.0.1")
+        .trim();
+    let parts: Vec<&str> = ip_str.split('.').collect();
+    if parts.len() != 4 {
+        return Err("Only IPv4 addresses currently supported for auto-allocation".to_string());
+    }
+    let prefix = format!("{}.{}.{}", parts[0], parts[1], parts[2]);
+    let server_host_octet: u8 = parts[3].parse().unwrap_or(1);
+
+    let mut used_octets = HashSet::new();
+    used_octets.insert(server_host_octet);
+
+    for peer in existing_peers {
+        let peer_ip = peer.assigned_ip.split('/').next().unwrap_or("").trim();
+        if let Some(last_str) = peer_ip.strip_prefix(&format!("{}.", prefix)) {
+            if let Ok(octet) = last_str.parse::<u8>() {
+                used_octets.insert(octet);
+            }
+        }
+    }
+
+    for octet in 2..=254 {
+        if !used_octets.contains(&octet) {
+            return Ok(format!("{}.{}", prefix, octet));
+        }
+    }
+    Err("IP subnet exhaustion: no available host addresses in subnet".to_string())
 }
 
 /// AmneziaWG Peer (Client) Configuration & Telemetry
@@ -93,6 +174,51 @@ pub struct AwgPeerConfig {
     pub tx_bytes: u64,
     #[serde(default)]
     pub latest_handshake_secs: u64,
+}
+
+/// Automatically provision a peer in `AwgServerConfig`.
+/// Generates keypair if `public_key` is not provided.
+pub fn provision_peer(
+    server_config: &mut AwgServerConfig,
+    name: &str,
+    device_id: Option<&str>,
+    public_key: Option<&str>,
+) -> Result<(AwgPeerConfig, Option<String>), String> {
+    let assigned_ip = allocate_next_peer_ip(&server_config.address, &server_config.peers)?;
+    let id = device_id
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| format!("peer-{}", hex::encode(rand::random::<[u8; 4]>())));
+
+    let (priv_key, pub_key) = if let Some(pk) = public_key.filter(|s| !s.trim().is_empty()) {
+        (None, pk.trim().to_string())
+    } else {
+        let (pr, pu) = generate_keypair();
+        (Some(pr), pu)
+    };
+
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let peer = AwgPeerConfig {
+        id: id.clone(),
+        name: if name.is_empty() {
+            format!("Peer {}", id)
+        } else {
+            name.to_string()
+        },
+        public_key: pub_key,
+        private_key: priv_key.clone(),
+        allowed_ips: format!("{}/32", assigned_ip),
+        assigned_ip,
+        created_at: today,
+        rx_bytes: 0,
+        tx_bytes: 0,
+        latest_handshake_secs: 0,
+    };
+
+    // Remove existing peer with the same ID if reenrolling
+    server_config.peers.retain(|p| p.id != id);
+    server_config.peers.push(peer.clone());
+
+    Ok((peer, priv_key))
 }
 
 /// Telemetry metrics parsed from WireGuard/AmneziaWG dump output
@@ -288,6 +414,41 @@ pub fn parse_interface_telemetry(dump_output: &str) -> HashMap<String, PeerTelem
     map
 }
 
+/// Update Prometheus metrics with current AWG server and peer telemetry
+pub fn update_telemetry_metrics(config: &AwgServerConfig, metrics: &crate::metrics::Metrics) {
+    metrics.awg_peers_total.set(config.peers.len() as f64);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let mut active_count = 0;
+    let mut total_rx = 0;
+    let mut total_tx = 0;
+
+    for peer in &config.peers {
+        total_rx += peer.rx_bytes;
+        total_tx += peer.tx_bytes;
+        if peer.latest_handshake_secs > 0 && now.saturating_sub(peer.latest_handshake_secs) <= 180 {
+            active_count += 1;
+        }
+    }
+
+    metrics.awg_active_peers.set(active_count as f64);
+    let current_rx = metrics.awg_rx_bytes_total.get() as u64;
+    if total_rx > current_rx {
+        metrics
+            .awg_rx_bytes_total
+            .inc_by((total_rx - current_rx) as f64);
+    }
+    let current_tx = metrics.awg_tx_bytes_total.get() as u64;
+    if total_tx > current_tx {
+        metrics
+            .awg_tx_bytes_total
+            .inc_by((total_tx - current_tx) as f64);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -301,6 +462,61 @@ mod tests {
         assert_eq!(obf.jmax, 70);
         assert_eq!(obf.s1, 15);
         assert_eq!(obf.s2, 25);
+    }
+
+    #[test]
+    fn test_generate_keypair_and_derive() {
+        let (priv_k, pub_k) = generate_keypair();
+        assert!(!priv_k.is_empty());
+        assert!(!pub_k.is_empty());
+        assert_eq!(priv_k.len(), 44);
+        assert_eq!(pub_k.len(), 44);
+
+        let derived_pub = derive_public_key(&priv_k).expect("derive public key");
+        assert_eq!(derived_pub, pub_k);
+    }
+
+    #[test]
+    fn test_allocate_next_peer_ip() {
+        let mut peers = vec![];
+        let ip1 = allocate_next_peer_ip("10.8.0.1/24", &peers).unwrap();
+        assert_eq!(ip1, "10.8.0.2");
+
+        peers.push(AwgPeerConfig {
+            id: "p1".to_string(),
+            name: "P1".to_string(),
+            public_key: "pub1".to_string(),
+            private_key: None,
+            allowed_ips: "10.8.0.2/32".to_string(),
+            assigned_ip: "10.8.0.2".to_string(),
+            created_at: "2026-08-24".to_string(),
+            rx_bytes: 0,
+            tx_bytes: 0,
+            latest_handshake_secs: 0,
+        });
+
+        let ip2 = allocate_next_peer_ip("10.8.0.1/24", &peers).unwrap();
+        assert_eq!(ip2, "10.8.0.3");
+    }
+
+    #[test]
+    fn test_provision_peer() {
+        let mut server = AwgServerConfig::default();
+        ensure_server_keys(&mut server);
+
+        let (peer, priv_key) =
+            provision_peer(&mut server, "Test Agent", Some("dev-123"), None).unwrap();
+        assert_eq!(peer.id, "dev-123");
+        assert_eq!(peer.name, "Test Agent");
+        assert_eq!(peer.assigned_ip, "10.8.0.2");
+        assert!(priv_key.is_some());
+        assert_eq!(server.peers.len(), 1);
+
+        // Re-provisioning with same ID replaces old entry
+        let (peer2, _) =
+            provision_peer(&mut server, "Test Agent Updated", Some("dev-123"), None).unwrap();
+        assert_eq!(server.peers.len(), 1);
+        assert_eq!(peer2.name, "Test Agent Updated");
     }
 
     #[test]
