@@ -924,7 +924,9 @@ impl ControlApiState {
             (&Method::GET, "/api/auth/basic/users") => self.basic_users_list().await,
             (&Method::POST, "/api/auth/basic/users") => self.basic_users_put(body).await,
             (&Method::DELETE, "/api/auth/basic/users") => self.basic_users_delete(body).await,
-            (&Method::GET, "/api/amneziawg/status") => self.amneziawg_status().await,
+            (&Method::GET, "/api/amneziawg/config") | (&Method::GET, "/api/amneziawg/status") => {
+                self.amneziawg_status().await
+            }
             (&Method::POST, "/api/amneziawg/config") => self.amneziawg_update(body).await,
             (&Method::POST, "/api/amneziawg/peers") => self.amneziawg_add_peer(body).await,
             (&Method::DELETE, "/api/amneziawg/peers") => self.amneziawg_delete_peer(body).await,

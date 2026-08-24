@@ -509,6 +509,7 @@ dependencies = [
 name = "bsdm-proxy-e2e"
 version = "0.1.0"
 dependencies = [
+ "agent-spike",
  "anyhow",
  "base64",
  "bsdm-events",
@@ -522,6 +523,7 @@ dependencies = [
  "rustls-pemfile",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tokio-rustls",
 ]

@@ -64,11 +64,12 @@ impl ControlApiState {
             return Some(self.registered_devices());
         }
         if method == Method::POST {
-            if let Some(device_id) = path
+            let device_id = path
                 .strip_prefix("/api/v1/devices/")
-                .and_then(|p| p.strip_suffix("/revoke"))
-            {
-                return Some(self.revoke_device(device_id).await);
+                .or_else(|| path.strip_prefix("/api/v1/agent/devices/"))
+                .and_then(|p| p.strip_suffix("/revoke"));
+            if let Some(id) = device_id {
+                return Some(self.revoke_device(id).await);
             }
         }
 
