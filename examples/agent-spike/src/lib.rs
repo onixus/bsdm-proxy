@@ -5,6 +5,7 @@
 pub mod engine;
 pub mod policy;
 pub mod system_proxy;
+pub mod tunnel;
 
 use engine::{demo_evaluate, AgentEngine};
 use std::sync::Arc;
@@ -80,9 +81,12 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .or_else(|| control_api_token.clone());
     let device_token = std::env::var("DEVICE_TOKEN").ok().filter(|t| !t.is_empty());
     let with_mtls = env_flag("AGENT_MTLS") || std::env::args().any(|a| a == "--mtls");
+    let with_tunnel = env_flag("AGENT_TUNNEL")
+        || std::env::args().any(|a| a == "--tunnel" || a == "--with-tunnel");
     let do_enroll = env_flag("AGENT_ENROLL")
         || std::env::args().any(|a| a == "--enroll")
         || with_mtls
+        || with_tunnel
         || device_token.is_none();
     let heartbeat_secs: u64 = std::env::var("HEARTBEAT_INTERVAL_SECS")
         .ok()
@@ -111,19 +115,34 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         info!(
             %control_plane_url,
             with_mtls,
+            with_tunnel,
             "Enrolling device with control plane..."
         );
         match agent
-            .enroll(&client, enroll_token.as_deref(), with_mtls)
+            .enroll(&client, enroll_token.as_deref(), with_mtls, with_tunnel)
             .await
         {
-            Ok((_id, token, client_cert, _ca)) => {
+            Ok(res) => {
                 info!("DEVICE_TOKEN issued — store securely for subsequent runs");
-                println!("DEVICE_TOKEN={token}");
-                if client_cert.is_some() {
+                println!("DEVICE_TOKEN={}", res.device_token);
+                if res.client_cert_pem.is_some() {
                     info!("mTLS client certificate issued (see DEVICE_CERT_PEM_* blocks)");
                 }
-                agent.set_api_token(Some(token));
+                if let Some(t_conf) = &res.tunnel_config {
+                    info!("AmneziaWG tunnel configured on server");
+                    if let Ok(c_conf) =
+                        serde_json::from_value::<tunnel::AwgClientConfig>(t_conf.clone())
+                    {
+                        let conf_path = std::env::var("AWG_CLIENT_CONFIG_PATH")
+                            .unwrap_or_else(|_| "./certs/awg/client.conf".to_string());
+                        if let Err(e) = c_conf.save_conf(std::path::Path::new(&conf_path)) {
+                            warn!("Failed to save client tunnel config: {e}");
+                        } else {
+                            info!(%conf_path, "Saved AmneziaWG client configuration");
+                        }
+                    }
+                }
+                agent.set_api_token(Some(res.device_token));
             }
             Err(e) => {
                 if once {

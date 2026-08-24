@@ -16,6 +16,11 @@ rcgen = { version = "0.14", default-features = true, features = ["pem"] }
 tokio-tungstenite = { version = "0.30", default-features = true, features = ["rustls-tls-webpki-roots"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 http = "1"
+rand = "0.8"
+hex = "0.4"
+
+[dev-dependencies]
+tempfile = "3"
 
 # Both binaries are auto-discovered from src/bin/ and are thin wrappers over
 # this package's library. They previously shared a single src/main.rs via two

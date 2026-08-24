@@ -14,12 +14,16 @@ build_one() {
   if [[ -n "${target}" ]]; then
     rustup target add "${target}" 2>/dev/null || true
     (cd "${ROOT}" && cargo build -p agent-spike --release --target "${target}")
-    local src="${ROOT}/target/${target}/release/agent-spike"
+    local src="${ROOT}/target/${target}/release/bsdm-agent"
+    local src_conn="${ROOT}/target/${target}/release/bsdm-connect"
     [[ -f "${src}.exe" ]] && src="${src}.exe"
+    [[ -f "${src_conn}.exe" ]] && src_conn="${src_conn}.exe"
     install -m 0755 "${src}" "${OUT}/${name}"
+    install -m 0755 "${src_conn}" "${OUT}/${name/bsdm-agent/bsdm-connect}"
   else
     (cd "${ROOT}" && cargo build -p agent-spike --release)
-    install -m 0755 "${ROOT}/target/release/agent-spike" "${OUT}/${name}"
+    install -m 0755 "${ROOT}/target/release/bsdm-agent" "${OUT}/${name}"
+    install -m 0755 "${ROOT}/target/release/bsdm-connect" "${OUT}/${name/bsdm-agent/bsdm-connect}"
   fi
 }
 
