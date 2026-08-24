@@ -111,6 +111,12 @@ impl ControlApiState {
     async fn amneziawg_update(&self, body: Bytes) -> Response<Body> {
         match serde_json::from_slice::<crate::amneziawg::AwgServerConfig>(&body) {
             Ok(config) => {
+                if let Err(err) = crate::amneziawg::validate_server_config(&config) {
+                    return json_response(
+                        StatusCode::BAD_REQUEST,
+                        &serde_json::json!({"error": err}).to_string(),
+                    );
+                }
                 let mut guard = self.awg_server.write().await;
                 *guard = config;
                 let conf_path = std::env::var("AWG_CONFIG_PATH")
@@ -139,8 +145,32 @@ impl ControlApiState {
 
     async fn amneziawg_add_peer(&self, body: Bytes) -> Response<Body> {
         match serde_json::from_slice::<crate::amneziawg::AwgPeerConfig>(&body) {
-            Ok(peer) => {
+            Ok(mut peer) => {
+                if let Err(e) = crate::amneziawg::validate_key_b64(&peer.public_key) {
+                    return json_response(
+                        StatusCode::BAD_REQUEST,
+                        &serde_json::json!({"error": format!("Invalid public key: {e}")})
+                            .to_string(),
+                    );
+                }
+                if let Some(psk) = &peer.preshared_key {
+                    if !psk.trim().is_empty() {
+                        if let Err(e) = crate::amneziawg::validate_key_b64(psk) {
+                            return json_response(
+                                StatusCode::BAD_REQUEST,
+                                &serde_json::json!({"error": format!("Invalid pre-shared key: {e}")}).to_string(),
+                            );
+                        }
+                    }
+                }
+                peer.name = crate::amneziawg::sanitize_config_string(&peer.name);
+                peer.id = crate::amneziawg::sanitize_config_string(&peer.id);
+                if peer.id.is_empty() {
+                    peer.id = format!("peer-{}", hex::encode(rand::random::<[u8; 4]>()));
+                }
+
                 let mut guard = self.awg_server.write().await;
+                guard.peers.retain(|p| p.id != peer.id);
                 guard.peers.push(peer);
                 let conf_path = std::env::var("AWG_CONFIG_PATH")
                     .unwrap_or_else(|_| "./certs/awg/awg0.conf".to_string());
@@ -165,6 +195,14 @@ impl ControlApiState {
             }
             Err(e) => json_response(StatusCode::BAD_REQUEST, &format!(r#"{{"error":"{}"}}"#, e)),
         }
+    }
+
+    fn amneziawg_generate_psk(&self) -> Response<Body> {
+        let psk = crate::amneziawg::generate_preshared_key();
+        let payload = serde_json::json!({
+            "preshared_key": psk,
+        });
+        json_response(StatusCode::OK, &payload.to_string())
     }
 
     async fn amneziawg_delete_peer(&self, body: Bytes) -> Response<Body> {
@@ -891,6 +929,7 @@ impl ControlApiState {
             (&Method::POST, "/api/amneziawg/peers") => self.amneziawg_add_peer(body).await,
             (&Method::DELETE, "/api/amneziawg/peers") => self.amneziawg_delete_peer(body).await,
             (&Method::POST, "/api/amneziawg/generate-keys") => self.amneziawg_generate_keys(),
+            (&Method::POST, "/api/amneziawg/generate-psk") => self.amneziawg_generate_psk(),
             (&Method::POST, "/api/amneziawg/telemetry") => self.amneziawg_telemetry(body).await,
             (&Method::GET, "/api/cluster/session-state") => self.cluster_session_state(),
             (&Method::GET, "/api/threats/sync/peers") => self.threat_sync_peers(),

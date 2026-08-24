@@ -37,10 +37,10 @@
 | DLP/CASB | Сигнатурное сканирование request body | Experimental (Frozen) | Заморожено. Сигнатурный сканер. |
 | ZTNA/IAP | Reverse proxy + OIDC | Experimental (Frozen) | Описан в Agent Contract v0.1 (ADR 0005). |
 | Network | eBPF/XDP manager | Experimental (Frozen) | Заморожено. `EBPF_XDP_ENABLED` интерфейс. |
-| Remote access | AmneziaWG sidecar/config API | Experimental (Frozen) | Заморожено. |
+| Remote access | AmneziaWG sidecar/config API | Поддерживается | Curve25519 криптография, PSK, авто-провижининг пиров, экспорт .conf, метрики и интеграция с Agent Contract (`tunnel` capability). |
 | Cluster | Global sessions, distributed rate limit, threat sync | Experimental (Frozen) | Scaffolding gRPC mesh. |
-| Admin UI | Admin Console (Hybrid core) | Основной | Primary nav: Dashboard, Logs, Analytics, Policies, RPZ, **Devices**, Users, Settings. SPA baked into proxy image (`/admin/`). Live/demo provenance, error/empty states, mutation token gate. Search CORS for localhost split. |
-| Admin UI | Admin Console experimental routes | Experimental (Frozen) | Deep-links `/wasm`, `/cluster`, `/ai-cache`, `/amneziawg` only — frozen banner, not in primary nav. |
+| Admin UI | Admin Console (Hybrid core) | Основной | Primary nav: Dashboard, Logs, Analytics, Policies, RPZ, **Devices**, **AmneziaWG**, Users, Settings. SPA baked into proxy image (`/admin/`). Live/demo provenance, error/empty states, mutation token gate. Search CORS for localhost split. |
+| Admin UI | Admin Console experimental routes | Experimental (Frozen) | Deep-links `/wasm`, `/cluster`, `/ai-cache` only — frozen banner, not in primary nav. |
 | UI reference | Standalone Trust-UI | Выведен из эксплуатации | Полностью удалён; операторский интерфейс консолидирован в Admin Console (`/admin/`). |
 | Agent (Phase C) | Local policy agent spike | Beta (lab) | Enroll, CSR, events, push (long-poll/SSE/**WS**/gRPC), mTLS, CRL, lab OCSP JSON + **RFC 6960 DER OCSP**, data-plane **OCSP stapling**, **multi-node Redis**, multi-OS installers + system proxy, **fleet silent/MDM scaffolding** (Intune/GPO/Jamf, unsigned), Admin `/devices`. Notarized/signed store packages = customer pipeline. [pilot-agent.md](getting-started/pilot-agent.md) · [pilot-agent-fleet.md](getting-started/pilot-agent-fleet.md). |
 

@@ -85,12 +85,11 @@ export const ROUTE_SCOPES: RouteScope[] = [
   },
   {
     path: '/amneziawg',
-    maturity: 'frozen',
+    maturity: 'supported',
     title: 'AmneziaWG',
-    category: 'Experimental',
+    category: 'Security',
     titleKey: 'amneziawg',
-    categoryKey: 'experimental',
-    frozenNote: 'AmneziaWG / BSDM Connect is Frozen until Agent Contract work completes.',
+    categoryKey: 'security',
   },
 ]
 

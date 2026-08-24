@@ -68,7 +68,7 @@ impl ControlApiState {
                 .strip_prefix("/api/v1/devices/")
                 .and_then(|p| p.strip_suffix("/revoke"))
             {
-                return Some(self.revoke_device(device_id));
+                return Some(self.revoke_device(device_id).await);
             }
         }
 
@@ -351,7 +351,7 @@ impl ControlApiState {
         json_response(StatusCode::OK, &serde_json::Value::Array(rows).to_string())
     }
 
-    fn revoke_device(&self, device_id: &str) -> Response<Body> {
+    async fn revoke_device(&self, device_id: &str) -> Response<Body> {
         match self.device_registry.revoke(device_id) {
             Ok((persisted, fingerprint, serial)) => {
                 let crl_added = self.agent_crl.revoke(
@@ -360,6 +360,24 @@ impl ControlApiState {
                     serial.as_deref(),
                     "cessationOfOperation",
                 );
+
+                // Remove associated AmneziaWG peer if present and sync sidecar
+                let mut awg_peer_revoked = false;
+                {
+                    let mut awg = self.awg_server.write().await;
+                    let initial_len = awg.peers.len();
+                    awg.peers.retain(|p| p.id != device_id);
+                    if awg.peers.len() < initial_len {
+                        awg_peer_revoked = true;
+                        let awg_path = std::env::var("AWG_CONFIG_PATH")
+                            .unwrap_or_else(|_| "/etc/amnezia/amneziawg/awg0.conf".to_string());
+                        let _ = crate::amneziawg::sync_sidecar_interface(
+                            std::path::Path::new(&awg_path),
+                            &mut awg,
+                        );
+                    }
+                }
+
                 json_response(
                     StatusCode::OK,
                     &serde_json::json!({
@@ -368,6 +386,7 @@ impl ControlApiState {
                         "persisted": persisted,
                         "crl_added": crl_added,
                         "cert_fingerprint": fingerprint,
+                        "awg_peer_revoked": awg_peer_revoked,
                     })
                     .to_string(),
                 )

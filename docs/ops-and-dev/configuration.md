@@ -320,6 +320,16 @@ ML worker:
 Полный пример: `packaging/config/threat-intel.env.example`. Подробнее:
 [Threat intel collector](../features/threat-intel-collector.md).
 
+## AmneziaWG (BSDM Connect)
+
+| Переменная | Default | Описание |
+|---|---|---|
+| `AWG_CONFIG_PATH` | `/etc/amnezia/amneziawg/awg0.conf` | Путь к конфигурационному файлу сервера AWG |
+| `AWG_SERVER_ENDPOINT` | `127.0.0.1:51820` | Внешний IP:Port эндпоинта для клиентов |
+| `AWG_RELOAD_CMD` | unset | Команда синхронизации интерфейса sidecar (например `awg syncconf awg0 ...`) |
+| `AWG_CLIENT_DNS` | `10.8.0.1` | DNS сервер для генерируемых клиентских профилей |
+| `AWG_CLIENT_MTU` | `1360` | MTU для клиентских туннелей (с учетом оверхеда обфускации) |
+
 ## Experimental modules
 
 ### WASM
