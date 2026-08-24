@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **AmneziaWG Server API & Endpoint Integration** — Curve25519 cryptography, pre-shared key (PSK) generation, automated peer provisioning, Agent Contract `tunnel` capability, atomic config generation (0600 permissions), device revocation sync with CRL/Registry, and Prometheus metrics.
+- **Alternative Rust Client (`bsdm-connect`)** — standalone CLI and daemon binary in `examples/agent-spike/src/bin/bsdm-connect.rs` providing cross-platform AmneziaWG tunnel management (`up`/`down`/`status`), process execution timeouts, and atomic config persistence.
+- **Domain-Based Split Routing & PAC Engine** — local route table engine (`Direct`, `Proxy`, `Tunnel`, `Block`), exact/wildcard/suffix/CIDR pattern matching, atomic JSON persistence, and standards-compliant JavaScript `FindProxyForURL(url, host)` PAC script generation with strict JS escaping.
+- **Hardened Agent Web & Mobile UI Server** — embedded localhost server on `:8765` serving adaptive Web/Mobile UI, `/proxy.pac`, live tunnel telemetry, and REST APIs, secured with CSRF / DNS-rebinding defense (`X-BSDM-Request: 1`), Slowloris bounds, and strict Content-Security-Policy (`X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`).
+- **Cross-Platform Scaffolding** — macOS `.app` bundle generator (`packaging/agent/macos/create-macos-app.sh`) and Android VPN Service scaffolding (`packaging/agent/android/`).
+- **Comprehensive E2E Test Suite** — `e2e/tests/amneziawg_and_agent_e2e.rs` verifying end-to-end AWG server config, key generation, agent enrollment, tunnel config export (`.conf`/`json`), token revocation, and dynamic PAC routing with CSRF rejection.
+
 ## [0.9.13] - 2026-08-21
 
 Patch after **0.9.12**: Threat intelligence feed collector framework (`threat-intel`), proxy hot-path zero-allocation and lock-free optimizations, ACL category policies and domain fallbacks, redesigned interactive installer, and security/dependency updates.

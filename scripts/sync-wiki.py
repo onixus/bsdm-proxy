@@ -45,6 +45,8 @@ PAGES: tuple[Page, ...] = (
     Page("docs/getting-started/pilot-ml.md", "Pilot-ML.md", "Getting started", "Pilot ML", "Одна ML-модель, write-back и smoke test."),
     Page("docs/getting-started/pilot-agent.md", "Pilot-Agent.md", "Getting started", "Pilot agent", "Phase C agent spike и lab-приёмка."),
     Page("docs/getting-started/pilot-agent-fleet.md", "Pilot-Agent-Fleet.md", "Getting started", "Agent fleet", "MDM/GPO/Jamf packaging scaffolding."),
+    Page("docs/getting-started/bsdm-connect-client.md", "Bsdm-Connect-Client.md", "Getting started", "BSDM Connect Client", "Альтернативный клиент на Rust для AmneziaWG и BSDM."),
+    Page("docs/getting-started/agent-ui-and-split-routing.md", "Agent-UI-and-Split-Routing.md", "Getting started", "Split Routing & Agent UI", "Локальное разграничение маршрутов по доменам, PAC и мобильный UI."),
     Page("docs/getting-started/lite-mode.md", "Lite-Mode.md", "Getting started", "Lite mode", "Proxy и SQLite без Kafka/ClickHouse."),
     Page("docs/getting-started/troubleshooting.md", "Troubleshooting-and-FAQ.md", "Getting started", "Troubleshooting", "Типовые ошибки запуска и диагностика."),
 

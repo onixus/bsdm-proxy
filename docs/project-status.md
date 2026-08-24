@@ -43,6 +43,7 @@
 | Admin UI | Admin Console experimental routes | Experimental (Frozen) | Deep-links `/wasm`, `/cluster`, `/ai-cache` only — frozen banner, not in primary nav. |
 | UI reference | Standalone Trust-UI | Выведен из эксплуатации | Полностью удалён; операторский интерфейс консолидирован в Admin Console (`/admin/`). |
 | Agent (Phase C) | Local policy agent spike | Beta (lab) | Enroll, CSR, events, push (long-poll/SSE/**WS**/gRPC), mTLS, CRL, lab OCSP JSON + **RFC 6960 DER OCSP**, data-plane **OCSP stapling**, **multi-node Redis**, multi-OS installers + system proxy, **fleet silent/MDM scaffolding** (Intune/GPO/Jamf, unsigned), Admin `/devices`. Notarized/signed store packages = customer pipeline. [pilot-agent.md](getting-started/pilot-agent.md) · [pilot-agent-fleet.md](getting-started/pilot-agent-fleet.md). |
+| Agent (Client & Routing) | BSDM Connect (`bsdm-connect`), Split Routing, PAC & UI | Beta (lab) | Альтернативный клиент на Rust, локальное разграничение маршрутов по доменам (`Direct`/`Proxy`/`Tunnel`/`Block`), генератор PAC-файлов с защитой от JS-инъекций, встроенный защищенный Web/Mobile UI сервер (CSRF defense, CSP, Slowloris protection) на `:8765`, скаффолды для macOS App и Android VPN Service. [bsdm-connect-client.md](getting-started/bsdm-connect-client.md) · [agent-ui-and-split-routing.md](getting-started/agent-ui-and-split-routing.md). |
 
 ## Известные ограничения
 
