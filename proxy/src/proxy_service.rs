@@ -49,6 +49,7 @@ use crate::session::{header_ci, resolve_location, SessionCorrelator};
 use crate::sharded_cache::HttpL1Cache;
 use crate::streaming_miss::TeeMissBody;
 use crate::threat_score_cache::ThreatScoreCache;
+use crate::ti_shadow::TiShadowMatcher;
 use crate::tls::CertCache;
 use crate::upstream::{UpstreamClientHandle, UpstreamTlsConfig};
 #[cfg(feature = "wasm")]
@@ -179,6 +180,7 @@ struct MissCompletionHandle {
     perf: PerfConfig,
     digest_registry: Option<Arc<DigestRegistry>>,
     sessions: Arc<SessionCorrelator>,
+    ti_shadow: Arc<TiShadowMatcher>,
     miss_flights: MissFlightMap,
     semantic_config: SemanticCacheConfig,
     semantic_index: SemanticIndex,
@@ -216,7 +218,8 @@ impl MissCompletionHandle {
         self.http_pipeline.is_some()
     }
 
-    fn send_cache_event(&self, event: CacheEvent) {
+    fn send_cache_event(&self, mut event: CacheEvent) {
+        crate::ti_shadow::annotate_shadow_match(&self.ti_shadow, &self.metrics, &mut event);
         if !self.perf.should_emit_kafka_event() {
             return;
         }
@@ -388,6 +391,7 @@ impl MissCompletionHandle {
                     casb_alert: None,
                     decision_source: Some(request_decision_source(url).to_string()),
                     bypass_reason: None,
+                    threat_shadow_match: None,
                     event_id,
                 };
                 self.send_cache_event(event);
@@ -429,6 +433,8 @@ pub struct ProxyService {
     policy_cache: Arc<PolicyDecisionCache>,
     sessions: Arc<SessionCorrelator>,
     threat_score_cache: Arc<ThreatScoreCache>,
+    /// Observe-only threat-intel matcher (issue #330); never blocks.
+    ti_shadow: Arc<TiShadowMatcher>,
     miss_flights: MissFlightMap,
     semantic_config: SemanticCacheConfig,
     semantic_index: SemanticIndex,
@@ -543,6 +549,11 @@ impl ProxyService {
         self.http_client.clone()
     }
 
+    /// Observe-only threat-intel matcher (issue #330).
+    pub fn ti_shadow(&self) -> Arc<TiShadowMatcher> {
+        self.ti_shadow.clone()
+    }
+
     pub fn pinning_registry(&self) -> Arc<PinningRegistry> {
         self.pinning_registry.clone()
     }
@@ -576,6 +587,7 @@ impl ProxyService {
             perf: self.perf.clone(),
             digest_registry: self.digest_registry.clone(),
             sessions: self.sessions.clone(),
+            ti_shadow: self.ti_shadow.clone(),
             miss_flights: self.miss_flights.clone(),
             semantic_config: self.semantic_config.clone(),
             semantic_index: self.semantic_index.clone(),
@@ -666,6 +678,7 @@ impl ProxyService {
             policy_cache,
             sessions: Arc::new(SessionCorrelator::from_env()),
             threat_score_cache,
+            ti_shadow: Arc::new(TiShadowMatcher::from_env()),
             miss_flights: MissFlightMap::new(),
             semantic_config,
             semantic_index,
@@ -772,6 +785,7 @@ impl ProxyService {
                 casb_alert: None,
                 decision_source: Some(request_decision_source(url).to_string()),
                 bypass_reason: None,
+                threat_shadow_match: None,
                 event_id,
             };
             self.send_cache_event(event);
@@ -849,6 +863,7 @@ impl ProxyService {
                 casb_alert: None,
                 decision_source: Some(decision_source.to_string()),
                 bypass_reason: None,
+                threat_shadow_match: None,
                 event_id,
             };
             self.send_cache_event(event);
@@ -1705,7 +1720,8 @@ impl ProxyService {
         self.http_pipeline.is_some()
     }
 
-    pub(crate) fn send_cache_event(&self, event: CacheEvent) {
+    pub(crate) fn send_cache_event(&self, mut event: CacheEvent) {
+        crate::ti_shadow::annotate_shadow_match(&self.ti_shadow, &self.metrics, &mut event);
         if !self.perf.should_emit_kafka_event() {
             return;
         }
@@ -2275,6 +2291,7 @@ impl ProxyService {
                                 },
                                 decision_source: Some("mitm".to_string()),
                                 bypass_reason: None,
+                                threat_shadow_match: None,
                                 event_id: new_event_id(),
                             };
                             self.send_cache_event(event);
@@ -2603,6 +2620,7 @@ impl ProxyService {
                                 },
                                 decision_source: Some("mitm".to_string()),
                                 bypass_reason: None,
+                                threat_shadow_match: None,
                                 event_id: new_event_id(),
                             };
                             if !event.session_id.is_empty() {

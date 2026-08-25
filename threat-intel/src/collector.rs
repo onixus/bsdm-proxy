@@ -249,13 +249,10 @@ impl Collector {
         let rpz_path = self.config.rpz_artifact_path();
         let acl_path = self.config.acl_artifact_path();
 
-        match storage
-            .list_active_domain_sources(self.config.min_confidence_score, 100_000)
-        {
+        match storage.list_active_domain_sources(self.config.min_confidence_score, 100_000) {
             Ok(pairs) => {
                 let domains: Vec<String> = pairs.iter().map(|(d, _)| d.clone()).collect();
-                let feeds: std::collections::BTreeMap<String, String> =
-                    pairs.into_iter().collect();
+                let feeds: std::collections::BTreeMap<String, String> = pairs.into_iter().collect();
                 let domain_count = domains.len();
                 let rpz_config = crate::rpz::RpzConfig {
                     shadow_mode: !mode.is_enforce(),

@@ -375,14 +375,13 @@ mod tests {
 
         // 4. SOAR Block
         let block_req = "POST /api/v1/soar/block HTTP/1.1\r\nContent-Type: application/json\r\n\r\n{\"indicator\":\"phish.example.test\",\"kind\":\"domain\",\"reason\":\"Manual SOAR containment\",\"operator\":\"soc1\"}";
-        let block_resp =
-            String::from_utf8(handle_admin(
-                block_req,
-                &metrics,
-                Some(&storage),
-                EnforcementMode::Enforce,
-            ))
-            .unwrap();
+        let block_resp = String::from_utf8(handle_admin(
+            block_req,
+            &metrics,
+            Some(&storage),
+            EnforcementMode::Enforce,
+        ))
+        .unwrap();
         assert!(block_resp.starts_with("HTTP/1.1 200 OK"));
         assert!(block_resp.contains("\"success\": true"));
 
@@ -399,26 +398,24 @@ mod tests {
 
         // 6. SOAR Unblock
         let unblock_req = "POST /api/v1/soar/unblock HTTP/1.1\r\nContent-Type: application/json\r\n\r\n{\"indicator\":\"phish.example.test\",\"reason\":\"Investigation closed\"}";
-        let unblock_resp =
-            String::from_utf8(handle_admin(
-                unblock_req,
-                &metrics,
-                Some(&storage),
-                EnforcementMode::Enforce,
-            ))
-            .unwrap();
+        let unblock_resp = String::from_utf8(handle_admin(
+            unblock_req,
+            &metrics,
+            Some(&storage),
+            EnforcementMode::Enforce,
+        ))
+        .unwrap();
         assert!(unblock_resp.starts_with("HTTP/1.1 200 OK"));
         assert!(unblock_resp.contains("\"success\": true"));
 
         // 7. Not found
-        let missing =
-            String::from_utf8(handle_admin(
-                "GET /nope HTTP/1.1",
-                &metrics,
-                Some(&storage),
-                EnforcementMode::Enforce,
-            ))
-            .unwrap();
+        let missing = String::from_utf8(handle_admin(
+            "GET /nope HTTP/1.1",
+            &metrics,
+            Some(&storage),
+            EnforcementMode::Enforce,
+        ))
+        .unwrap();
         assert!(missing.starts_with("HTTP/1.1 404"));
     }
 

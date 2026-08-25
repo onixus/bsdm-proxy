@@ -308,6 +308,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         bsdm_proxy::reverse_proxy::ReverseProxyConfig::from_env(),
     ));
 
+    // Threat-intel shadow feed: observation only, never affects the decision path.
+    service.ti_shadow().spawn_reload_task();
+
     let session_store = GlobalSessionStore::new(None);
     let node_id = std::env::var("NODE_ID").unwrap_or_else(|_| "node-1".to_string());
     let threat_sync = ThreatSyncEngine::new(node_id, None);

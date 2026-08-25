@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS bsdm.http_cache
     dlp_violation Nullable(String),
     casb_alert Nullable(String),
     decision_source LowCardinality(Nullable(String)),
-    bypass_reason Nullable(String)
+    bypass_reason Nullable(String),
+    threat_shadow_match LowCardinality(Nullable(String))
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMMDD(ts)
@@ -52,6 +53,10 @@ ALTER TABLE bsdm.http_cache
 
 ALTER TABLE bsdm.http_cache
     ADD COLUMN IF NOT EXISTS acl_reason Nullable(String);
+
+-- Threat-intel shadow mode observability (issue #330).
+ALTER TABLE bsdm.http_cache
+    ADD COLUMN IF NOT EXISTS threat_shadow_match LowCardinality(Nullable(String));
 
 -- M3: who accessed domain X (30 days)
 -- SELECT ts, username, client_ip, url, method, status, cache_status, session_id

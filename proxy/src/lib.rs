@@ -64,6 +64,7 @@ pub mod streaming_miss;
 pub mod tag_index;
 pub mod threat_score_cache;
 pub mod threat_sync;
+pub mod ti_shadow;
 pub mod tls;
 pub mod upstream;
 #[cfg(feature = "wasm")]
@@ -135,6 +136,7 @@ pub use sharded_cache::HttpL1Cache;
 pub use tag_index::{parse_cache_tags, TagIndex};
 pub use threat_score_cache::{ThreatScoreCache, ThreatScoreConfig, ThreatScoreHit};
 pub use threat_sync::{ThreatSyncEngine, ThreatSyncEvent};
+pub use ti_shadow::{ShadowMatch, TiShadowConfig, TiShadowMatcher};
 pub use tls::CertCache;
 pub use upstream::{
     build_upstream_https_connector, UpstreamClientHandle, UpstreamTlsConfig, UpstreamTlsSnapshot,

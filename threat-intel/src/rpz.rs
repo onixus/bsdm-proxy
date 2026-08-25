@@ -194,7 +194,10 @@ mod tests {
         let feed: ProxyThreatFeed = serde_json::from_str(&raw).unwrap();
         assert_eq!(feed.mode, "shadow");
         assert_eq!(feed.domain_count, 1);
-        assert_eq!(feed.feeds.get("evil.com").map(String::as_str), Some("urlhaus"));
+        assert_eq!(
+            feed.feeds.get("evil.com").map(String::as_str),
+            Some("urlhaus")
+        );
     }
 
     #[test]

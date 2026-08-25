@@ -260,6 +260,7 @@ mod tests {
             casb_alert: None,
             decision_source: decision_source.map(str::to_string),
             bypass_reason: None,
+            threat_shadow_match: None,
             event_id: id.into(),
         }
     }

@@ -40,6 +40,8 @@ spec:
               value: {{ .Values.threatIntel.maxAttempts | quote }}
             - name: TI_OUTPUT_DIR
               value: {{ .Values.threatIntel.outputDir | quote }}
+            - name: TI_ENFORCEMENT_MODE
+              value: {{ .Values.threatIntel.enforcementMode | default "shadow" | quote }}
             - name: METRICS_PORT
               value: {{ .Values.threatIntel.service.port | quote }}
             - name: RUST_LOG

@@ -270,7 +270,10 @@ mod tests {
 
     #[test]
     fn enforcement_is_enabled_only_by_explicit_value() {
-        assert_eq!(EnforcementMode::parse(" Enforce ").0, EnforcementMode::Enforce);
+        assert_eq!(
+            EnforcementMode::parse(" Enforce ").0,
+            EnforcementMode::Enforce
+        );
         // Anything ambiguous is fail-safe: shadow plus an operator warning.
         for raw in ["true", "1", "block", "yes", "on", "enforced"] {
             let (mode, warning) = EnforcementMode::parse(raw);

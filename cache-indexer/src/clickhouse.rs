@@ -73,6 +73,7 @@ impl ClickHouseWriter {
             format!("ALTER TABLE {database}.{table} ADD COLUMN IF NOT EXISTS bypass_reason Nullable(String)"),
             format!("ALTER TABLE {database}.{table} ADD COLUMN IF NOT EXISTS acl_rule_id Nullable(String)"),
             format!("ALTER TABLE {database}.{table} ADD COLUMN IF NOT EXISTS acl_reason Nullable(String)"),
+            format!("ALTER TABLE {database}.{table} ADD COLUMN IF NOT EXISTS threat_shadow_match LowCardinality(Nullable(String))"),
         ]
     }
 
@@ -184,7 +185,7 @@ mod tests {
     #[test]
     fn clickhouse_schema_migration_queries_are_valid() {
         let queries = ClickHouseWriter::schema_migration_queries("bsdm", "http_cache");
-        assert_eq!(queries.len(), 4);
+        assert_eq!(queries.len(), 5);
         assert!(queries[0]
             .contains("ALTER TABLE bsdm.http_cache ADD COLUMN IF NOT EXISTS decision_source"));
         assert!(queries[1]
@@ -195,5 +196,7 @@ mod tests {
         assert!(
             queries[3].contains("ALTER TABLE bsdm.http_cache ADD COLUMN IF NOT EXISTS acl_reason")
         );
+        assert!(queries[4]
+            .contains("ALTER TABLE bsdm.http_cache ADD COLUMN IF NOT EXISTS threat_shadow_match"));
     }
 }

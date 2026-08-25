@@ -297,6 +297,7 @@ pub fn to_events(device_id: &str, item: &AgentEventItem) -> (CacheEvent, RecentA
         casb_alert: None,
         decision_source: Some(decision_source.clone()),
         bypass_reason,
+        threat_shadow_match: None,
         event_id: event_id.clone(),
     };
     let recent = RecentAgentEvent {

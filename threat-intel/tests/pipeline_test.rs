@@ -64,10 +64,7 @@ impl FeedSource for TestFeedSource {
     }
 }
 
-fn pipeline_config(
-    output_dir: &std::path::Path,
-    mode: EnforcementMode,
-) -> Config {
+fn pipeline_config(output_dir: &std::path::Path, mode: EnforcementMode) -> Config {
     Config {
         sources: vec!["test_phish_feed".into()],
         poll_interval: Duration::from_secs(900),

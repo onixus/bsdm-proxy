@@ -35,6 +35,7 @@ mod tests {
             casb_alert: None,
             decision_source: None,
             bypass_reason: None,
+            threat_shadow_match: None,
             event_id: "evt-1".to_string(),
         };
 
@@ -78,6 +79,7 @@ mod tests {
             casb_alert: None,
             decision_source: None,
             bypass_reason: None,
+            threat_shadow_match: None,
             event_id: "evt-1".to_string(),
         };
 
@@ -140,6 +142,7 @@ mod tests {
             casb_alert: None,
             decision_source: None,
             bypass_reason: None,
+            threat_shadow_match: None,
             event_id: "evt-block".to_string(),
         };
 
@@ -183,6 +186,7 @@ mod tests {
                 casb_alert: None,
                 decision_source: None,
                 bypass_reason: None,
+                threat_shadow_match: None,
                 event_id: format!("evt-{i}"),
             });
         }
@@ -226,6 +230,7 @@ mod tests {
             casb_alert: None,
             decision_source: None,
             bypass_reason: None,
+            threat_shadow_match: None,
             event_id: "evt-block".to_string(),
         };
 

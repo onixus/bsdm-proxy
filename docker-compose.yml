@@ -138,6 +138,9 @@ services:
       - THREAT_SCORE_ENABLED=${THREAT_SCORE_ENABLED:-false}
       - THREAT_SCORE_POLL_URL=${THREAT_SCORE_POLL_URL:-http://ml-worker:8091/api/threat-scores}
       - THREAT_SCORE_POLL_INTERVAL_SECS=${THREAT_SCORE_POLL_INTERVAL_SECS:-60}
+      # Threat-intel Shadow Mode: observe-only IOC matching (issue #330).
+      - TI_SHADOW_MATCH_ENABLED=${TI_SHADOW_MATCH_ENABLED:-true}
+      - TI_SHADOW_FEED_PATH=/var/lib/bsdm-proxy/threat-intel/threat_domains.json.shadow
       - UT1_PATH=/var/lib/ut1-blacklists
       - RUST_LOG=info,bsdm_proxy=debug
       - RUST_BACKTRACE=1
@@ -152,6 +155,8 @@ services:
       - ./config/bsdm-etc:/etc/bsdm-proxy
       - pinning-audit:/var/log/bsdm-proxy
       - agent-devices:/var/lib/bsdm-proxy
+      # Shadow-mode IOC export, read-only: observation, never enforcement.
+      - threat-intel-data:/var/lib/bsdm-proxy/threat-intel:ro
     tty: true
     stdin_open: true
     restart: unless-stopped
@@ -480,6 +485,8 @@ services:
       - TI_MAX_BODY_MB=${TI_MAX_BODY_MB:-64}
       - TI_MAX_INDICATORS_PER_FETCH=${TI_MAX_INDICATORS_PER_FETCH:-500000}
       - TI_OUTPUT_DIR=/var/lib/bsdm-proxy/threat-intel
+      # Fail-safe default (issue #330): shadow writes *.shadow artifacts only.
+      - TI_ENFORCEMENT_MODE=${TI_ENFORCEMENT_MODE:-shadow}
       - METRICS_PORT=8093
       - RUST_LOG=info,threat_intel=info
     volumes:
