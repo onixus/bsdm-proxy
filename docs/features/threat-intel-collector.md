@@ -1,15 +1,35 @@
 # Threat intelligence collector (TASK-TI-001)
 
+> **Threat monitoring in Shadow Mode — enforcement is in development.** The
+> feeds are observed, not enforced: `TI_ENFORCEMENT_MODE=shadow` is the default
+> posture and blocking on feed content requires an explicit `enforce` decision
+> under the transition criteria of
+> [ADR 0008](../adr/0008-threat-intel-shadow-mode.md).
+
 Optional `threat-intel` worker that pulls phishing/malware IOC feeds on a
 schedule, parses them through per-source plugins, and writes a snapshot per feed
-plus a run report. This is the collector framework from the
-[TI backlog](../threat-intelligence/AI_Agent_Backlog.md): the IOC database
-(TASK-TI-002), full normalization (TASK-TI-003) and confidence scoring
-(TASK-TI-010) are **not** part of it, and nothing here is wired into ACL or RPZ
-enforcement yet.
+plus a run report. Beyond the collector framework from the
+[TI backlog](../threat-intelligence/AI_Agent_Backlog.md), the crate also holds an
+IOC store (SQLite with TTL, `TI_SQLITE_PATH`), normalization, weighted confidence
+scoring, SIEM export, a SOAR API (`/api/v1/soar/*`) and a reputation endpoint
+(`/api/v1/ml/reputation`).
 
-Status: **Experimental**. Treat the output as an input to a review pipeline, not
-as a block list.
+It also **compiles enforcement artifacts** when `TI_RPZ_ENABLED` is on (default
+`true`, `threat-intel/src/config.rs`): an RPZ zone `threats.rpz` and a Proxy ACL
+list `threat_domains.json` (`threat-intel/src/collector.rs`,
+`threat-intel/src/rpz.rs`). In shadow mode both are written under a `.shadow`
+suffix (`threats.rpz.shadow`, `threat_domains.json.shadow`) that no enforcement
+component loads, and `TI_RPZ_ENABLED=true` without an explicit
+`TI_ENFORCEMENT_MODE=enforce` logs a warning.
+
+Even in `enforce` these remain **files, not decisions**: `dns-sinkhole` loads the
+zone named by `DNS_SINKHOLE_ZONE_PATH` (compose:
+`/var/lib/bsdm-proxy/rpz/compiled.rpz`) and the proxy does not read
+`threat_domains.json`, so nothing blocks until an operator deliberately publishes
+the generated zone. Do not do that during a pilot — see ADR 0008.
+
+Status: **Beta, monitoring only**. Treat the output as an input to a review
+pipeline, not as a block list.
 
 ## Quick start
 
@@ -84,6 +104,10 @@ here.
 | `TI_MAX_BODY_MB` | `64` | Hard cap on a feed response body |
 | `TI_MAX_INDICATORS_PER_FETCH` | `500000` | Hard cap on indicators kept per fetch |
 | `TI_OUTPUT_DIR` | `./data/threat-intel` | Snapshot directory |
+| `TI_ENFORCEMENT_MODE` | `shadow` | `shadow` observes only; `enforce` is the explicit opt-in required by [ADR 0008](../adr/0008-threat-intel-shadow-mode.md) |
+| `TI_SQLITE_PATH` | `<TI_OUTPUT_DIR>/ioc.db` | IOC store path (`TI_STORAGE_ENABLED`, `TI_IOC_TTL_SECS`) |
+| `TI_RPZ_ENABLED` | `true` | Compile `threats.rpz` / `threat_domains.json`; in shadow mode they are written with a `.shadow` suffix |
+| `TI_MIN_CONFIDENCE_SCORE` | `75` | Minimum weighted score for an indicator to reach the artifacts |
 | `TI_USER_AGENT` | `bsdm-threat-intel/<version>` | Feed request User-Agent |
 | `TI_RUN_ONCE` | `false` | Collect every source once and exit |
 | `METRICS_PORT` | `8093` | `/metrics` and `/health` |
@@ -114,6 +138,23 @@ a cron job or a CI smoke check.
 | `threat_intel_last_success_timestamp_seconds` | `source` | Unix time of the last success — alert on staleness |
 | `threat_intel_fetch_duration_seconds` | `source` | Cycle duration histogram |
 | `threat_intel_sink_errors_total` | `source` | Snapshot write failures |
+| `threat_intel_soar_blocks_total` | `mode` | SOAR block actions by enforcement mode (`shadow`, `enforce`) |
+| `ti_shadow_matches_total` | `feed` | **Proxy-side, per [ADR 0008](../adr/0008-threat-intel-shadow-mode.md)**: traffic matches against an IOC while in shadow mode, emitted together with the `threat_shadow_match` event; the request is **not** blocked. This is the false-positive review input for the go/no-go record |
+
+## Shadow Mode review flow
+
+1. Keep `TI_ENFORCEMENT_MODE` unset or `shadow` (default) and confirm the
+   artifacts on disk carry the `.shadow` suffix.
+2. Let the collector run for at least the observation window in
+   [ADR 0008](../adr/0008-threat-intel-shadow-mode.md) (≥ 14 days).
+3. Review `threat_shadow_match` events per feed through the Search API and
+   compare volumes with `ti_shadow_matches_total{feed}`.
+4. Record the per-feed false-positive share in the
+   [go/no-go record](../ops-and-dev/pilot-go-no-go-template.md). Feeds above the
+   threshold are dropped from `TI_SOURCES` rather than enforced with exceptions.
+5. `POST /api/v1/soar/block` answers `202` with `"mode": "shadow"` and
+   `"enforced": false` while in shadow mode — a playbook must treat that as
+   "recorded", not "contained".
 
 ## Security
 

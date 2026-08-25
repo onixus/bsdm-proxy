@@ -12,7 +12,7 @@ Roadmap определяет порядок работ в рамках стра�
 2. **SNI (ClientHello) — контроль до расшифровки**: применение правил (Allow/Deny/Redirect) без терминирования TLS.
 3. **Selective MITM — селективная расшифровка**: расшифровка HTTPS применяется исключительно для целевых категорий высокого риска (`MITM_CATEGORIES`).
 4. **Local Agent — фильтрация на устройствах**: исполнение правил на эндпоинтах пользователя (On-Device SWG) вместо централизованного туннелирования.
-5. **Threat Intelligence — упреждающая защита**: автоматический сбор и актуализация IOC-индикаторов (фишинг, вредоносное ПО) для DNS RPZ и прокси-политик.
+5. **Threat Intelligence — мониторинг угроз в режиме Shadow**: автоматический сбор и актуализация IOC-индикаторов (фишинг, вредоносное ПО). Enforcement для DNS RPZ и прокси-политик — в разработке и выключен по умолчанию (`TI_ENFORCEMENT_MODE=shadow`, [ADR 0008](adr/0008-threat-intel-shadow-mode.md)).
 
 ---
 
@@ -64,12 +64,16 @@ Roadmap определяет порядок работ в рамках стра�
 
 ## Фаза D — Threat Intelligence & Feed Collector
 
+> Все артефакты ниже реализованы как **генерация и наблюдение**. Применение их для
+> блокировки трафика выключено по умолчанию и допускается только по критериям
+> перехода из [ADR 0008](adr/0008-threat-intel-shadow-mode.md).
+
 - [x] **Threat intelligence feed collector** (`threat-intel`, TASK-TI-001) — сбор OpenPhish, PhishStats, Phishing.Database и URLhaus по расписанию, retry/backoff, дедупликация, метрики на `:8093/metrics`, JSONL-снапшоты + `report.json`, Compose profile и Helm toggle ([threat-intel-collector.md](features/threat-intel-collector.md)).
 - [x] **IOC storage & SQLite persistence** (TASK-TI-002) — структурированное хранение индикаторов (`SqliteStorage`, `indicators`, `sources`, `collection_history`), дедупликация, TTL-экспирация и индексы.
 - [x] **IOC normalization and category tagging** (TASK-TI-003) — канонизация URL/доменов/IP, валидация Punycode/IDN, фильтрация bogon/private IP.
 - [x] **Confidence Scoring & Multi-source correlation** (TASK-TI-010) — алгоритм взвешенного скоринга с бонусом корреляции фидов и временным затуханием (freshness decay).
-- [x] **Automated RPZ zone generation & DNS enforcement** (TASK-TI-020) — автоматическая компиляция фидов в RPZ-зоны (`threats.rpz`) для dns-sinkhole с атомарной записью.
-- [x] **Proxy ACL threat feed export** (TASK-TI-021) — экспорт нормализованных доменов и URL угроз в JSON-формате (`threat_domains.json`) для применения в политиках proxy data-plane.
+- [x] **Automated RPZ zone generation** (TASK-TI-020) — автоматическая компиляция фидов в RPZ-зоны (`threats.rpz`) с атомарной записью. Публикация зоны в `dns-sinkhole` — отдельный явный шаг оператора (ADR 0008), по умолчанию не выполняется.
+- [x] **Proxy ACL threat feed export** (TASK-TI-021) — экспорт нормализованных доменов и URL угроз в JSON-формате (`threat_domains.json`). Файл предназначен для будущего применения в политиках proxy data-plane; сейчас proxy его не читает.
 - [x] **Enterprise SIEM Integration** (TASK-TI-030) — форматирование событий в CEF (ArcSight/QRadar/Splunk), ECS JSON (Elastic) и Syslog RFC 5424.
 - [x] **SOAR Automated Response API** (TASK-TI-031) — автоматизированные действия сдерживания и расследования (`/api/v1/soar/block`, `/api/v1/soar/unblock`, `/api/v1/soar/investigate`).
 - [x] **ML Domain Reputation & Typosquatting / Homoglyph Model** (TASK-TI-040) — детекция омоглифов (Unicode confusables), Damerau-Levenshtein расстояние до защищаемых брендов и детекция спуфинга субдоменов (`/api/v1/ml/reputation`).

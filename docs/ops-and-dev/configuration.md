@@ -303,8 +303,13 @@ ML worker:
 
 Отдельный опциональный worker `threat-intel` (профиль Compose `threat-intel`).
 
+> **Shadow Mode по умолчанию.** Модуль ведёт мониторинг угроз; блокировка по фидам
+> требует явного `TI_ENFORCEMENT_MODE=enforce` и критериев перехода из
+> [ADR 0008](../adr/0008-threat-intel-shadow-mode.md).
+
 | Переменная | Default |
 |---|---|
+| `TI_ENFORCEMENT_MODE` | `shadow` |
 | `TI_SOURCES` | `openphish,phishstats,phishing_database,urlhaus` |
 | `TI_<SOURCE>_URL` | endpoint вендора |
 | `TI_POLL_INTERVAL_SECS` | `900` |
@@ -314,6 +319,9 @@ ML worker:
 | `TI_MAX_BODY_MB` | `64` |
 | `TI_MAX_INDICATORS_PER_FETCH` | `500000` |
 | `TI_OUTPUT_DIR` | `./data/threat-intel` |
+| `TI_SQLITE_PATH` | `<TI_OUTPUT_DIR>/ioc.db` |
+| `TI_RPZ_ENABLED` | `true` (артефакт компилируется, но в shadow не публикуется) |
+| `TI_MIN_CONFIDENCE_SCORE` | `75` |
 | `TI_RUN_ONCE` | `false` |
 | `METRICS_PORT` | `8093` |
 
@@ -321,6 +329,11 @@ ML worker:
 [Threat intel collector](../features/threat-intel-collector.md).
 
 ## AmneziaWG (BSDM Connect)
+
+> **Только лаборатория (Beta).** AmneziaWG и `bsdm-connect` **не входят в
+> production-контур пилота и не поддерживаются в продакшене** — в матрице Day-1
+> они отмечены **OFF** ([pilot-deployment.md](../getting-started/pilot-deployment.md)),
+> зрелость — **Beta (lab)** ([project-status.md](../project-status.md)), issue #331.
 
 | Переменная | Default | Описание |
 |---|---|---|

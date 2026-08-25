@@ -12,6 +12,7 @@
 | [Load-test profile](../ops-and-dev/load-test-selective-mitm.md) | 100-user Hybrid нагрузка (#269) |
 | [CA lifecycle](../ops-and-dev/ca-lifecycle.md) | Выпуск / ротация MITM CA |
 | [Project status](../project-status.md) | Зрелость функций |
+| [Go / no-go шаблон](../ops-and-dev/pilot-go-no-go-template.md) | Решение по итогам 4-й недели пилота (#332) |
 
 Issue tracking: **#270** (этот документ + compose), **#269** (load-test).
 
@@ -33,7 +34,7 @@ Issue tracking: **#270** (этот документ + compose), **#269** (load-t
 | **ClickHouse + Search API** | ✅ **ON** | Аналитика и поиск событий (5-дневный retention) |
 | **Prometheus & Grafana** | ✅ **ON** | Мониторинг метрик и дашборды (`:9091`, `:3000`) |
 | **MITM Circuit Breaker** | ✅ **ON** | Автоматический blind CONNECT при сбоях TLS/pinning |
-| **Threat Intelligence (Enforcement)** | ❌ **OFF** | **Только Shadow Mode / коллектор**, без блокировки трафика |
+| **Threat Intelligence (Enforcement)** | ❌ **OFF** | **Только Shadow Mode / коллектор**, без блокировки трафика (`TI_ENFORCEMENT_MODE=shadow`, [ADR 0008](../adr/0008-threat-intel-shadow-mode.md)) |
 | **ML Worker (Block Mode)** | ❌ **OFF** | В Day-1 выключен (Day-2+: только скоринг/наблюдение) |
 | **Agent / Fleet Installers** | ❌ **OFF** | Исключены из обязательного пути (статус: Lab / Phase C) |
 | **AmneziaWG / bsdm-connect** | ❌ **OFF** | Исключены из production-пути (статус: Lab / Phase C) |
@@ -53,7 +54,7 @@ Issue tracking: **#270** (этот документ + compose), **#269** (load-t
 - [ ] **Токены:** заданы `CONTROL_API_TOKEN`, `ACL_API_TOKEN`, `SEARCH_API_TOKEN`
 - [ ] **Безопасность Control Plane:** `CONTROL_API_ALLOW_INSECURE=false`, порт `:9090` не доступен из публичного интернета
 - [ ] **Экспериментальные профили:** `--profile icap`, agent-fleet, awg **не** активированы
-- [ ] **Threat Intel:** правила блокировки TI выключены (enforcement=off)
+- [ ] **Threat Intel:** enforcement выключен (`TI_ENFORCEMENT_MODE` не задан или `shadow`); сгенерированный `threats.rpz` **не** подключён к `DNS_SINKHOLE_ZONE_PATH` ([ADR 0008](../adr/0008-threat-intel-shadow-mode.md))
 - [ ] **Хранилище:** ClickHouse TTL 5 дней (`pilot_retention.sql`), Kafka retention 48h
 - [ ] **CA:** сертификат выпущен (`./scripts/gen-ca.sh`) и установлен на тестовых хостах
 - [ ] **DNS Sinkhole:** резолвит локально и фильтрует тестовые вредоносные домены (`blocked.test`)

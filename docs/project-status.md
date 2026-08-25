@@ -30,16 +30,16 @@
 | Detection | alert-worker | Beta | Запросы правил выполняются периодически; нужен контроль ClickHouse latency. |
 | ML | UEBA, phishing, beacon, threat-score write-back | Beta | Один процесс `ml-worker` = одна модель. Пилот: UEBA `ueba_zscore_v0` + write-back ([pilot-ml.md](getting-started/pilot-ml.md)); proxy `THREAT_SCORE_*` opt-in, block off. |
 | DNS | DNS Sinkhole + RPZ (Core component) | Основной | DoH/DoT gateways; control-plane **RPZ API** (`/api/dns/rpz/*`) + zone reload. |
-| Threat Intelligence | IOC feed collector & pipeline (`threat-intel`) | Beta | TASK-TI-001..040: сбор OpenPhish, PhishStats, Phishing.Database, URLhaus; нормализация URL/доменов/IP; SQLite персистентность с TTL; взвешенный скоринг; авто-компиляция RPZ-зон для `dns-sinkhole` и Proxy ACL экспорт; интеграция SIEM (CEF/ECS/Syslog), SOAR API (`/api/v1/soar/*`) и ML-модель защиты брендов (`/api/v1/ml/reputation`) ([threat-intel-collector.md](features/threat-intel-collector.md)). |
+| Threat Intelligence | Мониторинг угроз в режиме Shadow (`threat-intel`) | Beta | Enforcement **в разработке**: блокировка по фидам выключена по умолчанию (`TI_ENFORCEMENT_MODE=shadow`, [ADR 0008](adr/0008-threat-intel-shadow-mode.md)). Реализовано: сбор OpenPhish, PhishStats, Phishing.Database, URLhaus; нормализация URL/доменов/IP; SQLite персистентность с TTL; взвешенный скоринг; компиляция RPZ-зон и Proxy ACL экспорта в файлы; интеграция SIEM (CEF/ECS/Syslog), SOAR API (`/api/v1/soar/*`) и ML-модель репутации (`/api/v1/ml/reputation`) ([threat-intel-collector.md](features/threat-intel-collector.md)). |
 | AI cache | Exact LLM POST cache, local/Qdrant near-hit | Beta | Поддерживает векторный бэкенд Qdrant (`SEMANTIC_VECTOR_BACKEND=qdrant`) и квотирование по API ключам. |
 | Extensions | WASM request hook | Experimental (Frozen) | Заморожено. PoC hook с fuel limits. |
 | Inspection | ICAP REQMOD/RESPMOD | Experimental (Frozen) | Заморожено. RESPMOD требует buffered MISS (`STREAMING_MISS_ENABLED=false`). |
 | DLP/CASB | Сигнатурное сканирование request body | Experimental (Frozen) | Заморожено. Сигнатурный сканер. |
 | ZTNA/IAP | Reverse proxy + OIDC | Experimental (Frozen) | Описан в Agent Contract v0.1 (ADR 0005). |
 | Network | eBPF/XDP manager | Experimental (Frozen) | Заморожено. `EBPF_XDP_ENABLED` интерфейс. |
-| Remote access | AmneziaWG sidecar/config API | Поддерживается | Curve25519 криптография, PSK, авто-провижининг пиров, экспорт .conf, метрики и интеграция с Agent Contract (`tunnel` capability). |
+| Remote access | AmneziaWG sidecar/config API | Beta (lab) | **Lab-only, не для продакшена** (Day-1 пилота: OFF, issue #331). Curve25519 криптография, PSK, авто-провижининг пиров, экспорт .conf, метрики и интеграция с Agent Contract (`tunnel` capability). [bsdm-connect-client.md](getting-started/bsdm-connect-client.md). |
 | Cluster | Global sessions, distributed rate limit, threat sync | Experimental (Frozen) | Scaffolding gRPC mesh. |
-| Admin UI | Admin Console (Hybrid core) | Основной | Primary nav: Dashboard, Logs, Analytics, Policies, RPZ, **Devices**, **AmneziaWG**, Users, Settings. SPA baked into proxy image (`/admin/`). Live/demo provenance, error/empty states, mutation token gate. Search CORS for localhost split. |
+| Admin UI | Admin Console (Hybrid core) | Основной | Primary nav: Dashboard, Logs, Analytics, Policies, RPZ, **Devices**, **AmneziaWG**, Users, Settings (разделы Devices и AmneziaWG помечены в навигации как lab-only, не для продакшена). SPA baked into proxy image (`/admin/`). Live/demo provenance, error/empty states, mutation token gate. Search CORS for localhost split. |
 | Admin UI | Admin Console experimental routes | Experimental (Frozen) | Deep-links `/wasm`, `/cluster`, `/ai-cache` only — frozen banner, not in primary nav. |
 | UI reference | Standalone Trust-UI | Выведен из эксплуатации | Полностью удалён; операторский интерфейс консолидирован в Admin Console (`/admin/`). |
 | Agent (Phase C) | Local policy agent spike | Beta (lab) | Enroll, CSR, events, push (long-poll/SSE/**WS**/gRPC), mTLS, CRL, lab OCSP JSON + **RFC 6960 DER OCSP**, data-plane **OCSP stapling**, **multi-node Redis**, multi-OS installers + system proxy, **fleet silent/MDM scaffolding** (Intune/GPO/Jamf, unsigned), Admin `/devices`. Notarized/signed store packages = customer pipeline. [pilot-agent.md](getting-started/pilot-agent.md) · [pilot-agent-fleet.md](getting-started/pilot-agent-fleet.md). |
@@ -60,10 +60,16 @@
    сигнатур: `DLP_ENABLED=true`. Runtime: `POST /api/security/dlp` с `[]` очищает
    паттерны (требует Bearer); состояние не персистится между рестартами.
 7. `threat-intel` сохраняет нормализованные индикаторы в SQLite (`TI_SQLITE_PATH`),
-   вычисляет взвешенный скоринг доверия и генерирует зоны RPZ (`threats.rpz`) для
-   `dns-sinkhole` и списки угроз для Proxy ACL. Предоставляет REST API для SOAR
-   (`/api/v1/soar/*`) и ML скоринга репутации (`/api/v1/ml/reputation`). В Day-1 пилота
-   блокировка на основе фидов запускается в Shadow / Collector режиме (`TI_RPZ_ENABLED=true`).
+   вычисляет взвешенный скоринг доверия и компилирует артефакты enforcement —
+   зону `threats.rpz` и список `threat_domains.json` (`TI_RPZ_ENABLED`, по умолчанию
+   `true`, `threat-intel/src/config.rs`). Предоставляет REST API для SOAR
+   (`/api/v1/soar/*`) и ML скоринга репутации (`/api/v1/ml/reputation`).
+   **Режим по умолчанию — Shadow: мониторинг без блокировки** (`TI_ENFORCEMENT_MODE=shadow`,
+   [ADR 0008](adr/0008-threat-intel-shadow-mode.md)). Сгенерированные артефакты не
+   подключены к data plane: `dns-sinkhole` читает зону из `DNS_SINKHOLE_ZONE_PATH`
+   (compose: `/var/lib/bsdm-proxy/rpz/compiled.rpz`), а proxy не читает
+   `threat_domains.json`. Переход к enforcement — только по критериям ADR 0008 и
+   с явной подписью в [go/no-go](ops-and-dev/pilot-go-no-go-template.md).
 8. `GlobalSessionStore`, Redis rate-limit path и `ThreatSyncEngine` добавлены как
    scaffolding. Текущий `main.rs` создаёт session/threat stores без Redis, а
    proxy request path не вызывает distributed rate-limit check. Название

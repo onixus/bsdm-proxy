@@ -54,7 +54,7 @@
 | **Аутентификация & ACL** | Поддержка Basic, LDAP / Active Directory, NTLM, Kerberos (SPNEGO), OIDC. Гранулярные правила ACL (по IP, подсетям, времени, категориям), rate limiting, встроенный DLP-сканер. |
 | **Аналитика & Телеметрия** | Асинхронный экспорт событий через Apache Kafka, индексация в ClickHouse / SQLite (`cache-indexer`), Search API, Prometheus-метрики, дашборды Grafana. |
 | **Безопасность & ML** | Микросервис `alert-worker` с дедупликацией инцидентов и SIEM-вебхуками; `ml-worker` для скоринга угроз (UEBA, фишинг, DGA/beacon-детекция) с обратной связью (threat-score write-back). |
-| **Threat Intelligence** | Модуль `threat-intel` с автоматическим периодическим сбором и нормализацией индикаторов компрометации (OpenPhish, PhishStats, Phishing.Database, URLhaus). |
+| **Threat Intelligence** | Мониторинг угроз в режиме **Shadow** (enforcement в разработке): модуль `threat-intel` периодически собирает и нормализует индикаторы компрометации (OpenPhish, PhishStats, Phishing.Database, URLhaus), ведёт IOC-хранилище и скоринг. Блокировка по фидам по умолчанию выключена — `TI_ENFORCEMENT_MODE=shadow` ([ADR 0008](docs/adr/0008-threat-intel-shadow-mode.md)). |
 | **Расширения & Сайдкары** | DNS Sinkhole (UDP RPZ-lite, DoH/DoT проксирование), Semantic Cache для LLM/AI-запросов, WASM-плагины через Wasmtime SDK, антивирусная проверка ICAP (ClamAV). |
 | **Клиент & Split Routing** | Standalone Rust-клиент `bsdm-connect`, локальное разделение маршрутов по доменам (`Direct`/`Proxy`/`Tunnel`/`Block`), генератор PAC-файлов с защитой от JS-инъекций, защищенный веб-интерфейс на `:8765`, скаффолды для macOS и Android. |
 | **Администрирование** | Единая веб-панель управления (Admin Console) по адресу `/admin/`, REST и gRPC Control Plane API, Helm-чарты, systemd-пакеты. |
@@ -348,12 +348,14 @@ make backup-drill
 | **Функции** | [Аутентификация](docs/features/authentication.md) | Настройка Basic, LDAP, NTLM, Kerberos и OIDC |
 | | [Политики ACL](docs/features/acl-policy.md) | Синтаксис и правила фильтрации доступа |
 | | [DNS Sinkhole](docs/features/dns-sinkhole.md) | Сайдкар DNS RPZ-lite, фильтрация DoH/DoT |
-| | [Threat Intel Collector](docs/features/threat-intel-collector.md) | Сбор и применение внешних фидов угроз |
+| | [Threat Intel Collector](docs/features/threat-intel-collector.md) | Сбор внешних фидов угроз (Shadow Mode, без блокировки) |
 | **Аналитика** | [ClickHouse Analytics](docs/analytics/clickhouse-retrosearch.md) | Схема БД, инжест событий и поисковый API |
 | | [Оповещения об угрозах](docs/analytics/alerting.md) | Правила корреляции инцидентов и SIEM-вебхуки |
 | | [ML-детекция угроз](docs/analytics/ml-security.md) | Модели детекции фишинга, C2-маяков и UEBA-скоринг |
 | **Решения (ADR)** | [ADR 0005: Policy Agent](docs/adr/0005-local-policy-agent-vs-tunnel-first.md) | Архитектурное решение гибридного локального агента |
 | | [ADR 0006: Operator Console](docs/adr/0006-single-operator-console.md) | Выбор единой консоли оператора |
+| | [ADR 0007: MITM Circuit Breaker](docs/adr/0007-mitm-circuit-breaker.md) | Безопасный selective MITM и bypass при pinning |
+| | [ADR 0008: TI Shadow Mode](docs/adr/0008-threat-intel-shadow-mode.md) | Threat Intelligence по умолчанию только наблюдает |
 
 ---
 
