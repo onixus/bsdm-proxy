@@ -63,7 +63,9 @@
    вычисляет взвешенный скоринг доверия и компилирует артефакты enforcement —
    зону `threats.rpz` и список `threat_domains.json` (`TI_RPZ_ENABLED`, по умолчанию
    `true`, `threat-intel/src/config.rs`). Предоставляет REST API для SOAR
-   (`/api/v1/soar/*`) и ML скоринга репутации (`/api/v1/ml/reputation`).
+   (`/api/v1/soar/*`) и ML скоринга репутации (`/api/v1/ml/reputation`);
+   мутации SOAR требуют `TI_API_TOKEN` и пишутся в аудит `TI_SOAR_AUDIT_PATH`,
+   листенер по умолчанию на `127.0.0.1` (`TI_ADMIN_BIND`).
    **Режим по умолчанию — Shadow: мониторинг без блокировки** (`TI_ENFORCEMENT_MODE=shadow`,
    [ADR 0008](adr/0008-threat-intel-shadow-mode.md)). Сгенерированные артефакты не
    подключены к data plane: `dns-sinkhole` читает зону из `DNS_SINKHOLE_ZONE_PATH`

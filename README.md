@@ -127,7 +127,7 @@ flowchart TB
 | **alert-worker** | `8090` | TCP | `/health`, `/metrics` (обработка инцидентов) |
 | **ml-worker** | `8091` | TCP | `/health`, `/metrics` (ML-скоринг трафика) |
 | **dns-sinkhole** | `8092` / `5353` | TCP / UDP | Управление (`8092`) и DNS RPZ-lite резолвер (`5353/udp`) |
-| **threat-intel** | `8093` | TCP | `/health`, `/metrics` (сбор фидов угроз) |
+| **threat-intel** | `8093` | TCP | `/health`, `/metrics`, SOAR/ML API. В Compose **не публикуется** на хост (`expose`); мутации SOAR требуют `TI_API_TOKEN` |
 | **ICP** | `3130` | UDP | Иерархический кеш (ICP, opt-in) |
 | **Kafka** | `9092` | TCP | Брокер событий кеширования и трафика |
 | **ClickHouse** | `8123` / `9000` | TCP | HTTP interface / Native binary protocol |

@@ -47,6 +47,10 @@ curl http://127.0.0.1:8093/health
 curl http://127.0.0.1:8093/metrics | grep threat_intel_
 ```
 
+A plain binary run binds `127.0.0.1` (`TI_ADMIN_BIND`). Under Compose the port
+is not published to the host, so probe it from inside the network, e.g.
+`docker compose exec threat-intel wget -q -O- http://127.0.0.1:8093/health`.
+
 Compose profile:
 
 ```bash
@@ -110,9 +114,59 @@ here.
 | `TI_MIN_CONFIDENCE_SCORE` | `75` | Minimum weighted score for an indicator to reach the artifacts |
 | `TI_USER_AGENT` | `bsdm-threat-intel/<version>` | Feed request User-Agent |
 | `TI_RUN_ONCE` | `false` | Collect every source once and exit |
-| `METRICS_PORT` | `8093` | `/metrics` and `/health` |
+| `METRICS_PORT` | `8093` | Admin listener: `/metrics`, `/health`, `/api/v1/soar/*`, `/api/v1/ml/*` |
+| `TI_ADMIN_BIND` | `127.0.0.1` | Host of that listener; Compose/Helm set `0.0.0.0` without publishing the port |
+| `TI_API_TOKEN` | unset | Bearer required by mutating `POST /api/v1/soar/*` |
+| `TI_API_ALLOW_INSECURE` | `false` | Lab-only: open SOAR mutations without a token |
+| `TI_API_REQUIRE_TOKEN` | `false` | Force fail-closed outside the production profile |
+| `TI_SOAR_AUDIT_PATH` | `<TI_OUTPUT_DIR>/soar-audit.jsonl` | JSONL audit of SOAR actions (`0600`) |
+| `DEPLOYMENT_PROFILE` | `production` when unset | Drives the fail-closed default |
 
 Packaged example: `packaging/config/threat-intel.env.example`.
+
+## SOAR API authorization and audit
+
+The admin listener carries the SOAR API, so **mutating** calls are gated
+(`threat-intel/src/api_auth.rs`, `threat-intel/src/main.rs`):
+
+| Endpoint | Auth |
+|---|---|
+| `POST /api/v1/soar/block`, `POST /api/v1/soar/unblock` | `Authorization: Bearer $TI_API_TOKEN` (constant-time comparison) |
+| `GET /api/v1/soar/investigate`, `GET /api/v1/ml/*`, `GET /metrics`, `GET /health` | Open — probes and the Prometheus scrape keep working |
+
+Posture resolution: `TI_API_ALLOW_INSECURE=true` opens mutations; otherwise the
+production profile (`DEPLOYMENT_PROFILE` unset, empty, `production` or `prod`)
+is fail-closed; otherwise `TI_API_REQUIRE_TOKEN` decides. A missing, empty,
+mismatched or non-`Bearer` credential is treated as absent.
+
+```bash
+curl -fsS -X POST http://127.0.0.1:8093/api/v1/soar/block \
+  -H "Authorization: Bearer $TI_API_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"indicator":"phish.example.test","kind":"domain","reason":"SEC-1234 SOC triage","operator":"soc1"}'
+```
+
+Without a valid token the request is refused with `401 Unauthorized` and a
+`WWW-Authenticate: Bearer` header **before** the storage is touched — a rejected
+call neither creates nor removes an indicator, and neither changes the metrics.
+
+Starting without a token does **not** stop the process: unlike the proxy control
+plane, the collector keeps ingesting feeds while the mutating endpoints stay
+closed, and the chosen posture is logged at startup (`info` with a token,
+`warn` without one and again when the lab escape hatch is open).
+
+Every block/unblock is appended to `TI_SOAR_AUDIT_PATH` as one JSONL record,
+**accepted or denied**, with `timestamp_unix`, `actor` (the request's `operator`
+field), `peer` (client address), `action`, `indicator`, `change_reason` (the
+request's `reason`), `mode` (`shadow` / `enforce`), `outcome`
+(`accepted` / `denied`) and `source_path`. Control characters are stripped and
+missing values are recorded as `unknown`; the file is created with `0600`.
+
+Network posture: port `8093` is **not** published to the host — Compose declares
+it with `expose`, so Prometheus scrapes `/metrics` inside the compose network
+and Compose/Helm therefore set `TI_ADMIN_BIND=0.0.0.0` inside the container. A
+plain binary run stays on `127.0.0.1`. Publish the port only together with a
+configured `TI_API_TOKEN`.
 
 ## Error handling
 
@@ -163,6 +217,10 @@ against the configured feed endpoints and never requests a collected indicator,
 so it does not visit phishing pages or download payloads. Response bodies are
 capped (`TI_MAX_BODY_MB`) before buffering, redirects are limited, and non-HTTP
 feed URLs are rejected.
+
+Mutating SOAR endpoints are fail-closed without `TI_API_TOKEN`, and the admin
+listener binds loopback unless `TI_ADMIN_BIND` says otherwise — see
+[SOAR API authorization and audit](#soar-api-authorization-and-audit).
 
 The container runs as a non-root user and needs egress to the feed vendors. In
 an air-gapped deployment, mirror the feeds internally and point `TI_<SOURCE>_URL`

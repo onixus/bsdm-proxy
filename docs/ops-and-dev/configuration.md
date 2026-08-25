@@ -373,6 +373,47 @@ ML worker:
 [Threat intel collector](../features/threat-intel-collector.md) ·
 [ADR 0008](../adr/0008-threat-intel-shadow-mode.md).
 
+### Admin/SOAR API коллектора: доступ и аудит
+
+Листенер `METRICS_PORT` обслуживает `/health`, `/metrics`, SOAR и
+`/api/v1/ml/*`. Мутирующие вызовы `POST /api/v1/soar/*` (block, unblock)
+закрыты Bearer-токеном и пишутся в аудит (`threat-intel/src/api_auth.rs`,
+`threat-intel/src/main.rs`).
+
+| Переменная | Default | Назначение |
+|---|---:|---|
+| `TI_API_TOKEN` | unset | Bearer для `POST /api/v1/soar/*`; сравнение constant-time. Без него мутации закрыты в production-профиле |
+| `TI_API_ALLOW_INSECURE` | `false` | Явная лабораторная лазейка: открыть мутации без токена. Не задавать в пилоте |
+| `TI_API_REQUIRE_TOKEN` | `false` | Форсировать fail-closed в non-production профилях |
+| `TI_ADMIN_BIND` | `127.0.0.1` | Хост admin/SOAR/metrics-листенера |
+| `TI_SOAR_AUDIT_PATH` | `<TI_OUTPUT_DIR>/soar-audit.jsonl` | JSONL-аудит SOAR-действий, файл создаётся с правами `0600` |
+| `DEPLOYMENT_PROFILE` | `production`, если не задана | Определяет fail-closed по умолчанию (`production`/`prod`/пустое значение = production) |
+
+Постура выбирается так: `TI_API_ALLOW_INSECURE=true` → открыто; иначе
+production-профиль → fail-closed; иначе — по `TI_API_REQUIRE_TOKEN`.
+
+- **Отказ**: мутация без валидного Bearer получает `401 Unauthorized` с
+  заголовком `WWW-Authenticate: Bearer`, **до** обращения к хранилищу —
+  отклонённый вызов не создаёт и не удаляет индикаторы. Токен с другой схемой
+  (`Basic`) или пустой Bearer считаются отсутствующими.
+- **Открытые эндпоинты**: `GET /health`, `GET /metrics`,
+  `GET /api/v1/soar/investigate`, `GET /api/v1/ml/*` — авторизация не требуется
+  (проверка применяется только к `POST /api/v1/soar/*`).
+- **Старт без токена не падает**: в отличие от proxy control plane, коллектор
+  продолжает собирать фиды, а мутации остаются закрытыми; выбранная постура
+  пишется в лог при старте (`info` при заданном токене, `warn` при его
+  отсутствии и при открытом lab-режиме).
+- **Аудит**: на каждый block/unblock — и принятый, и отклонённый — добавляется
+  строка JSONL с полями `timestamp_unix`, `actor` (поле `operator` из тела),
+  `peer` (адрес клиента), `action`, `indicator`, `change_reason` (поле `reason`),
+  `mode` (`shadow`/`enforce`), `outcome` (`accepted`/`denied`), `source_path`.
+  Управляющие символы вырезаются, отсутствующие значения пишутся как `unknown`.
+- **Сеть**: порт `8093` больше не публикуется на хост — в Compose сервис
+  объявлен через `expose`, Prometheus скрейпит `/metrics` внутри сети
+  `bsdm-net`, поэтому в Compose/Helm задан `TI_ADMIN_BIND=0.0.0.0`. При
+  локальном запуске бинарника листенер остаётся на `127.0.0.1`. Публиковать порт
+  наружу — только вместе с заданным `TI_API_TOKEN`.
+
 ## AmneziaWG (BSDM Connect)
 
 > **Только лаборатория (Beta).** AmneziaWG и `bsdm-connect` **не входят в

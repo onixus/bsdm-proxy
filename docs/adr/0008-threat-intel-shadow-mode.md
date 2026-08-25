@@ -81,6 +81,7 @@ Implemented on this branch; the mode contract above is what the code does:
 - `TI_ENFORCEMENT_MODE` parsing, the fail-safe fallback for any unrecognised value and the warning for `TI_RPZ_ENABLED=true` without `enforce`: `threat-intel/src/config.rs`.
 - Artifacts under the enforcement names are written **only** in `enforce`; in shadow the collector writes `threats.rpz.shadow` and `threat_domains.json.shadow`, and the zone body carries a `SHADOW MODE … Do NOT load this zone into dns-sinkhole` banner: `threat-intel/src/collector.rs`, `threat-intel/src/rpz.rs`.
 - SOAR block answers `202` with `"mode":"shadow"`, `"enforced":false` and is counted by `threat_intel_soar_blocks_total{mode}`: `threat-intel/src/soar.rs`, `threat-intel/src/main.rs`, `threat-intel/src/metrics.rs`.
+- Mutating SOAR calls additionally require `Authorization: Bearer $TI_API_TOKEN` and are audited accepted-or-denied: `threat-intel/src/api_auth.rs` ([configuration.md](../ops-and-dev/configuration.md#adminsoar-api-коллектора-доступ-и-аудит)).
 - The proxy-side matcher reads only the shadow export (`TI_SHADOW_MATCH_ENABLED`, `TI_SHADOW_FEED_PATH`, `TI_SHADOW_RELOAD_SECS`), annotates `threat_shadow_match` and counts `bsdm_proxy_ti_shadow_matches_total{feed}` without touching the allow/deny path: `proxy/src/ti_shadow.rs`, `proxy/src/metrics.rs`.
 - The event field and its ClickHouse column: `bsdm-events/src/lib.rs`, `bsdm-events/src/clickhouse.rs`, `cache-indexer/src/clickhouse.rs`.
 
