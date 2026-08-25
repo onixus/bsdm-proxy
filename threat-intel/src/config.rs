@@ -1,8 +1,59 @@
 //! Runtime configuration from environment variables.
 
 use crate::sources::KNOWN_SOURCES;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
+use tracing::warn;
+
+/// Suffix appended to enforcement artifacts while running in shadow mode, so
+/// neither `dns-sinkhole` nor the proxy can pick them up by accident.
+pub const SHADOW_SUFFIX: &str = ".shadow";
+
+/// How threat intelligence results are allowed to affect traffic (issue #330).
+///
+/// `Shadow` is the fail-safe default: artifacts are still compiled, but only
+/// under a `.shadow` name that no enforcement component loads.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum EnforcementMode {
+    #[default]
+    Shadow,
+    Enforce,
+}
+
+impl EnforcementMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Shadow => "shadow",
+            Self::Enforce => "enforce",
+        }
+    }
+
+    pub fn is_enforce(self) -> bool {
+        matches!(self, Self::Enforce)
+    }
+
+    /// Parses `TI_ENFORCEMENT_MODE`. Anything but an explicit `enforce` stays in
+    /// shadow mode; an unrecognised value additionally yields a warning string.
+    pub fn parse(raw: &str) -> (Self, Option<String>) {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "enforce" => (Self::Enforce, None),
+            "" | "shadow" => (Self::Shadow, None),
+            other => (
+                Self::Shadow,
+                Some(format!(
+                    "TI_ENFORCEMENT_MODE='{other}' is not recognised, falling back to shadow"
+                )),
+            ),
+        }
+    }
+}
+
+/// Appends [`SHADOW_SUFFIX`] to a path without touching its extension.
+pub fn shadow_path(path: &Path) -> PathBuf {
+    let mut name = path.as_os_str().to_os_string();
+    name.push(SHADOW_SUFFIX);
+    PathBuf::from(name)
+}
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -26,8 +77,12 @@ pub struct Config {
     pub ioc_ttl_secs: i64,
     pub min_confidence_score: u8,
     pub rpz_enabled: bool,
+    /// Base path of the RPZ zone; see [`Config::rpz_artifact_path`].
     pub rpz_output_path: PathBuf,
+    /// Base path of the proxy ACL feed; see [`Config::acl_artifact_path`].
     pub acl_export_path: PathBuf,
+    /// Shadow (default, observe-only) or explicit enforcement.
+    pub enforcement_mode: EnforcementMode,
     pub user_agent: String,
     pub metrics_port: u16,
     /// Collect every source once and exit (CI smoke, cron-style runs).
@@ -58,6 +113,20 @@ impl Config {
             .map(PathBuf::from)
             .unwrap_or_else(|_| output_dir.join("threat_domains.json"));
 
+        let (enforcement_mode, mode_warning) =
+            EnforcementMode::parse(&std::env::var("TI_ENFORCEMENT_MODE").unwrap_or_default());
+        if let Some(msg) = mode_warning {
+            warn!("{msg}");
+        }
+        let rpz_enabled = env_bool("TI_RPZ_ENABLED", true);
+        if rpz_enabled && !enforcement_mode.is_enforce() {
+            warn!(
+                "TI_RPZ_ENABLED=true without TI_ENFORCEMENT_MODE=enforce: threat intelligence \
+                 runs in shadow mode, artifacts are written with the '{SHADOW_SUFFIX}' suffix and \
+                 must not be wired into dns-sinkhole or proxy ACLs"
+            );
+        }
+
         Ok(Self {
             sources,
             poll_interval,
@@ -71,14 +140,34 @@ impl Config {
             storage_enabled: env_bool("TI_STORAGE_ENABLED", true),
             ioc_ttl_secs: env_u64("TI_IOC_TTL_SECS", 7 * 86400) as i64,
             min_confidence_score: env_u64("TI_MIN_CONFIDENCE_SCORE", 75).clamp(1, 100) as u8,
-            rpz_enabled: env_bool("TI_RPZ_ENABLED", true),
+            rpz_enabled,
             rpz_output_path,
             acl_export_path,
+            enforcement_mode,
             user_agent: std::env::var("TI_USER_AGENT")
                 .unwrap_or_else(|_| format!("bsdm-threat-intel/{}", env!("CARGO_PKG_VERSION"))),
             metrics_port: env_u64("METRICS_PORT", 8093) as u16,
             run_once: env_bool("TI_RUN_ONCE", false),
         })
+    }
+
+    /// Path the RPZ zone is actually written to: the plain path only in
+    /// `enforce` mode, `<path>.shadow` otherwise.
+    pub fn rpz_artifact_path(&self) -> PathBuf {
+        self.artifact_path(&self.rpz_output_path)
+    }
+
+    /// Path the proxy ACL threat feed is actually written to.
+    pub fn acl_artifact_path(&self) -> PathBuf {
+        self.artifact_path(&self.acl_export_path)
+    }
+
+    fn artifact_path(&self, base: &Path) -> PathBuf {
+        if self.enforcement_mode.is_enforce() {
+            base.to_path_buf()
+        } else {
+            shadow_path(base)
+        }
     }
 
     /// Per-source endpoint override, e.g. `TI_OPENPHISH_URL`.
@@ -150,6 +239,7 @@ mod tests {
             rpz_enabled: true,
             rpz_output_path: PathBuf::from("/tmp/threats.rpz"),
             acl_export_path: PathBuf::from("/tmp/threat_domains.json"),
+            enforcement_mode: EnforcementMode::default(),
             user_agent: "test".into(),
             metrics_port: 8093,
             run_once: true,
@@ -168,6 +258,43 @@ mod tests {
     fn rejects_empty_and_duplicate_source_lists() {
         assert!(parse_sources("  ,  ").is_err());
         assert!(parse_sources("urlhaus,urlhaus").is_err());
+    }
+
+    #[test]
+    fn enforcement_mode_defaults_to_shadow() {
+        assert_eq!(EnforcementMode::default(), EnforcementMode::Shadow);
+        assert_eq!(EnforcementMode::parse("").0, EnforcementMode::Shadow);
+        assert_eq!(EnforcementMode::parse("shadow").0, EnforcementMode::Shadow);
+        assert!(!EnforcementMode::default().is_enforce());
+    }
+
+    #[test]
+    fn enforcement_is_enabled_only_by_explicit_value() {
+        assert_eq!(EnforcementMode::parse(" Enforce ").0, EnforcementMode::Enforce);
+        // Anything ambiguous is fail-safe: shadow plus an operator warning.
+        for raw in ["true", "1", "block", "yes", "on", "enforced"] {
+            let (mode, warning) = EnforcementMode::parse(raw);
+            assert_eq!(mode, EnforcementMode::Shadow, "raw = {raw}");
+            assert!(warning.is_some(), "raw = {raw} must warn");
+        }
+    }
+
+    #[test]
+    fn shadow_mode_suffixes_enforcement_artifacts() {
+        let mut config = config();
+        assert_eq!(config.enforcement_mode, EnforcementMode::Shadow);
+        assert_eq!(
+            config.rpz_artifact_path(),
+            PathBuf::from("/tmp/threats.rpz.shadow")
+        );
+        assert_eq!(
+            config.acl_artifact_path(),
+            PathBuf::from("/tmp/threat_domains.json.shadow")
+        );
+
+        config.enforcement_mode = EnforcementMode::Enforce;
+        assert_eq!(config.rpz_artifact_path(), config.rpz_output_path);
+        assert_eq!(config.acl_artifact_path(), config.acl_export_path);
     }
 
     #[test]

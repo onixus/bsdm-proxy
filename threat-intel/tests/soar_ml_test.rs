@@ -1,5 +1,6 @@
 //! Integration tests for Enterprise SIEM, SOAR, and ML Domain Reputation.
 
+use threat_intel::config::EnforcementMode;
 use threat_intel::indicator::IndicatorKind;
 use threat_intel::ml_reputation::{evaluate_domain_reputation, normalize_homoglyphs};
 use threat_intel::siem::{SiemEvent, SiemEventAction};
@@ -23,6 +24,7 @@ fn test_siem_cef_and_ecs_pipeline() {
             ttl_secs: Some(86400 * 14),
             operator: Some("soc_lead".into()),
         },
+        EnforcementMode::Enforce,
     )
     .unwrap();
 
@@ -81,6 +83,7 @@ fn test_soar_full_lifecycle() {
             ttl_secs: Some(3600),
             operator: Some("automated_soar_playbook".into()),
         },
+        EnforcementMode::Enforce,
     )
     .unwrap();
     assert!(block_res.success);
@@ -100,6 +103,7 @@ fn test_soar_full_lifecycle() {
             reason: "Playbook completed analysis, marked false positive".into(),
             operator: Some("tier2_analyst".into()),
         },
+        EnforcementMode::Enforce,
     )
     .unwrap();
     assert!(unblock_res.success);

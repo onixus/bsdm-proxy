@@ -21,7 +21,7 @@ mod sources;
 mod storage;
 
 use collector::Collector;
-use config::Config;
+use config::{Config, EnforcementMode};
 use http::FeedHttpClient;
 use metrics::CollectorMetrics;
 use prometheus::{Encoder, TextEncoder};
@@ -84,6 +84,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         output_dir = %config.output_dir.display(),
         sqlite_enabled = config.storage_enabled,
         rpz_enabled = config.rpz_enabled,
+        enforcement_mode = config.enforcement_mode.as_str(),
+        rpz_artifact = %config.rpz_artifact_path().display(),
+        acl_artifact = %config.acl_artifact_path().display(),
         poll_secs = config.poll_interval.as_secs(),
         max_attempts = config.max_attempts,
         run_once = config.run_once,
@@ -92,6 +95,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let run_once = config.run_once;
     let metrics_port = config.metrics_port;
+    let enforcement_mode = config.enforcement_mode;
     let collector = Arc::new(Collector::new(
         config,
         http,
@@ -108,7 +112,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let storage_clone = storage.clone();
     tokio::spawn(async move {
-        run_admin_server(metrics_port, metrics, storage_clone).await;
+        run_admin_server(metrics_port, metrics, storage_clone, enforcement_mode).await;
     });
 
     let handles = collector::spawn_scheduled(collector, feeds);
@@ -122,6 +126,7 @@ async fn run_admin_server(
     port: u16,
     metrics: Arc<CollectorMetrics>,
     storage: Option<SqliteStorage>,
+    mode: EnforcementMode,
 ) {
     let bind_addr = format!("0.0.0.0:{port}");
     let listener = match TcpListener::bind(&bind_addr).await {
@@ -146,13 +151,18 @@ async fn run_admin_server(
                 return;
             }
             let req = String::from_utf8_lossy(&buf[..n]);
-            let response = handle_admin(&req, &metrics, storage.as_ref());
+            let response = handle_admin(&req, &metrics, storage.as_ref(), mode);
             let _ = socket.write_all(&response).await;
         });
     }
 }
 
-fn handle_admin(req: &str, metrics: &CollectorMetrics, storage: Option<&SqliteStorage>) -> Vec<u8> {
+fn handle_admin(
+    req: &str,
+    metrics: &CollectorMetrics,
+    storage: Option<&SqliteStorage>,
+    mode: EnforcementMode,
+) -> Vec<u8> {
     let mut lines = req.lines();
     let request_line = lines.next().unwrap_or("");
     let mut parts = request_line.split_whitespace();
@@ -223,10 +233,17 @@ fn handle_admin(req: &str, metrics: &CollectorMetrics, storage: Option<&SqliteSt
         let body_str = extract_http_body(req);
         let req_payload: Result<soar::SoarBlockRequest, _> = serde_json::from_str(body_str);
         return match req_payload {
-            Ok(payload) => match soar::execute_soar_block(storage, payload) {
+            Ok(payload) => match soar::execute_soar_block(storage, payload, mode) {
                 Ok(resp) => {
+                    metrics
+                        .soar_blocks
+                        .with_label_values(&[mode.as_str()])
+                        .inc();
                     let body = serde_json::to_vec_pretty(&resp).unwrap_or_default();
-                    http_response(200, "application/json", &body)
+                    // Shadow mode accepts the indicator for observation only:
+                    // 202 makes the non-enforcing outcome explicit to callers.
+                    let status = if resp.enforced { 200 } else { 202 };
+                    http_response(status, "application/json", &body)
                 }
                 Err(e) => {
                     let err = format!("{{\"error\":\"{}\"}}", e);
@@ -248,7 +265,7 @@ fn handle_admin(req: &str, metrics: &CollectorMetrics, storage: Option<&SqliteSt
         let body_str = extract_http_body(req);
         let req_payload: Result<soar::SoarUnblockRequest, _> = serde_json::from_str(body_str);
         return match req_payload {
-            Ok(payload) => match soar::execute_soar_unblock(storage, payload) {
+            Ok(payload) => match soar::execute_soar_unblock(storage, payload, mode) {
                 Ok(resp) => {
                     let body = serde_json::to_vec_pretty(&resp).unwrap_or_default();
                     http_response(200, "application/json", &body)
@@ -295,6 +312,9 @@ fn extract_http_body(req: &str) -> &str {
 fn http_response(status: u16, content_type: &str, body: &[u8]) -> Vec<u8> {
     let reason = match status {
         200 => "OK",
+        202 => "Accepted",
+        400 => "Bad Request",
+        503 => "Service Unavailable",
         404 => "Not Found",
         500 => "Internal Server Error",
         _ => "Error",
@@ -326,6 +346,7 @@ mod tests {
             "GET /health HTTP/1.1",
             &metrics,
             Some(&storage),
+            EnforcementMode::Enforce,
         ))
         .unwrap();
         assert!(health.starts_with("HTTP/1.1 200 OK"));
@@ -336,6 +357,7 @@ mod tests {
             "GET /metrics HTTP/1.1",
             &metrics,
             Some(&storage),
+            EnforcementMode::Enforce,
         ))
         .unwrap();
         assert!(scraped.contains("threat_intel_fetches_total"));
@@ -345,6 +367,7 @@ mod tests {
             "GET /api/v1/ml/reputation?domain=gogle.com HTTP/1.1",
             &metrics,
             Some(&storage),
+            EnforcementMode::Enforce,
         ))
         .unwrap();
         assert!(ml_res.starts_with("HTTP/1.1 200 OK"));
@@ -353,7 +376,13 @@ mod tests {
         // 4. SOAR Block
         let block_req = "POST /api/v1/soar/block HTTP/1.1\r\nContent-Type: application/json\r\n\r\n{\"indicator\":\"phish.example.test\",\"kind\":\"domain\",\"reason\":\"Manual SOAR containment\",\"operator\":\"soc1\"}";
         let block_resp =
-            String::from_utf8(handle_admin(block_req, &metrics, Some(&storage))).unwrap();
+            String::from_utf8(handle_admin(
+                block_req,
+                &metrics,
+                Some(&storage),
+                EnforcementMode::Enforce,
+            ))
+            .unwrap();
         assert!(block_resp.starts_with("HTTP/1.1 200 OK"));
         assert!(block_resp.contains("\"success\": true"));
 
@@ -362,6 +391,7 @@ mod tests {
             "GET /api/v1/soar/investigate?query=phish.example.test HTTP/1.1",
             &metrics,
             Some(&storage),
+            EnforcementMode::Enforce,
         ))
         .unwrap();
         assert!(inv_res.starts_with("HTTP/1.1 200 OK"));
@@ -370,14 +400,50 @@ mod tests {
         // 6. SOAR Unblock
         let unblock_req = "POST /api/v1/soar/unblock HTTP/1.1\r\nContent-Type: application/json\r\n\r\n{\"indicator\":\"phish.example.test\",\"reason\":\"Investigation closed\"}";
         let unblock_resp =
-            String::from_utf8(handle_admin(unblock_req, &metrics, Some(&storage))).unwrap();
+            String::from_utf8(handle_admin(
+                unblock_req,
+                &metrics,
+                Some(&storage),
+                EnforcementMode::Enforce,
+            ))
+            .unwrap();
         assert!(unblock_resp.starts_with("HTTP/1.1 200 OK"));
         assert!(unblock_resp.contains("\"success\": true"));
 
         // 7. Not found
         let missing =
-            String::from_utf8(handle_admin("GET /nope HTTP/1.1", &metrics, Some(&storage)))
-                .unwrap();
+            String::from_utf8(handle_admin(
+                "GET /nope HTTP/1.1",
+                &metrics,
+                Some(&storage),
+                EnforcementMode::Enforce,
+            ))
+            .unwrap();
         assert!(missing.starts_with("HTTP/1.1 404"));
+    }
+
+    #[test]
+    fn soar_block_in_shadow_mode_returns_202_and_counts_metric() {
+        let metrics = CollectorMetrics::new().unwrap();
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        let block_req = "POST /api/v1/soar/block HTTP/1.1\r\nContent-Type: application/json\r\n\r\n{\"indicator\":\"shadow-api.example.test\",\"kind\":\"domain\",\"reason\":\"SOC triage\",\"operator\":\"soc1\"}";
+        let resp = String::from_utf8(handle_admin(
+            block_req,
+            &metrics,
+            Some(&storage),
+            EnforcementMode::Shadow,
+        ))
+        .unwrap();
+
+        assert!(resp.starts_with("HTTP/1.1 202 Accepted"), "got: {resp}");
+        assert!(resp.contains("\"mode\": \"shadow\""));
+        assert!(resp.contains("\"enforced\": false"));
+        assert_eq!(
+            metrics.soar_blocks.with_label_values(&["shadow"]).get(),
+            1,
+            "shadow SOAR blocks must be counted"
+        );
+        assert_eq!(metrics.soar_blocks.with_label_values(&["enforce"]).get(), 0);
     }
 }
