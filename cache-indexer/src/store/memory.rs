@@ -122,6 +122,7 @@ mod tests {
             casb_alert: None,
             decision_source: None,
             bypass_reason: None,
+            threat_shadow_match: None,
             event_id: format!("e-{ts}"),
         }
     }

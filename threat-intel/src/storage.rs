@@ -317,38 +317,40 @@ impl SqliteStorage {
         Ok(indicators)
     }
 
-    /// List unique active domains for DNS RPZ zone generation.
-    pub fn list_active_domains(
+    /// Active domains paired with the feed that reported them with the highest
+    /// confidence. Used to label shadow matches per feed downstream.
+    pub fn list_active_domain_sources(
         &self,
         min_confidence: u8,
         limit: usize,
-    ) -> Result<Vec<String>, StorageError> {
+    ) -> Result<Vec<(String, String)>, StorageError> {
         let conn = self.conn.lock().map_err(|_| StorageError::Poisoned)?;
         let now_ts = Utc::now().timestamp();
 
         let mut stmt = conn.prepare(
             r#"
-            SELECT domain
+            SELECT domain, source
             FROM indicators
-            WHERE domain IS NOT NULL 
+            WHERE domain IS NOT NULL
               AND domain != ''
-              AND expires_at > ?1 
+              AND expires_at > ?1
               AND confidence_score >= ?2
             GROUP BY domain
+            HAVING confidence_score = MAX(confidence_score)
             ORDER BY MAX(confidence_score) DESC, COUNT(*) DESC
             LIMIT ?3
             "#,
         )?;
 
         let rows = stmt.query_map(params![now_ts, min_confidence, limit as i64], |row| {
-            row.get::<_, String>(0)
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?;
 
-        let mut domains = Vec::new();
-        for d in rows {
-            domains.push(d?);
+        let mut pairs = Vec::new();
+        for pair in rows {
+            pairs.push(pair?);
         }
-        Ok(domains)
+        Ok(pairs)
     }
 
     /// Delete all expired indicators from database.
@@ -542,10 +544,13 @@ mod tests {
         let active = storage.list_active(80, None, 10).unwrap();
         assert_eq!(active.len(), 2);
 
-        let domains = storage.list_active_domains(80, 10).unwrap();
-        assert_eq!(domains.len(), 2);
-        assert!(domains.contains(&"phish.test.org".to_string()));
-        assert!(domains.contains(&"sub.victim.net".to_string()));
+        let pairs = storage.list_active_domain_sources(80, 10).unwrap();
+        assert_eq!(pairs.len(), 2);
+        let domains: Vec<&str> = pairs.iter().map(|(d, _)| d.as_str()).collect();
+        assert!(domains.contains(&"phish.test.org"));
+        assert!(domains.contains(&"sub.victim.net"));
+        // Every exported domain carries the feed that reported it.
+        assert!(pairs.iter().all(|(_, source)| !source.is_empty()));
     }
 
     #[test]

@@ -11,7 +11,7 @@
 | `alert-worker` | `alert-worker/` | ClickHouse rules → webhook |
 | `ml-worker` | `ml-worker/` | Feature extraction и scoring |
 | `dns-sinkhole` | `dns-sinkhole/` | Core UDP DNS, DoH/DoT и RPZ-lite |
-| `threat-intel` | `threat-intel/` | Сбор IOC-фидов по расписанию (experimental) |
+| `threat-intel` | `threat-intel/` | Сбор IOC-фидов по расписанию, мониторинг в Shadow Mode (beta) |
 | `bsdm-events` | `bsdm-events/` | Общая event schema |
 | `bsdm-proxy-e2e` | `e2e/` | Test harness |
 | `bsdm-wasm-sdk` | `bsdm-wasm-sdk/` | WASM guest ABI helpers |
@@ -29,7 +29,7 @@ bsdm-proxy/
 ├── alert-worker/           # Detection rules
 ├── ml-worker/              # Feature store и scoring
 ├── dns-sinkhole/           # Core DNS security sidecar (DoH/DoT/RPZ)
-├── threat-intel/           # IOC feed collector (experimental)
+├── threat-intel/           # IOC feed collector (Shadow Mode, без блокировки)
 ├── bsdm-events/            # Shared event schema
 ├── bsdm-wasm-sdk/          # WASM SDK
 ├── e2e/                    # Integration test harness

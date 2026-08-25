@@ -64,6 +64,8 @@ pub struct Metrics {
     pub acl_eval_duration_seconds: Histogram,
     pub policy_cache_hit_total: Counter,
     pub policy_decision_source_total: CounterVec,
+    /// Threat-intel shadow matches by feed (observe-only, never blocks).
+    pub ti_shadow_matches_total: CounterVec,
 
     // Rate limit metrics
     pub rate_limit_rejected_total: CounterVec,
@@ -350,6 +352,15 @@ impl Metrics {
         )?;
         registry.register(Box::new(policy_decision_source_total.clone()))?;
 
+        let ti_shadow_matches_total = CounterVec::new(
+            Opts::new(
+                "bsdm_proxy_ti_shadow_matches_total",
+                "Threat-intel shadow-mode IOC matches by feed (observation only, request not blocked)",
+            ),
+            &["feed"],
+        )?;
+        registry.register(Box::new(ti_shadow_matches_total.clone()))?;
+
         let rate_limit_rejected_total = CounterVec::new(
             Opts::new(
                 "bsdm_proxy_rate_limit_rejected_total",
@@ -566,6 +577,7 @@ impl Metrics {
             acl_eval_duration_seconds,
             policy_cache_hit_total,
             policy_decision_source_total,
+            ti_shadow_matches_total,
             rate_limit_rejected_total,
             distributed_rate_limit_hits_total,
             global_sessions_active,
@@ -642,6 +654,13 @@ impl Metrics {
         };
         self.policy_decision_source_total
             .with_label_values(&[source])
+            .inc();
+    }
+
+    /// Records an observe-only threat-intel match; never affects the decision.
+    pub fn record_ti_shadow_match(&self, feed: &str) {
+        self.ti_shadow_matches_total
+            .with_label_values(&[feed])
             .inc();
     }
 

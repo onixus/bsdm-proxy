@@ -1,15 +1,35 @@
 # Threat intelligence collector (TASK-TI-001)
 
+> **Threat monitoring in Shadow Mode — enforcement is in development.** The
+> feeds are observed, not enforced: `TI_ENFORCEMENT_MODE=shadow` is the default
+> posture and blocking on feed content requires an explicit `enforce` decision
+> under the transition criteria of
+> [ADR 0008](../adr/0008-threat-intel-shadow-mode.md).
+
 Optional `threat-intel` worker that pulls phishing/malware IOC feeds on a
 schedule, parses them through per-source plugins, and writes a snapshot per feed
-plus a run report. This is the collector framework from the
-[TI backlog](../threat-intelligence/AI_Agent_Backlog.md): the IOC database
-(TASK-TI-002), full normalization (TASK-TI-003) and confidence scoring
-(TASK-TI-010) are **not** part of it, and nothing here is wired into ACL or RPZ
-enforcement yet.
+plus a run report. Beyond the collector framework from the
+[TI backlog](../threat-intelligence/AI_Agent_Backlog.md), the crate also holds an
+IOC store (SQLite with TTL, `TI_SQLITE_PATH`), normalization, weighted confidence
+scoring, SIEM export, a SOAR API (`/api/v1/soar/*`) and a reputation endpoint
+(`/api/v1/ml/reputation`).
 
-Status: **Experimental**. Treat the output as an input to a review pipeline, not
-as a block list.
+It also **compiles enforcement artifacts** when `TI_RPZ_ENABLED` is on (default
+`true`, `threat-intel/src/config.rs`): an RPZ zone `threats.rpz` and a Proxy ACL
+list `threat_domains.json` (`threat-intel/src/collector.rs`,
+`threat-intel/src/rpz.rs`). In shadow mode both are written under a `.shadow`
+suffix (`threats.rpz.shadow`, `threat_domains.json.shadow`) that no enforcement
+component loads, and `TI_RPZ_ENABLED=true` without an explicit
+`TI_ENFORCEMENT_MODE=enforce` logs a warning.
+
+Even in `enforce` these remain **files, not decisions**: `dns-sinkhole` loads the
+zone named by `DNS_SINKHOLE_ZONE_PATH` (compose:
+`/var/lib/bsdm-proxy/rpz/compiled.rpz`) and the proxy does not read
+`threat_domains.json`, so nothing blocks until an operator deliberately publishes
+the generated zone. Do not do that during a pilot — see ADR 0008.
+
+Status: **Beta, monitoring only**. Treat the output as an input to a review
+pipeline, not as a block list.
 
 ## Quick start
 
@@ -26,6 +46,10 @@ cargo run -p threat-intel
 curl http://127.0.0.1:8093/health
 curl http://127.0.0.1:8093/metrics | grep threat_intel_
 ```
+
+A plain binary run binds `127.0.0.1` (`TI_ADMIN_BIND`). Under Compose the port
+is not published to the host, so probe it from inside the network, e.g.
+`docker compose exec threat-intel wget -q -O- http://127.0.0.1:8093/health`.
 
 Compose profile:
 
@@ -84,11 +108,65 @@ here.
 | `TI_MAX_BODY_MB` | `64` | Hard cap on a feed response body |
 | `TI_MAX_INDICATORS_PER_FETCH` | `500000` | Hard cap on indicators kept per fetch |
 | `TI_OUTPUT_DIR` | `./data/threat-intel` | Snapshot directory |
+| `TI_ENFORCEMENT_MODE` | `shadow` | `shadow` observes only; `enforce` is the explicit opt-in required by [ADR 0008](../adr/0008-threat-intel-shadow-mode.md) |
+| `TI_SQLITE_PATH` | `<TI_OUTPUT_DIR>/ioc.db` | IOC store path (`TI_STORAGE_ENABLED`, `TI_IOC_TTL_SECS`) |
+| `TI_RPZ_ENABLED` | `true` | Compile `threats.rpz` / `threat_domains.json`; in shadow mode they are written with a `.shadow` suffix |
+| `TI_MIN_CONFIDENCE_SCORE` | `75` | Minimum weighted score for an indicator to reach the artifacts |
 | `TI_USER_AGENT` | `bsdm-threat-intel/<version>` | Feed request User-Agent |
 | `TI_RUN_ONCE` | `false` | Collect every source once and exit |
-| `METRICS_PORT` | `8093` | `/metrics` and `/health` |
+| `METRICS_PORT` | `8093` | Admin listener: `/metrics`, `/health`, `/api/v1/soar/*`, `/api/v1/ml/*` |
+| `TI_ADMIN_BIND` | `127.0.0.1` | Host of that listener; Compose/Helm set `0.0.0.0` without publishing the port |
+| `TI_API_TOKEN` | unset | Bearer required by mutating `POST /api/v1/soar/*` |
+| `TI_API_ALLOW_INSECURE` | `false` | Lab-only: open SOAR mutations without a token |
+| `TI_API_REQUIRE_TOKEN` | `false` | Force fail-closed outside the production profile |
+| `TI_SOAR_AUDIT_PATH` | `<TI_OUTPUT_DIR>/soar-audit.jsonl` | JSONL audit of SOAR actions (`0600`) |
+| `DEPLOYMENT_PROFILE` | `production` when unset | Drives the fail-closed default |
 
 Packaged example: `packaging/config/threat-intel.env.example`.
+
+## SOAR API authorization and audit
+
+The admin listener carries the SOAR API, so **mutating** calls are gated
+(`threat-intel/src/api_auth.rs`, `threat-intel/src/main.rs`):
+
+| Endpoint | Auth |
+|---|---|
+| `POST /api/v1/soar/block`, `POST /api/v1/soar/unblock` | `Authorization: Bearer $TI_API_TOKEN` (constant-time comparison) |
+| `GET /api/v1/soar/investigate`, `GET /api/v1/ml/*`, `GET /metrics`, `GET /health` | Open — probes and the Prometheus scrape keep working |
+
+Posture resolution: `TI_API_ALLOW_INSECURE=true` opens mutations; otherwise the
+production profile (`DEPLOYMENT_PROFILE` unset, empty, `production` or `prod`)
+is fail-closed; otherwise `TI_API_REQUIRE_TOKEN` decides. A missing, empty,
+mismatched or non-`Bearer` credential is treated as absent.
+
+```bash
+curl -fsS -X POST http://127.0.0.1:8093/api/v1/soar/block \
+  -H "Authorization: Bearer $TI_API_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"indicator":"phish.example.test","kind":"domain","reason":"SEC-1234 SOC triage","operator":"soc1"}'
+```
+
+Without a valid token the request is refused with `401 Unauthorized` and a
+`WWW-Authenticate: Bearer` header **before** the storage is touched — a rejected
+call neither creates nor removes an indicator, and neither changes the metrics.
+
+Starting without a token does **not** stop the process: unlike the proxy control
+plane, the collector keeps ingesting feeds while the mutating endpoints stay
+closed, and the chosen posture is logged at startup (`info` with a token,
+`warn` without one and again when the lab escape hatch is open).
+
+Every block/unblock is appended to `TI_SOAR_AUDIT_PATH` as one JSONL record,
+**accepted or denied**, with `timestamp_unix`, `actor` (the request's `operator`
+field), `peer` (client address), `action`, `indicator`, `change_reason` (the
+request's `reason`), `mode` (`shadow` / `enforce`), `outcome`
+(`accepted` / `denied`) and `source_path`. Control characters are stripped and
+missing values are recorded as `unknown`; the file is created with `0600`.
+
+Network posture: port `8093` is **not** published to the host — Compose declares
+it with `expose`, so Prometheus scrapes `/metrics` inside the compose network
+and Compose/Helm therefore set `TI_ADMIN_BIND=0.0.0.0` inside the container. A
+plain binary run stays on `127.0.0.1`. Publish the port only together with a
+configured `TI_API_TOKEN`.
 
 ## Error handling
 
@@ -114,6 +192,23 @@ a cron job or a CI smoke check.
 | `threat_intel_last_success_timestamp_seconds` | `source` | Unix time of the last success — alert on staleness |
 | `threat_intel_fetch_duration_seconds` | `source` | Cycle duration histogram |
 | `threat_intel_sink_errors_total` | `source` | Snapshot write failures |
+| `threat_intel_soar_blocks_total` | `mode` | SOAR block actions by enforcement mode (`shadow`, `enforce`) |
+| `bsdm_proxy_ti_shadow_matches_total` | `feed` | **Proxy-side, per [ADR 0008](../adr/0008-threat-intel-shadow-mode.md)**: traffic matches against an IOC while in shadow mode, counted together with the `threat_shadow_match` annotation on the event; the request is **not** blocked. This is the false-positive review input for the go/no-go record |
+
+## Shadow Mode review flow
+
+1. Keep `TI_ENFORCEMENT_MODE` unset or `shadow` (default) and confirm the
+   artifacts on disk carry the `.shadow` suffix.
+2. Let the collector run for at least the observation window in
+   [ADR 0008](../adr/0008-threat-intel-shadow-mode.md) (≥ 14 days).
+3. Review the events carrying `threat_shadow_match` per feed through the Search API and
+   compare volumes with `bsdm_proxy_ti_shadow_matches_total{feed}`.
+4. Record the per-feed false-positive share in the
+   [go/no-go record](../ops-and-dev/pilot-go-no-go-template.md). Feeds above the
+   threshold are dropped from `TI_SOURCES` rather than enforced with exceptions.
+5. `POST /api/v1/soar/block` answers `202` with `"mode": "shadow"` and
+   `"enforced": false` while in shadow mode — a playbook must treat that as
+   "recorded", not "contained".
 
 ## Security
 
@@ -122,6 +217,10 @@ against the configured feed endpoints and never requests a collected indicator,
 so it does not visit phishing pages or download payloads. Response bodies are
 capped (`TI_MAX_BODY_MB`) before buffering, redirects are limited, and non-HTTP
 feed URLs are rejected.
+
+Mutating SOAR endpoints are fail-closed without `TI_API_TOKEN`, and the admin
+listener binds loopback unless `TI_ADMIN_BIND` says otherwise — see
+[SOAR API authorization and audit](#soar-api-authorization-and-audit).
 
 The container runs as a non-root user and needs egress to the feed vendors. In
 an air-gapped deployment, mirror the feeds internally and point `TI_<SOURCE>_URL`

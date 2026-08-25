@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 use threat_intel::collector::{self, Collector};
-use threat_intel::config::Config;
+use threat_intel::config::{Config, EnforcementMode};
 use threat_intel::http::FeedHttpClient;
 use threat_intel::indicator::IndicatorKind;
 use threat_intel::metrics::CollectorMetrics;
@@ -31,6 +31,63 @@ async fn mock_http_server(body: &'static str) -> String {
     format!("http://{addr}/feed.txt")
 }
 
+struct TestFeedSource {
+    url: String,
+}
+
+impl FeedSource for TestFeedSource {
+    fn name(&self) -> &'static str {
+        "test_phish_feed"
+    }
+    fn url(&self) -> &str {
+        &self.url
+    }
+    fn weight(&self) -> u8 {
+        85
+    }
+    fn parse(
+        &self,
+        body: &str,
+    ) -> Result<Vec<threat_intel::indicator::RawIndicator>, threat_intel::source::FeedError> {
+        let mut res = Vec::new();
+        for line in body.lines().map(str::trim).filter(|l| !l.is_empty()) {
+            let kind = if line.starts_with("http://") || line.starts_with("https://") {
+                IndicatorKind::Url
+            } else if threat_intel::indicator::is_ip_literal(line) {
+                IndicatorKind::Ip
+            } else {
+                IndicatorKind::Domain
+            };
+            res.push(threat_intel::indicator::RawIndicator::new(line, kind, self));
+        }
+        Ok(res)
+    }
+}
+
+fn pipeline_config(output_dir: &std::path::Path, mode: EnforcementMode) -> Config {
+    Config {
+        sources: vec!["test_phish_feed".into()],
+        poll_interval: Duration::from_secs(900),
+        http_timeout: Duration::from_secs(5),
+        max_attempts: 1,
+        retry_backoff: Duration::from_secs(1),
+        max_body_bytes: 1024 * 1024,
+        max_indicators_per_fetch: 1000,
+        output_dir: output_dir.to_path_buf(),
+        sqlite_path: output_dir.join("ioc.db"),
+        storage_enabled: true,
+        ioc_ttl_secs: 7 * 86400,
+        min_confidence_score: 75,
+        rpz_enabled: true,
+        rpz_output_path: output_dir.join("threats.rpz"),
+        acl_export_path: output_dir.join("threat_domains.json"),
+        enforcement_mode: mode,
+        user_agent: "test".into(),
+        metrics_port: 0,
+        run_once: true,
+    }
+}
+
 #[tokio::test]
 async fn test_full_threat_intel_pipeline() {
     let temp_dir = tempfile::tempdir().unwrap();
@@ -50,59 +107,8 @@ phish.target-bank.net
 
     let feed_url = mock_http_server(feed_content).await;
 
-    struct TestFeedSource {
-        url: String,
-    }
-    impl FeedSource for TestFeedSource {
-        fn name(&self) -> &'static str {
-            "test_phish_feed"
-        }
-        fn url(&self) -> &str {
-            &self.url
-        }
-        fn weight(&self) -> u8 {
-            85
-        }
-        fn parse(
-            &self,
-            body: &str,
-        ) -> Result<Vec<threat_intel::indicator::RawIndicator>, threat_intel::source::FeedError>
-        {
-            let mut res = Vec::new();
-            for line in body.lines().map(str::trim).filter(|l| !l.is_empty()) {
-                let kind = if line.starts_with("http://") || line.starts_with("https://") {
-                    IndicatorKind::Url
-                } else if threat_intel::indicator::is_ip_literal(line) {
-                    IndicatorKind::Ip
-                } else {
-                    IndicatorKind::Domain
-                };
-                res.push(threat_intel::indicator::RawIndicator::new(line, kind, self));
-            }
-            Ok(res)
-        }
-    }
-
-    let config = Config {
-        sources: vec!["test_phish_feed".into()],
-        poll_interval: Duration::from_secs(900),
-        http_timeout: Duration::from_secs(5),
-        max_attempts: 1,
-        retry_backoff: Duration::from_secs(1),
-        max_body_bytes: 1024 * 1024,
-        max_indicators_per_fetch: 1000,
-        output_dir: output_dir.clone(),
-        sqlite_path: sqlite_path.clone(),
-        storage_enabled: true,
-        ioc_ttl_secs: 7 * 86400,
-        min_confidence_score: 75,
-        rpz_enabled: true,
-        rpz_output_path: rpz_path.clone(),
-        acl_export_path: acl_path.clone(),
-        user_agent: "test".into(),
-        metrics_port: 0,
-        run_once: true,
-    };
+    // Enforcement pipeline: artifacts land under their plain names.
+    let config = pipeline_config(&output_dir, EnforcementMode::Enforce);
 
     let metrics = CollectorMetrics::new().unwrap();
     let storage = SqliteStorage::new(&sqlite_path).unwrap();
@@ -193,4 +199,80 @@ phish.target-bank.net
     assert!(domain_strs.contains(&"evil-phish.com"));
     assert!(domain_strs.contains(&"malware-dropper.org"));
     assert!(domain_strs.contains(&"phish.target-bank.net"));
+}
+
+/// Issue #330: the default (shadow) mode must never produce an artifact that
+/// `dns-sinkhole` or the proxy ACL loader can pick up, including indicators
+/// pushed through the SOAR block API.
+#[tokio::test]
+async fn shadow_mode_writes_only_shadow_artifacts() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let output_dir = temp_dir.path().to_path_buf();
+    let sqlite_path = output_dir.join("ioc.db");
+
+    let feed_url = mock_http_server("https://evil-phish.com/login.php\n").await;
+    let config = pipeline_config(&output_dir, EnforcementMode::Shadow);
+
+    let metrics = CollectorMetrics::new().unwrap();
+    let storage = SqliteStorage::new(&sqlite_path).unwrap();
+    let file_sink = Box::new(JsonlFileSink::new(&output_dir).unwrap());
+    let sqlite_sink = Box::new(SqliteSink::new(storage.clone(), config.ioc_ttl_secs));
+    let composite_sink = Arc::new(CompositeSink::new(vec![file_sink, sqlite_sink]));
+    let http = FeedHttpClient::new(Duration::from_secs(5), 1024 * 1024, "test").unwrap();
+
+    // SOAR containment requested by an analyst while the collector is in shadow.
+    let soar = threat_intel::soar::execute_soar_block(
+        &storage,
+        threat_intel::soar::SoarBlockRequest {
+            indicator: "soar-shadow.test".into(),
+            kind: IndicatorKind::Domain,
+            reason: "SOC triage".into(),
+            ttl_secs: Some(3600),
+            operator: Some("soc1".into()),
+        },
+        EnforcementMode::Shadow,
+    )
+    .unwrap();
+    assert!(!soar.enforced);
+    assert_eq!(soar.mode, "shadow");
+
+    let collector = Arc::new(Collector::new(
+        config,
+        http,
+        composite_sink,
+        Some(storage.clone()),
+        metrics.clone(),
+    ));
+    let sources: Vec<Box<dyn FeedSource>> = vec![Box::new(TestFeedSource { url: feed_url })];
+    collector::run_once(collector, sources).await.unwrap();
+
+    // No enforcement artifact exists at all.
+    assert!(
+        !output_dir.join("threats.rpz").exists(),
+        "shadow mode must not write an enforceable RPZ zone"
+    );
+    assert!(
+        !output_dir.join("threat_domains.json").exists(),
+        "shadow mode must not write an enforceable proxy ACL feed"
+    );
+
+    // Shadow artifacts exist and are labelled as observe-only.
+    let rpz = std::fs::read_to_string(output_dir.join("threats.rpz.shadow")).unwrap();
+    assert!(rpz.contains("SHADOW MODE"));
+    assert!(rpz.contains("evil-phish.com CNAME ."));
+
+    let acl_raw = std::fs::read_to_string(output_dir.join("threat_domains.json.shadow")).unwrap();
+    let acl: serde_json::Value = serde_json::from_str(&acl_raw).unwrap();
+    assert_eq!(acl["mode"], "shadow");
+    let domains: Vec<&str> = acl["domains"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d.as_str().unwrap())
+        .collect();
+    assert!(domains.contains(&"evil-phish.com"));
+    // The SOAR indicator is observable only in the shadow export.
+    assert!(domains.contains(&"soar-shadow.test"));
+    assert_eq!(acl["feeds"]["evil-phish.com"], "test_phish_feed");
+    assert_eq!(acl["feeds"]["soar-shadow.test"], "soar:soc1");
 }

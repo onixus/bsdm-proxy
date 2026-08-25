@@ -585,6 +585,7 @@ async fn handle_connect_tunnel(
                                         .unwrap_or("connect_tunnel")
                                         .to_string(),
                                 ),
+                                threat_shadow_match: None,
                                 event_id,
                             };
                             service.send_cache_event(event);

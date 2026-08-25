@@ -46,6 +46,42 @@ DEPLOYMENT_PROFILE=development POLICY_MODE=full-mitm ALLOW_FULL_MITM=true \
 В production используйте `selective-mitm` и управляйте расшифровкой через
 `MITM_CATEGORIES`, либо `sni` для полного отключения TLS-терминирования.
 
+## MITM circuit breaker
+
+Автоматический перевод домена на blind `CONNECT` при росте доли ошибок TLS
+(`proxy/src/mitm_breaker.rs`, [ADR 0007](../adr/0007-mitm-circuit-breaker.md)).
+
+| Переменная | Default | Назначение |
+|---|---:|---|
+| `MITM_CIRCUIT_BREAKER_ENABLED` | `true` | Выключается только значениями `false` / `0` |
+| `MITM_CIRCUIT_BREAKER_FAILURE_RATE` | `0.05` | Доля ошибок для срабатывания; принимается только `0 < rate <= 1`, иначе default |
+| `MITM_CIRCUIT_BREAKER_MIN_SAMPLES` | `5` | Минимум попыток в окне до оценки доли ошибок (≥ 1) |
+| `MITM_CIRCUIT_BREAKER_WINDOW_SECS` | `60` | Длина скользящего окна, секунды (≥ 1) |
+| `MITM_CIRCUIT_BREAKER_COOLDOWN_SECS` | `0` | `0` — домен остаётся в bypass до ручного сброса; иначе авто-восстановление через N секунд |
+
+Некорректное значение любой переменной игнорируется и заменяется значением по
+умолчанию. Аудит срабатываний и сбросов пишется в `PINNING_AUDIT_LOG_PATH`.
+Статус и сброс: `GET /api/mitm/circuit-breaker`,
+`POST /api/mitm/circuit-breaker/reset` (Bearer). Процедура оператора —
+[certificate-pinning.md](../features/certificate-pinning.md#mitm-circuit-breaker-detection-and-operator-reset).
+
+## Threat intel shadow matching (proxy)
+
+Наблюдение за совпадениями трафика с IOC без блокировки (`proxy/src/ti_shadow.rs`,
+[ADR 0008](../adr/0008-threat-intel-shadow-mode.md)). Proxy читает **только**
+shadow-выгрузку коллектора и никогда не меняет allow/deny решение.
+
+| Переменная | Default | Назначение |
+|---|---:|---|
+| `TI_SHADOW_MATCH_ENABLED` | `true` | Выключается значениями `0`/`false`/`no`/`off` |
+| `TI_SHADOW_FEED_PATH` | `/var/lib/bsdm-proxy/threat-intel/threat_domains.json.shadow` | Файл shadow-выгрузки `threat-intel` |
+| `TI_SHADOW_RELOAD_SECS` | `300` | Интервал перечитывания файла; значения меньше `10` поднимаются до `10` |
+
+Совпадение помечает событие полем `threat_shadow_match` (имя фида) — колонка
+`threat_shadow_match` в ClickHouse — и увеличивает
+`bsdm_proxy_ti_shadow_matches_total{feed}`. Отсутствующий файл не является
+ошибкой: коллектор мог ещё не сформировать выгрузку.
+
 ## L1 cache
 
 | Переменная | Default | Назначение |
@@ -303,8 +339,13 @@ ML worker:
 
 Отдельный опциональный worker `threat-intel` (профиль Compose `threat-intel`).
 
+> **Shadow Mode по умолчанию.** Модуль ведёт мониторинг угроз; блокировка по фидам
+> требует явного `TI_ENFORCEMENT_MODE=enforce` и критериев перехода из
+> [ADR 0008](../adr/0008-threat-intel-shadow-mode.md).
+
 | Переменная | Default |
 |---|---|
+| `TI_ENFORCEMENT_MODE` | `shadow` |
 | `TI_SOURCES` | `openphish,phishstats,phishing_database,urlhaus` |
 | `TI_<SOURCE>_URL` | endpoint вендора |
 | `TI_POLL_INTERVAL_SECS` | `900` |
@@ -314,13 +355,71 @@ ML worker:
 | `TI_MAX_BODY_MB` | `64` |
 | `TI_MAX_INDICATORS_PER_FETCH` | `500000` |
 | `TI_OUTPUT_DIR` | `./data/threat-intel` |
+| `TI_SQLITE_PATH` | `<TI_OUTPUT_DIR>/ioc.db` |
+| `TI_RPZ_ENABLED` | `true` (в shadow пишутся только `threats.rpz.shadow` / `threat_domains.json.shadow`) |
+| `TI_MIN_CONFIDENCE_SCORE` | `75` |
 | `TI_RUN_ONCE` | `false` |
 | `METRICS_PORT` | `8093` |
 
+В режиме `shadow` enforcement-артефакты под «боевыми» именами не создаются:
+коллектор пишет `threats.rpz.shadow` и `threat_domains.json.shadow`
+(`threat-intel/src/config.rs`, `threat-intel/src/collector.rs`), а сама зона
+несёт баннер `SHADOW MODE … Do NOT load this zone into dns-sinkhole`
+(`threat-intel/src/rpz.rs`). Метрика SOAR-действий по режимам —
+`threat_intel_soar_blocks_total{mode}`; в shadow `POST /api/v1/soar/block`
+отвечает `202` с `"mode":"shadow"` и `"enforced":false`.
+
 Полный пример: `packaging/config/threat-intel.env.example`. Подробнее:
-[Threat intel collector](../features/threat-intel-collector.md).
+[Threat intel collector](../features/threat-intel-collector.md) ·
+[ADR 0008](../adr/0008-threat-intel-shadow-mode.md).
+
+### Admin/SOAR API коллектора: доступ и аудит
+
+Листенер `METRICS_PORT` обслуживает `/health`, `/metrics`, SOAR и
+`/api/v1/ml/*`. Мутирующие вызовы `POST /api/v1/soar/*` (block, unblock)
+закрыты Bearer-токеном и пишутся в аудит (`threat-intel/src/api_auth.rs`,
+`threat-intel/src/main.rs`).
+
+| Переменная | Default | Назначение |
+|---|---:|---|
+| `TI_API_TOKEN` | unset | Bearer для `POST /api/v1/soar/*`; сравнение constant-time. Без него мутации закрыты в production-профиле |
+| `TI_API_ALLOW_INSECURE` | `false` | Явная лабораторная лазейка: открыть мутации без токена. Не задавать в пилоте |
+| `TI_API_REQUIRE_TOKEN` | `false` | Форсировать fail-closed в non-production профилях |
+| `TI_ADMIN_BIND` | `127.0.0.1` | Хост admin/SOAR/metrics-листенера |
+| `TI_SOAR_AUDIT_PATH` | `<TI_OUTPUT_DIR>/soar-audit.jsonl` | JSONL-аудит SOAR-действий, файл создаётся с правами `0600` |
+| `DEPLOYMENT_PROFILE` | `production`, если не задана | Определяет fail-closed по умолчанию (`production`/`prod`/пустое значение = production) |
+
+Постура выбирается так: `TI_API_ALLOW_INSECURE=true` → открыто; иначе
+production-профиль → fail-closed; иначе — по `TI_API_REQUIRE_TOKEN`.
+
+- **Отказ**: мутация без валидного Bearer получает `401 Unauthorized` с
+  заголовком `WWW-Authenticate: Bearer`, **до** обращения к хранилищу —
+  отклонённый вызов не создаёт и не удаляет индикаторы. Токен с другой схемой
+  (`Basic`) или пустой Bearer считаются отсутствующими.
+- **Открытые эндпоинты**: `GET /health`, `GET /metrics`,
+  `GET /api/v1/soar/investigate`, `GET /api/v1/ml/*` — авторизация не требуется
+  (проверка применяется только к `POST /api/v1/soar/*`).
+- **Старт без токена не падает**: в отличие от proxy control plane, коллектор
+  продолжает собирать фиды, а мутации остаются закрытыми; выбранная постура
+  пишется в лог при старте (`info` при заданном токене, `warn` при его
+  отсутствии и при открытом lab-режиме).
+- **Аудит**: на каждый block/unblock — и принятый, и отклонённый — добавляется
+  строка JSONL с полями `timestamp_unix`, `actor` (поле `operator` из тела),
+  `peer` (адрес клиента), `action`, `indicator`, `change_reason` (поле `reason`),
+  `mode` (`shadow`/`enforce`), `outcome` (`accepted`/`denied`), `source_path`.
+  Управляющие символы вырезаются, отсутствующие значения пишутся как `unknown`.
+- **Сеть**: порт `8093` больше не публикуется на хост — в Compose сервис
+  объявлен через `expose`, Prometheus скрейпит `/metrics` внутри сети
+  `bsdm-net`, поэтому в Compose/Helm задан `TI_ADMIN_BIND=0.0.0.0`. При
+  локальном запуске бинарника листенер остаётся на `127.0.0.1`. Публиковать порт
+  наружу — только вместе с заданным `TI_API_TOKEN`.
 
 ## AmneziaWG (BSDM Connect)
+
+> **Только лаборатория (Beta).** AmneziaWG и `bsdm-connect` **не входят в
+> production-контур пилота и не поддерживаются в продакшене** — в матрице Day-1
+> они отмечены **OFF** ([pilot-deployment.md](../getting-started/pilot-deployment.md)),
+> зрелость — **Beta (lab)** ([project-status.md](../project-status.md)), issue #331.
 
 | Переменная | Default | Описание |
 |---|---|---|

@@ -49,6 +49,8 @@ pub struct HttpCacheRow {
     pub decision_source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bypass_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub threat_shadow_match: Option<String>,
 }
 
 /// Map proxy `CacheEvent` JSON to a ClickHouse JSONEachRow document.
@@ -86,6 +88,7 @@ pub fn cache_event_to_row(event: &CacheEvent) -> HttpCacheRow {
         casb_alert: event.casb_alert.clone(),
         decision_source: event.decision_source.clone(),
         bypass_reason: event.bypass_reason.clone(),
+        threat_shadow_match: event.threat_shadow_match.clone(),
     }
 }
 
@@ -159,6 +162,7 @@ mod tests {
             casb_alert: None,
             decision_source: None,
             bypass_reason: None,
+            threat_shadow_match: None,
             event_id: "evt-ch-1".to_string(),
         }
     }

@@ -1,5 +1,13 @@
 # Agent fleet packaging (MDM / GPO)
 
+> **Lab-only (Beta).** The Local Policy Agent, `bsdm-connect` and the AmneziaWG
+> path are **not part of the pilot production path and are not supported in
+> production**. Maturity in [project-status.md](../project-status.md): **Beta
+> (lab)**; the Day-1 pilot scope matrix marks them **OFF**
+> ([pilot-deployment.md](pilot-deployment.md)). Run them on lab devices only —
+> packages are unsigned/unnotarized and there are no availability or support
+> guarantees for this path (issue #331).
+
 Silent multi-endpoint distribution for the **Local Policy Agent** (`agent-spike` →
 `bsdm-agent`). Complements [pilot-agent.md](pilot-agent.md) (lab smoke) with
 **fleet residual** packaging from Phase C.

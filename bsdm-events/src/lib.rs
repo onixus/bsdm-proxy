@@ -66,6 +66,10 @@ pub struct CacheEvent {
     /// Reason for bypass if decision was bypassed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bypass_reason: Option<String>,
+    /// Threat-intel feed that matched this request while TI runs in shadow
+    /// mode (issue #330). Observation only: the request was not blocked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub threat_shadow_match: Option<String>,
     #[serde(default)]
     pub event_id: String,
 }
@@ -116,6 +120,7 @@ mod tests {
             casb_alert: None,
             decision_source: None,
             bypass_reason: None,
+            threat_shadow_match: None,
             event_id: "evt-1".to_string(),
         };
         assert_eq!(document_id(&event), "evt-1");
@@ -175,6 +180,7 @@ mod tests {
             casb_alert: None,
             decision_source: None,
             bypass_reason: None,
+            threat_shadow_match: None,
             event_id: "evt-block".to_string(),
         };
         let json = serde_json::to_string(&event).unwrap();

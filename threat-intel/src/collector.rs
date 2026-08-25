@@ -239,33 +239,48 @@ impl Collector {
                 .set(active_ips.len() as i64);
         }
 
-        if self.config.rpz_enabled {
-            match storage.list_active_domains(self.config.min_confidence_score, 100_000) {
-                Ok(domains) => {
-                    let domain_count = domains.len();
-                    if let Err(e) = crate::rpz::write_rpz_file(
-                        &self.config.rpz_output_path,
-                        &domains,
-                        &crate::rpz::RpzConfig::default(),
-                    ) {
-                        warn!("failed to compile DNS RPZ zone file: {e}");
-                    } else {
-                        self.metrics.rpz_records.set(domain_count as i64);
-                        info!(
-                            domains = domain_count,
-                            path = %self.config.rpz_output_path.display(),
-                            "generated DNS RPZ zone file"
-                        );
-                    }
+        if !self.config.rpz_enabled {
+            return;
+        }
 
-                    if let Err(e) =
-                        crate::rpz::export_proxy_acl_feed(&self.config.acl_export_path, domains)
-                    {
-                        warn!("failed to export Proxy ACL threat feed: {e}");
-                    }
+        let mode = self.config.enforcement_mode;
+        // Shadow mode still compiles artifacts, but only under the `.shadow`
+        // name that dns-sinkhole and the proxy never load (issue #330).
+        let rpz_path = self.config.rpz_artifact_path();
+        let acl_path = self.config.acl_artifact_path();
+
+        match storage.list_active_domain_sources(self.config.min_confidence_score, 100_000) {
+            Ok(pairs) => {
+                let domains: Vec<String> = pairs.iter().map(|(d, _)| d.clone()).collect();
+                let feeds: std::collections::BTreeMap<String, String> = pairs.into_iter().collect();
+                let domain_count = domains.len();
+                let rpz_config = crate::rpz::RpzConfig {
+                    shadow_mode: !mode.is_enforce(),
+                    ..crate::rpz::RpzConfig::default()
+                };
+                if let Err(e) = crate::rpz::write_rpz_file(&rpz_path, &domains, &rpz_config) {
+                    warn!("failed to compile DNS RPZ zone file: {e}");
+                } else {
+                    self.metrics.rpz_records.set(domain_count as i64);
+                    info!(
+                        domains = domain_count,
+                        path = %rpz_path.display(),
+                        mode = mode.as_str(),
+                        "generated DNS RPZ zone file"
+                    );
                 }
-                Err(e) => warn!("failed to query active domains for RPZ: {e}"),
+
+                if let Err(e) = crate::rpz::export_proxy_acl_feed(&acl_path, domains, mode, feeds) {
+                    warn!("failed to export Proxy ACL threat feed: {e}");
+                } else {
+                    info!(
+                        path = %acl_path.display(),
+                        mode = mode.as_str(),
+                        "exported Proxy ACL threat feed"
+                    );
+                }
             }
+            Err(e) => warn!("failed to query active domains for RPZ: {e}"),
         }
     }
 }
@@ -377,6 +392,7 @@ mod tests {
             rpz_enabled: true,
             rpz_output_path: PathBuf::from(dir).join("threats.rpz"),
             acl_export_path: PathBuf::from(dir).join("threat_domains.json"),
+            enforcement_mode: crate::config::EnforcementMode::Shadow,
             user_agent: "test".into(),
             metrics_port: 0,
             run_once: true,

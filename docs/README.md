@@ -51,7 +51,7 @@
 | [Admin Console security](features/admin-console-security.md) | Trust boundaries и mutation token gate |
 | [Semantic cache](features/semantic-cache.md) | beta |
 | [DNS sinkhole, DoH, DoT](features/dns-sinkhole.md) | основной |
-| [Threat intel collector](features/threat-intel-collector.md) | experimental |
+| [Threat intel collector](features/threat-intel-collector.md) | beta — мониторинг в Shadow Mode, без блокировки |
 | [WASM plugins](features/wasm-plugins.md) | experimental |
 | [ICAP](features/icap-inspection.md) | experimental |
 
@@ -70,6 +70,7 @@
 | [Kubernetes](ops-and-dev/k8s-architecture.md) | Helm и разделение data/analytics plane |
 | [Control plane security](ops-and-dev/control-plane-security.md) | Tokens, bind и network policy |
 | [Backup & restore](ops-and-dev/backup-restore.md) | ClickHouse и MITM CA rollback drill |
+| [Pilot go / no-go](ops-and-dev/pilot-go-no-go-template.md) | Шаблон решения по итогам 4-й недели пилота |
 | [CA lifecycle](ops-and-dev/ca-lifecycle.md) | Выпуск, ротация и отзыв CA |
 | [Hybrid load test](ops-and-dev/load-test-selective-mitm.md) | Selective MITM, DNS и auth workload |
 | [Load-test results](ops-and-dev/load-test-results/README.md) | Хранение и интерпретация отчётов |
@@ -87,6 +88,8 @@
 - [ADR 0004: DNS sinkhole](adr/0004-dns-sinkhole-sidecar.md)
 - [ADR 0005: Local policy agent](adr/0005-local-policy-agent-vs-tunnel-first.md)
 - [ADR 0006: One supported operator console](adr/0006-single-operator-console.md)
+- [ADR 0007: Safe selective MITM & circuit breaker](adr/0007-mitm-circuit-breaker.md)
+- [ADR 0008: Threat Intelligence Shadow Mode](adr/0008-threat-intel-shadow-mode.md)
 - [Roadmap](roadmap.md)
 - [Latest release notes (v0.9.13)](releases/v0.9.13.md)
 - [Release history](releases/)

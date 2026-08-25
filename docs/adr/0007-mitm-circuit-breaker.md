@@ -4,6 +4,7 @@
 - **Date**: 2026-08-24
 - **Deciders**: BSDM Core Security & Architecture Team
 - **Issues**: #322, #328
+- **Operator procedure**: [certificate-pinning.md — MITM circuit breaker: detection and operator reset](../features/certificate-pinning.md#mitm-circuit-breaker-detection-and-operator-reset) · tuning: [configuration.md](../ops-and-dev/configuration.md#mitm-circuit-breaker)
 
 ## Context
 
@@ -26,6 +27,8 @@ Corporate TLS MITM inspection creates availability risks when upstream services 
 3. **Telemetry & Observability**:
    - Every bypass is tagged with `decision_source: "pinning-bypass"` in events and metrics (`bsdm_proxy_policy_decision_source_total`).
    - Circuit breaker status and tripped domain list are exposed at `GET /api/mitm/circuit-breaker`.
+
+4. **Documented reset path**: recognising a trip, the pre-reset checks, the exact `POST /api/mitm/circuit-breaker/reset` payload (`domain`, `actor`, `reason`) and the choice between a reset and a pinning exception are documented for operators in [certificate-pinning.md](../features/certificate-pinning.md#mitm-circuit-breaker-detection-and-operator-reset). Tuning variables (`MITM_CIRCUIT_BREAKER_*`) are documented in [configuration.md](../ops-and-dev/configuration.md#mitm-circuit-breaker).
 
 ## Consequences
 

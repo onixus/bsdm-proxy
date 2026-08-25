@@ -245,6 +245,7 @@ RUN mkdir -p /var/lib/bsdm-proxy/threat-intel && \
 USER bsdm
 
 ENV TI_OUTPUT_DIR=/var/lib/bsdm-proxy/threat-intel \
+    TI_ENFORCEMENT_MODE=shadow \
     METRICS_PORT=8093
 
 EXPOSE 8093
