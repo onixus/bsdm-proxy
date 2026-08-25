@@ -42,6 +42,14 @@ spec:
               value: {{ .Values.threatIntel.outputDir | quote }}
             - name: TI_ENFORCEMENT_MODE
               value: {{ .Values.threatIntel.enforcementMode | default "shadow" | quote }}
+            # Pod-network bind for probes and scraping; SOAR mutations still
+            # require TI_API_TOKEN (fail-closed without it).
+            - name: TI_ADMIN_BIND
+              value: {{ .Values.threatIntel.adminBind | default "0.0.0.0" | quote }}
+            {{- if .Values.threatIntel.apiToken }}
+            - name: TI_API_TOKEN
+              value: {{ .Values.threatIntel.apiToken | quote }}
+            {{- end }}
             - name: METRICS_PORT
               value: {{ .Values.threatIntel.service.port | quote }}
             - name: RUST_LOG

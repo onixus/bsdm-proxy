@@ -1,5 +1,6 @@
 //! Threat intelligence feed collector and IOC pipeline (TASK-TI-001, 002, 003, 010, 020, 021).
 
+pub mod api_auth;
 pub mod collector;
 pub mod config;
 pub mod http;

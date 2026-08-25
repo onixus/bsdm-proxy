@@ -244,6 +244,10 @@ threatIntel:
   # shadow (default, observe-only) or enforce. Shadow writes <artifact>.shadow
   # files that dns-sinkhole and the proxy never load (issue #330).
   enforcementMode: shadow
+  # Admin/SOAR API bind inside the pod. Mutating /api/v1/soar/* endpoints are
+  # fail-closed until apiToken is set (Bearer TI_API_TOKEN).
+  adminBind: "0.0.0.0"
+  apiToken: ""
   # Snapshots are rebuilt on every cycle, so an emptyDir is enough unless the
   # IOC store (TASK-TI-002) needs them to survive a restart.
   persistence:
