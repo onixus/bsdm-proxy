@@ -21,6 +21,12 @@ pub struct CollectorMetrics {
     pub fetch_duration: HistogramVec,
     /// Sink write failures, per source.
     pub sink_errors: IntCounterVec,
+    /// Current count of active indicators in storage.
+    pub stored_indicators: IntGaugeVec,
+    /// Total count of expired indicators purged.
+    pub purged_expired: prometheus::IntCounter,
+    /// Number of domains exported to the RPZ zone file.
+    pub rpz_records: prometheus::IntGauge,
 }
 
 impl CollectorMetrics {
@@ -80,6 +86,21 @@ impl CollectorMetrics {
             ),
             &["source"],
         )?;
+        let stored_indicators = IntGaugeVec::new(
+            Opts::new(
+                "threat_intel_stored_indicators",
+                "Active indicators currently in SQLite storage",
+            ),
+            &["kind"],
+        )?;
+        let purged_expired = prometheus::IntCounter::new(
+            "threat_intel_purged_expired_total",
+            "Total expired indicators purged from storage",
+        )?;
+        let rpz_records = prometheus::IntGauge::new(
+            "threat_intel_rpz_records_total",
+            "Number of domains compiled into the DNS RPZ zone",
+        )?;
 
         registry.register(Box::new(fetches.clone()))?;
         registry.register(Box::new(retries.clone()))?;
@@ -89,6 +110,9 @@ impl CollectorMetrics {
         registry.register(Box::new(last_success_timestamp.clone()))?;
         registry.register(Box::new(fetch_duration.clone()))?;
         registry.register(Box::new(sink_errors.clone()))?;
+        registry.register(Box::new(stored_indicators.clone()))?;
+        registry.register(Box::new(purged_expired.clone()))?;
+        registry.register(Box::new(rpz_records.clone()))?;
 
         Ok(Arc::new(Self {
             registry,
@@ -100,6 +124,9 @@ impl CollectorMetrics {
             last_success_timestamp,
             fetch_duration,
             sink_errors,
+            stored_indicators,
+            purged_expired,
+            rpz_records,
         }))
     }
 

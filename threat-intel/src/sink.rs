@@ -59,6 +59,7 @@ impl JsonlFileSink {
         Ok(Self { dir })
     }
 
+    #[allow(dead_code)]
     pub fn dir(&self) -> &Path {
         &self.dir
     }
@@ -91,6 +92,76 @@ impl IndicatorSink for JsonlFileSink {
         let json = serde_json::to_vec_pretty(report)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         self.write_atomic("report.json", &json)
+    }
+}
+
+/// Sink storing normalized indicators in SQLite with TTL support.
+pub struct SqliteSink {
+    storage: crate::storage::SqliteStorage,
+    ttl_secs: i64,
+}
+
+impl SqliteSink {
+    pub fn new(storage: crate::storage::SqliteStorage, ttl_secs: i64) -> Self {
+        Self { storage, ttl_secs }
+    }
+
+    #[allow(dead_code)]
+    pub fn storage(&self) -> &crate::storage::SqliteStorage {
+        &self.storage
+    }
+}
+
+impl IndicatorSink for SqliteSink {
+    fn write_batch(&self, _source: &str, indicators: &[RawIndicator]) -> std::io::Result<()> {
+        let normalized: Vec<crate::normalizer::NormalizedIndicator> = indicators
+            .iter()
+            .filter_map(|raw| {
+                crate::normalizer::NormalizedIndicator::from_raw(raw, raw.source_weight)
+            })
+            .collect();
+
+        self.storage
+            .upsert_batch(&normalized, self.ttl_secs)
+            .map_err(std::io::Error::other)?;
+
+        Ok(())
+    }
+
+    fn write_report(&self, report: &CollectionReport) -> std::io::Result<()> {
+        for source_rep in &report.sources {
+            self.storage
+                .record_run(source_rep)
+                .map_err(std::io::Error::other)?;
+        }
+        Ok(())
+    }
+}
+
+/// Composite sink dispatching writes to multiple underlying sinks.
+pub struct CompositeSink {
+    sinks: Vec<Box<dyn IndicatorSink>>,
+}
+
+impl CompositeSink {
+    pub fn new(sinks: Vec<Box<dyn IndicatorSink>>) -> Self {
+        Self { sinks }
+    }
+}
+
+impl IndicatorSink for CompositeSink {
+    fn write_batch(&self, source: &str, indicators: &[RawIndicator]) -> std::io::Result<()> {
+        for sink in &self.sinks {
+            sink.write_batch(source, indicators)?;
+        }
+        Ok(())
+    }
+
+    fn write_report(&self, report: &CollectionReport) -> std::io::Result<()> {
+        for sink in &self.sinks {
+            sink.write_report(report)?;
+        }
+        Ok(())
     }
 }
 

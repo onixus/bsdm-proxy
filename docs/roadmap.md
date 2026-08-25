@@ -65,10 +65,14 @@ Roadmap определяет порядок работ в рамках стра�
 ## Фаза D — Threat Intelligence & Feed Collector
 
 - [x] **Threat intelligence feed collector** (`threat-intel`, TASK-TI-001) — сбор OpenPhish, PhishStats, Phishing.Database и URLhaus по расписанию, retry/backoff, дедупликация, метрики на `:8093/metrics`, JSONL-снапшоты + `report.json`, Compose profile и Helm toggle ([threat-intel-collector.md](features/threat-intel-collector.md)).
-- [ ] **IOC storage & SQLite/ClickHouse persistence** (TASK-TI-002) — структурированное хранение индикаторов, дедупликация, TTL и быстрый индекс.
-- [ ] **IOC normalization and category tagging** (TASK-TI-003) — канонизация URL/доменов/IP, риск-скоринг и confidence rating (TASK-TI-010).
-- [ ] **Automated RPZ zone generation & DNS enforcement** (TASK-TI-020) — автоматическая компиляция фидов в RPZ-зоны для dns-sinkhole с hot reload.
-- [ ] **Proxy ACL threat feed sync & automatic blocking** (TASK-TI-021) — динамическое применение собранных индикаторов в политиках proxy data-plane.
+- [x] **IOC storage & SQLite persistence** (TASK-TI-002) — структурированное хранение индикаторов (`SqliteStorage`, `indicators`, `sources`, `collection_history`), дедупликация, TTL-экспирация и индексы.
+- [x] **IOC normalization and category tagging** (TASK-TI-003) — канонизация URL/доменов/IP, валидация Punycode/IDN, фильтрация bogon/private IP.
+- [x] **Confidence Scoring & Multi-source correlation** (TASK-TI-010) — алгоритм взвешенного скоринга с бонусом корреляции фидов и временным затуханием (freshness decay).
+- [x] **Automated RPZ zone generation & DNS enforcement** (TASK-TI-020) — автоматическая компиляция фидов в RPZ-зоны (`threats.rpz`) для dns-sinkhole с атомарной записью.
+- [x] **Proxy ACL threat feed export** (TASK-TI-021) — экспорт нормализованных доменов и URL угроз в JSON-формате (`threat_domains.json`) для применения в политиках proxy data-plane.
+- [x] **Enterprise SIEM Integration** (TASK-TI-030) — форматирование событий в CEF (ArcSight/QRadar/Splunk), ECS JSON (Elastic) и Syslog RFC 5424.
+- [x] **SOAR Automated Response API** (TASK-TI-031) — автоматизированные действия сдерживания и расследования (`/api/v1/soar/block`, `/api/v1/soar/unblock`, `/api/v1/soar/investigate`).
+- [x] **ML Domain Reputation & Typosquatting / Homoglyph Model** (TASK-TI-040) — детекция омоглифов (Unicode confusables), Damerau-Levenshtein расстояние до защищаемых брендов и детекция спуфинга субдоменов (`/api/v1/ml/reputation`).
 
 ---
 

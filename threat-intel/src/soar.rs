@@ -1,0 +1,184 @@
+//! TASK-TI-031: SOAR Integration & Automated Response Engine.
+//!
+//! Provides automated security orchestration, investigation, and incident containment:
+//! - Automated blocking (`block_indicator`) with high priority and custom TTL.
+//! - Automated unblocking / exception whitelisting (`unblock_indicator`).
+//! - Full IOC investigation and lineage lookup (`investigate_indicator`).
+
+use crate::indicator::IndicatorKind;
+use crate::normalizer::NormalizedIndicator;
+use crate::storage::{SqliteStorage, StorageError, StoredIndicator};
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SoarBlockRequest {
+    pub indicator: String,
+    pub kind: IndicatorKind,
+    pub reason: String,
+    pub ttl_secs: Option<i64>,
+    pub operator: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SoarUnblockRequest {
+    pub indicator: String,
+    pub kind: Option<IndicatorKind>,
+    pub reason: String,
+    pub operator: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SoarInvestigationResult {
+    pub query: String,
+    pub found: bool,
+    pub indicator: Option<StoredIndicator>,
+    pub is_active: bool,
+    pub queried_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SoarActionResponse {
+    pub success: bool,
+    pub action: String,
+    pub indicator: String,
+    pub message: String,
+    pub timestamp: DateTime<Utc>,
+}
+
+/// Executes an automated SOAR block action.
+pub fn execute_soar_block(
+    storage: &SqliteStorage,
+    req: SoarBlockRequest,
+) -> Result<SoarActionResponse, StorageError> {
+    let ttl_secs = req.ttl_secs.unwrap_or(86400 * 30); // Default 30 days
+    let raw = crate::indicator::RawIndicator {
+        value: req.indicator.clone(),
+        kind: req.kind,
+        source: format!("soar:{}", req.operator.as_deref().unwrap_or("auto")),
+        source_weight: 100,
+        collected_at: Utc::now(),
+        reported_at: Some(Utc::now()),
+        reference: Some(req.reason.clone()),
+        tags: vec!["soar_blocked".to_string(), "manual_containment".to_string()],
+    };
+
+    let norm = match NormalizedIndicator::from_raw(&raw, 100) {
+        Some(n) => n,
+        None => {
+            return Ok(SoarActionResponse {
+                success: false,
+                action: "block".into(),
+                indicator: req.indicator,
+                message: "Failed to normalize indicator value".into(),
+                timestamp: Utc::now(),
+            });
+        }
+    };
+
+    let stats = storage.upsert_batch(&[norm], ttl_secs)?;
+
+    Ok(SoarActionResponse {
+        success: true,
+        action: "block".into(),
+        indicator: req.indicator,
+        message: format!(
+            "Indicator blocked successfully (inserted: {}, updated: {}, ttl: {}s)",
+            stats.inserted, stats.updated, ttl_secs
+        ),
+        timestamp: Utc::now(),
+    })
+}
+
+/// Executes an automated SOAR unblock action.
+pub fn execute_soar_unblock(
+    storage: &SqliteStorage,
+    req: SoarUnblockRequest,
+) -> Result<SoarActionResponse, StorageError> {
+    // Delete indicator or mark as expired
+    let purged = storage.purge_indicator(&req.indicator, req.kind)?;
+
+    Ok(SoarActionResponse {
+        success: purged > 0,
+        action: "unblock".into(),
+        indicator: req.indicator,
+        message: if purged > 0 {
+            format!("Indicator removed from active threats (records purged: {purged})")
+        } else {
+            "Indicator not found in active threats".to_string()
+        },
+        timestamp: Utc::now(),
+    })
+}
+
+/// Investigates an indicator against threat storage.
+pub fn execute_soar_investigation(
+    storage: &SqliteStorage,
+    query: &str,
+    kind: Option<IndicatorKind>,
+) -> Result<SoarInvestigationResult, StorageError> {
+    let ind = storage.query_indicator(query, kind)?;
+    let now = Utc::now();
+    let is_active = ind.as_ref().map(|i| i.expires_at > now).unwrap_or(false);
+
+    Ok(SoarInvestigationResult {
+        query: query.to_string(),
+        found: ind.is_some(),
+        indicator: ind,
+        is_active,
+        queried_at: now,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_soar_block_unblock_investigate() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // 1. Investigate non-existent
+        let res1 = execute_soar_investigation(&storage, "malicious-domain.test", None).unwrap();
+        assert!(!res1.found);
+
+        // 2. Block domain
+        let block_res = execute_soar_block(
+            &storage,
+            SoarBlockRequest {
+                indicator: "malicious-domain.test".into(),
+                kind: IndicatorKind::Domain,
+                reason: "Active C2 beacon observed in SIEM".into(),
+                ttl_secs: Some(3600),
+                operator: Some("soc_analyst_1".into()),
+            },
+        )
+        .unwrap();
+        assert!(block_res.success);
+
+        // 3. Investigate again
+        let res2 = execute_soar_investigation(&storage, "malicious-domain.test", None).unwrap();
+        assert!(res2.found);
+        assert!(res2.is_active);
+        let ind = res2.indicator.unwrap();
+        assert_eq!(ind.confidence_score, 100);
+        assert_eq!(ind.source, "soar:soc_analyst_1");
+
+        // 4. Unblock
+        let unblock_res = execute_soar_unblock(
+            &storage,
+            SoarUnblockRequest {
+                indicator: "malicious-domain.test".into(),
+                kind: Some(IndicatorKind::Domain),
+                reason: "False positive confirmed".into(),
+                operator: Some("soc_analyst_1".into()),
+            },
+        )
+        .unwrap();
+        assert!(unblock_res.success);
+
+        // 5. Investigate after unblock
+        let res3 = execute_soar_investigation(&storage, "malicious-domain.test", None).unwrap();
+        assert!(!res3.found);
+    }
+}
