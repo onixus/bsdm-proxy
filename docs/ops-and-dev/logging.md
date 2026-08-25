@@ -102,8 +102,14 @@ systemd подхватывает env из `/etc/bsdm-proxy/bsdm-proxy.env` и `c
 | `dns` | Запрос перехвачен и обработан DNS-sinkhole (UDP RPZ / DoH / DoT) |
 | `sni` | Запрос обработан по SNI без TLS-расшифровки (`POLICY_MODE=sni` или проксирование CONNECT) |
 | `mitm` | Запрос прошёл через TLS MITM расшифровку (`POLICY_MODE=full-mitm` / `selective-mitm`) |
-| `pinning-bypass` | TLS MITM расшифровка пропущена из-за совпадения с `pinning_exceptions` |
+| `pinning-bypass` | TLS MITM расшифровка пропущена: совпадение с реестром pinning-исключений (`bypass_reason=certificate_pinning_exception`) **или** сработавший circuit breaker (`bypass_reason=circuit_breaker_tripped`) |
 | `auth-deny` | Запрос заблокирован на этапе аутентификации |
+| `local-agent` | Решение принято локальным агентом и получено телеметрией (`/api/v1/agent/events`) |
+
+Поле `bypass_reason` уточняет причину отказа от MITM: `certificate_pinning_exception`,
+`circuit_breaker_tripped`, `mitm_disabled`, `policy_mode_sni`,
+`category_not_selected_for_mitm`, `non_mitm_port` (`proxy/src/proxy_service.rs`).
+Разбор сработавшего брейкера — [certificate-pinning.md](../features/certificate-pinning.md#mitm-circuit-breaker-detection-and-operator-reset).
 
 ### Prometheus Метрика:
 ```prometheus
@@ -115,6 +121,23 @@ bsdm_proxy_policy_decision_source_total{source="pinning-bypass"} 14
 ```
 
 Поле `decision_source` сквозным образом передаётся через `CacheEvent`, сохраняется в ClickHouse (`bsdm.http_cache`), доступно в REST Search API (`/api/search?decision_source=mitm`) и отображается на Grafana дашборде.
+
+### Threat Intelligence: Shadow Mode
+
+TI работает в режиме наблюдения ([ADR 0008](../adr/0008-threat-intel-shadow-mode.md)):
+совпадение трафика с IOC **не** меняет allow/deny решение, а помечает событие.
+
+| Сигнал | Где |
+|---|---|
+| Поле `threat_shadow_match` (имя фида) в `CacheEvent` | ClickHouse `bsdm.http_cache`, колонка `threat_shadow_match`; Search API |
+| `bsdm_proxy_ti_shadow_matches_total{feed}` | Prometheus (proxy, `proxy/src/metrics.rs`) |
+| `threat_intel_soar_blocks_total{mode}` | Prometheus (`threat-intel`, метки `shadow` / `enforce`) |
+| Debug-лог `threat-intel shadow match (request not blocked)` | proxy, target `bsdm_proxy` |
+
+```prometheus
+bsdm_proxy_ti_shadow_matches_total{feed="urlhaus"} 37
+threat_intel_soar_blocks_total{mode="shadow"} 4
+```
 
 ## Просмотр логов
 

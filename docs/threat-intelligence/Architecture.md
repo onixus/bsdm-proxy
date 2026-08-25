@@ -26,7 +26,7 @@ Risk Engine
     |
 Policy Engine
     |
-    +-- shadow (default): threat_shadow_match event + ti_shadow_matches_total{feed}
+    +-- shadow (default): threat_shadow_match field on the event + bsdm_proxy_ti_shadow_matches_total{feed}
     |
     +-- enforce (explicit opt-in, ADR 0008): DNS RPZ / ACL
     |

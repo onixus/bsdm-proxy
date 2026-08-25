@@ -46,6 +46,42 @@ DEPLOYMENT_PROFILE=development POLICY_MODE=full-mitm ALLOW_FULL_MITM=true \
 В production используйте `selective-mitm` и управляйте расшифровкой через
 `MITM_CATEGORIES`, либо `sni` для полного отключения TLS-терминирования.
 
+## MITM circuit breaker
+
+Автоматический перевод домена на blind `CONNECT` при росте доли ошибок TLS
+(`proxy/src/mitm_breaker.rs`, [ADR 0007](../adr/0007-mitm-circuit-breaker.md)).
+
+| Переменная | Default | Назначение |
+|---|---:|---|
+| `MITM_CIRCUIT_BREAKER_ENABLED` | `true` | Выключается только значениями `false` / `0` |
+| `MITM_CIRCUIT_BREAKER_FAILURE_RATE` | `0.05` | Доля ошибок для срабатывания; принимается только `0 < rate <= 1`, иначе default |
+| `MITM_CIRCUIT_BREAKER_MIN_SAMPLES` | `5` | Минимум попыток в окне до оценки доли ошибок (≥ 1) |
+| `MITM_CIRCUIT_BREAKER_WINDOW_SECS` | `60` | Длина скользящего окна, секунды (≥ 1) |
+| `MITM_CIRCUIT_BREAKER_COOLDOWN_SECS` | `0` | `0` — домен остаётся в bypass до ручного сброса; иначе авто-восстановление через N секунд |
+
+Некорректное значение любой переменной игнорируется и заменяется значением по
+умолчанию. Аудит срабатываний и сбросов пишется в `PINNING_AUDIT_LOG_PATH`.
+Статус и сброс: `GET /api/mitm/circuit-breaker`,
+`POST /api/mitm/circuit-breaker/reset` (Bearer). Процедура оператора —
+[certificate-pinning.md](../features/certificate-pinning.md#mitm-circuit-breaker-detection-and-operator-reset).
+
+## Threat intel shadow matching (proxy)
+
+Наблюдение за совпадениями трафика с IOC без блокировки (`proxy/src/ti_shadow.rs`,
+[ADR 0008](../adr/0008-threat-intel-shadow-mode.md)). Proxy читает **только**
+shadow-выгрузку коллектора и никогда не меняет allow/deny решение.
+
+| Переменная | Default | Назначение |
+|---|---:|---|
+| `TI_SHADOW_MATCH_ENABLED` | `true` | Выключается значениями `0`/`false`/`no`/`off` |
+| `TI_SHADOW_FEED_PATH` | `/var/lib/bsdm-proxy/threat-intel/threat_domains.json.shadow` | Файл shadow-выгрузки `threat-intel` |
+| `TI_SHADOW_RELOAD_SECS` | `300` | Интервал перечитывания файла; значения меньше `10` поднимаются до `10` |
+
+Совпадение помечает событие полем `threat_shadow_match` (имя фида) — колонка
+`threat_shadow_match` в ClickHouse — и увеличивает
+`bsdm_proxy_ti_shadow_matches_total{feed}`. Отсутствующий файл не является
+ошибкой: коллектор мог ещё не сформировать выгрузку.
+
 ## L1 cache
 
 | Переменная | Default | Назначение |
@@ -320,13 +356,22 @@ ML worker:
 | `TI_MAX_INDICATORS_PER_FETCH` | `500000` |
 | `TI_OUTPUT_DIR` | `./data/threat-intel` |
 | `TI_SQLITE_PATH` | `<TI_OUTPUT_DIR>/ioc.db` |
-| `TI_RPZ_ENABLED` | `true` (артефакт компилируется, но в shadow не публикуется) |
+| `TI_RPZ_ENABLED` | `true` (в shadow пишутся только `threats.rpz.shadow` / `threat_domains.json.shadow`) |
 | `TI_MIN_CONFIDENCE_SCORE` | `75` |
 | `TI_RUN_ONCE` | `false` |
 | `METRICS_PORT` | `8093` |
 
+В режиме `shadow` enforcement-артефакты под «боевыми» именами не создаются:
+коллектор пишет `threats.rpz.shadow` и `threat_domains.json.shadow`
+(`threat-intel/src/config.rs`, `threat-intel/src/collector.rs`), а сама зона
+несёт баннер `SHADOW MODE … Do NOT load this zone into dns-sinkhole`
+(`threat-intel/src/rpz.rs`). Метрика SOAR-действий по режимам —
+`threat_intel_soar_blocks_total{mode}`; в shadow `POST /api/v1/soar/block`
+отвечает `202` с `"mode":"shadow"` и `"enforced":false`.
+
 Полный пример: `packaging/config/threat-intel.env.example`. Подробнее:
-[Threat intel collector](../features/threat-intel-collector.md).
+[Threat intel collector](../features/threat-intel-collector.md) ·
+[ADR 0008](../adr/0008-threat-intel-shadow-mode.md).
 
 ## AmneziaWG (BSDM Connect)
 

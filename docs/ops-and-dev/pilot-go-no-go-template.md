@@ -93,7 +93,7 @@ pilot on blocking quality.
 |---|---|---|---|
 | Shadow observation window | ≥ 14 consecutive days | | |
 | Feed collection staleness (`threat_intel_last_success_timestamp_seconds`) | no gap beyond one poll interval | | |
-| `ti_shadow_matches_total{feed}` reviewed per feed | every feed reviewed | | |
+| `bsdm_proxy_ti_shadow_matches_total{feed}` reviewed per feed | every feed reviewed | | |
 | False-positive share per feed (SOC review of `threat_shadow_match`) | < 1% | | |
 | Shadow matches against business-critical allowlist | 0 | | |
 | Enforcement flag state | `TI_ENFORCEMENT_MODE` unset or `shadow` | | |

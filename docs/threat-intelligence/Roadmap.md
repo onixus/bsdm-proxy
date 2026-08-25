@@ -18,7 +18,7 @@
 
 - [x] RPZ generation (`threats.rpz`, `threat-intel/src/rpz.rs`)
 - [ ] DNS integration — **gated**: the generated zone is not published to `dns-sinkhole` by default (ADR 0008)
-- [ ] Policy validation — shadow observation (`threat_shadow_match`, `ti_shadow_matches_total{feed}`) is the validation input
+- [ ] Policy validation — shadow observation (`threat_shadow_match`, `bsdm_proxy_ti_shadow_matches_total{feed}`) is the validation input
 - [ ] Rollback — zone-serial rollback drill required before enforcement
 
 ## Phase 3 - Enterprise

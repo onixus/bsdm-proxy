@@ -14,7 +14,7 @@ The enforcement path, however, landed **before** this decision was written down,
 
 1. `TI_RPZ_ENABLED` defaults to `true` (`threat-intel/src/config.rs:74`). On every collection cycle the collector compiles `threats.rpz` and `threat_domains.json` from feed content (`threat-intel/src/collector.rs:242-262`, `threat-intel/src/rpz.rs`).
 2. `POST /api/v1/soar/block` inserts an indicator straight into the same IOC store with `soar_blocked` tags and returns `200` (`threat-intel/src/main.rs:218-240`, `threat-intel/src/soar.rs:49-92`), so a SOAR action reaches the same generated artifacts on the next cycle.
-3. The word *shadow* does not exist anywhere in the codebase. There is no `threat_shadow_match` event, no per-feed match metric, and therefore **no data on which to judge the false-positive rate of these feeds** in our own traffic.
+3. At the time of this decision the word *shadow* did not exist anywhere in the codebase: no shadow annotation on events, no per-feed match metric, and therefore **no data on which to judge the false-positive rate of these feeds** in our own traffic.
 4. Only the last mile is manual: the compose stack points `dns-sinkhole` at the control-plane compiled zone (`DNS_SINKHOLE_ZONE_PATH=/var/lib/bsdm-proxy/rpz/compiled.rpz`, `docker-compose.yml:128,431`), while the collector writes `threats.rpz` into its own volume, and the proxy does not read `threat_domains.json` at all today. A single operator step — publishing the generated zone into the sinkhole path — turns unmoderated feed content into hard DNS blocking for the whole pilot.
 
 Public phishing feeds carry URL-level indicators, shared hosters, URL shorteners and CDN hostnames. Promoting them to a domain-level block list without measuring hit quality first risks blocking legitimate business traffic during the pilot, which is precisely the failure mode the pilot cannot absorb.
@@ -27,12 +27,12 @@ Public phishing feeds carry URL-level indicators, shared hosters, URL shorteners
    - `TI_RPZ_ENABLED=true` **without** an explicit `TI_ENFORCEMENT_MODE=enforce` yields shadow behaviour plus a warning in the log. Enforcement requires one explicit, auditable variable — never a combination of legacy flags.
 
 2. **Shadow matches are observed, never acted on.**
-   - When traffic matches an IOC while in shadow mode, the proxy emits a `threat_shadow_match` event through the normal Kafka → `cache-indexer` → ClickHouse pipeline, modelled on the existing `decision_source` field.
+   - When traffic matches an IOC while in shadow mode, the proxy annotates the outgoing event with a `threat_shadow_match` field carrying the reporting feed name, and it travels the normal Kafka → `cache-indexer` → ClickHouse pipeline alongside `decision_source`.
    - The allow/deny path is unchanged: the request is neither blocked nor delayed by the match. A shadow match is telemetry, not a policy decision.
 
 3. **Per-feed observability.**
-   - Prometheus counter `ti_shadow_matches_total{feed}` counts shadow matches per feed, so feed quality can be compared feed by feed rather than in aggregate.
-   - The SOC reviews candidates through the Search API over `threat_shadow_match` events; no separate review UI is required for the pilot.
+   - Prometheus counter `bsdm_proxy_ti_shadow_matches_total{feed}` counts shadow matches per feed, so feed quality can be compared feed by feed rather than in aggregate.
+   - The SOC reviews candidates through the Search API over events carrying `threat_shadow_match`; no separate review UI is required for the pilot.
 
 4. **SOAR containment is mode-aware.**
    - In shadow mode `POST /api/v1/soar/block` returns `202 Accepted` with a `shadow` marker instead of `200`, and records the indicator only in the shadow export. The response must make it unambiguous to the calling playbook that nothing is being blocked.
@@ -59,7 +59,7 @@ Enforcement is enabled per feed set and per installation. Passing these criteria
 1. `TI_ENFORCEMENT_MODE` is unset or `shadow` in the environment of the `threat-intel` service.
 2. The path referenced by `DNS_SINKHOLE_ZONE_PATH` is **not** a collector-generated `threats.rpz`, and no automation copies it there.
 3. The proxy ACL configuration does not reference `TI_ACL_EXPORT_PATH` / `threat_domains.json`.
-4. `ti_shadow_matches_total` is present in `/metrics` on the proxy and grows with traffic; `threat_shadow_match` events are searchable in ClickHouse.
+4. `bsdm_proxy_ti_shadow_matches_total` is present in `/metrics` on the proxy and grows with traffic; events carrying `threat_shadow_match` are searchable in ClickHouse.
 
 **Enabling enforcement (only after the transition criteria are met):**
 
@@ -73,6 +73,18 @@ Enforcement is enabled per feed set and per installation. Passing these criteria
 1. Set `TI_ENFORCEMENT_MODE=shadow` (or unset it) and restart `threat-intel`.
 2. Restore the previous DNS zone serial ([RPZ_Deployment.md](../threat-intelligence/RPZ_Deployment.md)); the sinkhole falls back to the compiled zone it had before.
 3. If the incident touched stored indicators, restore from the backup/restore runbook ([backup-restore.md](../ops-and-dev/backup-restore.md)).
+
+## Implementation status
+
+Implemented on this branch; the mode contract above is what the code does:
+
+- `TI_ENFORCEMENT_MODE` parsing, the fail-safe fallback for any unrecognised value and the warning for `TI_RPZ_ENABLED=true` without `enforce`: `threat-intel/src/config.rs`.
+- Artifacts under the enforcement names are written **only** in `enforce`; in shadow the collector writes `threats.rpz.shadow` and `threat_domains.json.shadow`, and the zone body carries a `SHADOW MODE … Do NOT load this zone into dns-sinkhole` banner: `threat-intel/src/collector.rs`, `threat-intel/src/rpz.rs`.
+- SOAR block answers `202` with `"mode":"shadow"`, `"enforced":false` and is counted by `threat_intel_soar_blocks_total{mode}`: `threat-intel/src/soar.rs`, `threat-intel/src/main.rs`, `threat-intel/src/metrics.rs`.
+- The proxy-side matcher reads only the shadow export (`TI_SHADOW_MATCH_ENABLED`, `TI_SHADOW_FEED_PATH`, `TI_SHADOW_RELOAD_SECS`), annotates `threat_shadow_match` and counts `bsdm_proxy_ti_shadow_matches_total{feed}` without touching the allow/deny path: `proxy/src/ti_shadow.rs`, `proxy/src/metrics.rs`.
+- The event field and its ClickHouse column: `bsdm-events/src/lib.rs`, `bsdm-events/src/clickhouse.rs`, `cache-indexer/src/clickhouse.rs`.
+
+Operator-facing variables and metrics: [configuration.md](../ops-and-dev/configuration.md#threat-intel-shadow-matching-proxy) · [logging.md](../ops-and-dev/logging.md).
 
 ## Consequences
 

@@ -32,7 +32,7 @@ User Request Filtering
 ### Proxy Layer
 
 In `shadow` (default) the proxy uses IOC data for observation only: a match emits
-a `threat_shadow_match` event and increments `ti_shadow_matches_total{feed}`, and
+the `threat_shadow_match` field on the event and increments `bsdm_proxy_ti_shadow_matches_total{feed}`, and
 the allow/deny path is unchanged.
 
 In `enforce` (explicit opt-in, [ADR 0008](../adr/0008-threat-intel-shadow-mode.md))

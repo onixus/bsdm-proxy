@@ -139,7 +139,7 @@ a cron job or a CI smoke check.
 | `threat_intel_fetch_duration_seconds` | `source` | Cycle duration histogram |
 | `threat_intel_sink_errors_total` | `source` | Snapshot write failures |
 | `threat_intel_soar_blocks_total` | `mode` | SOAR block actions by enforcement mode (`shadow`, `enforce`) |
-| `ti_shadow_matches_total` | `feed` | **Proxy-side, per [ADR 0008](../adr/0008-threat-intel-shadow-mode.md)**: traffic matches against an IOC while in shadow mode, emitted together with the `threat_shadow_match` event; the request is **not** blocked. This is the false-positive review input for the go/no-go record |
+| `bsdm_proxy_ti_shadow_matches_total` | `feed` | **Proxy-side, per [ADR 0008](../adr/0008-threat-intel-shadow-mode.md)**: traffic matches against an IOC while in shadow mode, counted together with the `threat_shadow_match` annotation on the event; the request is **not** blocked. This is the false-positive review input for the go/no-go record |
 
 ## Shadow Mode review flow
 
@@ -147,8 +147,8 @@ a cron job or a CI smoke check.
    artifacts on disk carry the `.shadow` suffix.
 2. Let the collector run for at least the observation window in
    [ADR 0008](../adr/0008-threat-intel-shadow-mode.md) (≥ 14 days).
-3. Review `threat_shadow_match` events per feed through the Search API and
-   compare volumes with `ti_shadow_matches_total{feed}`.
+3. Review the events carrying `threat_shadow_match` per feed through the Search API and
+   compare volumes with `bsdm_proxy_ti_shadow_matches_total{feed}`.
 4. Record the per-feed false-positive share in the
    [go/no-go record](../ops-and-dev/pilot-go-no-go-template.md). Feeds above the
    threshold are dropped from `TI_SOURCES` rather than enforced with exceptions.

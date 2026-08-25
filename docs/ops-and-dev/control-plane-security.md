@@ -34,6 +34,11 @@ See also: [control-plane.md](../features/control-plane.md) ·
 | `GET /api/stats` | Cache hit ratios | Open (local monitoring) |
 | `GET /api/mitm/circuit-breaker` | Visibility of tripped domains | **Bearer required** |
 
+Операторская процедура сброса брейкера (как понять, что он сработал, что
+проверить до сброса, тело запроса и аудит) —
+[certificate-pinning.md](../features/certificate-pinning.md#mitm-circuit-breaker-detection-and-operator-reset).
+Настройки порогов — [configuration.md](configuration.md#mitm-circuit-breaker).
+
 ---
 
 ## Environment variables
