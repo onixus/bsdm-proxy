@@ -22,6 +22,7 @@ native install находятся в `packaging/config/*.env.example`; Compose �
 | `MITM_ENABLED` | `true` | HTTPS MITM; требует `ca.key` и `ca.crt` при POLICY_MODE != sni |
 | `TLS_OCSP_STAPLING` | `true` | OCSP staple (RFC 6960 DER, CA-signed **good**) on MITM/control TLS leaves |
 | `TLS_OCSP_STAPLE_REFRESH_SECS` | `900` | TTL refresh cached `ServerConfig` + staple (60–86400) |
+| `MITM_CERT_CACHE_MAX_ENTRIES` | `10000` | Лимит записей в кэшах MITM-сертификатов и `ServerConfig` (ключ — SNI); значения ниже `128` поднимаются до `128`. При заполнении вытесняются самые старые записи |
 | `AGENT_DEVICES_PATH` | unset | Local durable agent device JSON |
 | `AGENT_CRL_PATH` | unset | Local durable agent CRL JSON |
 | `AGENT_DEVICES_REDIS_URL` | unset | Multi-node Redis URL for devices+CRL (preferred) |
@@ -58,9 +59,18 @@ DEPLOYMENT_PROFILE=development POLICY_MODE=full-mitm ALLOW_FULL_MITM=true \
 | `MITM_CIRCUIT_BREAKER_MIN_SAMPLES` | `5` | Минимум попыток в окне до оценки доли ошибок (≥ 1) |
 | `MITM_CIRCUIT_BREAKER_WINDOW_SECS` | `60` | Длина скользящего окна, секунды (≥ 1) |
 | `MITM_CIRCUIT_BREAKER_COOLDOWN_SECS` | `0` | `0` — домен остаётся в bypass до ручного сброса; иначе авто-восстановление через N секунд |
+| `MITM_CIRCUIT_BREAKER_MAX_DOMAINS` | `10000` | Максимум отслеживаемых доменов в памяти; значения ниже `128` поднимаются до `128` |
 
 Некорректное значение любой переменной игнорируется и заменяется значением по
-умолчанию. Аудит срабатываний и сбросов пишется в `PINNING_AUDIT_LOG_PATH`.
+умолчанию.
+
+Счётчики хранятся по домену, поэтому их число ограничено
+`MITM_CIRCUIT_BREAKER_MAX_DOMAINS`. При заполнении вытесняются наименее
+недавно использованные счётчики — сначала те, у которых не осталось попыток
+внутри окна. Домены в состоянии tripped не вытесняются никогда: активный bypass
+и его аудит сохраняются. Текущее заполнение видно в
+`GET /api/mitm/circuit-breaker` (`tracked_domains`, `tracked_wildcards`,
+`evicted_domains_total`, `max_domains`). Аудит срабатываний и сбросов пишется в `PINNING_AUDIT_LOG_PATH`.
 Статус и сброс: `GET /api/mitm/circuit-breaker`,
 `POST /api/mitm/circuit-breaker/reset` (Bearer). Процедура оператора —
 [certificate-pinning.md](../features/certificate-pinning.md#mitm-circuit-breaker-detection-and-operator-reset).

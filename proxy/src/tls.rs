@@ -24,7 +24,18 @@ use tracing::{debug, warn};
 use crate::agent_ocsp;
 
 pub type CertPair = (Bytes, Bytes);
-type CertMap = Arc<RwLock<HashMap<Arc<str>, CertPair>>>;
+
+/// Upper bound on entries in each MITM cache. Both maps are keyed by SNI, so an
+/// unbounded map grows with every unique hostname a client asks for.
+const DEFAULT_CERT_CACHE_MAX_ENTRIES: usize = 10_000;
+const MIN_CERT_CACHE_MAX_ENTRIES: usize = 128;
+
+struct CachedCert {
+    pair: CertPair,
+    created: Instant,
+}
+
+type CertMap = Arc<RwLock<HashMap<Arc<str>, CachedCert>>>;
 
 struct CachedServerConfig {
     config: Arc<ServerConfig>,
@@ -33,6 +44,40 @@ struct CachedServerConfig {
 }
 
 type ServerConfigMap = Arc<RwLock<HashMap<Arc<str>, CachedServerConfig>>>;
+
+fn cert_cache_max_entries() -> usize {
+    std::env::var("MITM_CERT_CACHE_MAX_ENTRIES")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .map(|n| n.max(MIN_CERT_CACHE_MAX_ENTRIES))
+        .unwrap_or(DEFAULT_CERT_CACHE_MAX_ENTRIES)
+}
+
+/// Evict the oldest entries when a cache is at capacity.
+///
+/// A single sweep frees 10% of the cap, so the sort cost is amortised over the
+/// following `max / 10` inserts instead of being paid on every cache miss.
+fn evict_oldest<V>(cache: &mut HashMap<Arc<str>, V>, max: usize, stamp: impl Fn(&V) -> Instant) {
+    if cache.len() < max {
+        return;
+    }
+    let target = max - (max / 10).max(1);
+    let mut entries: Vec<(Instant, Arc<str>)> = cache
+        .iter()
+        .map(|(key, value)| (stamp(value), key.clone()))
+        .collect();
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    for (_, key) in entries {
+        if cache.len() <= target {
+            break;
+        }
+        cache.remove(&key);
+    }
+    warn!(
+        entries = cache.len(),
+        max, "MITM certificate cache at capacity; evicted oldest entries"
+    );
+}
 
 #[derive(Clone)]
 pub struct CertCache {
@@ -174,6 +219,9 @@ impl CertCache {
         )?);
 
         let mut cache = self.server_configs.write().await;
+        evict_oldest(&mut cache, cert_cache_max_entries(), |entry| {
+            entry.stapled_at
+        });
         cache.insert(
             domain_arc,
             CachedServerConfig {
@@ -194,7 +242,7 @@ impl CertCache {
             let cache = self.certs.read().await;
             if let Some(cert) = cache.get(&domain_arc) {
                 debug!("Certificate cache HIT for {}", domain);
-                return Ok(cert.clone());
+                return Ok(cert.pair.clone());
             }
         }
 
@@ -218,7 +266,14 @@ impl CertCache {
 
         let cert_pair = (cert_pem, key_pem);
         let mut cache = self.certs.write().await;
-        cache.insert(domain_arc, cert_pair.clone());
+        evict_oldest(&mut cache, cert_cache_max_entries(), |entry| entry.created);
+        cache.insert(
+            domain_arc,
+            CachedCert {
+                pair: cert_pair.clone(),
+                created: Instant::now(),
+            },
+        );
         Ok(cert_pair)
     }
 
@@ -514,6 +569,53 @@ pub fn rewrite_mitm_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn evict_oldest_frees_capacity_and_drops_oldest_first() {
+        let mut cache: HashMap<Arc<str>, Instant> = HashMap::new();
+        let base = Instant::now();
+        let max = MIN_CERT_CACHE_MAX_ENTRIES;
+        for n in 0..max {
+            let key: Arc<str> = format!("host{n:04}.example.com").into();
+            cache.insert(key, base + std::time::Duration::from_millis(n as u64));
+        }
+
+        evict_oldest(&mut cache, max, |stamp| *stamp);
+
+        assert!(cache.len() < max, "eviction must free capacity");
+        assert!(
+            !cache.contains_key("host0000.example.com"),
+            "oldest entry must be evicted first"
+        );
+        let newest: Arc<str> = format!("host{:04}.example.com", max - 1).into();
+        assert!(cache.contains_key(&newest), "newest entry must be kept");
+    }
+
+    #[tokio::test]
+    async fn cert_cache_stays_bounded_across_unique_sni() {
+        let key_pair = KeyPair::generate().unwrap();
+        let cache = CertCache::from_pem(key_pair.serialize_pem().as_bytes(), b"").unwrap();
+
+        // Far more unique hostnames than the floor cap, as a client looping
+        // CONNECT on random SNI would produce.
+        std::env::set_var(
+            "MITM_CERT_CACHE_MAX_ENTRIES",
+            MIN_CERT_CACHE_MAX_ENTRIES.to_string(),
+        );
+        for n in 0..(MIN_CERT_CACHE_MAX_ENTRIES + 32) {
+            cache
+                .get_or_generate(&format!("host{n}.attacker.tld"))
+                .await
+                .unwrap();
+        }
+        std::env::remove_var("MITM_CERT_CACHE_MAX_ENTRIES");
+
+        let entries = cache.certs.read().await.len();
+        assert!(
+            entries <= MIN_CERT_CACHE_MAX_ENTRIES,
+            "certificate cache grew past the cap: {entries}"
+        );
+    }
 
     #[tokio::test]
     async fn load_for_startup_without_ca_when_mitm_disabled() {

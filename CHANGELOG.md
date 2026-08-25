@@ -26,6 +26,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **ML Domain Reputation & Typosquatting Engine** (`threat_intel::ml_reputation`): visual homoglyph / Unicode confusable normalization, Damerau-Levenshtein distance against protected brand dictionaries, brand keyword stacking and subdomain deception detection (`/api/v1/ml/reputation`).
   - **Pipeline & SOAR/ML Test Suites**: end-to-end integration tests (`threat-intel/tests/pipeline_test.rs`, `threat-intel/tests/soar_ml_test.rs`).
 
+### Fixed
+
+- **MITM circuit breaker: bounded state and O(1) lookup** (#340) — the per-domain
+  tracker map is now capped by `MITM_CIRCUIT_BREAKER_MAX_DOMAINS` (default 10000)
+  with least-recently-used eviction of closed trackers, so a client looping
+  `CONNECT <random>.tld:443` can no longer grow proxy memory without limit.
+  Tripped domains are never evicted, keeping an active bypass and its audit trail
+  intact. `is_tripped()` now answers exact domains with a single hash lookup and
+  scans only a bounded wildcard index instead of walking the whole map on every
+  MITM `CONNECT`. `GET /api/mitm/circuit-breaker` reports `tracked_domains`,
+  `tracked_wildcards`, `evicted_domains_total` and `max_domains`.
+- **Bounded MITM certificate caches** (#340) — the per-SNI certificate and
+  `ServerConfig` caches are capped by `MITM_CERT_CACHE_MAX_ENTRIES`
+  (default 10000, oldest entries evicted first); previously both grew with every
+  unique hostname seen.
+
+### Security
+
+- **Destination security policy is enforced on MITM `CONNECT`** (#340) — the
+  MITM branch now runs the same `check_destination_security` check as the blind
+  tunnel branch, so an SSRF-rejected destination no longer reaches certificate
+  generation or the circuit-breaker tracker. Blocks are counted in
+  `ssrf_blocked_total`.
+
 ## [0.9.13] - 2026-08-21
 
 Patch after **0.9.12**: Threat intelligence feed collector framework (`threat-intel`), proxy hot-path zero-allocation and lock-free optimizations, ACL category policies and domain fallbacks, redesigned interactive installer, and security/dependency updates.
