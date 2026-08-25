@@ -21,6 +21,13 @@ pub struct Config {
     /// Hard cap on indicators kept from a single fetch.
     pub max_indicators_per_fetch: usize,
     pub output_dir: PathBuf,
+    pub sqlite_path: PathBuf,
+    pub storage_enabled: bool,
+    pub ioc_ttl_secs: i64,
+    pub min_confidence_score: u8,
+    pub rpz_enabled: bool,
+    pub rpz_output_path: PathBuf,
+    pub acl_export_path: PathBuf,
     pub user_agent: String,
     pub metrics_port: u16,
     /// Collect every source once and exit (CI smoke, cron-style runs).
@@ -35,6 +42,21 @@ impl Config {
 
         let max_attempts = env_u64("TI_MAX_ATTEMPTS", 3).max(1) as u32;
         let poll_interval = Duration::from_secs(env_u64("TI_POLL_INTERVAL_SECS", 900).max(60));
+        let output_dir = PathBuf::from(
+            std::env::var("TI_OUTPUT_DIR").unwrap_or_else(|_| "./data/threat-intel".into()),
+        );
+
+        let sqlite_path = std::env::var("TI_SQLITE_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| output_dir.join("ioc.db"));
+
+        let rpz_output_path = std::env::var("TI_RPZ_OUTPUT_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| output_dir.join("threats.rpz"));
+
+        let acl_export_path = std::env::var("TI_ACL_EXPORT_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| output_dir.join("threat_domains.json"));
 
         Ok(Self {
             sources,
@@ -44,9 +66,14 @@ impl Config {
             retry_backoff: Duration::from_secs(env_u64("TI_RETRY_BACKOFF_SECS", 5).max(1)),
             max_body_bytes: env_u64("TI_MAX_BODY_MB", 64).max(1) as usize * 1024 * 1024,
             max_indicators_per_fetch: env_u64("TI_MAX_INDICATORS_PER_FETCH", 500_000) as usize,
-            output_dir: PathBuf::from(
-                std::env::var("TI_OUTPUT_DIR").unwrap_or_else(|_| "./data/threat-intel".into()),
-            ),
+            output_dir,
+            sqlite_path,
+            storage_enabled: env_bool("TI_STORAGE_ENABLED", true),
+            ioc_ttl_secs: env_u64("TI_IOC_TTL_SECS", 7 * 86400) as i64,
+            min_confidence_score: env_u64("TI_MIN_CONFIDENCE_SCORE", 75).clamp(1, 100) as u8,
+            rpz_enabled: env_bool("TI_RPZ_ENABLED", true),
+            rpz_output_path,
+            acl_export_path,
             user_agent: std::env::var("TI_USER_AGENT")
                 .unwrap_or_else(|_| format!("bsdm-threat-intel/{}", env!("CARGO_PKG_VERSION"))),
             metrics_port: env_u64("METRICS_PORT", 8093) as u16,
@@ -116,6 +143,13 @@ mod tests {
             max_body_bytes: 1024,
             max_indicators_per_fetch: 10,
             output_dir: PathBuf::from("/tmp"),
+            sqlite_path: PathBuf::from("/tmp/ioc.db"),
+            storage_enabled: true,
+            ioc_ttl_secs: 3600,
+            min_confidence_score: 75,
+            rpz_enabled: true,
+            rpz_output_path: PathBuf::from("/tmp/threats.rpz"),
+            acl_export_path: PathBuf::from("/tmp/threat_domains.json"),
             user_agent: "test".into(),
             metrics_port: 8093,
             run_once: true,

@@ -17,6 +17,8 @@ Thumbs.db
 *.pem
 *.key
 *.crt
+certs/
+proxy/certs/
 secrets/
 .env
 

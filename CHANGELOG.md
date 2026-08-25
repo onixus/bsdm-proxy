@@ -15,6 +15,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Hardened Agent Web & Mobile UI Server** — embedded localhost server on `:8765` serving adaptive Web/Mobile UI, `/proxy.pac`, live tunnel telemetry, and REST APIs, secured with CSRF / DNS-rebinding defense (`X-BSDM-Request: 1`), Slowloris bounds, and strict Content-Security-Policy (`X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`).
 - **Cross-Platform Scaffolding** — macOS `.app` bundle generator (`packaging/agent/macos/create-macos-app.sh`) and Android VPN Service scaffolding (`packaging/agent/android/`).
 - **Comprehensive E2E Test Suite** — `e2e/tests/amneziawg_and_agent_e2e.rs` verifying end-to-end AWG server config, key generation, agent enrollment, tunnel config export (`.conf`/`json`), token revocation, and dynamic PAC routing with CSRF rejection.
+- **Threat Intelligence Pipeline (Phase D / TASK-TI-002..040)**:
+  - **IOC Normalization** (`threat_intel::normalizer`): canonical URL formatting, FQDN extraction, Punycode/IDNA support, and bogon/private IP filtering.
+  - **Confidence Scoring Engine** (`threat_intel::scorer`): weighted algorithm with multi-feed correlation bonus ($+20/+35$), tag multipliers, and time-decay freshness modeling.
+  - **Durable SQLite Storage** (`threat_intel::storage`): thread-safe SQLite backend with schema migrations, indexes on normalized values/domains/expiration, hit-count tracking, and TTL-based background purge.
+  - **Automated DNS RPZ Zone Compilation** (`threat_intel::rpz`): BIND/RPZ-compliant zone generation (`threats.rpz`) with atomic filesystem rotation for hot-reload by `dns-sinkhole`.
+  - **Proxy ACL Threat Feed Export**: structured JSON threat feed lists (`threat_domains.json`) for data-plane proxy filtering policies.
+  - **Enterprise SIEM Integration** (`threat_intel::siem`): export and formatting of threat detections in CEF (ArcSight/QRadar/Splunk), ECS JSON (Elastic), and Syslog RFC 5424 formats.
+  - **SOAR Automated Response Engine** (`threat_intel::soar`): automated containment API (`/api/v1/soar/block`, `/api/v1/soar/unblock`, `/api/v1/soar/investigate`) with real-time exception tracking and lineage lookup.
+  - **ML Domain Reputation & Typosquatting Engine** (`threat_intel::ml_reputation`): visual homoglyph / Unicode confusable normalization, Damerau-Levenshtein distance against protected brand dictionaries, brand keyword stacking and subdomain deception detection (`/api/v1/ml/reputation`).
+  - **Pipeline & SOAR/ML Test Suites**: end-to-end integration tests (`threat-intel/tests/pipeline_test.rs`, `threat-intel/tests/soar_ml_test.rs`).
 
 ## [0.9.13] - 2026-08-21
 

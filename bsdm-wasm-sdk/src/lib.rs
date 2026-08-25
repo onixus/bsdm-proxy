@@ -6,6 +6,7 @@
 // Raw Host ABI
 // -----------------------------------------------------------------------------
 
+#[cfg(target_arch = "wasm32")]
 #[link(wasm_import_module = "bsdm")]
 unsafe extern "C" {
     fn url_contains(ptr: *const u8, len: usize) -> i32;
@@ -17,6 +18,46 @@ unsafe extern "C" {
     fn get_username(optr: *mut u8, omaxlen: usize) -> i32;
     fn set_response_header(nptr: *const u8, nlen: usize, vptr: *const u8, vlen: usize);
     fn get_response_status() -> i32;
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_variables)]
+unsafe fn url_contains(ptr: *const u8, len: usize) -> i32 {
+    0
+}
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_variables)]
+unsafe fn method_eq(ptr: *const u8, len: usize) -> i32 {
+    0
+}
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_variables)]
+unsafe fn set_request_header(nptr: *const u8, nlen: usize, vptr: *const u8, vlen: usize) {}
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_variables)]
+unsafe fn deny(ptr: *const u8, len: usize) {}
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_variables)]
+unsafe fn get_request_header(nptr: *const u8, nlen: usize, optr: *mut u8, omaxlen: usize) -> i32 {
+    -1
+}
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_variables)]
+unsafe fn get_client_ip(optr: *mut u8, omaxlen: usize) -> i32 {
+    -1
+}
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_variables)]
+unsafe fn get_username(optr: *mut u8, omaxlen: usize) -> i32 {
+    -1
+}
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_variables)]
+unsafe fn set_response_header(nptr: *const u8, nlen: usize, vptr: *const u8, vlen: usize) {}
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_variables)]
+unsafe fn get_response_status() -> i32 {
+    200
 }
 
 // -----------------------------------------------------------------------------

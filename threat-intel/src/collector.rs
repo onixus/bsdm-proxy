@@ -16,6 +16,7 @@ pub struct Collector {
     config: Config,
     http: FeedHttpClient,
     sink: Arc<dyn IndicatorSink>,
+    storage: Option<crate::storage::SqliteStorage>,
     metrics: Arc<CollectorMetrics>,
     report: Mutex<CollectionReport>,
 }
@@ -25,12 +26,14 @@ impl Collector {
         config: Config,
         http: FeedHttpClient,
         sink: Arc<dyn IndicatorSink>,
+        storage: Option<crate::storage::SqliteStorage>,
         metrics: Arc<CollectorMetrics>,
     ) -> Self {
         Self {
             config,
             http,
             sink,
+            storage,
             metrics,
             report: Mutex::new(CollectionReport::default()),
         }
@@ -38,6 +41,11 @@ impl Collector {
 
     pub fn config(&self) -> &Config {
         &self.config
+    }
+
+    #[allow(dead_code)]
+    pub fn storage(&self) -> Option<&crate::storage::SqliteStorage> {
+        self.storage.as_ref()
     }
 
     /// Fetch, parse and persist one source. A failing source never aborts the
@@ -190,6 +198,76 @@ impl Collector {
             Err(poisoned) => poisoned.into_inner().clone(),
         }
     }
+
+    /// Performs post-collection storage maintenance: purging expired entries,
+    /// updating Prometheus gauges, and compiling the DNS RPZ zone / ACL lists.
+    pub fn sync_storage_and_exports(&self) {
+        let Some(storage) = &self.storage else {
+            return;
+        };
+
+        let now_ts = Utc::now().timestamp();
+        if let Ok(purged) = storage.purge_expired(now_ts) {
+            if purged > 0 {
+                self.metrics.purged_expired.inc_by(purged as u64);
+                info!(purged, "purged expired threat indicators from storage");
+            }
+        }
+
+        if let Ok(active_urls) =
+            storage.list_active(0, Some(crate::indicator::IndicatorKind::Url), 1_000_000)
+        {
+            self.metrics
+                .stored_indicators
+                .with_label_values(&["url"])
+                .set(active_urls.len() as i64);
+        }
+        if let Ok(active_domains) =
+            storage.list_active(0, Some(crate::indicator::IndicatorKind::Domain), 1_000_000)
+        {
+            self.metrics
+                .stored_indicators
+                .with_label_values(&["domain"])
+                .set(active_domains.len() as i64);
+        }
+        if let Ok(active_ips) =
+            storage.list_active(0, Some(crate::indicator::IndicatorKind::Ip), 1_000_000)
+        {
+            self.metrics
+                .stored_indicators
+                .with_label_values(&["ip"])
+                .set(active_ips.len() as i64);
+        }
+
+        if self.config.rpz_enabled {
+            match storage.list_active_domains(self.config.min_confidence_score, 100_000) {
+                Ok(domains) => {
+                    let domain_count = domains.len();
+                    if let Err(e) = crate::rpz::write_rpz_file(
+                        &self.config.rpz_output_path,
+                        &domains,
+                        &crate::rpz::RpzConfig::default(),
+                    ) {
+                        warn!("failed to compile DNS RPZ zone file: {e}");
+                    } else {
+                        self.metrics.rpz_records.set(domain_count as i64);
+                        info!(
+                            domains = domain_count,
+                            path = %self.config.rpz_output_path.display(),
+                            "generated DNS RPZ zone file"
+                        );
+                    }
+
+                    if let Err(e) =
+                        crate::rpz::export_proxy_acl_feed(&self.config.acl_export_path, domains)
+                    {
+                        warn!("failed to export Proxy ACL threat feed: {e}");
+                    }
+                }
+                Err(e) => warn!("failed to query active domains for RPZ: {e}"),
+            }
+        }
+    }
 }
 
 /// Collect every source once, sequentially, so a one-shot run has a
@@ -204,6 +282,8 @@ pub async fn run_once(
             failed.push(source.name());
         }
     }
+
+    collector.sync_storage_and_exports();
 
     let report = collector.report();
     let total: usize = report.sources.iter().map(|s| s.indicators).sum();
@@ -238,6 +318,7 @@ pub fn spawn_scheduled(
                 loop {
                     ticker.tick().await;
                     let _ = collector.collect(source.as_ref()).await;
+                    collector.sync_storage_and_exports();
                 }
             })
         })
@@ -289,6 +370,13 @@ mod tests {
             max_body_bytes: 1024 * 1024,
             max_indicators_per_fetch: cap,
             output_dir: PathBuf::from(dir),
+            sqlite_path: PathBuf::from(dir).join("ioc.db"),
+            storage_enabled: true,
+            ioc_ttl_secs: 3600,
+            min_confidence_score: 75,
+            rpz_enabled: true,
+            rpz_output_path: PathBuf::from(dir).join("threats.rpz"),
+            acl_export_path: PathBuf::from(dir).join("threat_domains.json"),
             user_agent: "test".into(),
             metrics_port: 0,
             run_once: true,
@@ -296,11 +384,18 @@ mod tests {
     }
 
     fn collector(dir: &std::path::Path, cap: usize) -> Collector {
-        let sink = Arc::new(JsonlFileSink::new(dir).unwrap());
+        let storage = crate::storage::SqliteStorage::new(dir.join("ioc.db")).unwrap();
+        let file_sink = Box::new(JsonlFileSink::new(dir).unwrap());
+        let sqlite_sink = Box::new(crate::sink::SqliteSink::new(storage.clone(), 3600));
+        let sink = Arc::new(crate::sink::CompositeSink::new(vec![
+            file_sink,
+            sqlite_sink,
+        ]));
         Collector::new(
             test_config(dir, cap),
             FeedHttpClient::new(Duration::from_secs(5), 1024 * 1024, "test").unwrap(),
             sink,
+            Some(storage),
             CollectorMetrics::new().unwrap(),
         )
     }

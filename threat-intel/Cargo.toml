@@ -9,6 +9,10 @@ repository = "https://github.com/onixus/bsdm-proxy"
 keywords = ["threat-intelligence", "ioc", "phishing", "security"]
 categories = ["network-programming"]
 
+[lib]
+name = "threat_intel"
+path = "src/lib.rs"
+
 [[bin]]
 name = "threat-intel"
 path = "src/main.rs"
@@ -23,6 +27,8 @@ tracing-subscriber = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 prometheus = "0.14"
 thiserror = "2"
+rusqlite = { version = "0.32", features = ["bundled"] }
+url = "2.5"
 
 [dev-dependencies]
 tokio = { workspace = true }
