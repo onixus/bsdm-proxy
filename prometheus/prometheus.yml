@@ -36,6 +36,16 @@ scrape_configs:
           service: 'alert-worker'
           component: 'bsdm-alerts'
 
+  # Present when compose profile `threat-intel` is enabled (scrapes fail quietly
+  # otherwise). Carries the Shadow Mode signals: threat_intel_soar_blocks_total
+  # {mode} and feed freshness.
+  - job_name: 'threat-intel'
+    static_configs:
+      - targets: ['threat-intel:8093']
+        labels:
+          service: 'threat-intel'
+          component: 'bsdm-threat-intel'
+
   - job_name: 'prometheus'
     static_configs:
       - targets: ['localhost:9090']

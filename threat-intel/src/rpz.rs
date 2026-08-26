@@ -36,6 +36,12 @@ impl Default for RpzConfig {
     }
 }
 
+/// Owner name of the record that marks a zone as an observe-only artifact.
+///
+/// `dns-sinkhole` treats a zone carrying it as unloadable — see
+/// `dns-sinkhole/src/zone.rs`.
+pub const SHADOW_MARKER_NAME: &str = "_bsdm-enforcement-mode";
+
 /// Generates a valid BIND / RPZ zone file content from a list of domain names.
 pub fn generate_rpz_zone(domains: &[String], config: &RpzConfig) -> String {
     let now = Utc::now();
@@ -51,10 +57,15 @@ pub fn generate_rpz_zone(domains: &[String], config: &RpzConfig) -> String {
     ));
     out.push_str(&format!("@ IN NS {}\n\n", config.primary_ns));
     if config.shadow_mode {
+        // The comment is for humans; a zone parser drops it. The TXT record below
+        // is the machine-readable half — `dns-sinkhole` refuses to load a zone
+        // carrying it, so the shadow artifact cannot become enforcement by way of
+        // someone repointing DNS_SINKHOLE_ZONE_PATH (ADR 0008).
         out.push_str(
             "; SHADOW MODE (TI_ENFORCEMENT_MODE=shadow): observe-only artifact.\n\
              ; Do NOT load this zone into dns-sinkhole; it blocks nothing by design.\n",
         );
+        out.push_str(&format!("{SHADOW_MARKER_NAME} IN TXT \"shadow\"\n"));
     }
     out.push_str("; Active Threat Intelligence RPZ Rules\n");
 
@@ -145,6 +156,26 @@ pub fn export_proxy_acl_feed(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_shadow_zone_carries_the_machine_readable_marker() {
+        let domains = vec!["phish.test".to_string()];
+        let shadow = generate_rpz_zone(&domains, &RpzConfig::default());
+        assert!(
+            shadow.contains(&format!("{SHADOW_MARKER_NAME} IN TXT \"shadow\"")),
+            "dns-sinkhole refuses a zone by this record; without it the banner is \
+             just a comment that any parser drops:\n{shadow}"
+        );
+
+        let enforce = generate_rpz_zone(
+            &domains,
+            &RpzConfig {
+                shadow_mode: false,
+                ..RpzConfig::default()
+            },
+        );
+        assert!(!enforce.contains(SHADOW_MARKER_NAME));
+    }
     use super::*;
 
     #[test]

@@ -111,11 +111,9 @@ pub fn normalize_url(raw: &str) -> Option<(String, String)> {
         return None;
     }
 
-    let is_prefixed = trimmed.len() >= 7 && {
-        let prefix = &trimmed[..7.min(trimmed.len())].to_ascii_lowercase();
-        prefix.starts_with("http://")
-            || (trimmed.len() >= 8 && trimmed[..8].to_ascii_lowercase().starts_with("https://"))
-    };
+    // Byte-index slicing would panic on a multibyte indicator submitted through SOAR.
+    let lowered = trimmed.to_ascii_lowercase();
+    let is_prefixed = lowered.starts_with("http://") || lowered.starts_with("https://");
 
     let to_parse = if !is_prefixed {
         format!("http://{trimmed}")

@@ -207,6 +207,11 @@ package() {
   )
 }
 
+shadow_defaults() {
+  log "Threat-intel Shadow Mode deployment defaults"
+  ./scripts/ci/check-shadow-defaults.sh
+}
+
 preflight() {
   require_commands bash git python3 cargo rustc node npm
   local rust_version rust_major rust_minor node_major
@@ -229,6 +234,7 @@ preflight() {
   node --version
   npm --version
   python3 --version
+  shadow_defaults
 }
 
 usage() {
@@ -236,7 +242,8 @@ usage() {
 Usage: scripts/ci/run.sh <task>
 
 Tasks:
-  preflight          Check the base CI toolchain
+  preflight          Check the base CI toolchain and deployment safety defaults
+  shadow-defaults    Assert threat-intel Shadow Mode stays the shipped default
   rust-all           Run the complete Rust quality gate
   rust-ca            Run the offline CA rotation drill
   rust-fmt           Check rustfmt
@@ -262,6 +269,7 @@ EOF
 task="${1:-}"
 case "$task" in
   preflight) preflight ;;
+  shadow-defaults) shadow_defaults ;;
   rust-all) rust_all ;;
   rust-ca) rust_ca ;;
   rust-fmt) rust_fmt ;;

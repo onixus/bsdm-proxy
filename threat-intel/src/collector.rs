@@ -249,7 +249,13 @@ impl Collector {
         let rpz_path = self.config.rpz_artifact_path();
         let acl_path = self.config.acl_artifact_path();
 
-        match storage.list_active_domain_sources(self.config.min_confidence_score, 100_000) {
+        // Enforcement artifacts never inherit indicators that SOAR accepted while
+        // shadow mode was in force (ADR 0008 §4).
+        match storage.list_active_domain_sources(
+            self.config.min_confidence_score,
+            100_000,
+            mode.is_enforce(),
+        ) {
             Ok(pairs) => {
                 let domains: Vec<String> = pairs.iter().map(|(d, _)| d.clone()).collect();
                 let feeds: std::collections::BTreeMap<String, String> = pairs.into_iter().collect();

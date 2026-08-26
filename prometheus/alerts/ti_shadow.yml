@@ -1,0 +1,79 @@
+# Threat-intel Shadow Mode signals (issue #330).
+# Shadow is the fail-safe default: the collector writes only *.shadow artifacts
+# and the proxy observes matches without changing an allow/deny decision.
+# These rules answer two questions during a pilot: "is the observation pipeline
+# alive?" and "did anything switch to enforcement without a decision?".
+groups:
+  - name: bsdm_threat_intel_shadow
+    interval: 30s
+    rules:
+      # Observation signal. Not a block — a shadow match means the request was
+      # served and only annotated, so this is a go/no-go input, not an incident.
+      - alert: BsdmTiShadowMatchSpike
+        expr: sum(rate(bsdm_proxy_ti_shadow_matches_total[5m])) by (feed) > 0.2
+        for: 10m
+        labels:
+          severity: warning
+          team: bsdm-m4
+          mode: shadow
+        annotations:
+          summary: "Threat-intel shadow matches elevated (feed {{ $labels.feed }})"
+          description: "{{ $value | humanize }} shadow match(es)/s over 10m from feed {{ $labels.feed }}. Traffic was NOT blocked (TI_ENFORCEMENT_MODE=shadow). Review before flipping to enforce; see docs ADR-0008."
+
+      # Enforcement must be an explicit, announced decision. The gauge carries the
+      # posture the collector booted with, so a silent flip to enforce is visible
+      # even on an installation where SOAR is never called.
+      - alert: BsdmTiEnforcementActive
+        expr: max(threat_intel_enforcement_mode{mode="enforce"}) > 0
+        for: 0m
+        labels:
+          severity: critical
+          team: bsdm-m4
+          mode: enforce
+        annotations:
+          summary: "Threat-intel is ENFORCING (TI_ENFORCEMENT_MODE=enforce)"
+          description: "The collector reports the enforce posture, so feed data compiles into live RPZ/ACL artifacts and can block traffic. The gauge reflects the mode itself — it fires whether or not anyone calls SOAR. If this deployment is supposed to be in Shadow Mode, TI_ENFORCEMENT_MODE was changed; see ADR-0008."
+
+      # SOAR mutations arriving in shadow mode are expected (202, no enforcement),
+      # but a burst is worth seeing: it is the audit-trail counterpart in metrics.
+      - alert: BsdmTiSoarBlockBurst
+        expr: increase(threat_intel_soar_blocks_total{mode="shadow"}[10m]) > 20
+        for: 5m
+        labels:
+          severity: warning
+          team: bsdm-m4
+          mode: shadow
+        annotations:
+          summary: "Burst of SOAR block requests in shadow mode"
+          description: "{{ $value }} SOAR block call(s) in 10m. Cross-check the audit trail (TI_SOAR_AUDIT_PATH) for the actor."
+
+      # A stale feed silently degrades the shadow observation to nothing.
+      - alert: BsdmTiFeedStale
+        expr: time() - max by (source) (threat_intel_last_success_timestamp_seconds) > 5400
+        for: 15m
+        labels:
+          severity: warning
+          team: bsdm-m4
+        annotations:
+          summary: "Threat-intel feed {{ $labels.source }} is stale"
+          description: "No successful collection from {{ $labels.source }} for over 90m (poll interval default 15m). Shadow observation is running on old indicators."
+
+      - alert: BsdmTiFetchErrors
+        expr: sum by (source) (increase(threat_intel_fetches_total{result!="ok"}[15m])) > 3
+        for: 10m
+        labels:
+          severity: warning
+          team: bsdm-m4
+        annotations:
+          summary: "Threat-intel feed {{ $labels.source }} failing"
+          description: "{{ $value }} failed collection cycle(s) in 15m for {{ $labels.source }}."
+
+      - alert: BsdmTiCollectorDown
+        expr: up{job="threat-intel"} == 0
+        for: 10m
+        labels:
+          severity: warning
+          team: bsdm-m4
+        annotations:
+          summary: "Threat-intel collector is not scrapable"
+          description: "Prometheus cannot scrape threat-intel:8093 for 10m. Expected when the compose profile `threat-intel` is off; otherwise the collector is down."

@@ -21,6 +21,57 @@ use tracing::{info, warn};
 
 use crate::http_types::{full, Body};
 
+/// Mutation audit trail, relative to the RPZ state directory.
+const RPZ_AUDIT_FILE: &str = "rpz-audit.jsonl";
+
+/// Zone growth (in rules) that a single list may add without `confirm=true`.
+///
+/// A public feed can carry hundreds of thousands of domains; applying one to a
+/// live zone is not something to do by accident. Override with
+/// `RPZ_CONFIRM_GROWTH_RULES`.
+const DEFAULT_CONFIRM_GROWTH_RULES: u64 = 5_000;
+
+/// Relative growth (percent of the current zone) allowed without `confirm=true`.
+///
+/// The absolute threshold alone is per-list, so a series of sub-threshold lists
+/// grows the zone without limit. Override with `RPZ_CONFIRM_GROWTH_PCT`.
+const DEFAULT_CONFIRM_GROWTH_PCT: u64 = 50;
+
+fn confirm_growth_threshold() -> u64 {
+    std::env::var("RPZ_CONFIRM_GROWTH_RULES")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(DEFAULT_CONFIRM_GROWTH_RULES)
+}
+
+fn confirm_growth_pct() -> u64 {
+    std::env::var("RPZ_CONFIRM_GROWTH_PCT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(DEFAULT_CONFIRM_GROWTH_PCT)
+}
+
+/// Whether adding `added` rules to a zone of `current` needs a confirmation.
+///
+/// Two limits, because they catch different mistakes: the absolute one stops a
+/// single unmoderated feed, the relative one stops a zone from being doubled by
+/// a series of lists that each stay just under it.
+fn requires_confirmation(current: u64, added: u64, threshold: u64, growth_pct: u64) -> bool {
+    if added > threshold {
+        return true;
+    }
+    // No baseline to compare against on an empty zone; the absolute limit rules.
+    current > 0 && added.saturating_mul(100) / current > growth_pct
+}
+
+/// True when `name` is present in the query string as `name=true|1|yes`.
+fn query_flag(query: &str, name: &str) -> bool {
+    query.split('&').any(|pair| {
+        let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
+        k == name && matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes")
+    })
+}
+
 fn escape_json(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
@@ -244,6 +295,54 @@ impl RpzApiState {
         state
     }
 
+    /// Appends one line to the mutation audit trail.
+    ///
+    /// Every `/api/dns/*` mutation compiles straight into the zone that
+    /// `dns-sinkhole` serves, so the trail is what makes a bad list traceable
+    /// afterwards. Best effort: a broken audit file must not block a rollback.
+    fn audit(&self, action: &str, target: &str, outcome: &str, detail: serde_json::Value) {
+        use std::io::Write as _;
+
+        let record = serde_json::json!({
+            "ts": now_rfc3339(),
+            "action": action,
+            "target": target,
+            "outcome": outcome,
+            "detail": detail,
+        });
+        let path = self.state_dir.join(RPZ_AUDIT_FILE);
+        if let Err(e) = std::fs::create_dir_all(&self.state_dir) {
+            warn!(err = %e, "rpz audit: state dir");
+            return;
+        }
+        let mut opts = std::fs::OpenOptions::new();
+        opts.create(true).append(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            opts.mode(0o600);
+        }
+        match opts.open(&path) {
+            Ok(mut f) => {
+                if let Err(e) = writeln!(f, "{record}") {
+                    warn!(err = %e, "rpz audit: write");
+                }
+            }
+            Err(e) => warn!(err = %e, path = %path.display(), "rpz audit: open"),
+        }
+    }
+
+    /// Rules the compiled zone currently carries.
+    fn active_rule_count(state: &RpzStateFile) -> u64 {
+        state
+            .lists
+            .iter()
+            .filter(|l| l.active)
+            .map(|l| l.rule_count)
+            .sum::<u64>()
+            + state.custom_rules.len() as u64
+    }
+
     async fn persist(&self, state: &RpzStateFile) -> Result<(), String> {
         std::fs::create_dir_all(&self.state_dir).map_err(|e| format!("create state dir: {e}"))?;
         std::fs::create_dir_all(self.state_dir.join("lists"))
@@ -335,7 +434,7 @@ impl RpzApiState {
         if path == "/api/dns/rpz/lists" {
             return match *method {
                 Method::GET => self.list_lists().await,
-                Method::POST => self.add_list(body).await,
+                Method::POST => self.add_list(body, query).await,
                 _ => method_not_allowed(),
             };
         }
@@ -387,7 +486,7 @@ impl RpzApiState {
         json_ok(&g.lists)
     }
 
-    async fn add_list(&self, body: Bytes) -> Response<Body> {
+    async fn add_list(&self, body: Bytes, query: &str) -> Response<Body> {
         #[derive(Deserialize)]
         struct In {
             name: String,
@@ -417,6 +516,74 @@ impl RpzApiState {
             }
         }
         let rule_count = count_rules(&content);
+
+        // A list compiles into the live zone the moment it is stored, so a
+        // large one needs either a preview or a deliberate confirmation first.
+        let dry_run = query_flag(query, "dryRun");
+        let confirmed = query_flag(query, "confirm");
+        let threshold = confirm_growth_threshold();
+        let growth_pct = confirm_growth_pct();
+        let current_rules = {
+            let g = self.inner.read().await;
+            Self::active_rule_count(&g)
+        };
+        let needs_confirm = requires_confirmation(current_rules, rule_count, threshold, growth_pct);
+        let source_label = input
+            .url
+            .clone()
+            .unwrap_or_else(|| "inline content".to_string());
+
+        if dry_run {
+            self.audit(
+                "add_list",
+                &input.name,
+                "dry_run",
+                serde_json::json!({
+                    "source": source_label,
+                    "ruleCount": rule_count,
+                    "zoneRulesBefore": current_rules,
+                    "zoneRulesAfter": current_rules + rule_count,
+                }),
+            );
+            return json_ok(&serde_json::json!({
+                "dryRun": true,
+                "applied": false,
+                "name": input.name,
+                "source": source_label,
+                "ruleCount": rule_count,
+                "zoneRulesBefore": current_rules,
+                "zoneRulesAfter": current_rules + rule_count,
+                "requiresConfirm": needs_confirm,
+                "sample": content.lines().filter(|l| {
+                    let l = l.trim();
+                    !l.is_empty() && !l.starts_with('#') && !l.starts_with(';')
+                }).take(20).collect::<Vec<_>>(),
+            }));
+        }
+
+        if needs_confirm && !confirmed {
+            self.audit(
+                "add_list",
+                &input.name,
+                "refused_unconfirmed",
+                serde_json::json!({
+                    "source": source_label,
+                    "ruleCount": rule_count,
+                    "zoneRulesBefore": current_rules,
+                    "threshold": threshold,
+                    "growthPct": growth_pct,
+                }),
+            );
+            return json_err(
+                StatusCode::CONFLICT,
+                &format!(
+                    "list adds {rule_count} rules to a zone of {current_rules} (limits: \
+                     {threshold} rules, {growth_pct}% growth). Review it with ?dryRun=true, \
+                     then repeat with ?confirm=true"
+                ),
+            );
+        }
+
         let list = RpzList {
             id: id.clone(),
             name: input.name,
@@ -444,6 +611,19 @@ impl RpzApiState {
         if let Err(e) = self.persist(&g).await {
             return json_err(StatusCode::INTERNAL_SERVER_ERROR, &e);
         }
+        self.audit(
+            "add_list",
+            &list.id,
+            "applied",
+            serde_json::json!({
+                "name": list.name,
+                "source": source_label,
+                "ruleCount": rule_count,
+                "zoneRulesBefore": current_rules,
+                "zoneRulesAfter": current_rules + rule_count,
+                "confirmed": confirmed,
+            }),
+        );
         json_ok(&list)
     }
 
@@ -462,9 +642,16 @@ impl RpzApiState {
         };
         list.active = input.active;
         list.last_updated = now_rfc3339();
+        let rules = list.rule_count;
         if let Err(e) = self.persist(&g).await {
             return json_err(StatusCode::INTERNAL_SERVER_ERROR, &e);
         }
+        self.audit(
+            "toggle_list",
+            id,
+            "applied",
+            serde_json::json!({"active": input.active, "ruleCount": rules}),
+        );
         json_ok(&serde_json::json!({"status":"ok"}))
     }
 
@@ -497,6 +684,20 @@ impl RpzApiState {
         if let Err(e) = self.persist(&g).await {
             return json_err(StatusCode::INTERNAL_SERVER_ERROR, &e);
         }
+        self.audit(
+            "sync_list",
+            id,
+            if out.sync_error.is_some() {
+                "failed"
+            } else {
+                "applied"
+            },
+            serde_json::json!({
+                "url": out.url,
+                "ruleCount": out.rule_count,
+                "syncError": out.sync_error,
+            }),
+        );
         json_ok(&out)
     }
 
@@ -511,6 +712,7 @@ impl RpzApiState {
         if let Err(e) = self.persist(&g).await {
             return json_err(StatusCode::INTERNAL_SERVER_ERROR, &e);
         }
+        self.audit("delete_list", id, "applied", serde_json::json!({}));
         json_ok(&serde_json::json!({"status":"deleted"}))
     }
 
@@ -529,6 +731,12 @@ impl RpzApiState {
         if let Err(e) = self.persist(&g).await {
             return json_err(StatusCode::INTERNAL_SERVER_ERROR, &e);
         }
+        self.audit(
+            "put_config",
+            "sinkhole",
+            "applied",
+            serde_json::to_value(&cfg).unwrap_or_default(),
+        );
         json_ok(&cfg)
     }
 
@@ -645,6 +853,12 @@ impl RpzApiState {
         if let Err(e) = self.persist(&g).await {
             return json_err(StatusCode::INTERNAL_SERVER_ERROR, &e);
         }
+        self.audit(
+            "add_rule",
+            &rule.id,
+            "applied",
+            serde_json::json!({"domain": rule.domain, "action": rule.action.as_api()}),
+        );
         json_ok(&rule)
     }
 
@@ -658,6 +872,7 @@ impl RpzApiState {
         if let Err(e) = self.persist(&g).await {
             return json_err(StatusCode::INTERNAL_SERVER_ERROR, &e);
         }
+        self.audit("delete_rule", id, "applied", serde_json::json!({}));
         json_ok(&serde_json::json!({"status":"deleted"}))
     }
 }
@@ -834,4 +1049,173 @@ fn percent_decode(s: &str) -> String {
         i += 1;
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use http_body_util::BodyExt;
+    use std::sync::OnceLock;
+    use tokio::sync::Mutex as AsyncMutex;
+
+    /// The threshold overrides below are process-global; sibling tests read
+    /// them. Async mutex because the guard spans `.await` points.
+    fn env_lock() -> &'static AsyncMutex<()> {
+        static LOCK: OnceLock<AsyncMutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| AsyncMutex::new(()))
+    }
+
+    fn state_in(dir: &Path) -> RpzApiState {
+        RpzApiState {
+            inner: RwLock::new(RpzStateFile {
+                lists: Vec::new(),
+                custom_rules: Vec::new(),
+                config: DnsSinkholeConfig::default(),
+            }),
+            state_dir: dir.to_path_buf(),
+            zone_path: dir.join("compiled.rpz"),
+            reload_url: None,
+        }
+    }
+
+    /// A list body large enough to trip the confirmation threshold.
+    fn big_list(rules: usize) -> Bytes {
+        let content: String = (0..rules)
+            .map(|i| format!("bad{i}.example\n"))
+            .collect::<String>();
+        Bytes::from(
+            serde_json::json!({
+                "name": "public feed",
+                "description": "unmoderated",
+                "source": "url_feed",
+                "format": "domain-list",
+                "url": "https://feed.example/list.txt",
+                "content": content,
+                "defaultAction": "NXDOMAIN",
+            })
+            .to_string(),
+        )
+    }
+
+    fn audit_lines(dir: &Path) -> Vec<serde_json::Value> {
+        std::fs::read_to_string(dir.join(RPZ_AUDIT_FILE))
+            .unwrap_or_default()
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| serde_json::from_str(l).expect("audit line is JSON"))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_dry_run_previews_the_feed_without_touching_the_zone() {
+        let _guard = env_lock().lock().await;
+        let dir = tempfile::tempdir().unwrap();
+        let api = state_in(dir.path());
+
+        let resp = api.add_list(big_list(3), "dryRun=true").await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = BodyExt::collect(resp.into_body()).await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(json["applied"], serde_json::json!(false));
+        assert_eq!(json["ruleCount"], serde_json::json!(3));
+        assert_eq!(json["zoneRulesAfter"], serde_json::json!(3));
+        assert_eq!(json["sample"].as_array().unwrap().len(), 3);
+        assert!(
+            !dir.path().join("compiled.rpz").exists(),
+            "a preview must not compile a zone"
+        );
+        assert!(api.inner.read().await.lists.is_empty());
+        assert_eq!(audit_lines(dir.path())[0]["outcome"], "dry_run");
+    }
+
+    #[tokio::test]
+    async fn a_large_feed_needs_an_explicit_confirmation() {
+        let _guard = env_lock().lock().await;
+        let dir = tempfile::tempdir().unwrap();
+        let api = state_in(dir.path());
+        std::env::set_var("RPZ_CONFIRM_GROWTH_RULES", "2");
+
+        let refused = api.add_list(big_list(5), "").await;
+        assert_eq!(refused.status(), StatusCode::CONFLICT);
+        assert!(api.inner.read().await.lists.is_empty());
+
+        let applied = api.add_list(big_list(5), "confirm=true").await;
+        assert_eq!(applied.status(), StatusCode::OK);
+        assert_eq!(api.inner.read().await.lists.len(), 1);
+
+        std::env::remove_var("RPZ_CONFIRM_GROWTH_RULES");
+
+        let outcomes: Vec<String> = audit_lines(dir.path())
+            .iter()
+            .map(|l| l["outcome"].as_str().unwrap_or_default().to_string())
+            .collect();
+        assert_eq!(outcomes, vec!["refused_unconfirmed", "applied"]);
+    }
+
+    #[tokio::test]
+    async fn a_series_of_small_lists_cannot_grow_the_zone_unchecked() {
+        let _guard = env_lock().lock().await;
+        let dir = tempfile::tempdir().unwrap();
+        let api = state_in(dir.path());
+        // Well under the absolute limit, so only the relative one can catch it.
+        std::env::set_var("RPZ_CONFIRM_GROWTH_RULES", "1000");
+        std::env::set_var("RPZ_CONFIRM_GROWTH_PCT", "50");
+
+        // First list: an empty zone has no baseline, the absolute limit applies.
+        assert_eq!(
+            api.add_list(big_list(100), "").await.status(),
+            StatusCode::OK
+        );
+        // Second list of the same size would double the zone.
+        let refused = api.add_list(big_list(100), "").await;
+        assert_eq!(
+            refused.status(),
+            StatusCode::CONFLICT,
+            "doubling the zone must need a confirmation even below the rule limit"
+        );
+        // A small addition on top of the same zone stays unattended.
+        assert_eq!(
+            api.add_list(big_list(10), "").await.status(),
+            StatusCode::OK
+        );
+
+        std::env::remove_var("RPZ_CONFIRM_GROWTH_RULES");
+        std::env::remove_var("RPZ_CONFIRM_GROWTH_PCT");
+    }
+
+    #[tokio::test]
+    async fn every_mutation_leaves_an_audit_record() {
+        let _guard = env_lock().lock().await;
+        let dir = tempfile::tempdir().unwrap();
+        let api = state_in(dir.path());
+
+        let resp = api.add_list(big_list(1), "").await;
+        let body = BodyExt::collect(resp.into_body()).await.unwrap().to_bytes();
+        let list: RpzList = serde_json::from_slice(&body).unwrap();
+
+        api.toggle_list(&list.id, Bytes::from(r#"{"active":false}"#))
+            .await;
+        api.delete_list(&list.id).await;
+
+        let actions: Vec<String> = audit_lines(dir.path())
+            .iter()
+            .map(|l| l["action"].as_str().unwrap_or_default().to_string())
+            .collect();
+        assert_eq!(actions, vec!["add_list", "toggle_list", "delete_list"]);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let mode = std::fs::metadata(dir.path().join(RPZ_AUDIT_FILE))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(
+                mode & 0o777,
+                0o600,
+                "audit trail must not be world-readable"
+            );
+        }
+    }
 }

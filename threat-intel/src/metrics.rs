@@ -27,6 +27,8 @@ pub struct CollectorMetrics {
     pub purged_expired: prometheus::IntCounter,
     /// Number of domains exported to the RPZ zone file.
     pub rpz_records: prometheus::IntGauge,
+    /// `mode` label carries `shadow`/`enforce`; exactly one series is 1.
+    pub enforcement_mode: IntGaugeVec,
     /// SOAR block actions by enforcement mode (`shadow`, `enforce`).
     pub soar_blocks: IntCounterVec,
 }
@@ -103,6 +105,16 @@ impl CollectorMetrics {
             "threat_intel_rpz_records_total",
             "Number of domains compiled into the DNS RPZ zone",
         )?;
+        // A gauge rather than a counter: the question a monitor has to answer is
+        // "is this installation enforcing right now", which no amount of block
+        // counters can express — an enforcing collector nobody calls stays at 0.
+        let enforcement_mode = prometheus::IntGaugeVec::new(
+            Opts::new(
+                "threat_intel_enforcement_mode",
+                "1 for the active enforcement mode, 0 for the others (ADR 0008)",
+            ),
+            &["mode"],
+        )?;
         let soar_blocks = IntCounterVec::new(
             Opts::new(
                 "threat_intel_soar_blocks_total",
@@ -123,6 +135,7 @@ impl CollectorMetrics {
         registry.register(Box::new(purged_expired.clone()))?;
         registry.register(Box::new(rpz_records.clone()))?;
         registry.register(Box::new(soar_blocks.clone()))?;
+        registry.register(Box::new(enforcement_mode.clone()))?;
 
         Ok(Arc::new(Self {
             registry,
@@ -138,6 +151,7 @@ impl CollectorMetrics {
             purged_expired,
             rpz_records,
             soar_blocks,
+            enforcement_mode,
         }))
     }
 

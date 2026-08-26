@@ -354,6 +354,19 @@ ML worker:
 | `DNS_SINKHOLE_DOT_ENABLED` | `true` |
 | `DNS_SINKHOLE_DOT_BIND` | `0.0.0.0:853` |
 | `DNS_SINKHOLE_TLS_CERT`, `DNS_SINKHOLE_TLS_KEY` | required for DoH/DoT |
+| `RPZ_CONFIRM_GROWTH_RULES` | `5000` | Абсолютный порог правил, выше которого `POST /api/dns/rpz/lists` требует `?confirm=true` |
+| `RPZ_CONFIRM_GROWTH_PCT` | `50` | Относительный порог: прирост зоны больше этого процента тоже требует `?confirm=true` |
+
+`dns-sinkhole` **отказывается** загружать observe-only артефакт коллектора: и по
+имени (путь оканчивается на `.shadow`), и по машинному маркеру внутри зоны
+(`_bsdm-enforcement-mode IN TXT "shadow"`). На старте это ошибка без отката на
+fallback-зону — иначе неверный `DNS_SINKHOLE_ZONE_PATH` тихо маскировался бы.
+Баннер-комментарий в зоне оставлен для человека: любой парсер его выбрасывает.
+
+Мутации `/api/dns/*` пишут JSONL-аудит в `<DNS_RPZ_STATE_DIR>/rpz-audit.jsonl`
+(`0600`). Добавление списка поддерживает `?dryRun=true` — предпросмотр числа
+правил, размера зоны до/после и первых 20 строк без записи и без компиляции
+зоны.
 
 Подробнее: [DNS sinkhole](../features/dns-sinkhole.md).
 
@@ -404,15 +417,15 @@ ML worker:
 
 | Переменная | Default | Назначение |
 |---|---:|---|
-| `TI_API_TOKEN` | unset | Bearer для `POST /api/v1/soar/*`; сравнение constant-time. Без него мутации закрыты в production-профиле |
+| `TI_API_TOKEN` | unset | Bearer для `POST /api/v1/soar/*`; сравнение constant-time. Без него мутации закрыты |
 | `TI_API_ALLOW_INSECURE` | `false` | Явная лабораторная лазейка: открыть мутации без токена. Не задавать в пилоте |
-| `TI_API_REQUIRE_TOKEN` | `false` | Форсировать fail-closed в non-production профилях |
 | `TI_ADMIN_BIND` | `127.0.0.1` | Хост admin/SOAR/metrics-листенера |
 | `TI_SOAR_AUDIT_PATH` | `<TI_OUTPUT_DIR>/soar-audit.jsonl` | JSONL-аудит SOAR-действий, файл создаётся с правами `0600` |
-| `DEPLOYMENT_PROFILE` | `production`, если не задана | Определяет fail-closed по умолчанию (`production`/`prod`/пустое значение = production) |
 
-Постура выбирается так: `TI_API_ALLOW_INSECURE=true` → открыто; иначе
-production-профиль → fail-closed; иначе — по `TI_API_REQUIRE_TOKEN`.
+Постура выбирается так: fail-closed всегда, кроме единственного случая
+`TI_API_ALLOW_INSECURE=true`. `DEPLOYMENT_PROFILE` на неё **не влияет**: эту
+переменную переключают другие сервисы по своим причинам, и раньше любое
+не-production значение тихо открывало мутации SOAR без токена.
 
 - **Отказ**: мутация без валидного Bearer получает `401 Unauthorized` с
   заголовком `WWW-Authenticate: Bearer`, **до** обращения к хранилищу —

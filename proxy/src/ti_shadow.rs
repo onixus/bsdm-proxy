@@ -81,6 +81,26 @@ pub struct TiShadowMatcher {
     domains: RwLock<HashMap<String, String>>,
 }
 
+/// Folds a feed name to a bounded set of label values.
+///
+/// SOAR sources embed a caller-supplied operator (`soar:<operator>`), which
+/// would otherwise open one new metric series per block request.
+fn normalize_feed_label(raw: Option<&str>) -> String {
+    match raw {
+        Some(feed) if feed.starts_with("soar:") => "soar".to_string(),
+        Some(feed)
+            if !feed.is_empty()
+                && feed.len() <= 32
+                && feed
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') =>
+        {
+            feed.to_string()
+        }
+        _ => UNKNOWN_FEED.to_string(),
+    }
+}
+
 impl TiShadowMatcher {
     /// Builds the matcher and performs the initial load. A missing file is not
     /// an error: the collector may not have produced an export yet.
@@ -156,12 +176,10 @@ impl TiShadowMatcher {
             if key.is_empty() {
                 continue;
             }
-            let feed = parsed
-                .feeds
-                .get(&domain)
-                .map(String::as_str)
-                .unwrap_or(UNKNOWN_FEED)
-                .to_string();
+            // `feed` becomes a Prometheus label and a ClickHouse LowCardinality
+            // value. A SOAR block carries an operator-controlled `soar:<operator>`
+            // source, so anything unbounded is folded before it reaches either.
+            let feed = normalize_feed_label(parsed.feeds.get(&domain).map(String::as_str));
             table.insert(key, feed);
         }
 
@@ -364,6 +382,154 @@ mod tests {
         let m = matcher();
         assert!(m.load_from_str("{not json", None).is_err());
         assert_eq!(m.len(), 2);
+    }
+
+    fn env_lock() -> &'static std::sync::Mutex<()> {
+        static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+        LOCK.get_or_init(|| std::sync::Mutex::new(()))
+    }
+
+    fn clear_shadow_env() {
+        for var in [
+            "TI_SHADOW_MATCH_ENABLED",
+            "TI_SHADOW_FEED_PATH",
+            "TI_SHADOW_RELOAD_SECS",
+        ] {
+            std::env::remove_var(var);
+        }
+    }
+
+    #[test]
+    fn feed_label_is_folded_to_a_bounded_set() {
+        // An operator-controlled SOAR source collapses to a single series.
+        assert_eq!(normalize_feed_label(Some("soar:alice")), "soar");
+        assert_eq!(normalize_feed_label(Some("soar:")), "soar");
+        // Known feed names survive verbatim.
+        assert_eq!(normalize_feed_label(Some("openphish")), "openphish");
+        assert_eq!(
+            normalize_feed_label(Some("phishing-database")),
+            "phishing-database"
+        );
+        // Anything unbounded, empty or non-ASCII falls back to the default label.
+        assert_eq!(normalize_feed_label(Some(&"x".repeat(33))), UNKNOWN_FEED);
+        assert_eq!(normalize_feed_label(Some("feed with spaces")), UNKNOWN_FEED);
+        assert_eq!(normalize_feed_label(Some("")), UNKNOWN_FEED);
+        assert_eq!(normalize_feed_label(None), UNKNOWN_FEED);
+    }
+
+    #[test]
+    fn shadow_config_from_env_parses_toggle_path_and_reload_floor() {
+        let _guard = env_lock().lock().unwrap();
+        clear_shadow_env();
+
+        let default = TiShadowConfig::from_env();
+        assert!(default.enabled, "observation is on by default");
+        assert_eq!(default.feed_path, PathBuf::from(DEFAULT_FEED_PATH));
+        assert_eq!(
+            default.reload_interval,
+            Duration::from_secs(DEFAULT_RELOAD_SECS)
+        );
+
+        // Only explicit off-values disable observation.
+        for raw in ["0", "false", "No", " OFF "] {
+            std::env::set_var("TI_SHADOW_MATCH_ENABLED", raw);
+            assert!(!TiShadowConfig::from_env().enabled, "raw = {raw}");
+        }
+        // Anything unrecognised keeps observing; shadow never blocks, so the
+        // safe fallback here is "keep collecting evidence".
+        for raw in ["maybe", "true", ""] {
+            std::env::set_var("TI_SHADOW_MATCH_ENABLED", raw);
+            assert!(TiShadowConfig::from_env().enabled, "raw = {raw}");
+        }
+
+        // Reload interval: floored at 10s, garbage falls back to the default.
+        std::env::set_var("TI_SHADOW_RELOAD_SECS", "1");
+        assert_eq!(
+            TiShadowConfig::from_env().reload_interval,
+            Duration::from_secs(10)
+        );
+        std::env::set_var("TI_SHADOW_RELOAD_SECS", "not-a-number");
+        assert_eq!(
+            TiShadowConfig::from_env().reload_interval,
+            Duration::from_secs(DEFAULT_RELOAD_SECS)
+        );
+
+        std::env::set_var("TI_SHADOW_FEED_PATH", "/var/tmp/custom.json.shadow");
+        assert_eq!(
+            TiShadowConfig::from_env().feed_path,
+            PathBuf::from("/var/tmp/custom.json.shadow")
+        );
+
+        clear_shadow_env();
+    }
+
+    #[test]
+    fn reload_reads_disk_and_a_non_shadow_export_still_only_annotates() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("threat_domains.json.shadow");
+        // Export mislabelled as `enforce`: the proxy must still treat it as
+        // observation only and leave the decision the ACL engine made intact.
+        std::fs::write(
+            &path,
+            r#"{"mode":"enforce","domains":["c2.example.test"],"feeds":{"c2.example.test":"urlhaus"}}"#,
+        )
+        .unwrap();
+
+        let m = TiShadowMatcher {
+            config: TiShadowConfig {
+                enabled: true,
+                feed_path: path,
+                reload_interval: Duration::from_secs(300),
+            },
+            domains: RwLock::new(HashMap::new()),
+        };
+        assert_eq!(m.reload().unwrap(), 1);
+
+        let metrics = Metrics::new().unwrap();
+        let mut event = event("node.c2.example.test");
+        event.acl_action = Some("allow".into());
+        event.acl_rule_id = Some("rule-7".into());
+        annotate_shadow_match(&m, &metrics, &mut event);
+
+        assert_eq!(event.threat_shadow_match.as_deref(), Some("urlhaus"));
+        // Zero change to the allow/deny path.
+        assert_eq!(event.acl_action.as_deref(), Some("allow"));
+        assert_eq!(event.acl_rule_id.as_deref(), Some("rule-7"));
+        assert_eq!(event.status, 200);
+    }
+
+    #[test]
+    fn missing_feed_file_is_not_fatal_and_matcher_stays_inert() {
+        let m = TiShadowMatcher {
+            config: TiShadowConfig {
+                enabled: true,
+                feed_path: PathBuf::from("/nonexistent/threat_domains.json.shadow"),
+                reload_interval: Duration::from_secs(300),
+            },
+            domains: RwLock::new(HashMap::new()),
+        };
+        assert!(m.reload().is_err());
+        assert!(m.is_empty());
+        assert!(m.match_domain("evil-phish.com").is_none());
+    }
+
+    #[test]
+    fn existing_annotation_is_neither_overwritten_nor_double_counted() {
+        let m = matcher();
+        let metrics = Metrics::new().unwrap();
+
+        let mut event = event("evil-phish.com");
+        event.threat_shadow_match = Some("preset-feed".into());
+        annotate_shadow_match(&m, &metrics, &mut event);
+
+        assert_eq!(event.threat_shadow_match.as_deref(), Some("preset-feed"));
+        assert_eq!(
+            metrics
+                .ti_shadow_matches_total
+                .with_label_values(&["urlhaus"])
+                .get(),
+            0.0
+        );
     }
 
     #[test]

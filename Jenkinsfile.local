@@ -66,6 +66,15 @@ pipeline {
   }
 
   stages {
+    // Дешёвый конфиг-гейт до сборки: дефолты поставки не должны уводить
+    // threat-intel из Shadow Mode (issue #330) — pure bash, секунды.
+    stage('Deployment defaults') {
+      agent any
+      steps {
+        sh './scripts/ci/check-shadow-defaults.sh'
+      }
+    }
+
     stage('CA rotation drill') {
       agent { docker { image RUST_IMAGE; args CACHE_ARGS; reuseNode true } }
       steps {
