@@ -53,6 +53,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     })?;
 
     let metrics = CollectorMetrics::new()?;
+    // Publish the posture itself, so a monitor can tell "observing" from
+    // "enforcing" without waiting for someone to call SOAR (ADR 0008).
+    for mode in [EnforcementMode::Shadow, EnforcementMode::Enforce] {
+        metrics
+            .enforcement_mode
+            .with_label_values(&[mode.as_str()])
+            .set(i64::from(mode == config.enforcement_mode));
+    }
 
     let storage = if config.storage_enabled {
         let st = SqliteStorage::new(&config.sqlite_path)?;

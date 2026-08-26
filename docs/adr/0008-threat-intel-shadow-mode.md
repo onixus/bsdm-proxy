@@ -32,6 +32,7 @@ Public phishing feeds carry URL-level indicators, shared hosters, URL shorteners
 
 3. **Per-feed observability.**
    - Prometheus counter `bsdm_proxy_ti_shadow_matches_total{feed}` counts shadow matches per feed, so feed quality can be compared feed by feed rather than in aggregate.
+   - Gauge `threat_intel_enforcement_mode{mode}` publishes the posture itself, so a monitor can tell an observing installation from an enforcing one without waiting for a SOAR call that may never come.
    - The SOC reviews candidates through the Search API over events carrying `threat_shadow_match`; no separate review UI is required for the pilot.
 
 4. **SOAR containment is mode-aware.**

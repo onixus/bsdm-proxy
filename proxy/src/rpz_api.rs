@@ -31,11 +31,37 @@ const RPZ_AUDIT_FILE: &str = "rpz-audit.jsonl";
 /// `RPZ_CONFIRM_GROWTH_RULES`.
 const DEFAULT_CONFIRM_GROWTH_RULES: u64 = 5_000;
 
+/// Relative growth (percent of the current zone) allowed without `confirm=true`.
+///
+/// The absolute threshold alone is per-list, so a series of sub-threshold lists
+/// grows the zone without limit. Override with `RPZ_CONFIRM_GROWTH_PCT`.
+const DEFAULT_CONFIRM_GROWTH_PCT: u64 = 50;
+
 fn confirm_growth_threshold() -> u64 {
     std::env::var("RPZ_CONFIRM_GROWTH_RULES")
         .ok()
         .and_then(|v| v.trim().parse::<u64>().ok())
         .unwrap_or(DEFAULT_CONFIRM_GROWTH_RULES)
+}
+
+fn confirm_growth_pct() -> u64 {
+    std::env::var("RPZ_CONFIRM_GROWTH_PCT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(DEFAULT_CONFIRM_GROWTH_PCT)
+}
+
+/// Whether adding `added` rules to a zone of `current` needs a confirmation.
+///
+/// Two limits, because they catch different mistakes: the absolute one stops a
+/// single unmoderated feed, the relative one stops a zone from being doubled by
+/// a series of lists that each stay just under it.
+fn requires_confirmation(current: u64, added: u64, threshold: u64, growth_pct: u64) -> bool {
+    if added > threshold {
+        return true;
+    }
+    // No baseline to compare against on an empty zone; the absolute limit rules.
+    current > 0 && added.saturating_mul(100) / current > growth_pct
 }
 
 /// True when `name` is present in the query string as `name=true|1|yes`.
@@ -496,10 +522,12 @@ impl RpzApiState {
         let dry_run = query_flag(query, "dryRun");
         let confirmed = query_flag(query, "confirm");
         let threshold = confirm_growth_threshold();
+        let growth_pct = confirm_growth_pct();
         let current_rules = {
             let g = self.inner.read().await;
             Self::active_rule_count(&g)
         };
+        let needs_confirm = requires_confirmation(current_rules, rule_count, threshold, growth_pct);
         let source_label = input
             .url
             .clone()
@@ -525,7 +553,7 @@ impl RpzApiState {
                 "ruleCount": rule_count,
                 "zoneRulesBefore": current_rules,
                 "zoneRulesAfter": current_rules + rule_count,
-                "requiresConfirm": rule_count > threshold,
+                "requiresConfirm": needs_confirm,
                 "sample": content.lines().filter(|l| {
                     let l = l.trim();
                     !l.is_empty() && !l.starts_with('#') && !l.starts_with(';')
@@ -533,7 +561,7 @@ impl RpzApiState {
             }));
         }
 
-        if rule_count > threshold && !confirmed {
+        if needs_confirm && !confirmed {
             self.audit(
                 "add_list",
                 &input.name,
@@ -541,14 +569,17 @@ impl RpzApiState {
                 serde_json::json!({
                     "source": source_label,
                     "ruleCount": rule_count,
+                    "zoneRulesBefore": current_rules,
                     "threshold": threshold,
+                    "growthPct": growth_pct,
                 }),
             );
             return json_err(
                 StatusCode::CONFLICT,
                 &format!(
-                    "list adds {rule_count} rules to a zone of {current_rules} (threshold \
-                     {threshold}). Review it with ?dryRun=true, then repeat with ?confirm=true"
+                    "list adds {rule_count} rules to a zone of {current_rules} (limits: \
+                     {threshold} rules, {growth_pct}% growth). Review it with ?dryRun=true, \
+                     then repeat with ?confirm=true"
                 ),
             );
         }
@@ -1024,6 +1055,15 @@ fn percent_decode(s: &str) -> String {
 mod tests {
     use super::*;
     use http_body_util::BodyExt;
+    use std::sync::OnceLock;
+    use tokio::sync::Mutex as AsyncMutex;
+
+    /// The threshold overrides below are process-global; sibling tests read
+    /// them. Async mutex because the guard spans `.await` points.
+    fn env_lock() -> &'static AsyncMutex<()> {
+        static LOCK: OnceLock<AsyncMutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| AsyncMutex::new(()))
+    }
 
     fn state_in(dir: &Path) -> RpzApiState {
         RpzApiState {
@@ -1068,6 +1108,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_dry_run_previews_the_feed_without_touching_the_zone() {
+        let _guard = env_lock().lock().await;
         let dir = tempfile::tempdir().unwrap();
         let api = state_in(dir.path());
 
@@ -1090,6 +1131,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_large_feed_needs_an_explicit_confirmation() {
+        let _guard = env_lock().lock().await;
         let dir = tempfile::tempdir().unwrap();
         let api = state_in(dir.path());
         std::env::set_var("RPZ_CONFIRM_GROWTH_RULES", "2");
@@ -1112,7 +1154,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_series_of_small_lists_cannot_grow_the_zone_unchecked() {
+        let _guard = env_lock().lock().await;
+        let dir = tempfile::tempdir().unwrap();
+        let api = state_in(dir.path());
+        // Well under the absolute limit, so only the relative one can catch it.
+        std::env::set_var("RPZ_CONFIRM_GROWTH_RULES", "1000");
+        std::env::set_var("RPZ_CONFIRM_GROWTH_PCT", "50");
+
+        // First list: an empty zone has no baseline, the absolute limit applies.
+        assert_eq!(
+            api.add_list(big_list(100), "").await.status(),
+            StatusCode::OK
+        );
+        // Second list of the same size would double the zone.
+        let refused = api.add_list(big_list(100), "").await;
+        assert_eq!(
+            refused.status(),
+            StatusCode::CONFLICT,
+            "doubling the zone must need a confirmation even below the rule limit"
+        );
+        // A small addition on top of the same zone stays unattended.
+        assert_eq!(
+            api.add_list(big_list(10), "").await.status(),
+            StatusCode::OK
+        );
+
+        std::env::remove_var("RPZ_CONFIRM_GROWTH_RULES");
+        std::env::remove_var("RPZ_CONFIRM_GROWTH_PCT");
+    }
+
+    #[tokio::test]
     async fn every_mutation_leaves_an_audit_record() {
+        let _guard = env_lock().lock().await;
         let dir = tempfile::tempdir().unwrap();
         let api = state_in(dir.path());
 

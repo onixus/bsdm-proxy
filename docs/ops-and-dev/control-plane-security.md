@@ -126,9 +126,12 @@ Every mutation compiles straight into the zone `dns-sinkhole` serves, so:
    action, target, outcome, rule delta.
 2. `POST /api/dns/rpz/lists?dryRun=true` previews a feed (rule count, zone size
    before/after, first 20 entries) without storing or compiling anything.
-3. A list adding more than `RPZ_CONFIRM_GROWTH_RULES` rules (default `5000`) is
-   refused with `409` until the call is repeated with `?confirm=true`. The
-   refusal is audited.
+3. A list is refused with `409` until the call is repeated with `?confirm=true`
+   when it adds more than `RPZ_CONFIRM_GROWTH_RULES` rules (default `5000`) or
+   grows the current zone by more than `RPZ_CONFIRM_GROWTH_PCT` percent
+   (default `50`). The absolute limit stops one unmoderated feed; the relative
+   one stops a series of lists that each stay just under it. Refusals are
+   audited.
 
 A public feed pulled through `source: url_feed` is unmoderated content: preview
 it before applying it, and remember this path is **not** gated by

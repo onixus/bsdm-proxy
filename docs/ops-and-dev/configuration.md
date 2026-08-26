@@ -332,7 +332,8 @@ ML worker:
 | `DNS_SINKHOLE_DOT_ENABLED` | `true` |
 | `DNS_SINKHOLE_DOT_BIND` | `0.0.0.0:853` |
 | `DNS_SINKHOLE_TLS_CERT`, `DNS_SINKHOLE_TLS_KEY` | required for DoH/DoT |
-| `RPZ_CONFIRM_GROWTH_RULES` | `5000` | Порог правил, выше которого `POST /api/dns/rpz/lists` требует `?confirm=true` |
+| `RPZ_CONFIRM_GROWTH_RULES` | `5000` | Абсолютный порог правил, выше которого `POST /api/dns/rpz/lists` требует `?confirm=true` |
+| `RPZ_CONFIRM_GROWTH_PCT` | `50` | Относительный порог: прирост зоны больше этого процента тоже требует `?confirm=true` |
 
 `dns-sinkhole` **отказывается** загружать observe-only артефакт коллектора: и по
 имени (путь оканчивается на `.shadow`), и по машинному маркеру внутри зоны

@@ -64,6 +64,23 @@ impl Zone {
     }
 
     pub fn parse(text: &str) -> Result<Self, ZoneError> {
+        // Scan for the marker before parsing anything: a real collector artifact
+        // opens with a multi-line SOA that `parse_line` rejects, so a per-line
+        // check would report a malformed zone and let the caller fall back to a
+        // default blocklist instead of failing on the shadow artifact itself.
+        if let Some((lineno, _)) = text
+            .lines()
+            .enumerate()
+            .find(|(_, raw)| is_shadow_marker(strip_comment(raw).trim()))
+        {
+            return Err(ZoneError::ShadowArtifact(format!(
+                "zone line {}: this zone is marked '{SHADOW_MARKER_NAME} TXT \"shadow\"' — \
+                 it is an observe-only threat-intel artifact and must not be enforced. \
+                 Set TI_ENFORCEMENT_MODE=enforce on the collector to produce a real zone",
+                lineno + 1
+            )));
+        }
+
         let mut zone = Self::default();
         for (lineno, raw) in text.lines().enumerate() {
             let cleaned = strip_comment(raw);
@@ -74,14 +91,6 @@ impl Zone {
             if line.starts_with('$') {
                 // $TTL etc. — ignore for PoC
                 continue;
-            }
-            if is_shadow_marker(line) {
-                return Err(ZoneError::ShadowArtifact(format!(
-                    "zone line {}: this zone is marked '{SHADOW_MARKER_NAME} TXT \"shadow\"' — \
-                     it is an observe-only threat-intel artifact and must not be enforced. \
-                     Set TI_ENFORCEMENT_MODE=enforce on the collector to produce a real zone",
-                    lineno + 1
-                )));
             }
             parse_line(&mut zone, line)
                 .map_err(|e| ZoneError::Invalid(format!("zone line {}: {e}", lineno + 1)))?;
@@ -220,6 +229,33 @@ fn parse_line(zone: &mut Zone, line: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The zone `threat_intel::rpz::generate_rpz_zone` actually writes: SOA and
+    /// NS records the sinkhole parser does not support come *before* the marker.
+    #[test]
+    fn a_real_shadow_artifact_is_refused_despite_the_unsupported_soa_header() {
+        let err = Zone::parse(
+            r#"$TTL 300
+@ IN SOA ns1.bsdm-proxy.internal. hostmaster.bsdm-proxy.internal. (
+  2026082612 ; serial
+  3600 ; refresh
+)
+@ IN NS ns1.bsdm-proxy.internal.
+
+; SHADOW MODE (TI_ENFORCEMENT_MODE=shadow): observe-only artifact.
+; Do NOT load this zone into dns-sinkhole; it blocks nothing by design.
+_bsdm-enforcement-mode IN TXT "shadow"
+; Active Threat Intelligence RPZ Rules
+phish.test CNAME .
+"#,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, ZoneError::ShadowArtifact(_)),
+            "the marker must win over the SOA parse error, else the caller falls \
+             back to a default blocklist and starts normally; got {err:?}"
+        );
+    }
 
     #[test]
     fn a_shadow_marked_zone_is_refused() {

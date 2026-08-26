@@ -47,7 +47,7 @@ check "packaging env example ships TI_ENFORCEMENT_MODE=shadow" \
 check "no deployment file hardcodes enforce as a default" \
   not grep -rInE '^[^#]*TI_ENFORCEMENT_MODE[=:][[:space:]]*"?enforce' \
     --exclude="check-shadow-defaults.sh" \
-    Dockerfile docker-compose.yml deploy charts packaging config scripts
+    Dockerfile docker-compose.yml docker-compose.override.yml deploy charts packaging config scripts
 
 check "proxy reads the observe-only .shadow artifact (compose)" \
   grep -qE 'TI_SHADOW_FEED_PATH=.*\.shadow' docker-compose.yml
@@ -64,7 +64,7 @@ check "admin/SOAR port 8093 is not published to the host" \
 check "no deployment file enables TI_API_ALLOW_INSECURE" \
   not grep -rInE '^[^#]*TI_API_ALLOW_INSECURE[=:][[:space:]]*"?(1|true|yes)' \
     --exclude="check-shadow-defaults.sh" \
-    Dockerfile docker-compose.yml deploy charts packaging config scripts
+    Dockerfile docker-compose.yml docker-compose.override.yml deploy charts packaging config scripts
 
 check "threat-intel scrape job exists so shadow metrics are collected" \
   grep -q "job_name: 'threat-intel'" prometheus/prometheus.yml
