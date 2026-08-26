@@ -1,15 +1,12 @@
-# Threat intelligence collector (TASK-TI-001)
+# Threat intelligence collector & pipeline (TASK-TI-001..040)
 
-Optional `threat-intel` worker that pulls phishing/malware IOC feeds on a
-schedule, parses them through per-source plugins, and writes a snapshot per feed
-plus a run report. This is the collector framework from the
-[TI backlog](../threat-intelligence/AI_Agent_Backlog.md): the IOC database
-(TASK-TI-002), full normalization (TASK-TI-003) and confidence scoring
-(TASK-TI-010) are **not** part of it, and nothing here is wired into ACL or RPZ
-enforcement yet.
+The `threat-intel` worker ingests phishing/malware IOC feeds on a schedule,
+normalizes and scores indicators, persists them into SQLite with TTL management,
+and exports live DNS RPZ zones (`threats.rpz`) and Proxy ACL feeds (`threat_domains.json`).
+It also exposes enterprise SIEM formatting (CEF/ECS/Syslog), SOAR automated containment
+APIs (`/api/v1/soar/*`), and ML domain reputation/homoglyph evaluation (`/api/v1/ml/*`).
 
-Status: **Experimental**. Treat the output as an input to a review pipeline, not
-as a block list.
+Status: **Beta**. Full pipeline integration with automated DNS RPZ / Proxy ACL and SIEM/SOAR.
 
 ## Quick start
 
