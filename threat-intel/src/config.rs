@@ -282,6 +282,80 @@ mod tests {
         }
     }
 
+    fn env_lock() -> &'static std::sync::Mutex<()> {
+        static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+        LOCK.get_or_init(|| std::sync::Mutex::new(()))
+    }
+
+    /// Loads a `Config` from a clean `TI_*` environment with the given raw
+    /// `TI_ENFORCEMENT_MODE` value (`None` = variable unset).
+    fn config_from_env_with_mode(raw: Option<&str>) -> Config {
+        for var in [
+            "TI_SOURCES",
+            "TI_SQLITE_PATH",
+            "TI_RPZ_OUTPUT_PATH",
+            "TI_ACL_EXPORT_PATH",
+        ] {
+            std::env::remove_var(var);
+        }
+        std::env::set_var("TI_OUTPUT_DIR", "/tmp/ti-env-test");
+        match raw {
+            Some(value) => std::env::set_var("TI_ENFORCEMENT_MODE", value),
+            None => std::env::remove_var("TI_ENFORCEMENT_MODE"),
+        }
+        let config = Config::from_env().expect("config must load");
+        std::env::remove_var("TI_ENFORCEMENT_MODE");
+        std::env::remove_var("TI_OUTPUT_DIR");
+        config
+    }
+
+    #[test]
+    fn from_env_gates_enforcement_on_the_exact_value() {
+        let _guard = env_lock().lock().unwrap();
+
+        // Variable unset: fail-safe shadow, both artifacts suffixed.
+        let unset = config_from_env_with_mode(None);
+        assert_eq!(unset.enforcement_mode, EnforcementMode::Shadow);
+        assert_eq!(
+            unset.rpz_artifact_path(),
+            PathBuf::from("/tmp/ti-env-test/threats.rpz.shadow")
+        );
+        assert_eq!(
+            unset.acl_artifact_path(),
+            PathBuf::from("/tmp/ti-env-test/threat_domains.json.shadow")
+        );
+
+        // Garbage and truthy-looking values must never reach enforcement.
+        for raw in ["true", "1", "yes", "block", "enforced", "ENFORCE!", "  "] {
+            let config = config_from_env_with_mode(Some(raw));
+            assert_eq!(
+                config.enforcement_mode,
+                EnforcementMode::Shadow,
+                "raw = {raw}"
+            );
+            assert!(
+                config
+                    .rpz_artifact_path()
+                    .to_string_lossy()
+                    .ends_with(SHADOW_SUFFIX),
+                "raw = {raw} must keep the RPZ zone unloadable"
+            );
+            assert!(
+                config
+                    .acl_artifact_path()
+                    .to_string_lossy()
+                    .ends_with(SHADOW_SUFFIX),
+                "raw = {raw} must keep the ACL feed unloadable"
+            );
+        }
+
+        // Only the explicit opt-in flips to enforceable artifact paths.
+        let enforced = config_from_env_with_mode(Some(" ENFORCE "));
+        assert!(enforced.enforcement_mode.is_enforce());
+        assert_eq!(enforced.rpz_artifact_path(), enforced.rpz_output_path);
+        assert_eq!(enforced.acl_artifact_path(), enforced.acl_export_path);
+    }
+
     #[test]
     fn shadow_mode_suffixes_enforcement_artifacts() {
         let mut config = config();

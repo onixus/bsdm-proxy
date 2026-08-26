@@ -37,15 +37,6 @@ fn env_flag(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn is_production_profile() -> bool {
-    std::env::var("DEPLOYMENT_PROFILE")
-        .map(|v| {
-            let v = v.trim().to_ascii_lowercase();
-            v.is_empty() || v == "production" || v == "prod"
-        })
-        .unwrap_or(true)
-}
-
 /// Auth posture of the collector admin API.
 #[derive(Debug, Clone)]
 pub struct AdminApiSecurity {
@@ -61,15 +52,12 @@ impl AdminApiSecurity {
             .ok()
             .map(|t| t.trim().to_string())
             .filter(|t| !t.is_empty());
-        // Explicit lab override; never set it on a pilot network.
+        // Explicit lab override; never set it on a pilot network. It is the only
+        // way to open the mutating endpoints: the posture deliberately ignores
+        // DEPLOYMENT_PROFILE, which other services flip for unrelated reasons and
+        // which would otherwise silently unauthenticate SOAR mutations.
         let allow_insecure = env_flag("TI_API_ALLOW_INSECURE");
-        let fail_closed = if allow_insecure {
-            false
-        } else if is_production_profile() {
-            true
-        } else {
-            env_flag("TI_API_REQUIRE_TOKEN")
-        };
+        let fail_closed = !allow_insecure;
         let bind_host = std::env::var("TI_ADMIN_BIND").unwrap_or_else(|_| DEFAULT_BIND.to_string());
         let audit_path = std::env::var("TI_SOAR_AUDIT_PATH")
             .map(PathBuf::from)

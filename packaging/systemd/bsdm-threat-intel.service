@@ -14,7 +14,34 @@ StateDirectory=bsdm-proxy/threat-intel
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=65536
+
+# Hardening. The unit holds TI_API_TOKEN in its environment and writes the SOAR
+# audit trail (0600 JSONL) under StateDirectory, so keep the blast radius small.
+# If TI_OUTPUT_DIR / TI_SOAR_AUDIT_PATH are moved outside /var/lib/bsdm-proxy,
+# add the new location to ReadWritePaths or the collector will fail to write.
 NoNewPrivileges=true
+UMask=0077
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallArchitectures=native
 
 [Install]
 WantedBy=multi-user.target

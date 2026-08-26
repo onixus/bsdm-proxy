@@ -59,7 +59,6 @@ See also: [control-plane.md](../features/control-plane.md) ·
 | `SEARCH_API_TOKEN` | *unset* | Bearer for Search API |
 | `TI_API_TOKEN` | *unset* | Bearer for mutating `POST /api/v1/soar/*` (`threat-intel`) |
 | `TI_API_ALLOW_INSECURE` | `false` | Lab only: open SOAR mutations without a token |
-| `TI_API_REQUIRE_TOKEN` | `false` | Force fail-closed for the collector API in development/test |
 | `TI_ADMIN_BIND` | `127.0.0.1` | Host of the collector admin/SOAR/metrics listener |
 | `TI_SOAR_AUDIT_PATH` | `<TI_OUTPUT_DIR>/soar-audit.jsonl` | Append-only JSONL audit of SOAR actions (`0600`) |
 | `SEARCH_API_ALLOW_INSECURE` | *unset* (inherits CONTROL insecure) | Lab open search |
@@ -118,6 +117,22 @@ Other control APIs remain on plain `METRICS_PORT` with Bearer auth.
 2. With a token configured → all non-public `/api/*` need
    `Authorization: Bearer …` (constant-time compare).
 3. Without a token in open lab mode → mutations are allowed (legacy), with loud warnings.
+
+### RPZ mutations (`/api/dns/*`)
+
+Every mutation compiles straight into the zone `dns-sinkhole` serves, so:
+
+1. All mutations append to `<DNS_RPZ_STATE_DIR>/rpz-audit.jsonl` (`0600`) —
+   action, target, outcome, rule delta.
+2. `POST /api/dns/rpz/lists?dryRun=true` previews a feed (rule count, zone size
+   before/after, first 20 entries) without storing or compiling anything.
+3. A list adding more than `RPZ_CONFIRM_GROWTH_RULES` rules (default `5000`) is
+   refused with `409` until the call is repeated with `?confirm=true`. The
+   refusal is audited.
+
+A public feed pulled through `source: url_feed` is unmoderated content: preview
+it before applying it, and remember this path is **not** gated by
+`TI_ENFORCEMENT_MODE` — it is the control plane's own list, not threat-intel's.
 
 ### Cache-indexer
 

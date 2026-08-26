@@ -132,6 +132,10 @@ networkPolicy:
   enabled: false
   proxyIngressCidrs:
     - 10.0.0.0/8
+  # Namespace allowed to scrape metrics (proxy + threat-intel).
+  monitoringNamespace: "monitoring"
+  # Namespaces allowed to call the threat-intel admin/SOAR API on :8093.
+  threatIntelAdminNamespaces: []
   allowEgressInternet: true
   redisNamespace: ""
   kafkaNamespace: ""
@@ -247,6 +251,11 @@ threatIntel:
   # Admin/SOAR API bind inside the pod. Mutating /api/v1/soar/* endpoints are
   # fail-closed until apiToken is set (Bearer TI_API_TOKEN).
   adminBind: "0.0.0.0"
+  # SOAR token. Prefer an existing Secret: apiToken lands in the Deployment spec
+  # in plaintext and in Git if values.yaml is committed.
+  #   kubectl create secret generic bsdm-ti --from-literal=ti-api-token=...
+  existingSecret: ""
+  existingSecretKey: "ti-api-token"
   apiToken: ""
   # Snapshots are rebuilt on every cycle, so an emptyDir is enough unless the
   # IOC store (TASK-TI-002) needs them to survive a restart.

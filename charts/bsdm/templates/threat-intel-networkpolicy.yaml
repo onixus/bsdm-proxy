@@ -1,0 +1,60 @@
+{{- if and .Values.threatIntel .Values.threatIntel.enabled .Values.networkPolicy.enabled }}
+# The collector binds its admin/SOAR API on 0.0.0.0 inside the pod so kubelet
+# probes and the Prometheus scraper can reach it. Without this policy every pod
+# in the cluster can reach :8093 — read endpoints always, and mutating
+# /api/v1/soar/* as soon as a token exists and leaks.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "bsdm.fullname" . }}-threat-intel
+  labels:
+    {{- include "bsdm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: threat-intel
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "bsdm.threatIntelSelectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Scraping only. Probes come from the node and are not subject to policy.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.monitoringNamespace | default "monitoring" }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.threatIntel.service.port }}
+    {{- with .Values.networkPolicy.threatIntelAdminNamespaces }}
+    # Explicit opt-in for operator tooling that calls the SOAR API.
+    - from:
+        {{- range . }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ $.Values.threatIntel.service.port }}
+    {{- end }}
+  egress:
+    # IOC feeds are public HTTPS endpoints; no reason to reach cluster-internal ranges.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 80
+    - ports:
+        - protocol: TCP
+          port: 53
+        - protocol: UDP
+          port: 53
+{{- end }}

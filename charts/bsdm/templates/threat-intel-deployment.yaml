@@ -46,10 +46,20 @@ spec:
             # require TI_API_TOKEN (fail-closed without it).
             - name: TI_ADMIN_BIND
               value: {{ .Values.threatIntel.adminBind | default "0.0.0.0" | quote }}
-            {{- if .Values.threatIntel.apiToken }}
+            {{- if .Values.threatIntel.existingSecret }}
+            - name: TI_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.threatIntel.existingSecret }}
+                  key: {{ .Values.threatIntel.existingSecretKey | default "ti-api-token" }}
+            {{- else if .Values.threatIntel.apiToken }}
+            # Plaintext token from values.yaml: visible in `kubectl get deploy -o yaml`
+            # and in any Git-stored values file. Prefer threatIntel.existingSecret.
             - name: TI_API_TOKEN
               value: {{ .Values.threatIntel.apiToken | quote }}
             {{- end }}
+            - name: TI_SOAR_AUDIT_PATH
+              value: {{ printf "%s/soar-audit.jsonl" .Values.threatIntel.outputDir | quote }}
             - name: METRICS_PORT
               value: {{ .Values.threatIntel.service.port | quote }}
             - name: RUST_LOG

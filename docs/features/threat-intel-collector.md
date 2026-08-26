@@ -8,9 +8,11 @@
 
 The `threat-intel` worker ingests phishing/malware IOC feeds on a schedule,
 normalizes and scores indicators, persists them into SQLite with TTL management (`TI_SQLITE_PATH`),
-and exports live DNS RPZ zones (`threats.rpz`) and Proxy ACL feeds (`threat_domains.json`).
-It also exposes enterprise SIEM formatting (CEF/ECS/Syslog), SOAR automated containment
-APIs (`/api/v1/soar/*`), and ML domain reputation/homoglyph evaluation (`/api/v1/ml/*`).
+and compiles DNS RPZ zones (`threats.rpz`) and Proxy ACL feeds (`threat_domains.json`) to disk.
+In the default shadow mode those artifacts are written with a `.shadow` suffix that no
+data-plane component loads. It also exposes enterprise SIEM formatting (CEF/ECS/Syslog),
+a SOAR API (`/api/v1/soar/*`) which in shadow mode records indicators for observation only
+(`202`, `enforced:false`), and ML domain reputation/homoglyph evaluation (`/api/v1/ml/*`).
 
 It also **compiles enforcement artifacts** when `TI_RPZ_ENABLED` is on (default
 `true`, `threat-intel/src/config.rs`): an RPZ zone `threats.rpz` and a Proxy ACL
@@ -103,9 +105,11 @@ indicator count, attempts, duration and the last error, if any.
 | `TI_OUTPUT_DIR` | `./data/threat-intel` | Snapshot and artifact output directory |
 | `TI_USER_AGENT` | `bsdm-threat-intel/<version>` | Feed request User-Agent |
 | `TI_RUN_ONCE` | `false` | Collect every source once and exit |
-| `TI_ENFORCEMENT_MODE` | `shadow` | `shadow` writes `.shadow` files; `enforce` compiles live targets |
+| `TI_ENFORCEMENT_MODE` | `shadow` | `shadow` writes `.shadow` files; `enforce` compiles live targets. Any unrecognised value falls back to `shadow`. The suffix is a convention on the producer side: `dns-sinkhole` loads whatever `DNS_SINKHOLE_ZONE_PATH` points at, including a `.shadow` file |
 | `TI_RPZ_ENABLED` | `true` | Compile `threats.rpz` and `threat_domains.json` |
-| `TI_API_KEY` | empty | Bearer / header token for SOAR endpoints (`X-API-Key`) |
+| `TI_API_TOKEN` | unset | `Authorization: Bearer` token for mutating `POST /api/v1/soar/*`; unset means those endpoints are disabled in the production profile (fail-closed) |
+| `TI_API_ALLOW_INSECURE` | `false` | Lab-only override that leaves mutating endpoints open without a token; never set it on a pilot network |
+| `TI_SOAR_AUDIT_PATH` | `<TI_OUTPUT_DIR>/soar-audit.jsonl` | Audit trail of SOAR mutations |
 | `TI_ADMIN_BIND` | `127.0.0.1` | Bind host for the HTTP admin/metrics listener |
 | `METRICS_PORT` | `8093` | `/metrics`, `/health`, SOAR and ML endpoints |
 

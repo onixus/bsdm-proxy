@@ -64,7 +64,9 @@ pub fn execute_soar_block(
     req: SoarBlockRequest,
     mode: EnforcementMode,
 ) -> Result<SoarActionResponse, StorageError> {
-    let ttl_secs = req.ttl_secs.unwrap_or(86400 * 30); // Default 30 days
+    // Default 30 days; clamped so a client-supplied TTL cannot overflow the
+    // expiry timestamp or expire the indicator on insert.
+    let ttl_secs = req.ttl_secs.unwrap_or(86400 * 30).clamp(60, 86400 * 365);
     let mut tags = vec!["soar_blocked".to_string(), "manual_containment".to_string()];
     if !mode.is_enforce() {
         tags.push("shadow".to_string());

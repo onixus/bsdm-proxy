@@ -4,6 +4,25 @@ use std::collections::HashMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::path::Path;
 
+/// Why a zone could not be loaded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ZoneError {
+    /// The file is observe-only threat-intel output, not a zone to enforce.
+    ShadowArtifact(String),
+    /// Unreadable file or malformed content.
+    Invalid(String),
+}
+
+impl std::fmt::Display for ZoneError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ShadowArtifact(m) | Self::Invalid(m) => f.write_str(m),
+        }
+    }
+}
+
+impl std::error::Error for ZoneError {}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ZoneAction {
     /// Use global sinkhole / NXDOMAIN policy.
@@ -23,12 +42,28 @@ pub struct Zone {
 }
 
 impl Zone {
-    pub fn load_path(path: &Path) -> Result<Self, String> {
-        let text = std::fs::read_to_string(path).map_err(|e| format!("read zone: {e}"))?;
+    pub fn load_path(path: &Path) -> Result<Self, ZoneError> {
+        // The collector writes observe-only artifacts under a `.shadow` suffix.
+        // Refuse them by name as well as by marker: a copy that kept the suffix
+        // is still an artifact nobody signed off for enforcement (ADR 0008).
+        if path
+            .as_os_str()
+            .to_string_lossy()
+            .ends_with(SHADOW_ARTIFACT_SUFFIX)
+        {
+            return Err(ZoneError::ShadowArtifact(format!(
+                "refusing to load {}: a '{SHADOW_ARTIFACT_SUFFIX}' artifact is observe-only \
+                 threat-intel output, not a zone. Enforcement requires \
+                 TI_ENFORCEMENT_MODE=enforce on the collector",
+                path.display()
+            )));
+        }
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| ZoneError::Invalid(format!("read zone: {e}")))?;
         Self::parse(&text)
     }
 
-    pub fn parse(text: &str) -> Result<Self, String> {
+    pub fn parse(text: &str) -> Result<Self, ZoneError> {
         let mut zone = Self::default();
         for (lineno, raw) in text.lines().enumerate() {
             let cleaned = strip_comment(raw);
@@ -40,7 +75,16 @@ impl Zone {
                 // $TTL etc. — ignore for PoC
                 continue;
             }
-            parse_line(&mut zone, line).map_err(|e| format!("zone line {}: {e}", lineno + 1))?;
+            if is_shadow_marker(line) {
+                return Err(ZoneError::ShadowArtifact(format!(
+                    "zone line {}: this zone is marked '{SHADOW_MARKER_NAME} TXT \"shadow\"' — \
+                     it is an observe-only threat-intel artifact and must not be enforced. \
+                     Set TI_ENFORCEMENT_MODE=enforce on the collector to produce a real zone",
+                    lineno + 1
+                )));
+            }
+            parse_line(&mut zone, line)
+                .map_err(|e| ZoneError::Invalid(format!("zone line {}: {e}", lineno + 1)))?;
         }
         Ok(zone)
     }
@@ -61,6 +105,27 @@ impl Zone {
     pub fn len(&self) -> usize {
         self.exact.len() + self.suffixes.len()
     }
+}
+
+/// Owner name that `threat-intel` writes into an observe-only zone.
+///
+/// Kept in sync with `threat_intel::rpz::SHADOW_MARKER_NAME`; the two crates do
+/// not depend on each other, so the constant is duplicated rather than shared.
+const SHADOW_MARKER_NAME: &str = "_bsdm-enforcement-mode";
+
+/// Filename suffix of the collector's observe-only artifacts.
+const SHADOW_ARTIFACT_SUFFIX: &str = ".shadow";
+
+/// True for the marker record that makes a zone unloadable.
+///
+/// Matched on the owner name alone: whatever the mode says, a zone that carries
+/// the record at all is collector output that no operator promoted.
+fn is_shadow_marker(line: &str) -> bool {
+    line.split_whitespace().next().is_some_and(|owner| {
+        owner
+            .trim_end_matches('.')
+            .eq_ignore_ascii_case(SHADOW_MARKER_NAME)
+    })
 }
 
 fn strip_comment(line: &str) -> String {
@@ -155,6 +220,42 @@ fn parse_line(zone: &mut Zone, line: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_shadow_marked_zone_is_refused() {
+        // Exactly what threat-intel writes in shadow mode: the human-readable
+        // banner is a comment, the TXT record is the enforceable half.
+        let err = Zone::parse(
+            r#"
+$TTL 300
+; SHADOW MODE (TI_ENFORCEMENT_MODE=shadow): observe-only artifact.
+_bsdm-enforcement-mode IN TXT "shadow"
+phish.test. CNAME .
+"#,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, ZoneError::ShadowArtifact(_)),
+            "shadow-marked zone must be refused, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn a_shadow_suffixed_path_is_refused_before_it_is_read() {
+        // The file does not even exist: the suffix alone must stop the load,
+        // otherwise a copy that kept the name would be enforced.
+        let err = Zone::load_path(Path::new("/nonexistent/threats.rpz.shadow")).unwrap_err();
+        assert!(
+            matches!(err, ZoneError::ShadowArtifact(_)),
+            "a .shadow path must be refused by name, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn an_enforce_zone_without_the_marker_still_loads() {
+        let z = Zone::parse("$TTL 300\nphish.test. CNAME .\n").unwrap();
+        assert!(matches!(z.lookup("phish.test"), Some(ZoneAction::Policy)));
+    }
 
     #[test]
     fn parses_plain_and_rpz() {

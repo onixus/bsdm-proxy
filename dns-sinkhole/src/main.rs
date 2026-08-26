@@ -12,7 +12,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tracing::{error, info, warn};
-use zone::Zone;
+use zone::{Zone, ZoneError};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -35,6 +35,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let zone_path = Path::new(&cfg.zone_path);
     let zone = match Zone::load_path(zone_path) {
         Ok(z) => z,
+        // A shadow artifact is a misconfiguration, not a missing file: falling
+        // back would hide the fact that someone pointed the sinkhole at
+        // observe-only threat-intel output (ADR 0008).
+        Err(e @ ZoneError::ShadowArtifact(_)) => {
+            error!("{e}");
+            return Err(e.into());
+        }
         Err(e) => {
             // First boot: fall back to image/example blocklist if compiled zone missing.
             let fallback = Path::new("/etc/bsdm-proxy/blocklist.rpz");

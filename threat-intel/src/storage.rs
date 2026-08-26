@@ -162,7 +162,7 @@ impl SqliteStorage {
 
         let now = Utc::now();
         let now_ts = now.timestamp();
-        let expires_ts = now_ts + ttl_secs;
+        let expires_ts = now_ts.saturating_add(ttl_secs);
 
         for ind in indicators {
             if ind.is_private_or_bogon {
@@ -319,10 +319,17 @@ impl SqliteStorage {
 
     /// Active domains paired with the feed that reported them with the highest
     /// confidence. Used to label shadow matches per feed downstream.
+    ///
+    /// `exclude_shadow` drops indicators tagged `shadow` — those accepted by
+    /// SOAR while `TI_ENFORCEMENT_MODE=shadow` was in force. They are recorded
+    /// for observation only, so they must never turn into blocking rules just
+    /// because the mode was later flipped to `enforce` (ADR 0008 §4): promoting
+    /// them takes a deliberate re-submission under `enforce`.
     pub fn list_active_domain_sources(
         &self,
         min_confidence: u8,
         limit: usize,
+        exclude_shadow: bool,
     ) -> Result<Vec<(String, String)>, StorageError> {
         let conn = self.conn.lock().map_err(|_| StorageError::Poisoned)?;
         let now_ts = Utc::now().timestamp();
@@ -335,6 +342,7 @@ impl SqliteStorage {
               AND domain != ''
               AND expires_at > ?1
               AND confidence_score >= ?2
+              AND (?4 = 0 OR tags NOT LIKE '%"shadow"%')
             GROUP BY domain
             HAVING confidence_score = MAX(confidence_score)
             ORDER BY MAX(confidence_score) DESC, COUNT(*) DESC
@@ -342,9 +350,11 @@ impl SqliteStorage {
             "#,
         )?;
 
-        let rows = stmt.query_map(params![now_ts, min_confidence, limit as i64], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?;
+        let exclude_shadow = i64::from(exclude_shadow);
+        let rows = stmt.query_map(
+            params![now_ts, min_confidence, limit as i64, exclude_shadow],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )?;
 
         let mut pairs = Vec::new();
         for pair in rows {
@@ -544,13 +554,47 @@ mod tests {
         let active = storage.list_active(80, None, 10).unwrap();
         assert_eq!(active.len(), 2);
 
-        let pairs = storage.list_active_domain_sources(80, 10).unwrap();
+        let pairs = storage.list_active_domain_sources(80, 10, false).unwrap();
         assert_eq!(pairs.len(), 2);
         let domains: Vec<&str> = pairs.iter().map(|(d, _)| d.as_str()).collect();
         assert!(domains.contains(&"phish.test.org"));
         assert!(domains.contains(&"sub.victim.net"));
         // Every exported domain carries the feed that reported it.
         assert!(pairs.iter().all(|(_, source)| !source.is_empty()));
+    }
+
+    #[test]
+    fn shadow_tagged_indicators_never_reach_the_enforcement_export() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        let feed_raw = RawIndicator::new("feed-threat.test", IndicatorKind::Domain, &TestFeed);
+        let mut soar_raw = RawIndicator::new("soar-shadow.test", IndicatorKind::Domain, &TestFeed);
+        // Exactly what execute_soar_block records while the mode is shadow.
+        soar_raw.source = "soar:operator-1".to_string();
+        soar_raw.tags = vec![
+            "soar_blocked".to_string(),
+            "manual_containment".to_string(),
+            "shadow".to_string(),
+        ];
+
+        let norm_feed = NormalizedIndicator::from_raw(&feed_raw, 90).unwrap();
+        let norm_soar = NormalizedIndicator::from_raw(&soar_raw, 100).unwrap();
+        storage.upsert_batch(&[norm_feed, norm_soar], 3600).unwrap();
+
+        // Shadow artifact: the operator must see what they submitted.
+        let observed = storage.list_active_domain_sources(0, 10, false).unwrap();
+        let observed: Vec<&str> = observed.iter().map(|(d, _)| d.as_str()).collect();
+        assert!(observed.contains(&"soar-shadow.test"));
+        assert!(observed.contains(&"feed-threat.test"));
+
+        // Enforcement artifact: flipping the mode must not promote it silently.
+        let enforced = storage.list_active_domain_sources(0, 10, true).unwrap();
+        let enforced: Vec<&str> = enforced.iter().map(|(d, _)| d.as_str()).collect();
+        assert!(
+            !enforced.contains(&"soar-shadow.test"),
+            "an indicator accepted in shadow mode leaked into the enforcement export: {enforced:?}"
+        );
+        assert!(enforced.contains(&"feed-threat.test"));
     }
 
     #[test]

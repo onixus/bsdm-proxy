@@ -10,14 +10,15 @@
 - [x] Integrate public threat feeds (`threat-intel` collector: OpenPhish, PhishStats, Phishing.Database, URLhaus — TASK-TI-001)
 - [x] Store IOC (structured SQLite persistence with WAL, migrations, indexes, and TTL expiration — TASK-TI-002)
 - [x] Normalize domains, URLs and IP addresses (canonicalization, Punycode, bogon filter — TASK-TI-003)
-- [x] Generate ACL lists (`threat_domains.json` JSON feed for proxy data-plane policies — TASK-TI-021)
+- [x] Generate ACL lists (`threat_domains.json` JSON feed — TASK-TI-021). Consumed only by the proxy shadow matcher for observation; no ACL engine reads it in any mode
 
-## Phase 2 - Scoring & RPZ Enforcement
+## Phase 2 - Scoring & RPZ artifact generation (enforcement gated by ADR 0008)
 
 - [x] Weighted confidence scoring & multi-source correlation bonus with freshness decay (TASK-TI-010)
 - [x] Automated DNS RPZ zone compilation (`threats.rpz`) with atomic rotation for `dns-sinkhole` (TASK-TI-020)
 - [x] RPZ syntax validation and zone serial management (TASK-TI-020)
-- [x] Proxy ACL and DNS blocklist integration (TASK-TI-020 & 021)
+- [x] Compilation of RPZ/ACL artifacts to disk (TASK-TI-020 & 021)
+- [ ] Consumption of `threat_domains.json` by a proxy ACL engine — not implemented
 - [x] Shadow Mode observation & false-positive evaluation (`threat_shadow_match`, `bsdm_proxy_ti_shadow_matches_total{feed}`) (ADR 0008)
 
 ## Phase 3 - Enterprise SIEM & SOAR
@@ -36,7 +37,9 @@
 ## Success Criteria
 
 - [x] Automated IOC collection and deduplication
-- [x] Measured false-positive rate per feed before any blocking (ADR 0008)
-- [x] Reliable DNS RPZ and Proxy ACL blocking
+- [x] Mechanism for measuring the per-feed false-positive rate (`threat_shadow_match`, per-feed metric — ADR 0008)
+- [ ] The measurement itself on real traffic (observation window per ADR 0008); not yet performed on any installation
+- [ ] Reliable DNS RPZ blocking — requires an explicit `TI_ENFORCEMENT_MODE=enforce` under the ADR 0008 transition criteria; not enabled in the pilot
+- [ ] Proxy ACL blocking — not implemented
 - [x] Auditable SIEM decisions and SOAR exceptions
-- [x] Integration with BSDM Proxy security controls
+- [x] Observational integration with BSDM Proxy (shadow matching, event field, per-feed metric)
