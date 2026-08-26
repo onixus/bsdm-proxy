@@ -19,6 +19,12 @@ const DEFAULT_FAILURE_RATE: f64 = 0.05; // 5%
 const DEFAULT_MIN_SAMPLES: usize = 5;
 const DEFAULT_WINDOW_SECS: u64 = 60;
 const DEFAULT_COOLDOWN_SECS: u64 = 0; // 0 = permanent until manual reset
+/// Upper bound on the number of per-domain trackers kept in memory. Without it a
+/// client looping `CONNECT <random>.attacker.tld:443` grows the map without limit.
+const DEFAULT_MAX_DOMAINS: usize = 10_000;
+/// Smallest cap accepted from the environment; below this the breaker cannot keep
+/// a meaningful window for a real client population.
+const MIN_MAX_DOMAINS: usize = 128;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MitmCircuitBreakerConfig {
@@ -27,6 +33,7 @@ pub struct MitmCircuitBreakerConfig {
     pub min_samples: usize,
     pub window_secs: u64,
     pub cooldown_secs: u64,
+    pub max_domains: usize,
 }
 
 impl Default for MitmCircuitBreakerConfig {
@@ -37,6 +44,7 @@ impl Default for MitmCircuitBreakerConfig {
             min_samples: DEFAULT_MIN_SAMPLES,
             window_secs: DEFAULT_WINDOW_SECS,
             cooldown_secs: DEFAULT_COOLDOWN_SECS,
+            max_domains: DEFAULT_MAX_DOMAINS,
         }
     }
 }
@@ -65,6 +73,11 @@ impl MitmCircuitBreakerConfig {
             .ok()
             .and_then(|v| v.parse::<u64>().ok())
             .unwrap_or(DEFAULT_COOLDOWN_SECS);
+        let max_domains = std::env::var("MITM_CIRCUIT_BREAKER_MAX_DOMAINS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .map(|n| n.max(MIN_MAX_DOMAINS))
+            .unwrap_or(DEFAULT_MAX_DOMAINS);
 
         Self {
             enabled,
@@ -72,6 +85,7 @@ impl MitmCircuitBreakerConfig {
             min_samples,
             window_secs,
             cooldown_secs,
+            max_domains,
         }
     }
 }
@@ -93,7 +107,12 @@ pub struct MitmCircuitBreakerStatus {
     pub min_samples: usize,
     pub window_secs: u64,
     pub cooldown_secs: u64,
+    pub max_domains: usize,
     pub audit_path: Option<String>,
+    pub tracked_domains: usize,
+    pub evicted_domains_total: u64,
+    pub evicted_tripped_domains_total: u64,
+    pub dropped_attempts_total: u64,
     pub tripped_count: usize,
     pub tripped_domains: Vec<TrippedInfo>,
 }
@@ -126,13 +145,15 @@ enum DomainState {
 struct DomainTracker {
     samples: VecDeque<Sample>,
     state: DomainState,
+    last_seen: Instant,
 }
 
 impl DomainTracker {
-    fn new() -> Self {
+    fn new(now: Instant) -> Self {
         Self {
             samples: VecDeque::new(),
             state: DomainState::Closed,
+            last_seen: now,
         }
     }
 
@@ -142,6 +163,106 @@ impl DomainTracker {
                 self.samples.pop_front();
             } else {
                 break;
+            }
+        }
+    }
+
+    /// A tracker is evictable once it carries no state worth keeping: not tripped
+    /// and with no sample left inside the current window.
+    fn is_evictable(&self, cutoff: Instant) -> bool {
+        matches!(self.state, DomainState::Closed)
+            && self.samples.iter().all(|sample| sample.at < cutoff)
+    }
+}
+
+/// Bounded map of per-domain trackers.
+///
+/// `is_tripped` runs on every MITM CONNECT, so it is a single `HashMap` lookup:
+/// keys are exact hostnames, normalized by [`normalize_domain_key`].
+#[derive(Debug, Default)]
+struct BreakerState {
+    trackers: HashMap<String, DomainTracker>,
+    evicted_total: u64,
+    evicted_tripped_total: u64,
+    dropped_attempts_total: u64,
+}
+
+impl BreakerState {
+    /// Free capacity when the tracker map is full.
+    ///
+    /// Each sweep frees 10% of the cap, so its cost is amortised over the
+    /// following `max_domains / 10` inserts instead of being paid per request.
+    /// The tiers exist so that a `CONNECT` flood evicts its own throwaway
+    /// trackers before it can flush a domain the breaker is actually measuring.
+    /// Returns `true` when there is room for a new tracker.
+    fn make_room(&mut self, max_domains: usize, cutoff: Instant) -> bool {
+        if self.trackers.len() < max_domains {
+            return true;
+        }
+
+        let target = max_domains - (max_domains / 10).max(1);
+
+        // Tier 1: closed trackers with no sample left inside the window — nothing
+        // is lost, least recently seen first.
+        self.evict_until(
+            target,
+            |tracker| tracker.is_evictable(cutoff),
+            |tracker| (0, tracker.last_seen),
+        );
+        if self.trackers.len() < max_domains {
+            return true;
+        }
+
+        // Tier 2: under a flood every tracker still holds a live sample. Evict
+        // closed trackers with the fewest samples first, which targets the flood's
+        // own one-sample entries ahead of a domain sitting on a partial failure
+        // streak; last_seen breaks ties.
+        self.evict_until(
+            target,
+            |tracker| matches!(tracker.state, DomainState::Closed),
+            |tracker| (tracker.samples.len(), tracker.last_seen),
+        );
+        if self.trackers.len() < max_domains {
+            return true;
+        }
+
+        // Tier 3: the map is full of tripped domains. Trips are cheap to re-earn
+        // (the next failures re-trip the domain) but an unbounded map is not, and
+        // without this the sweep above would run on every request forever. Evict
+        // the least recently seen trips and count them separately so operators can
+        // see that a bypass was dropped under pressure.
+        let before = self.evicted_total;
+        self.evict_until(target, |_| true, |tracker| (0, tracker.last_seen));
+        self.evicted_tripped_total += self.evicted_total - before;
+
+        self.trackers.len() < max_domains
+    }
+
+    /// Drop trackers matching `evictable`, ordered by `rank` ascending, until the
+    /// map is at or below `target`.
+    fn evict_until<K: Ord>(
+        &mut self,
+        target: usize,
+        evictable: impl Fn(&DomainTracker) -> bool,
+        rank: impl Fn(&DomainTracker) -> K,
+    ) {
+        if self.trackers.len() <= target {
+            return;
+        }
+        let mut candidates: Vec<(K, String)> = self
+            .trackers
+            .iter()
+            .filter(|(_, tracker)| evictable(tracker))
+            .map(|(key, tracker)| (rank(tracker), key.clone()))
+            .collect();
+        candidates.sort_by(|a, b| a.0.cmp(&b.0));
+
+        for (_, key) in candidates {
+            if self.trackers.len() <= target {
+                break;
+            }
+            if self.trackers.remove(&key).is_some() {
+                self.evicted_total += 1;
             }
         }
     }
@@ -163,7 +284,7 @@ struct BreakerAuditRecord<'a> {
 pub struct MitmCircuitBreaker {
     config: MitmCircuitBreakerConfig,
     audit_path: Option<PathBuf>,
-    trackers: RwLock<HashMap<String, DomainTracker>>,
+    state: RwLock<BreakerState>,
 }
 
 impl MitmCircuitBreaker {
@@ -186,7 +307,7 @@ impl MitmCircuitBreaker {
         Self {
             config,
             audit_path,
-            trackers: RwLock::new(HashMap::new()),
+            state: RwLock::new(BreakerState::default()),
         }
     }
 
@@ -211,24 +332,16 @@ impl MitmCircuitBreaker {
         let now = Instant::now();
         let cooldown = self.config.cooldown_secs;
 
-        let trackers = match self.trackers.read() {
+        let state = match self.state.read() {
             Ok(t) => t,
             Err(poisoned) => poisoned.into_inner(),
         };
 
-        // Check exact match and parent domain suffixes
-        for (tracked_domain, tracker) in trackers.iter() {
-            if domain_matches(&normalized, tracked_domain) {
-                if let DomainState::Tripped { tripped_at, .. } = &tracker.state {
-                    if cooldown > 0 && now.duration_since(*tripped_at).as_secs() >= cooldown {
-                        // Cooldown elapsed, allow attempt
-                        continue;
-                    }
-                    return true;
-                }
-            }
-        }
-        false
+        // Keys are exact hostnames, so this is a single lookup — no scan.
+        state
+            .trackers
+            .get(&normalized)
+            .is_some_and(|tracker| is_active_trip(tracker, now, cooldown))
     }
 
     /// Record an attempt outcome (success or failure) for a domain.
@@ -242,14 +355,36 @@ impl MitmCircuitBreaker {
             .checked_sub(Duration::from_secs(self.config.window_secs))
             .unwrap_or(now);
 
-        let mut trackers = match self.trackers.write() {
+        let mut state = match self.state.write() {
             Ok(t) => t,
             Err(poisoned) => poisoned.into_inner(),
         };
 
-        let tracker = trackers
-            .entry(domain_key.clone())
-            .or_insert_with(DomainTracker::new);
+        if !state.trackers.contains_key(&domain_key) {
+            // Cap the tracker map: an attacker looping CONNECT on random hosts must
+            // not be able to grow it without limit. When nothing can be evicted the
+            // sample is dropped — the breaker stops learning new domains rather than
+            // growing, and existing trips keep working.
+            if !state.make_room(self.config.max_domains, cutoff) {
+                state.dropped_attempts_total += 1;
+                warn!(
+                    domain = %domain_key,
+                    max_domains = self.config.max_domains,
+                    dropped_attempts_total = state.dropped_attempts_total,
+                    "MITM circuit breaker tracker map is full; attempt not recorded"
+                );
+                return;
+            }
+            state
+                .trackers
+                .insert(domain_key.clone(), DomainTracker::new(now));
+        }
+
+        let tracker = state
+            .trackers
+            .get_mut(&domain_key)
+            .expect("tracker inserted above");
+        tracker.last_seen = now;
 
         // If cooldown elapsed on a tripped domain, reset it back to closed
         if let DomainState::Tripped { tripped_at, .. } = &tracker.state {
@@ -333,7 +468,7 @@ impl MitmCircuitBreaker {
         validate_audit_text("actor", actor, 128)?;
         validate_audit_text("reason", change_reason, 512)?;
 
-        let mut trackers = match self.trackers.write() {
+        let mut state = match self.state.write() {
             Ok(t) => t,
             Err(poisoned) => poisoned.into_inner(),
         };
@@ -342,7 +477,7 @@ impl MitmCircuitBreaker {
         let pattern_norm = domain_pattern.trim().to_ascii_lowercase();
 
         if pattern_norm == "*" {
-            for (domain, tracker) in trackers.iter_mut() {
+            for (domain, tracker) in state.trackers.iter_mut() {
                 if matches!(tracker.state, DomainState::Tripped { .. }) {
                     tracker.state = DomainState::Closed;
                     tracker.samples.clear();
@@ -351,7 +486,7 @@ impl MitmCircuitBreaker {
             }
         } else {
             let key = normalize_domain_key(&pattern_norm);
-            if let Some(tracker) = trackers.get_mut(&key) {
+            if let Some(tracker) = state.trackers.get_mut(&key) {
                 if matches!(tracker.state, DomainState::Tripped { .. }) {
                     tracker.state = DomainState::Closed;
                     tracker.samples.clear();
@@ -393,13 +528,13 @@ impl MitmCircuitBreaker {
 
     /// Get snapshot of circuit breaker status and tripped domains.
     pub fn status(&self) -> MitmCircuitBreakerStatus {
-        let trackers = match self.trackers.read() {
+        let state = match self.state.read() {
             Ok(t) => t,
             Err(poisoned) => poisoned.into_inner(),
         };
 
         let mut tripped = Vec::new();
-        for tracker in trackers.values() {
+        for tracker in state.trackers.values() {
             if let DomainState::Tripped { info, .. } = &tracker.state {
                 tripped.push(info.clone());
             }
@@ -412,23 +547,38 @@ impl MitmCircuitBreaker {
             min_samples: self.config.min_samples,
             window_secs: self.config.window_secs,
             cooldown_secs: self.config.cooldown_secs,
+            max_domains: self.config.max_domains,
             audit_path: self.audit_path(),
+            tracked_domains: state.trackers.len(),
+            evicted_domains_total: state.evicted_total,
+            evicted_tripped_domains_total: state.evicted_tripped_total,
+            dropped_attempts_total: state.dropped_attempts_total,
             tripped_count: tripped.len(),
             tripped_domains: tripped,
         }
     }
 }
 
-fn normalize_domain_key(domain: &str) -> String {
-    domain.trim().trim_end_matches('.').to_ascii_lowercase()
+/// A tracker counts as tripped only while its cooldown (when configured) has not
+/// elapsed; afterwards `record_attempt` closes it again on the next attempt.
+fn is_active_trip(tracker: &DomainTracker, now: Instant, cooldown_secs: u64) -> bool {
+    match &tracker.state {
+        DomainState::Tripped { tripped_at, .. } => {
+            cooldown_secs == 0 || now.duration_since(*tripped_at).as_secs() < cooldown_secs
+        }
+        DomainState::Closed => false,
+    }
 }
 
-fn domain_matches(target: &str, tracked: &str) -> bool {
-    if tracked.starts_with('.') {
-        target == tracked.trim_start_matches('.') || target.ends_with(tracked)
-    } else {
-        target == tracked
-    }
+/// Canonical tracker key: an exact, lowercase hostname.
+///
+/// Leading dots are stripped as well as trailing ones. The only producer of keys
+/// is `record_attempt`, fed from the client-supplied CONNECT authority, so a key
+/// such as `.example.com` would let a client trip a parent-domain wildcard and
+/// force blind-CONNECT for every host under it. Keys are exact hostnames instead,
+/// which also keeps the lookup in `is_tripped` O(1).
+fn normalize_domain_key(domain: &str) -> String {
+    domain.trim().trim_matches('.').to_ascii_lowercase()
 }
 
 fn validate_audit_text(field: &str, value: &str, max: usize) -> Result<(), String> {
@@ -507,6 +657,7 @@ mod tests {
             min_samples: 5,
             window_secs: 60,
             cooldown_secs: 0,
+            max_domains: DEFAULT_MAX_DOMAINS,
         };
         let breaker = MitmCircuitBreaker::new(config, Some(audit.clone()));
 
@@ -554,6 +705,7 @@ mod tests {
             min_samples: 10,
             window_secs: 60,
             cooldown_secs: 0,
+            max_domains: DEFAULT_MAX_DOMAINS,
         };
         let breaker = MitmCircuitBreaker::new(config, None);
 
@@ -566,22 +718,167 @@ mod tests {
     }
 
     #[test]
-    fn wildcards_and_parent_domains_match() {
+    fn tracker_map_is_bounded_and_evicts_idle_domains() {
+        let config = MitmCircuitBreakerConfig {
+            enabled: true,
+            failure_rate_threshold: 0.10,
+            min_samples: 2,
+            // Window of 0s is not accepted from env, but here it lets every sample
+            // fall out of the window immediately so trackers become evictable.
+            window_secs: 1,
+            cooldown_secs: 0,
+            max_domains: MIN_MAX_DOMAINS,
+        };
+        let breaker = MitmCircuitBreaker::new(config, None);
+
+        // Simulate `CONNECT <n>.attacker.tld:443` in a loop: far more unique
+        // domains than the cap.
+        for n in 0..(MIN_MAX_DOMAINS * 4) {
+            breaker.record_attempt(&format!("host{n}.attacker.tld"), true, "ok");
+        }
+
+        let status = breaker.status();
+        assert!(
+            status.tracked_domains <= MIN_MAX_DOMAINS,
+            "tracker map grew past the cap: {}",
+            status.tracked_domains
+        );
+        assert!(
+            status.evicted_domains_total > 0,
+            "expected idle trackers to be evicted"
+        );
+    }
+
+    #[test]
+    fn tripped_domains_survive_pressure_from_new_domains() {
+        let config = MitmCircuitBreakerConfig {
+            enabled: true,
+            failure_rate_threshold: 0.10,
+            min_samples: 2,
+            window_secs: 1,
+            cooldown_secs: 0,
+            max_domains: MIN_MAX_DOMAINS,
+        };
+        let breaker = MitmCircuitBreaker::new(config, None);
+
+        breaker.record_attempt("victim.example.com", false, "fail");
+        breaker.record_attempt("victim.example.com", false, "fail");
+        assert!(breaker.is_tripped("victim.example.com"));
+
+        for n in 0..(MIN_MAX_DOMAINS * 4) {
+            breaker.record_attempt(&format!("host{n}.attacker.tld"), true, "ok");
+        }
+
+        // The flood is made of closed trackers, so tiers 1 and 2 free all the room
+        // needed and the trip never becomes an eviction candidate.
+        assert!(breaker.is_tripped("victim.example.com"));
+        assert_eq!(breaker.status().tripped_count, 1);
+    }
+
+    #[test]
+    fn client_supplied_dots_cannot_create_a_parent_domain_wildcard() {
         let config = MitmCircuitBreakerConfig {
             enabled: true,
             failure_rate_threshold: 0.10,
             min_samples: 2,
             window_secs: 60,
             cooldown_secs: 0,
+            max_domains: DEFAULT_MAX_DOMAINS,
         };
         let breaker = MitmCircuitBreaker::new(config, None);
 
+        // `CONNECT .pinned.com:443` must trip that exact host only; it must not
+        // become a wildcard that bypasses MITM for every host under pinned.com.
         breaker.record_attempt(".pinned.com", false, "fail");
         breaker.record_attempt(".pinned.com", false, "fail");
 
         assert!(breaker.is_tripped("pinned.com"));
-        assert!(breaker.is_tripped("sub.pinned.com"));
-        assert!(breaker.is_tripped("deep.sub.pinned.com"));
+        assert!(!breaker.is_tripped("sub.pinned.com"));
+        assert!(!breaker.is_tripped("deep.sub.pinned.com"));
         assert!(!breaker.is_tripped("other.com"));
+
+        let status = breaker.status();
+        assert_eq!(status.tripped_count, 1);
+        assert_eq!(status.tripped_domains[0].domain, "pinned.com");
+    }
+
+    #[test]
+    fn flood_evicts_its_own_trackers_before_a_domain_under_measurement() {
+        let config = MitmCircuitBreakerConfig {
+            enabled: true,
+            failure_rate_threshold: 0.90,
+            // High enough that the victim never trips: it stays Closed with live
+            // samples, which is exactly the state tier 2 must protect.
+            min_samples: 50,
+            window_secs: 600,
+            cooldown_secs: 0,
+            max_domains: MIN_MAX_DOMAINS,
+        };
+        let breaker = MitmCircuitBreaker::new(config, None);
+
+        for _ in 0..10 {
+            breaker.record_attempt("victim.example.com", false, "fail");
+        }
+
+        for n in 0..(MIN_MAX_DOMAINS * 4) {
+            breaker.record_attempt(&format!("host{n}.attacker.tld"), true, "ok");
+        }
+
+        let status = breaker.status();
+        assert!(status.tracked_domains <= MIN_MAX_DOMAINS);
+        assert!(
+            status.evicted_domains_total > 0,
+            "the flood must evict its own trackers"
+        );
+        assert_eq!(
+            status.dropped_attempts_total, 0,
+            "eviction must keep making room instead of dropping attempts"
+        );
+
+        // The victim's failure history must have survived the flood: 40 more
+        // failures reach min_samples only if the first 10 are still counted.
+        for _ in 0..40 {
+            breaker.record_attempt("victim.example.com", false, "fail");
+        }
+        assert!(
+            breaker.is_tripped("victim.example.com"),
+            "the flood flushed the samples the breaker was measuring"
+        );
+    }
+
+    #[test]
+    fn a_map_full_of_trips_still_makes_room() {
+        let config = MitmCircuitBreakerConfig {
+            enabled: true,
+            failure_rate_threshold: 0.10,
+            min_samples: 2,
+            window_secs: 600,
+            cooldown_secs: 0,
+            max_domains: MIN_MAX_DOMAINS,
+        };
+        let breaker = MitmCircuitBreaker::new(config, None);
+
+        // A client can trip a domain at will by aborting its own handshake, so the
+        // map must stay bounded even when every tracker is tripped.
+        for n in 0..(MIN_MAX_DOMAINS * 2) {
+            let domain = format!("host{n}.attacker.tld");
+            breaker.record_attempt(&domain, false, "fail");
+            breaker.record_attempt(&domain, false, "fail");
+        }
+
+        let status = breaker.status();
+        assert!(
+            status.tracked_domains <= MIN_MAX_DOMAINS,
+            "tracker map grew past the cap: {}",
+            status.tracked_domains
+        );
+        assert!(
+            status.evicted_tripped_domains_total > 0,
+            "expected tier-3 eviction of the oldest trips"
+        );
+        assert_eq!(
+            status.dropped_attempts_total, 0,
+            "tier 3 must keep making room instead of dropping attempts"
+        );
     }
 }

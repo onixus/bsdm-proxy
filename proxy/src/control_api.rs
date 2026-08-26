@@ -2478,6 +2478,10 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let env_path = temp.path().join("bsdm-proxy.env");
         std::env::set_var("CONFIG_ENV_PATH", env_path.to_string_lossy().to_string());
+        // Without an explicit restart command, `schedule_service_restart` falls back
+        // to re-executing `current_exe()` — under `cargo test` that is the test
+        // binary, so the whole suite forks a fresh copy of itself on every run.
+        std::env::set_var("CONFIG_RESTART_CMD", "true");
 
         let metrics = Arc::new(Metrics::new().unwrap());
         let cache = Arc::new(HttpL1Cache::new(100, 4));
@@ -2511,6 +2515,7 @@ mod tests {
             .expect("channel open");
         assert!(*shutdown_rx.borrow());
 
+        std::env::remove_var("CONFIG_RESTART_CMD");
         std::env::remove_var("CONFIG_ENV_PATH");
     }
 

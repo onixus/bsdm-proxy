@@ -617,7 +617,20 @@ async fn handle_connect_mitm(
     client_ip: Arc<str>,
     proxy_user: Option<Arc<UserInfo>>,
 ) {
-    let (domain, _port) = parse_authority(&authority);
+    let (domain, port) = parse_authority(&authority);
+
+    // Same destination check as the blind-tunnel path. Without it a MITM CONNECT
+    // reaches certificate generation and the circuit-breaker tracker for a
+    // destination the SSRF policy would reject anyway.
+    if let Err(reason) = service.check_destination_security(&domain, port) {
+        warn!(%authority, %reason, "CONNECT MITM blocked by destination security policy");
+        service
+            .metrics
+            .ssrf_blocked_total
+            .with_label_values(&[reason])
+            .inc();
+        return;
+    }
 
     let server_config = match service.cert_cache.server_config_for_domain(&domain).await {
         Ok(config) => config,

@@ -26,6 +26,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **ML Domain Reputation & Typosquatting Engine** (`threat_intel::ml_reputation`): visual homoglyph / Unicode confusable normalization, Damerau-Levenshtein distance against protected brand dictionaries, brand keyword stacking and subdomain deception detection (`/api/v1/ml/reputation`).
   - **Pipeline & SOAR/ML Test Suites**: end-to-end integration tests (`threat-intel/tests/pipeline_test.rs`, `threat-intel/tests/soar_ml_test.rs`).
 
+### Fixed
+
+- **MITM circuit breaker: bounded state and O(1) lookup** (#340) — the per-domain
+  tracker map is now capped by `MITM_CIRCUIT_BREAKER_MAX_DOMAINS` (default 10000)
+  with least-recently-used eviction of closed trackers, so a client looping
+  `CONNECT <random>.tld:443` can no longer grow proxy memory without limit.
+  Tripped domains are never evicted, keeping an active bypass and its audit trail
+  intact for as long as anything else can be evicted; when the whole map is
+  tripped, the least recently seen trips are evicted too, since a client can trip
+  a domain at will by aborting its own handshake. `is_tripped()` now answers with
+  a single hash lookup instead of walking the whole map on every MITM `CONNECT`.
+  `GET /api/mitm/circuit-breaker` reports `tracked_domains`, `max_domains`,
+  `evicted_domains_total`, `evicted_tripped_domains_total` and
+  `dropped_attempts_total`.
+- **Bounded MITM certificate caches** (#340) — the per-SNI certificate and
+  `ServerConfig` caches are capped by `MITM_CERT_CACHE_MAX_ENTRIES`
+  (default 10000, oldest entries evicted first); previously both grew with every
+  unique hostname seen.
+
+### Changed
+
+- **Circuit breaker tracker keys are exact hostnames** (#340) — leading dots are
+  stripped alongside trailing ones, so `CONNECT .example.com:443` tracks that
+  host instead of creating a parent-domain wildcard. Wildcard keys had no
+  producer other than client input, and a tripped wildcard forced blind `CONNECT`
+  for every host under the domain.
+
+### Security
+
+- **Destination security policy is enforced on MITM `CONNECT`** (#340) — the
+  MITM branch now runs the same `check_destination_security` check as the blind
+  tunnel branch, so an SSRF-rejected destination no longer reaches certificate
+  generation or the circuit-breaker tracker. Blocks are counted in
+  `ssrf_blocked_total`.
+
 ## [0.9.13] - 2026-08-21
 
 Patch after **0.9.12**: Threat intelligence feed collector framework (`threat-intel`), proxy hot-path zero-allocation and lock-free optimizations, ACL category policies and domain fallbacks, redesigned interactive installer, and security/dependency updates.

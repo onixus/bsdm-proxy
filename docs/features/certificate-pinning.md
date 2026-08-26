@@ -96,10 +96,32 @@ curl -fsS http://127.0.0.1:9090/api/mitm/circuit-breaker \
 ```
 
 The response carries the effective settings (`enabled`, `failure_rate_threshold`,
-`min_samples`, `window_secs`, `cooldown_secs`, `audit_path`), `tripped_count`,
-and per-domain `tripped_domains[]` entries with `tripped_at_unix`,
-`failure_rate`, `failure_count`, `total_samples` and `reason`
+`min_samples`, `window_secs`, `cooldown_secs`, `max_domains`, `audit_path`),
+`tripped_count`, and per-domain `tripped_domains[]` entries with
+`tripped_at_unix`, `failure_rate`, `failure_count`, `total_samples` and `reason`
 (`proxy/src/mitm_breaker.rs`).
+
+It also reports the size of the tracker map: `tracked_domains`,
+`evicted_domains_total`, `evicted_tripped_domains_total` and
+`dropped_attempts_total`. The map is capped by
+`MITM_CIRCUIT_BREAKER_MAX_DOMAINS` so that a client looping `CONNECT` on random
+hostnames cannot grow proxy memory. Eviction runs in three tiers: closed
+trackers with no sample left in the window, then closed trackers with the fewest
+samples (so a flood evicts its own throwaway entries before a domain the breaker
+is measuring), and finally — only when every tracker is tripped — the least
+recently seen trips.
+
+A steadily rising `evicted_domains_total` means the cap is being hit: either
+raise it for a large client population, or treat it as a signal of `CONNECT`
+scanning. A non-zero `evicted_tripped_domains_total` means a bypass was dropped
+under that pressure; the trip stays in the audit log and is re-established by the
+next failures, but investigate the source of the load. `dropped_attempts_total`
+should stay at zero.
+
+Tracker keys are exact hostnames — leading and trailing dots are stripped. The
+only producer of keys is the client-supplied `CONNECT` authority, so there is no
+`.example.com` wildcard key a client could trip to force blind `CONNECT` for a
+whole parent domain.
 
 Note that `decision_source="pinning-bypass"` covers **both** a registry exception
 (`bypass_reason="certificate_pinning_exception"`) and a tripped breaker
