@@ -33,14 +33,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with least-recently-used eviction of closed trackers, so a client looping
   `CONNECT <random>.tld:443` can no longer grow proxy memory without limit.
   Tripped domains are never evicted, keeping an active bypass and its audit trail
-  intact. `is_tripped()` now answers exact domains with a single hash lookup and
-  scans only a bounded wildcard index instead of walking the whole map on every
-  MITM `CONNECT`. `GET /api/mitm/circuit-breaker` reports `tracked_domains`,
-  `tracked_wildcards`, `evicted_domains_total` and `max_domains`.
+  intact for as long as anything else can be evicted; when the whole map is
+  tripped, the least recently seen trips are evicted too, since a client can trip
+  a domain at will by aborting its own handshake. `is_tripped()` now answers with
+  a single hash lookup instead of walking the whole map on every MITM `CONNECT`.
+  `GET /api/mitm/circuit-breaker` reports `tracked_domains`, `max_domains`,
+  `evicted_domains_total`, `evicted_tripped_domains_total` and
+  `dropped_attempts_total`.
 - **Bounded MITM certificate caches** (#340) — the per-SNI certificate and
   `ServerConfig` caches are capped by `MITM_CERT_CACHE_MAX_ENTRIES`
   (default 10000, oldest entries evicted first); previously both grew with every
   unique hostname seen.
+
+### Changed
+
+- **Circuit breaker tracker keys are exact hostnames** (#340) — leading dots are
+  stripped alongside trailing ones, so `CONNECT .example.com:443` tracks that
+  host instead of creating a parent-domain wildcard. Wildcard keys had no
+  producer other than client input, and a tripped wildcard forced blind `CONNECT`
+  for every host under the domain.
 
 ### Security
 

@@ -65,12 +65,24 @@ DEPLOYMENT_PROFILE=development POLICY_MODE=full-mitm ALLOW_FULL_MITM=true \
 умолчанию.
 
 Счётчики хранятся по домену, поэтому их число ограничено
-`MITM_CIRCUIT_BREAKER_MAX_DOMAINS`. При заполнении вытесняются наименее
-недавно использованные счётчики — сначала те, у которых не осталось попыток
-внутри окна. Домены в состоянии tripped не вытесняются никогда: активный bypass
-и его аудит сохраняются. Текущее заполнение видно в
-`GET /api/mitm/circuit-breaker` (`tracked_domains`, `tracked_wildcards`,
-`evicted_domains_total`, `max_domains`). Аудит срабатываний и сбросов пишется в `PINNING_AUDIT_LOG_PATH`.
+`MITM_CIRCUIT_BREAKER_MAX_DOMAINS`. При заполнении вытеснение идёт тремя
+ярусами: (1) закрытые счётчики без попыток внутри окна, (2) закрытые счётчики с
+наименьшим числом попыток — так поток `CONNECT` по случайным хостам вытесняет
+свои же одноразовые записи раньше домена, который breaker реально измеряет,
+(3) если вся карта состоит из tripped-доменов — наименее недавно использованные
+из них. Ярус 3 нужен, чтобы карта оставалась ограниченной: клиент может ввести
+домен в tripped, оборвав собственный TLS-хендшейк. Вытесненный trip не теряется
+из аудита и переустанавливается при следующих ошибках.
+
+Текущее состояние видно в `GET /api/mitm/circuit-breaker`: `tracked_domains`,
+`max_domains`, `evicted_domains_total`, `evicted_tripped_domains_total`
+(сработал ярус 3) и `dropped_attempts_total` (попытки, которые не удалось
+записать вообще).
+
+Ключами счётчиков служат точные имена хостов: ведущие и завершающие точки
+отбрасываются. Единственный источник ключей — имя из `CONNECT`, то есть данные
+клиента, поэтому wildcard-ключей вида `.example.com` не существует и клиент не
+может ввести в bypass весь родительский домен. Аудит срабатываний и сбросов пишется в `PINNING_AUDIT_LOG_PATH`.
 Статус и сброс: `GET /api/mitm/circuit-breaker`,
 `POST /api/mitm/circuit-breaker/reset` (Bearer). Процедура оператора —
 [certificate-pinning.md](../features/certificate-pinning.md#mitm-circuit-breaker-detection-and-operator-reset).

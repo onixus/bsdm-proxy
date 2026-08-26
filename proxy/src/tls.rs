@@ -218,10 +218,14 @@ impl CertCache {
             ocsp.as_deref(),
         )?);
 
+        let max_entries = cert_cache_max_entries();
         let mut cache = self.server_configs.write().await;
-        evict_oldest(&mut cache, cert_cache_max_entries(), |entry| {
-            entry.stapled_at
-        });
+        // Only an insert can grow the map. The staple-refresh path replaces an
+        // existing key, so evicting there would drop other domains' configs on
+        // every refresh once the working set reaches the cap.
+        if !cache.contains_key(&domain_arc) {
+            evict_oldest(&mut cache, max_entries, |entry| entry.stapled_at);
+        }
         cache.insert(
             domain_arc,
             CachedServerConfig {
@@ -265,8 +269,11 @@ impl CertCache {
         let key_pem = Bytes::from(key_pair.serialize_pem().into_bytes());
 
         let cert_pair = (cert_pem, key_pem);
+        let max_entries = cert_cache_max_entries();
         let mut cache = self.certs.write().await;
-        evict_oldest(&mut cache, cert_cache_max_entries(), |entry| entry.created);
+        if !cache.contains_key(&domain_arc) {
+            evict_oldest(&mut cache, max_entries, |entry| entry.created);
+        }
         cache.insert(
             domain_arc,
             CachedCert {
