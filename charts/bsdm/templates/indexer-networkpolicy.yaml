@@ -1,0 +1,69 @@
+{{- if and .Values.indexer .Values.indexer.enabled .Values.networkPolicy.enabled }}
+# cache-indexer: Kafka consumer + ClickHouse writer, and (when enabled) the
+# Search API on the same port. Without a policy every pod in the cluster could
+# query cached URLs of every user; the bearer token is the only gate.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "bsdm.fullname" . }}-indexer
+  labels:
+    {{- include "bsdm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cache-indexer
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "bsdm.indexerSelectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Metrics and Search API share :8080. Probes come from the node and are not
+    # subject to policy.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.monitoringNamespace | default "monitoring" }}
+        {{- range .Values.networkPolicy.searchApiNamespaces }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+        {{- end }}
+        {{- range .Values.networkPolicy.searchApiCidrs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.indexer.service.port }}
+  egress:
+    {{- if .Values.networkPolicy.kafkaNamespace }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.kafkaNamespace }}
+      ports:
+        - protocol: TCP
+          port: 9092
+    {{- else }}
+    # kafkaNamespace unset: port-restricted only, so a co-located or external
+    # broker keeps working. Set networkPolicy.kafkaNamespace to narrow this.
+    - ports:
+        - protocol: TCP
+          port: 9092
+    {{- end }}
+    {{- if .Values.networkPolicy.clickhouseNamespace }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.clickhouseNamespace }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.networkPolicy.clickhousePort | default 8123 }}
+    {{- else }}
+    # clickhouseNamespace unset: port-restricted only (managed/external CH).
+    - ports:
+        - protocol: TCP
+          port: {{ .Values.networkPolicy.clickhousePort | default 8123 }}
+    {{- end }}
+    {{- include "bsdm.dnsEgress" . | nindent 4 }}
+{{- end }}

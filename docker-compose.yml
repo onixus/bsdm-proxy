@@ -1,4 +1,17 @@
-version: '3.9'
+# Pinned so the project name stays 'bsdm-proxy' regardless of the checkout
+# directory name (Compose derives it from the directory otherwise).
+name: bsdm-proxy
+
+# Reference (production-shaped) stack. Defaults are fail-closed and mirror
+# bsdm-proxy.env: AUTH_ENABLED=true, ACL_ENABLED=true,
+# CONTROL_API_ALLOW_INSECURE=false, SEARCH_API_ALLOW_INSECURE=false.
+#
+# Required before `docker compose up`:
+#   export CONTROL_API_TOKEN=...   # proxy exits without it (profile=production)
+#   export SEARCH_API_TOKEN=...    # cache-indexer exits without it
+#   export BASIC_AUTH_USERS_HOST=/path/to/your/basic-auth-users.json
+#   ./scripts/gen-ca.sh
+# For a disposable lab stack use deploy/compose/docker-compose.lite.yml instead.
 
 x-logging: &default-logging
   driver: "json-file"
@@ -16,9 +29,15 @@ services:
       - bsdm-net
     restart: unless-stopped
     logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     deploy:
       resources:
         limits:
+          pids: 2048
+          cpus: "0.25"
           memory: 512M
         reservations:
           memory: 256M
@@ -27,8 +46,10 @@ services:
     image: confluentinc/cp-kafka:7.9.8
     depends_on:
       - zookeeper
+    # Control plane / not data plane: broker is reachable inside bsdm-net.
+    # PLAINTEXT listener stays on loopback on the host.
     ports:
-      - "9092:9092"
+      - "127.0.0.1:9092:9092"
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
@@ -40,6 +61,10 @@ services:
       - bsdm-net
     restart: unless-stopped
     logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     healthcheck:
       test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 >/dev/null 2>&1"]
       interval: 10s
@@ -49,15 +74,18 @@ services:
     deploy:
       resources:
         limits:
+          pids: 2048
+          cpus: "0.50"
           memory: 1G
         reservations:
           memory: 512M
 
   clickhouse:
     image: clickhouse/clickhouse-server:24.12
+    # No password is configured for the default user: never publish beyond loopback.
     ports:
-      - "8123:8123"
-      - "9000:9000"
+      - "127.0.0.1:8123:8123"
+      - "127.0.0.1:9000:9000"
     environment:
       CLICKHOUSE_DB: bsdm
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
@@ -69,6 +97,18 @@ services:
       - bsdm-net
     restart: unless-stopped
     logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # The official entrypoint starts as root, chowns /var/lib/clickhouse and
+    # then drops to the clickhouse user — that needs exactly these five.
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
     healthcheck:
       test: ["CMD-SHELL", "clickhouse-client --query 'SELECT 1' || exit 1"]
       interval: 10s
@@ -82,6 +122,8 @@ services:
     deploy:
       resources:
         limits:
+          pids: 2048
+          cpus: "1.00"
           memory: 2G
         reservations:
           memory: 1G
@@ -95,14 +137,19 @@ services:
       cache_from:
         - type=registry,ref=ghcr.io/onixus/bsdm-proxy:latest
     ports:
+      # 3128 is the data plane (clients) — published on all interfaces.
       - "3128:3128"
-      - "9090:9090"
+      # 9090 is metrics + control/admin API — loopback only.
+      - "127.0.0.1:9090:9090"
     environment:
       - KAFKA_BROKERS=kafka:9092
       - KAFKA_TOPIC=cache-events
       - CACHE_CAPACITY=10000
       - CACHE_TTL_SECONDS=3600
       - MAX_CACHE_BODY_SIZE=10485760
+      # Body spill must land on a volume, not the (read-only) container rootfs
+      # or the small /tmp tmpfs. Same path the pilot overlay uses.
+      - CACHE_SPILL_DIR=/var/cache/bsdm-spill
       - HTTP_PORT=3128
       - METRICS_PORT=9090
       - DEPLOYMENT_PROFILE=production
@@ -113,10 +160,27 @@ services:
       # Agent Phase C device inventory (survives restart); empty path = memory-only
       - AGENT_DEVICES_PATH=${AGENT_DEVICES_PATH:-/var/lib/bsdm-proxy/agent-devices.json}
       - MITM_ENABLED=true
-      - AUTH_ENABLED=false
+      # Proxy auth is ON by default (matches bsdm-proxy.env). Clients must send
+      # Proxy-Authorization; unauthenticated requests get 407.
+      - AUTH_ENABLED=${AUTH_ENABLED:-true}
+      - AUTH_BACKEND=${AUTH_BACKEND:-basic}
+      # MUST be set whenever AUTH_ENABLED=true with the basic backend: without it
+      # the proxy accepts ANY credentials (auth theatre). Defaults to the mounted
+      # example file below, whose password hashes are public — override
+      # BASIC_AUTH_USERS_HOST with your own file before any real deployment.
+      # Generate one with scripts/gen-basic-auth-user.sh (docs/getting-started/pilot-auth.md).
+      - BASIC_AUTH_USERS_FILE=${BASIC_AUTH_USERS_FILE:-/etc/bsdm-proxy/basic-auth-users.json}
       - SHUTDOWN_TIMEOUT_SECONDS=30
-      - ACL_ENABLED=false
-      - ACL_DEFAULT_ACTION=allow
+      - ACL_ENABLED=${ACL_ENABLED:-true}
+      # The shipped ACL is a blocklist: config/bsdm-etc/acl-rules.json holds 85
+      # rules, all of them deny, and no allow rule at all. default_action=deny
+      # would therefore block every request instead of hardening anything, so
+      # allow is deliberate here. It is also only a fallback — acl_config.rs
+      # takes "default_action" from the rules file when present, and every
+      # shipped rule set says "allow". Inspect the value actually in effect:
+      #   curl -H "Authorization: Bearer $CONTROL_API_TOKEN" \
+      #        http://127.0.0.1:9090/api/acl/config
+      - ACL_DEFAULT_ACTION=${ACL_DEFAULT_ACTION:-allow}
       - ACL_RULES_PATH=/etc/bsdm-proxy/acl-rules.json
       - ACL_AUTO_RELOAD=false
       # Writable env persist (Admin Settings Apply); not cwd /
@@ -129,10 +193,14 @@ services:
       - DNS_SINKHOLE_RELOAD_URL=http://dns-sinkhole:8092/api/zone/reload
       - CATEGORIZATION_ENABLED=false
       - UT1_ENABLED=false
-      # Control plane: set real secrets for pilot. Lab compose allows insecure open APIs.
+      # Control plane is fail-closed: DEPLOYMENT_PROFILE=production above means
+      # the proxy REFUSES TO START without CONTROL_API_TOKEN (or ACL_API_TOKEN).
+      # Export CONTROL_API_TOKEN before `docker compose up`. For a throwaway lab
+      # only, set CONTROL_API_ALLOW_INSECURE=true to leave the mutating control
+      # APIs open — never on a network anyone else can reach.
       - CONTROL_API_TOKEN=${CONTROL_API_TOKEN:-}
       - ACL_API_TOKEN=${ACL_API_TOKEN:-}
-      - CONTROL_API_ALLOW_INSECURE=${CONTROL_API_ALLOW_INSECURE:-true}
+      - CONTROL_API_ALLOW_INSECURE=${CONTROL_API_ALLOW_INSECURE:-false}
       - METRICS_BIND=${METRICS_BIND:-0.0.0.0}
       - DLP_ENABLED=${DLP_ENABLED:-false}
       - THREAT_SCORE_ENABLED=${THREAT_SCORE_ENABLED:-false}
@@ -153,14 +221,26 @@ services:
       - ./certs:/certs:ro
       # Writable /etc/bsdm-proxy (ACL persist needs sibling *.tmp)
       - ./config/bsdm-etc:/etc/bsdm-proxy
+      # Basic-auth users for AUTH_ENABLED=true. The default is the EXAMPLE file
+      # (public password hashes) — point BASIC_AUTH_USERS_HOST at your own file.
+      - ${BASIC_AUTH_USERS_HOST:-./config/basic-auth-users.example.json}:/etc/bsdm-proxy/basic-auth-users.json:ro
       - pinning-audit:/var/log/bsdm-proxy
       - agent-devices:/var/lib/bsdm-proxy
+      - proxy-spill:/var/cache/bsdm-spill
       # Shadow-mode IOC export, read-only: observation, never enforcement.
       - threat-intel-data:/var/lib/bsdm-proxy/threat-intel:ro
     tty: true
     stdin_open: true
     restart: unless-stopped
     logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Runs as uid 1000; every writable path is a volume above.
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:9090/health | grep -q ok"]
       interval: 10s
@@ -169,6 +249,8 @@ services:
     deploy:
       resources:
         limits:
+          pids: 512
+          cpus: "2.00"
           memory: 512M
         reservations:
           memory: 256M
@@ -180,8 +262,9 @@ services:
       target: cache-indexer
       cache_from:
         - type=registry,ref=ghcr.io/onixus/bsdm-proxy:cache-indexer
+    # Search API carries a bearer token: loopback only, front it with TLS.
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     environment:
       - KAFKA_BROKERS=kafka:9092
       - KAFKA_TOPIC=cache-events
@@ -191,8 +274,11 @@ services:
       - CLICKHOUSE_TABLE=http_cache
       - METRICS_PORT=8080
       - SEARCH_API_ENABLED=true
+      # Same fail-closed posture as the proxy control plane: with
+      # DEPLOYMENT_PROFILE=production, cache-indexer exits at startup unless
+      # SEARCH_API_TOKEN is set (or SEARCH_API_ALLOW_INSECURE=true, lab only).
       - SEARCH_API_TOKEN=${SEARCH_API_TOKEN:-}
-      - SEARCH_API_ALLOW_INSECURE=${SEARCH_API_ALLOW_INSECURE:-true}
+      - SEARCH_API_ALLOW_INSECURE=${SEARCH_API_ALLOW_INSECURE:-false}
       - DEPLOYMENT_PROFILE=${DEPLOYMENT_PROFILE:-production}
       - RUST_LOG=info,cache_indexer=debug
       - RUST_BACKTRACE=1
@@ -205,6 +291,14 @@ services:
       - bsdm-net
     restart: unless-stopped
     logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # ClickHouse-backed here: no local state (SQLite path is Lite-only).
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8080/health | grep -q ok"]
       interval: 10s
@@ -213,6 +307,8 @@ services:
     deploy:
       resources:
         limits:
+          pids: 512
+          cpus: "0.50"
           memory: 512M
         reservations:
           memory: 256M
@@ -226,7 +322,7 @@ services:
       cache_from:
         - type=registry,ref=ghcr.io/onixus/bsdm-proxy:alert-worker
     ports:
-      - "8090:8090"
+      - "127.0.0.1:8090:8090"
     environment:
       - ALERT_WEBHOOK_URL=${ALERT_WEBHOOK_URL:-}
       - ALERT_WEBHOOK_HEADERS=${ALERT_WEBHOOK_HEADERS:-{}}
@@ -248,6 +344,13 @@ services:
       - bsdm-net
     restart: unless-stopped
     logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8090/health | grep -q ok"]
       interval: 15s
@@ -256,6 +359,8 @@ services:
     deploy:
       resources:
         limits:
+          pids: 512
+          cpus: "0.50"
           memory: 512M
         reservations:
           memory: 256M
@@ -269,7 +374,7 @@ services:
       cache_from:
         - type=registry,ref=ghcr.io/onixus/bsdm-proxy:ml-worker
     ports:
-      - "8091:8091"
+      - "127.0.0.1:8091:8091"
     environment:
       - CLICKHOUSE_URL=http://clickhouse:8123
       - CLICKHOUSE_DATABASE=bsdm
@@ -302,6 +407,15 @@ services:
       - bsdm-net
     restart: unless-stopped
     logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # ML_BASELINE_PATH is unset by default; point it at a volume before
+    # setting it, otherwise the write fails on the read-only rootfs.
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8091/health | grep -q ok"]
       interval: 15s
@@ -310,6 +424,8 @@ services:
     deploy:
       resources:
         limits:
+          pids: 512
+          cpus: "0.50"
           memory: 512M
         reservations:
           memory: 256M
@@ -317,7 +433,7 @@ services:
   alertmanager:
     image: prom/alertmanager:v0.28.1
     ports:
-      - "9093:9093"
+      - "127.0.0.1:9093:9093"
     environment:
       - ALERT_WEBHOOK_URL=${ALERT_WEBHOOK_URL:-}
     volumes:
@@ -328,13 +444,25 @@ services:
       - bsdm-net
     restart: unless-stopped
     logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:9093/-/healthy || exit 1"]
+    deploy:
+      resources:
+        limits:
+          pids: 512
+          cpus: "0.25"
+          memory: 512M
+        reservations:
+          memory: 128M
 
   prometheus:
     image: prom/prometheus:v3.12.0
     ports:
-      - "9091:9090"
+      - "127.0.0.1:9091:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus/alerts:/etc/prometheus/alerts:ro
@@ -345,11 +473,16 @@ services:
       - '--web.console.libraries=/usr/share/prometheus/console_libraries'
       - '--web.console.templates=/usr/share/prometheus/consoles'
       - '--storage.tsdb.retention.time=15d'
-      - '--web.enable-lifecycle'
+      # --web.enable-lifecycle is intentionally NOT set: it exposes unauthenticated
+      # POST /-/reload and /-/quit. Reload via `docker compose kill -s HUP prometheus`.
     networks:
       - bsdm-net
     restart: unless-stopped
     logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     depends_on:
       - proxy
       - alertmanager
@@ -361,6 +494,8 @@ services:
     deploy:
       resources:
         limits:
+          pids: 512
+          cpus: "0.50"
           memory: 512M
         reservations:
           memory: 256M
@@ -368,9 +503,10 @@ services:
   grafana:
     image: grafana/grafana:12.3.8
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      # No default: compose refuses to start rather than shipping admin/admin.
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD to a strong value}
       - GF_SECURITY_ADMIN_USER=admin
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-clickhouse-datasource
@@ -385,6 +521,10 @@ services:
       - bsdm-net
     restart: unless-stopped
     logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     depends_on:
       - prometheus
       - clickhouse
@@ -397,22 +537,37 @@ services:
     deploy:
       resources:
         limits:
+          pids: 512
+          cpus: "0.50"
           memory: 512M
         reservations:
           memory: 256M
 
   icap:
     profiles: ["icap"]
-    image: toolarium/toolarium-icap-clamav-docker:latest
+    # Upstream repository name is 'calmav' (sic) and ships a single tag.
+    image: toolarium/toolarium-icap-calmav-docker:0.0.1
     ports:
-      - "1344:1344"
+      - "127.0.0.1:1344:1344"
     networks:
       - bsdm-net
     restart: unless-stopped
     logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # c-icap/clamd start as root and drop to the clamav user at startup.
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETGID
+      - SETUID
     deploy:
       resources:
         limits:
+          pids: 512
+          cpus: "1.00"
           memory: 1G
         reservations:
           memory: 512M
@@ -427,8 +582,10 @@ services:
       cache_from:
         - type=registry,ref=ghcr.io/onixus/bsdm-proxy:dns-sinkhole
     ports:
+      # 5353/udp is the data plane (resolver clients).
       - "5353:53/udp"
-      - "8092:8092"
+      # 8092 is metrics + zone-reload API — loopback only.
+      - "127.0.0.1:8092:8092"
     environment:
       - DNS_SINKHOLE_ENABLED=${DNS_SINKHOLE_ENABLED:-true}
       - DNS_SINKHOLE_BIND=0.0.0.0:53
@@ -450,6 +607,16 @@ services:
       - bsdm-net
     restart: unless-stopped
     logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Binds :53 (and :853 with DoT) inside the container as uid 1000.
+    cap_add:
+      - NET_BIND_SERVICE
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8092/health | grep -q ok"]
       interval: 15s
@@ -459,6 +626,8 @@ services:
     deploy:
       resources:
         limits:
+          pids: 512
+          cpus: "0.25"
           memory: 256M
         reservations:
           memory: 128M
@@ -502,6 +671,14 @@ services:
       - bsdm-net
     restart: unless-stopped
     logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Snapshots (and their *.tmp siblings) go to the volume above.
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8093/health | grep -q ok"]
       interval: 15s
@@ -511,6 +688,8 @@ services:
     deploy:
       resources:
         limits:
+          pids: 512
+          cpus: "0.50"
           memory: 512M
         reservations:
           memory: 128M
@@ -534,6 +713,8 @@ volumes:
   pinning-audit:
     driver: local
   agent-devices:
+    driver: local
+  proxy-spill:
     driver: local
   threat-intel-data:
     driver: local

@@ -21,7 +21,6 @@ data:
   {{- if .Values.indexer.clickhouse.user }}
   CLICKHOUSE_USER: {{ .Values.indexer.clickhouse.user | quote }}
   {{- end }}
-  {{- if and .Values.indexer.searchApi.token (ne .Values.indexer.searchApi.token "") }}
-  SEARCH_API_TOKEN: {{ .Values.indexer.searchApi.token | quote }}
-  {{- end }}
+  # SEARCH_API_TOKEN is deliberately absent here — it is injected as a
+  # secretKeyRef in indexer-deployment.yaml (see indexer-secret.yaml).
 {{- end }}

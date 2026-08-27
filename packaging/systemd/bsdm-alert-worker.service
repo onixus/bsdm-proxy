@@ -8,12 +8,52 @@ Wants=network-online.target
 Type=simple
 User=bsdm-proxy
 Group=bsdm-proxy
-EnvironmentFile=-/etc/bsdm-proxy/alert-worker.env
+# Mandatory: ALERT_WEBHOOK_URL and its auth header live here. Without the file
+# the worker would start and quietly deliver nothing — alerts would just stop.
+EnvironmentFile=/etc/bsdm-proxy/alert-worker.env
+EnvironmentFile=-/etc/bsdm-proxy/conf.d/alert-worker.d/*.env
 ExecStart=/opt/bsdm-proxy/bin/alert-worker
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=65536
+
+# No StateDirectory / ReadWritePaths on purpose: the worker keeps its dedup
+# state in memory and only does ClickHouse reads + webhook POSTs (no fs::write
+# anywhere in alert-worker/src). If a state or spool file is ever added, list it
+# here — ProtectSystem=strict makes every other path read-only.
+
+# Hardening.
 NoNewPrivileges=true
+UMask=0077
+# HTTP client + metrics listener on 8090: no capabilities needed.
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+# No JIT/WASM in this binary (cargo tree: no wasmtime/cranelift), so W^X is safe.
+MemoryDenyWriteExecute=true
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallArchitectures=native
+
+# Moderate ceilings; override with a drop-in
+# (/etc/systemd/system/bsdm-alert-worker.service.d/20-limits.conf).
+TasksMax=256
+MemoryMax=512M
 
 [Install]
 WantedBy=multi-user.target

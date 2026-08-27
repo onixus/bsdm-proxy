@@ -17,14 +17,15 @@ spec:
         {{- include "bsdm.threatIntelSelectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: {{ include "bsdm.serviceAccountName" . }}
+      automountServiceAccountToken: false
       securityContext:
-        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        {{- include "bsdm.podSecurityContext" (dict "ctx" . "component" .Values.threatIntel) | nindent 8 }}
       containers:
         - name: threat-intel
           image: "{{ .Values.threatIntel.image.repository }}:{{ .Values.threatIntel.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.threatIntel.image.pullPolicy }}
           securityContext:
-            {{- toYaml .Values.securityContext | nindent 12 }}
+            {{- include "bsdm.containerSecurityContext" (dict "ctx" . "component" .Values.threatIntel) | nindent 12 }}
           ports:
             - name: admin
               containerPort: {{ .Values.threatIntel.service.port }}
@@ -46,17 +47,15 @@ spec:
             # require TI_API_TOKEN (fail-closed without it).
             - name: TI_ADMIN_BIND
               value: {{ .Values.threatIntel.adminBind | default "0.0.0.0" | quote }}
+            {{- if .Values.threatIntel.apiToken }}
+            {{- fail "threatIntel.apiToken is no longer supported: an inline SOAR token is rendered into the Deployment spec, visible to anyone with `get deployments` and stored in whatever holds your values file. Create a Secret (kubectl create secret generic bsdm-ti --from-literal=ti-api-token=<token>), set threatIntel.existingSecret=bsdm-ti (and threatIntel.existingSecretKey if the key differs) and clear threatIntel.apiToken. Leaving all three empty is also fine: the mutating /api/v1/soar/* endpoints stay fail-closed." }}
+            {{- end }}
             {{- if .Values.threatIntel.existingSecret }}
             - name: TI_API_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.threatIntel.existingSecret }}
                   key: {{ .Values.threatIntel.existingSecretKey | default "ti-api-token" }}
-            {{- else if .Values.threatIntel.apiToken }}
-            # Plaintext token from values.yaml: visible in `kubectl get deploy -o yaml`
-            # and in any Git-stored values file. Prefer threatIntel.existingSecret.
-            - name: TI_API_TOKEN
-              value: {{ .Values.threatIntel.apiToken | quote }}
             {{- end }}
             - name: TI_SOAR_AUDIT_PATH
               value: {{ printf "%s/soar-audit.jsonl" .Values.threatIntel.outputDir | quote }}
@@ -87,6 +86,9 @@ spec:
           persistentVolumeClaim:
             claimName: {{ include "bsdm.fullname" . }}-threat-intel
         {{- else }}
-          emptyDir: {}
+          emptyDir:
+            # Uncapped emptyDir is node ephemeral storage: a feed that suddenly
+            # returns gigabytes fills the node and evicts co-located pods.
+            sizeLimit: {{ .Values.threatIntel.emptyDirSizeLimit | default "1Gi" }}
         {{- end }}
 {{- end }}

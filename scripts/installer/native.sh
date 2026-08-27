@@ -12,12 +12,13 @@ install_native() {
   local http_port="${3:-3128}"
   local metrics_port="${4:-9090}"
   local enable_acl="${5:-false}"
-  local version package_version os arch staging
+  local version package_version os arch staging certs_dir
+  certs_dir="$(resolve_certs_dir /etc/bsdm-proxy /certs)"
 
   [[ -x "${root}/scripts/build-package.sh" ]] || die "Missing canonical package builder"
   [[ -f "${root}/proxy/Cargo.toml" ]] || die "Cargo workspace not found"
 
-  backup_installation "/etc/bsdm-proxy" "/certs" >/dev/null
+  backup_installation "/etc/bsdm-proxy" "$certs_dir" >/dev/null
 
   info "Building canonical release package"
   (
@@ -45,10 +46,17 @@ install_native() {
     --systemd
 
   configure_native_proxy "$root" /etc/bsdm-proxy "$http_port" "$metrics_port" "$enable_acl"
-  ensure_ca /certs
+  ensure_ca "$certs_dir"
+
+  # The proxy binary resolves the CA from the hardcoded /certs (proxy/src/tls.rs
+  # load_for_startup), so keep that path valid as a symlink on new installs.
+  if [[ "$certs_dir" != "/certs" && ! -e /certs ]]; then
+    ln -s "$certs_dir" /certs
+    info "Linked /certs -> ${certs_dir}"
+  fi
 
   if id bsdm-proxy >/dev/null 2>&1; then
-    chown -R bsdm-proxy:bsdm-proxy /certs
+    chown -R bsdm-proxy:bsdm-proxy "$certs_dir"
   fi
 
   systemctl daemon-reload

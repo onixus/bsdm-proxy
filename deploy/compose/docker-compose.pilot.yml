@@ -44,7 +44,8 @@ services:
   redis:
     image: redis:7.4-alpine
     ports:
-      - "6379:6379"
+      # No AUTH / TLS configured — never publish beyond loopback.
+      - "127.0.0.1:6379:6379"
     command:
       - redis-server
       - --maxmemory
@@ -63,9 +64,20 @@ services:
       timeout: 3s
       retries: 10
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Official entrypoint starts as root, chowns /data and drops to `redis`.
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETGID
+      - SETUID
     deploy:
       resources:
         limits:
+          pids: 512
           cpus: "0.50"
           memory: 768M
 
@@ -84,11 +96,17 @@ services:
 
       # --- Core controls ---
       ACL_ENABLED: "${ACL_ENABLED:-true}"
+      # fail-closed: unmatched traffic is blocked with 403. Load your allow rules
+      # into ACL_RULES_PATH before cutover. ACL_DEFAULT_ACTION=allow restores the
+      # old blocklist-only behaviour (unmatched traffic passes unfiltered).
       ACL_DEFAULT_ACTION: "${ACL_DEFAULT_ACTION:-allow}"
-      AUTH_ENABLED: "${AUTH_ENABLED:-false}"
+      # On by default: pilot clients must authenticate (407 otherwise).
+      AUTH_ENABLED: "${AUTH_ENABLED:-true}"
       AUTH_BACKEND: "${AUTH_BACKEND:-basic}"
       AUTH_REALM: "${AUTH_REALM:-BSDM Pilot}"
-      # When AUTH_ENABLED=true, point at a users file (example password: pilot-secret).
+      # Required with AUTH_ENABLED=true + basic backend, otherwise ANY credentials
+      # are accepted. Defaults to the mounted file below; the shipped example has
+      # public hashes (password: pilot-secret) — override BASIC_AUTH_USERS_HOST.
       BASIC_AUTH_USERS_FILE: "${BASIC_AUTH_USERS_FILE:-/etc/bsdm-proxy/basic-auth-users.json}"
       CATEGORIZATION_ENABLED: "${CATEGORIZATION_ENABLED:-false}"
       UT1_ENABLED: "${UT1_ENABLED:-false}"
@@ -203,7 +221,7 @@ services:
       - "--web.console.libraries=/usr/share/prometheus/console_libraries"
       - "--web.console.templates=/usr/share/prometheus/consoles"
       - "--storage.tsdb.retention.time=5d"
-      - "--web.enable-lifecycle"
+      # --web.enable-lifecycle stays off: unauthenticated POST /-/reload + /-/quit.
     deploy:
       resources:
         limits:

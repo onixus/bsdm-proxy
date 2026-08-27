@@ -299,6 +299,165 @@ impl ConnAuthCache {
     }
 }
 
+/// Argon2id parameters for interactive server-side password verification.
+///
+/// OWASP Password Storage Cheat Sheet (2024) baseline for Argon2id:
+/// m = 19 MiB, t = 2, p = 1. This costs ~30-50 ms and ~19 MiB per verification,
+/// which is acceptable because successful Basic-auth logins are cached in
+/// `user_cache` (see `AuthConfig::cache_ttl`) and never re-hashed per request.
+pub const ARGON2_MEMORY_KIB: u32 = 19 * 1024;
+/// Argon2id time cost (iterations). See [`ARGON2_MEMORY_KIB`].
+pub const ARGON2_ITERATIONS: u32 = 2;
+/// Argon2id parallelism (lanes). See [`ARGON2_MEMORY_KIB`].
+pub const ARGON2_PARALLELISM: u32 = 1;
+
+/// Result of checking a plaintext password against a stored hash.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PasswordCheck {
+    /// Password matches; `needs_rehash` is true for legacy (unsalted SHA-256) hashes.
+    Valid { needs_rehash: bool },
+    /// Password does not match, or the stored hash is unparseable.
+    Invalid,
+}
+
+impl PasswordCheck {
+    pub fn is_valid(self) -> bool {
+        matches!(self, PasswordCheck::Valid { .. })
+    }
+}
+
+fn argon2_params() -> Result<argon2::Argon2<'static>, String> {
+    let params = argon2::Params::new(
+        ARGON2_MEMORY_KIB,
+        ARGON2_ITERATIONS,
+        ARGON2_PARALLELISM,
+        None,
+    )
+    .map_err(|e| format!("invalid Argon2 params: {e}"))?;
+    Ok(argon2::Argon2::new(
+        argon2::Algorithm::Argon2id,
+        argon2::Version::V0x13,
+        params,
+    ))
+}
+
+/// Hash a password with Argon2id, returning a self-describing PHC string
+/// (`$argon2id$v=19$m=...,t=...,p=...$<salt>$<hash>`).
+///
+/// This is the single place in the repository where the password hashing
+/// algorithm is defined: `scripts/gen-basic-auth-user.sh` shells out to
+/// `proxy hash-password` instead of reimplementing it.
+pub fn hash_password_argon2(password: &str) -> Result<String, String> {
+    use argon2::password_hash::{PasswordHasher, SaltString};
+    let salt = SaltString::generate(&mut argon2::password_hash::rand_core::OsRng);
+    let hasher = argon2_params()?;
+    hasher
+        .hash_password(password.as_bytes(), &salt)
+        .map(|h| h.to_string())
+        .map_err(|e| format!("argon2 hashing failed: {e}"))
+}
+
+/// True when `stored` is a legacy unsalted SHA-256 hex digest rather than a PHC string.
+///
+/// The format is detected from the string itself (PHC hashes always start with
+/// `$`), so no version field is needed in `basic-auth-users.json` and old files
+/// keep loading unchanged.
+pub fn is_legacy_sha256_hash(stored: &str) -> bool {
+    !stored.starts_with('$')
+}
+
+/// Verify `password` against a stored hash in either format.
+///
+/// Both branches are constant-time with respect to the hash bytes: Argon2 via
+/// `password_hash`'s own constant-time comparison, legacy via
+/// [`crate::security_util::constant_time_eq`].
+///
+/// CPU-bound (~tens of ms for Argon2id) — call from `spawn_blocking` on the
+/// async path.
+pub fn verify_password_hash(stored: &str, password: &str) -> PasswordCheck {
+    if is_legacy_sha256_hash(stored) {
+        let legacy = AuthManager::hash_password_stable(password);
+        if crate::security_util::constant_time_eq(stored.as_bytes(), legacy.as_bytes()) {
+            return PasswordCheck::Valid { needs_rehash: true };
+        }
+        return PasswordCheck::Invalid;
+    }
+
+    use argon2::password_hash::{PasswordHash, PasswordVerifier};
+    let parsed = match PasswordHash::new(stored) {
+        Ok(p) => p,
+        Err(e) => {
+            warn!("Unparseable stored password hash: {}", e);
+            return PasswordCheck::Invalid;
+        }
+    };
+    let hasher = match argon2_params() {
+        Ok(h) => h,
+        Err(e) => {
+            warn!("{}", e);
+            return PasswordCheck::Invalid;
+        }
+    };
+    // Verification uses the parameters embedded in the PHC string, so hashes
+    // produced with older cost parameters keep verifying.
+    match hasher.verify_password(password.as_bytes(), &parsed) {
+        Ok(()) => PasswordCheck::Valid {
+            needs_rehash: false,
+        },
+        Err(_) => PasswordCheck::Invalid,
+    }
+}
+
+fn hash_format_label(legacy: bool) -> &'static str {
+    if legacy {
+        "sha256_legacy"
+    } else {
+        "argon2id"
+    }
+}
+
+/// Atomic write of the basic users DB: temp file in the same directory + rename,
+/// mirroring `device_registry::save`.
+fn write_users_atomically(path: &str, json: &str) -> Result<(), String> {
+    use std::io::Write;
+    let path = std::path::Path::new(path);
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("create basic users parent {}: {e}", parent.display()))?;
+        }
+    }
+    let tmp = path.with_extension("json.tmp");
+    {
+        // The file holds password hashes, so keep it owner-only. Permissions are
+        // set on the temp file before any content reaches it: creating it 0644
+        // and chmod'ing afterwards would expose the hashes for the duration of
+        // the write.
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let mut f = opts
+            .open(&tmp)
+            .map_err(|e| format!("create temp basic users file {}: {e}", tmp.display()))?;
+        f.write_all(json.as_bytes())
+            .map_err(|e| format!("write temp basic users file: {e}"))?;
+        f.sync_all()
+            .map_err(|e| format!("sync temp basic users file: {e}"))?;
+    }
+    std::fs::rename(&tmp, path).map_err(|e| {
+        format!(
+            "rename basic users {} → {}: {e}",
+            tmp.display(),
+            path.display()
+        )
+    })?;
+    Ok(())
+}
+
 /// A user stored in the local basic authentication database.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BasicUser {
@@ -327,6 +486,10 @@ pub struct AuthManager {
     sspi_engine: Option<Arc<SspiAuthEngine>>,
     #[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]
     principal_cache: Arc<RwLock<HashMap<String, UserInfo>>>,
+    /// Transparently upgrade legacy SHA-256 hashes on successful login
+    /// (`BASIC_AUTH_REHASH_ON_LOGIN`, default on).
+    rehash_on_login: bool,
+    metrics: Option<Arc<crate::metrics::Metrics>>,
 }
 
 impl AuthManager {
@@ -368,6 +531,20 @@ impl AuthManager {
                         initial_basic_users.len(),
                         path
                     );
+                    let legacy = initial_basic_users
+                        .values()
+                        .filter(|u| is_legacy_sha256_hash(&u.password_hash))
+                        .count();
+                    if legacy > 0 {
+                        warn!(
+                            "{} of {} basic auth users still use the legacy unsalted SHA-256 \
+                             hash. They are upgraded to Argon2id on the next successful login \
+                             (set BASIC_AUTH_REHASH_ON_LOGIN=false to disable), or run \
+                             scripts/gen-basic-auth-user.sh to reissue them offline.",
+                            legacy,
+                            initial_basic_users.len()
+                        );
+                    }
                 } else {
                     warn!("Failed to parse basic users file: {}", path);
                 }
@@ -390,7 +567,18 @@ impl AuthManager {
             sspi_engine,
             #[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]
             principal_cache: Arc::new(RwLock::new(HashMap::new())),
+            rehash_on_login: std::env::var("BASIC_AUTH_REHASH_ON_LOGIN")
+                .map(|v| !matches!(v.to_ascii_lowercase().as_str(), "0" | "false" | "no"))
+                .unwrap_or(true),
+            metrics: None,
         }
+    }
+
+    /// Attach the Prometheus registry so basic-auth verification/rehash counters
+    /// are exported.
+    pub fn with_metrics(mut self, metrics: Arc<crate::metrics::Metrics>) -> Self {
+        self.metrics = Some(metrics);
+        self
     }
 
     #[cfg(any(feature = "auth-ntlm", feature = "auth-kerberos"))]
@@ -680,38 +868,142 @@ impl AuthManager {
                 authenticated_at: Instant::now(),
             });
         }
-        if let Some(user) = guard.get(username) {
-            let hash = Self::hash_password_stable(password);
-            if crate::security_util::constant_time_eq(
-                user.password_hash.as_bytes(),
-                hash.as_bytes(),
-            ) {
-                return Ok(UserInfo {
+        let Some((stored_hash, role)) = guard
+            .get(username)
+            .map(|u| (u.password_hash.clone(), u.role.clone()))
+        else {
+            // Keep the lock held for as short as possible: verification below is
+            // CPU-bound and must never run while holding the RwLock.
+            drop(guard);
+            return Err("Invalid username or password".to_string());
+        };
+        drop(guard);
+
+        let legacy = is_legacy_sha256_hash(&stored_hash);
+        let password_owned = password.to_string();
+        let check = tokio::task::spawn_blocking(move || {
+            verify_password_hash(&stored_hash, &password_owned)
+        })
+        .await
+        .unwrap_or_else(|e| {
+            warn!("Password verification task failed: {}", e);
+            PasswordCheck::Invalid
+        });
+
+        match check {
+            PasswordCheck::Valid { needs_rehash } => {
+                if let Some(m) = &self.metrics {
+                    m.auth_password_verifications_total
+                        .with_label_values(&[hash_format_label(legacy), "success"])
+                        .inc();
+                }
+                if needs_rehash {
+                    self.rehash_basic_user(username, password).await;
+                }
+                Ok(UserInfo {
                     username: username.to_string(),
                     display_name: Some(username.to_string()),
                     email: None,
-                    groups: vec![user.role.clone()],
+                    groups: vec![role],
                     authenticated_at: Instant::now(),
-                });
+                })
+            }
+            PasswordCheck::Invalid => {
+                if let Some(m) = &self.metrics {
+                    m.auth_password_verifications_total
+                        .with_label_values(&[hash_format_label(legacy), "failure"])
+                        .inc();
+                }
+                Err("Invalid username or password".to_string())
             }
         }
-        Err("Invalid username or password".to_string())
+    }
+
+    /// Transparently upgrade a legacy SHA-256 hash to Argon2id after a
+    /// successful login.
+    ///
+    /// Best-effort: any failure is logged and the login still succeeds, so a
+    /// read-only users file can never lock users out.
+    async fn rehash_basic_user(&self, username: &str, password: &str) {
+        if !self.rehash_on_login {
+            return;
+        }
+        if self.config.basic_users_file.is_none() {
+            // Nothing to persist to — an in-memory upgrade would be lost on
+            // restart and would only hide the fact that the DB is still legacy.
+            return;
+        }
+        let password_owned = password.to_string();
+        let new_hash = match tokio::task::spawn_blocking(move || {
+            hash_password_argon2(&password_owned)
+        })
+        .await
+        {
+            Ok(Ok(h)) => h,
+            Ok(Err(e)) => {
+                warn!("Argon2 rehash for {} failed: {}", username, e);
+                return;
+            }
+            Err(e) => {
+                warn!("Argon2 rehash task for {} failed: {}", username, e);
+                return;
+            }
+        };
+
+        {
+            let mut guard = self.basic_users.write().await;
+            match guard.get_mut(username) {
+                // Re-check under the write lock: another concurrent login may
+                // have already upgraded this user, or an admin may have changed
+                // the password meanwhile.
+                Some(user) if is_legacy_sha256_hash(&user.password_hash) => {
+                    user.password_hash = new_hash;
+                }
+                _ => return,
+            }
+        }
+
+        match self.sync_basic_users_to_disk().await {
+            Ok(()) => {
+                if let Some(m) = &self.metrics {
+                    m.auth_password_rehashes_total.inc();
+                }
+                info!(
+                    "Upgraded password hash for {} from legacy SHA-256 to Argon2id",
+                    username
+                );
+            }
+            Err(e) => warn!(
+                "Upgraded password hash for {} in memory but failed to persist: {}",
+                username, e
+            ),
+        }
     }
 
     /// Sync basic users to disk if a file is configured
     pub async fn sync_basic_users_to_disk(&self) -> Result<(), String> {
         if let Some(path) = &self.config.basic_users_file {
-            let guard = self.basic_users.read().await;
-            let users: Vec<BasicUser> = guard.values().cloned().collect();
+            let mut users: Vec<BasicUser> = {
+                let guard = self.basic_users.read().await;
+                guard.values().cloned().collect()
+            };
+            // Stable order so concurrent rehashes do not reshuffle the file.
+            users.sort_by(|a, b| a.username.cmp(&b.username));
             let json = serde_json::to_string_pretty(&users)
                 .map_err(|e| format!("Failed to serialize basic users: {}", e))?;
-            tokio::fs::write(path, json)
+            let path = path.clone();
+            tokio::task::spawn_blocking(move || write_users_atomically(&path, &json))
                 .await
-                .map_err(|e| format!("Failed to write basic users to disk: {}", e))?;
+                .map_err(|e| format!("Failed to join basic users writer: {}", e))??;
         }
         Ok(())
     }
 
+    /// Legacy unsalted SHA-256 hex digest.
+    ///
+    /// Kept only to verify (and then upgrade) user databases created before the
+    /// Argon2id migration. Never use it to produce new hashes — see
+    /// [`hash_password_argon2`].
     pub fn hash_password_stable(password: &str) -> String {
         let mut hasher = sha2::Sha256::new();
         hasher.update(password.as_bytes());
@@ -725,10 +1017,20 @@ impl AuthManager {
         password: Option<String>,
         role: String,
     ) -> Result<(), String> {
+        // Hash outside the lock: Argon2id is deliberately slow and would block
+        // every concurrent authentication if done under the write guard.
+        let new_hash = match password {
+            Some(p) => Some(
+                tokio::task::spawn_blocking(move || hash_password_argon2(&p))
+                    .await
+                    .map_err(|e| format!("Failed to join password hasher: {}", e))??,
+            ),
+            None => None,
+        };
         {
             let mut guard = self.basic_users.write().await;
-            let password_hash = if let Some(p) = password {
-                Self::hash_password_stable(&p)
+            let password_hash = if let Some(p) = new_hash {
+                p
             } else if let Some(existing) = guard.get(&username) {
                 existing.password_hash.clone()
             } else {
@@ -1179,6 +1481,203 @@ mod tests {
             "alice"
         );
         assert_eq!(ldap_account_name_from_principal("CORP\\alice"), "alice");
+    }
+
+    #[test]
+    fn legacy_sha256_hash_is_detected_and_verified() {
+        let password = test_password();
+        let wrong = test_password();
+        let stored = AuthManager::hash_password_stable(&password);
+        assert!(is_legacy_sha256_hash(&stored));
+        assert_eq!(
+            verify_password_hash(&stored, &password),
+            PasswordCheck::Valid { needs_rehash: true }
+        );
+        assert_eq!(
+            verify_password_hash(&stored, &wrong),
+            PasswordCheck::Invalid
+        );
+    }
+
+    #[test]
+    fn argon2_hash_round_trips() {
+        let password = test_password();
+        let stored = hash_password_argon2(&password).expect("hash");
+        assert!(stored.starts_with("$argon2id$v=19$"));
+        assert!(!is_legacy_sha256_hash(&stored));
+        assert_eq!(
+            verify_password_hash(&stored, &password),
+            PasswordCheck::Valid {
+                needs_rehash: false
+            }
+        );
+        // One character short: a near miss must still be rejected.
+        let truncated = &password[..password.len() - 1];
+        assert_eq!(
+            verify_password_hash(&stored, truncated),
+            PasswordCheck::Invalid
+        );
+    }
+
+    #[test]
+    fn argon2_hashes_are_salted() {
+        let password = test_password();
+        let a = hash_password_argon2(&password).expect("hash");
+        let b = hash_password_argon2(&password).expect("hash");
+        assert_ne!(
+            a, b,
+            "identical passwords must not produce identical hashes"
+        );
+    }
+
+    #[test]
+    fn garbage_hash_is_rejected() {
+        let password = test_password();
+        assert_eq!(
+            verify_password_hash("$nonsense$", &password),
+            PasswordCheck::Invalid
+        );
+        assert_eq!(verify_password_hash("", &password), PasswordCheck::Invalid);
+        // Legacy-looking but wrong length: still rejected, never panics.
+        assert_eq!(
+            verify_password_hash("deadbeef", &password),
+            PasswordCheck::Invalid
+        );
+    }
+
+    /// A fresh random password for each call.
+    ///
+    /// Tests deliberately hold no literal credentials: what is under test is the
+    /// hash round-trip and the legacy-upgrade path, never one particular string.
+    /// Generating the value also keeps CodeQL's hard-coded-credential query
+    /// honest instead of silencing it.
+    fn test_password() -> String {
+        format!("pw-{}", hex::encode(rand::random::<[u8; 16]>()))
+    }
+
+    fn users_file_with(hash: &str) -> tempfile::NamedTempFile {
+        let file = tempfile::Builder::new()
+            .suffix(".json")
+            .tempfile()
+            .expect("tempfile");
+        let users = serde_json::json!([{
+            "username": "legacyuser",
+            "password_hash": hash,
+            "role": "users",
+        }]);
+        std::fs::write(file.path(), users.to_string()).expect("write users");
+        file
+    }
+
+    #[tokio::test]
+    async fn legacy_hash_authenticates_and_is_rehashed_on_disk() {
+        let password = test_password();
+        let wrong = test_password();
+        let legacy = AuthManager::hash_password_stable(&password);
+        let file = users_file_with(&legacy);
+        let path = file.path().to_string_lossy().to_string();
+        let manager = AuthManager::new(AuthConfig {
+            enabled: true,
+            backend: AuthBackend::Basic,
+            basic_users_file: Some(path.clone()),
+            ..Default::default()
+        });
+
+        // Wrong password on a legacy hash is rejected and does not rewrite the file.
+        assert!(manager.authenticate("legacyuser", &wrong).await.is_err());
+        assert!(std::fs::read_to_string(&path)
+            .expect("read")
+            .contains(&legacy));
+
+        let user = manager
+            .authenticate("legacyuser", &password)
+            .await
+            .expect("legacy login must succeed");
+        assert_eq!(user.groups, vec!["users".to_string()]);
+
+        let on_disk = std::fs::read_to_string(&path).expect("read users file");
+        assert!(
+            on_disk.contains("$argon2id$"),
+            "hash was not upgraded on disk: {on_disk}"
+        );
+        assert!(!on_disk.contains(&legacy), "legacy hash still present");
+
+        // The rewritten file carries password hashes and must stay owner-only.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).expect("stat").permissions().mode();
+            assert_eq!(
+                mode & 0o777,
+                0o600,
+                "users file must be 0600 after rehash, got {:o}",
+                mode & 0o777
+            );
+        }
+
+        let in_memory = manager
+            .basic_users
+            .read()
+            .await
+            .get("legacyuser")
+            .map(|u| u.password_hash.clone())
+            .expect("user");
+        assert!(!is_legacy_sha256_hash(&in_memory));
+
+        // The upgraded hash still authenticates the same password.
+        let fresh = AuthManager::new(AuthConfig {
+            enabled: true,
+            backend: AuthBackend::Basic,
+            basic_users_file: Some(path.clone()),
+            ..Default::default()
+        });
+        assert!(fresh.authenticate("legacyuser", &password).await.is_ok());
+        // Trailing whitespace must not be trimmed into a successful match.
+        let padded = format!("{password} ");
+        assert!(fresh.authenticate("legacyuser", &padded).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn argon2_user_from_file_authenticates_without_rewrite() {
+        let password = test_password();
+        let hash = hash_password_argon2(&password).expect("hash");
+        let file = users_file_with(&hash);
+        let path = file.path().to_string_lossy().to_string();
+        let manager = AuthManager::new(AuthConfig {
+            enabled: true,
+            backend: AuthBackend::Basic,
+            basic_users_file: Some(path.clone()),
+            ..Default::default()
+        });
+
+        assert!(manager.authenticate("legacyuser", &password).await.is_ok());
+        assert!(manager.authenticate("unknown", &password).await.is_err());
+        let on_disk = std::fs::read_to_string(&path).expect("read users file");
+        assert!(
+            on_disk.contains(&hash),
+            "existing Argon2 hash must be left alone"
+        );
+    }
+
+    #[tokio::test]
+    async fn put_basic_user_writes_argon2_hash() {
+        let manager = AuthManager::new(AuthConfig {
+            enabled: true,
+            backend: AuthBackend::Basic,
+            ..Default::default()
+        });
+        manager
+            .put_basic_user("u".to_string(), Some("p".to_string()), "users".to_string())
+            .await
+            .expect("put user");
+        let hash = manager
+            .basic_users
+            .read()
+            .await
+            .get("u")
+            .map(|u| u.password_hash.clone())
+            .expect("user");
+        assert!(hash.starts_with("$argon2id$"));
     }
 
     #[tokio::test]

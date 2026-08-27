@@ -8,12 +8,55 @@ Wants=network-online.target
 Type=simple
 User=bsdm-proxy
 Group=bsdm-proxy
-EnvironmentFile=-/etc/bsdm-proxy/cache-indexer.env
+# Mandatory: the unit holds SEARCH_API_TOKEN and the ClickHouse/Kafka endpoints.
+# Silently starting on built-in defaults would publish an unauthenticated
+# Search API and point the indexer at localhost.
+EnvironmentFile=/etc/bsdm-proxy/cache-indexer.env
+EnvironmentFile=-/etc/bsdm-proxy/conf.d/cache-indexer.d/*.env
 ExecStart=/opt/bsdm-proxy/bin/cache-indexer
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=65536
+
+# Only write path: the SQLite spool, SQLITE_PATH, default
+# /var/lib/cache-indexer/events.db (cache-indexer/src/store/mod.rs).
+# StateDirectory creates it 0700 owned by bsdm-proxy. If SQLITE_PATH is moved,
+# add the new location to ReadWritePaths or the indexer will fail to open it.
+StateDirectory=cache-indexer
+WorkingDirectory=/var/lib/cache-indexer
+
+# Hardening.
 NoNewPrivileges=true
+UMask=0077
+# Outbound Kafka/ClickHouse client + metrics listener on 8080: no capabilities.
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+# No JIT/WASM in this binary (cargo tree: no wasmtime/cranelift), so W^X is safe.
+MemoryDenyWriteExecute=true
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallArchitectures=native
+
+# Moderate ceilings; override with a drop-in
+# (/etc/systemd/system/bsdm-cache-indexer.service.d/20-limits.conf).
+TasksMax=512
+MemoryMax=2G
 
 [Install]
 WantedBy=multi-user.target

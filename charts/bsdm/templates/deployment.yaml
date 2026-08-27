@@ -21,6 +21,7 @@ spec:
     metadata:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap-env.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret-env.yaml") . | sha256sum }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -31,8 +32,9 @@ spec:
         {{- end }}
     spec:
       serviceAccountName: {{ include "bsdm.serviceAccountName" . }}
+      automountServiceAccountToken: false
       securityContext:
-        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        {{- include "bsdm.podSecurityContext" (dict "ctx" . "component" .Values.proxy) | nindent 8 }}
       {{- with .Values.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}
@@ -51,7 +53,7 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext:
-            {{- toYaml .Values.securityContext | nindent 12 }}
+            {{- include "bsdm.containerSecurityContext" (dict "ctx" . "component" .Values.proxy) | nindent 12 }}
           ports:
             - name: proxy
               containerPort: {{ .Values.service.proxyPort }}
@@ -62,9 +64,30 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "bsdm.fullname" . }}-env
-          {{- with .Values.proxy.extraEnv }}
+          {{- $phishtankSecret := "" }}
+          {{- $phishtankKey := "" }}
+          {{- if .Values.proxy.phishtankExistingSecret }}
+          {{- $phishtankSecret = .Values.proxy.phishtankExistingSecret }}
+          {{- $phishtankKey = .Values.proxy.phishtankExistingSecretKey | default "phishtank-api-key" }}
+          {{- else if .Values.proxy.phishtankApiKey }}
+          {{- $phishtankSecret = printf "%s-secrets" (include "bsdm.fullname" .) }}
+          {{- $phishtankKey = "phishtank-api-key" }}
+          {{- end }}
+          {{- if or $phishtankSecret .Values.proxy.extraEnv }}
           env:
+            {{- if $phishtankSecret }}
+            # Credential: secretKeyRef, not the env ConfigMap (a ConfigMap is
+            # readable by anything with namespace get/list and lands in etcd
+            # unencrypted regardless of encryption-at-rest for Secrets).
+            - name: PHISHTANK_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $phishtankSecret }}
+                  key: {{ $phishtankKey }}
+            {{- end }}
+            {{- with .Values.proxy.extraEnv }}
             {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
           volumeMounts:
             {{- if .Values.spill.enabled }}

@@ -8,12 +8,56 @@ Wants=network-online.target
 Type=simple
 User=bsdm-proxy
 Group=bsdm-proxy
-EnvironmentFile=-/etc/bsdm-proxy/ml-worker.env
+# Mandatory: ClickHouse DSN/credentials and scoring thresholds live here.
+# On built-in defaults the worker would score against an empty local DB and
+# report healthy while producing nothing.
+EnvironmentFile=/etc/bsdm-proxy/ml-worker.env
+EnvironmentFile=-/etc/bsdm-proxy/conf.d/ml-worker.d/*.env
 ExecStart=/opt/bsdm-proxy/bin/ml-worker
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=65536
+
+# No StateDirectory / ReadWritePaths on purpose: ml-worker only reads
+# ML_BASELINE_PATH (/etc/bsdm-proxy/baseline.json) and writes back to
+# ClickHouse over HTTP — there is no fs::write in ml-worker/src. Regenerating
+# the baseline is a separate offline job (scripts/ml/export_baseline.py), it
+# must not run as this unit. If model artifacts start being written locally,
+# add StateDirectory=ml-worker.
+
+# Hardening.
 NoNewPrivileges=true
+UMask=0077
+# HTTP client + metrics listener on 8091: no capabilities needed.
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+# No JIT/WASM in this binary (cargo tree: no wasmtime/cranelift and no ONNX/TVM
+# runtime — scoring is plain Rust), so W^X is safe.
+MemoryDenyWriteExecute=true
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallArchitectures=native
+
+# Moderate ceilings; override with a drop-in
+# (/etc/systemd/system/bsdm-ml-worker.service.d/20-limits.conf).
+TasksMax=512
+MemoryMax=2G
 
 [Install]
 WantedBy=multi-user.target

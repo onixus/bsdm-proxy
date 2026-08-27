@@ -45,16 +45,30 @@ indexer:
     url: "http://clickhouse-bsdm.bsdm-analytics.svc.cluster.local:8123"
     database: bsdm
     table: http_cache
-    # Prefer existing Secret with keys username / password when set
+    # Existing Secret with keys username / password. Required as soon as your
+    # ClickHouse needs auth: `user`/`password` inline is a render-time error.
     existingSecret: ""
     user: ""
     password: ""
   searchApi:
     enabled: true
+    # Bearer token for the Search API — from a Secret, never from the ConfigMap.
+    existingSecret: ""
+    existingSecretKey: "search-api-token"
     token: ""
     maxLimit: 10000
     defaultDays: 30
   rustLog: "info,cache_indexer=info"
+
+networkPolicy:
+  enabled: true
+  # Kafka and ClickHouse live in this namespace in the reference layout.
+  kafkaNamespace: bsdm-analytics
+  clickhouseNamespace: bsdm-analytics
+  # Namespaces whose pods may query the Search API on :8080. Empty = only the
+  # monitoring namespace (scraping) reaches the indexer.
+  searchApiNamespaces: []
+  searchApiCidrs: []
 
 # Proxy Kafka still pointed from values-prod when co-located; unused if replicaCount=0
 proxy:

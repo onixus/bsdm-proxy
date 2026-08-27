@@ -37,7 +37,8 @@ export BASIC_AUTH_USERS_FILE=/etc/bsdm-proxy/basic-auth-users.json
 ```
 
 Users file is JSON array of `{ "username", "password_hash", "role" }` where
-`password_hash` is **SHA-256 hex** of the password. Generate entries with
+`password_hash` is an **Argon2id PHC string** (`$argon2id$v=19$...`). Generate
+entries with
 `./scripts/gen-basic-auth-user.sh`. Example: `config/basic-auth-users.example.json`
 (password `pilot-secret` — change before production).
 
@@ -136,7 +137,9 @@ Enrichment failures are logged; authentication still succeeds with empty groups.
 
 ### Security
 
-- Passwords are never stored in plaintext (Basic/LDAP cache uses SHA-256)
+- Passwords are never stored in plaintext. Basic-auth entries are hashed with
+  Argon2id; legacy unsalted SHA-256 hex digests still verify and are rewritten
+  to Argon2id after the first successful login (see `BASIC_AUTH_REHASH_ON_LOGIN`)
 - LDAP connections support TLS/SSL (`ldaps://` in `LDAP_SERVERS`)
 - Kerberos uses keytab (no password on disk for service)
 - Failed auth attempts are logged

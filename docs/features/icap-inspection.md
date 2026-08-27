@@ -60,7 +60,7 @@ cargo run -p bsdm-proxy --bin proxy
 
 ## Compose (open-source ICAP server)
 
-Profile **`icap`** starts [c-icap](https://sourceforge.net/projects/c-icap/) via the community image `toolarium/toolarium-icap-clamav-docker` (c-icap + ClamAV on port **1344**):
+Profile **`icap`** starts [c-icap](https://sourceforge.net/projects/c-icap/) via the community image `toolarium/toolarium-icap-calmav-docker` (c-icap + ClamAV on port **1344**; the `calmav` spelling is the upstream repository name, not a typo on our side):
 
 ```bash
 # From repo root — sidecar only, or with full stack

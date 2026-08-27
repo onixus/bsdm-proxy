@@ -73,6 +73,7 @@ ring = "0.17"
 spki = "0.7"
 hyper-tungstenite = "0.30"
 futures-util = { version = "0.3", features = ["sink"] }
+argon2 = { version = "0.5.3", features = ["std"] }
 
 [build-dependencies]
 tonic-build = { version = "0.12", optional = true }

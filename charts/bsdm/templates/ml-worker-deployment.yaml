@@ -17,14 +17,15 @@ spec:
         {{- include "bsdm.mlWorkerSelectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: {{ include "bsdm.serviceAccountName" . }}
+      automountServiceAccountToken: false
       securityContext:
-        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        {{- include "bsdm.podSecurityContext" (dict "ctx" . "component" .Values.mlWorker) | nindent 8 }}
       containers:
         - name: ml-worker
           image: "{{ .Values.mlWorker.image.repository }}:{{ .Values.mlWorker.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.mlWorker.image.pullPolicy }}
           securityContext:
-            {{- toYaml .Values.securityContext | nindent 12 }}
+            {{- include "bsdm.containerSecurityContext" (dict "ctx" . "component" .Values.mlWorker) | nindent 12 }}
           ports:
             - name: admin
               containerPort: {{ .Values.mlWorker.service.port }}

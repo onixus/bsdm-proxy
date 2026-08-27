@@ -50,11 +50,18 @@ pdb:
 
 networkPolicy:
   enabled: true
-  proxyIngressCidrs:
-    - 10.0.0.0/8
-    - 172.16.0.0/12
+  # REQUIRED: who may use the proxy. The previous `10.0.0.0/8` / `172.16.0.0/12`
+  # here also matched the pod CIDR, so any pod in the cluster could use the
+  # proxy for egress. Pods of the release namespace are always allowed; list
+  # your client namespaces and/or the office/VPN ranges explicitly.
+  proxyClientNamespaces: []
+  #  - apps
+  proxyIngressCidrs: []
+  #  - 10.20.30.0/24
   redisNamespace: bsdm-proxy
   kafkaNamespace: bsdm-analytics
+  clickhouseNamespace: bsdm-analytics
+  defaultDeny: true
 
 serviceMonitor:
   enabled: true

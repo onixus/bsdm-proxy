@@ -8,12 +8,83 @@ Wants=network-online.target
 Type=simple
 User=bsdm-proxy
 Group=bsdm-proxy
-EnvironmentFile=-/etc/bsdm-proxy/bsdm-proxy.env
+# Main config is mandatory: a missing/unreadable file must fail the unit loudly.
+# Starting on built-in defaults silently would mean no CONTROL_API_TOKEN,
+# ACL_ENABLED=false and MITM off — a fail-open proxy nobody notices.
+EnvironmentFile=/etc/bsdm-proxy/bsdm-proxy.env
+# Optional operator drop-ins (may be absent).
+EnvironmentFile=-/etc/bsdm-proxy/conf.d/*.env
 ExecStart=/opt/bsdm-proxy/bin/proxy
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=65536
+
+# Writable state. ProtectSystem=strict below makes the whole filesystem
+# read-only except these, so every write path of the proxy must be listed:
+#   /var/lib/bsdm-proxy      RKN snapshot, RPZ state, TI shadow feed, agent
+#                            device registry / CRL   (StateDirectory)
+#   /var/cache/bsdm-proxy    CACHE_SPILL_DIR when moved off /tmp (CacheDirectory)
+#   /var/log/bsdm-proxy      PINNING_AUDIT_LOG_PATH  (LogsDirectory)
+#   /etc/bsdm-proxy          ACL persist (ACL_RULES_PATH), runtime config
+#                            rewrite (CONFIG_ENV_PATH), custom category DB,
+#                            MITM CA under /etc/bsdm-proxy/certs
+StateDirectory=bsdm-proxy
+CacheDirectory=bsdm-proxy
+LogsDirectory=bsdm-proxy
+WorkingDirectory=/var/lib/bsdm-proxy
+ReadWritePaths=/etc/bsdm-proxy
+
+# Hardening.
 NoNewPrivileges=true
+UMask=0077
+# Default ports are unprivileged (HTTP_PORT=3128, METRICS_PORT=9090), the proxy
+# needs no capability at all. Two cases require a drop-in
+# (/etc/systemd/system/bsdm-proxy.service.d/10-caps.conf):
+#   * binding HTTP_PORT/METRICS_PORT below 1024:
+#       [Service]
+#       CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+#       AmbientCapabilities=CAP_NET_BIND_SERVICE
+#   * EBPF_XDP_ENABLED=true (attaches bpf/xdp_drop.o via `ip link set ... xdp`):
+#       [Service]
+#       CapabilityBoundingSet=CAP_BPF CAP_NET_ADMIN CAP_SYS_RESOURCE
+#       AmbientCapabilities=CAP_BPF CAP_NET_ADMIN
+#       RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+#       ProtectKernelModules=false
+#       SystemCallFilter=@system-service @privileged
+#     (iproute2 talks to the kernel over netlink, hence AF_NETLINK; the XDP
+#     object is loaded from the working directory, keep it under
+#     /var/lib/bsdm-proxy/bpf.)
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictRealtime=true
+# AF_NETLINK is deliberately absent: it is only needed with eBPF/XDP enabled,
+# see the drop-in above.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+# MemoryDenyWriteExecute is intentionally NOT set: the proxy can be built with
+# the optional `wasm` feature (proxy/Cargo.toml: wasmtime + cranelift), whose
+# JIT maps W^X pages. Enabling it would crash any deployment using WASM hooks.
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallArchitectures=native
+
+# Moderate resource ceilings; override per host with a drop-in
+# (/etc/systemd/system/bsdm-proxy.service.d/20-limits.conf).
+TasksMax=4096
+MemoryMax=4G
 
 [Install]
 WantedBy=multi-user.target
