@@ -138,15 +138,25 @@ pipeline {
               ${ASSERT_WS_ON_VOLUME}
               RULES="--config p/security-audit --config p/secrets --config p/rust"
 
+              # Каталог воркспейса внутри тома — для volume-subpath ниже.
+              WS_REL="\${WORKSPACE#${WS_ROOT}/}"
+
+              # Образ semgrep требует код именно в /src: adjust_for_docker()
+              # падает с "Detected Docker environment without a code volume",
+              # если /src пуст, и никакой -w этого не заменяет. Поэтому не
+              # весь том, а подкаталог воркспейса — иначе в /src приехали бы
+              # воркспейсы всех стадий разом.
+              MOUNT="--mount type=volume,src=${WS_VOLUME},dst=/src,volume-subpath=\$WS_REL"
+
               # Проход 1 — полный отчёт, все severity, билд не роняет (--no-error).
               echo "[sast] полный отчёт"
-              docker run --rm -v ${WS_VOLUME}:${WS_ROOT} -w "\$WORKSPACE" semgrep/semgrep:latest \\
+              docker run --rm \$MOUNT -w /src semgrep/semgrep:latest \\
                 semgrep scan \$RULES --metrics=off --no-error \\
                   --json --output semgrep.json
 
               # Проход 2 — гейт: только ERROR, находки уходят в код возврата.
               echo "[sast] quality gate: блок при ERROR"
-              docker run --rm -v ${WS_VOLUME}:${WS_ROOT} -w "\$WORKSPACE" semgrep/semgrep:latest \\
+              docker run --rm \$MOUNT -w /src semgrep/semgrep:latest \\
                 semgrep scan \$RULES --metrics=off --severity ERROR --error
             """
           }
