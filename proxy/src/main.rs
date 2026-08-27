@@ -68,8 +68,29 @@ async fn run_accept_loop(
     }
 }
 
+/// `proxy hash-password`: password on stdin (first line), PHC hash on stdout.
+fn run_hash_password() -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Read;
+    let mut input = String::new();
+    std::io::stdin().read_to_string(&mut input)?;
+    let password = input.strip_suffix('\n').unwrap_or(&input);
+    let password = password.strip_suffix('\r').unwrap_or(password);
+    if password.is_empty() {
+        return Err("empty password on stdin".into());
+    }
+    println!("{}", bsdm_proxy::hash_password_argon2(password)?);
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Offline helper: `proxy hash-password` reads a password from stdin and prints
+    // an Argon2id PHC hash. scripts/gen-basic-auth-user.sh calls this so the
+    // hashing algorithm stays defined in exactly one place (proxy/src/auth.rs).
+    if std::env::args().nth(1).as_deref() == Some("hash-password") {
+        return run_hash_password();
+    }
+
     // Admin Console persist file must win over compose hardcodes after Apply+restart.
     if let Ok(saved) = bsdm_proxy::runtime_config::read_env_file() {
         if !saved.is_empty() {
@@ -123,6 +144,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if policy_config.acl_enabled {
         info!("ACL enabled");
     }
+    bsdm_proxy::policy_config::log_fail_open_warnings(
+        bsdm_proxy::policy_config::acl_default_action_from_env(),
+    );
     if policy_config.categorization.is_some() {
         info!("URL categorization enabled");
     }
@@ -225,7 +249,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let auth_config = load_auth_config();
-    let auth = Some(Arc::new(AuthManager::new(auth_config.clone())));
+    let auth = Some(Arc::new(
+        AuthManager::new(auth_config.clone()).with_metrics(metrics.clone()),
+    ));
     if auth_config.enabled {
         info!(
             "Proxy authentication enabled (backend={}, realm={})",

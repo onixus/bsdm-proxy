@@ -58,6 +58,13 @@ pub struct Metrics {
     pub kafka_queue_dropped_total: Counter,
     pub tls_handshakes_total: CounterVec,
 
+    // Basic-auth password hashing metrics
+    /// Password verifications by stored hash format (`argon2id` / `sha256_legacy`)
+    /// and result (`success` / `failure`).
+    pub auth_password_verifications_total: CounterVec,
+    /// Legacy SHA-256 hashes transparently upgraded to Argon2id on login.
+    pub auth_password_rehashes_total: Counter,
+
     // ACL metrics
     pub acl_decisions_total: CounterVec,
     pub acl_rules_matched_total: CounterVec,
@@ -316,6 +323,21 @@ impl Metrics {
         )?;
         registry.register(Box::new(tls_handshakes_total.clone()))?;
 
+        let auth_password_verifications_total = CounterVec::new(
+            Opts::new(
+                "bsdm_proxy_auth_password_verifications_total",
+                "Basic-auth password verifications by stored hash format and result",
+            ),
+            &["format", "result"],
+        )?;
+        registry.register(Box::new(auth_password_verifications_total.clone()))?;
+
+        let auth_password_rehashes_total = Counter::new(
+            "bsdm_proxy_auth_password_rehashes_total",
+            "Legacy SHA-256 password hashes upgraded to Argon2id on successful login",
+        )?;
+        registry.register(Box::new(auth_password_rehashes_total.clone()))?;
+
         let acl_decisions_total = CounterVec::new(
             Opts::new("bsdm_proxy_acl_decisions_total", "Total ACL decisions"),
             &["action"],
@@ -572,6 +594,8 @@ impl Metrics {
             kafka_send_errors,
             kafka_queue_dropped_total,
             tls_handshakes_total,
+            auth_password_verifications_total,
+            auth_password_rehashes_total,
             acl_decisions_total,
             acl_rules_matched_total,
             acl_eval_duration_seconds,

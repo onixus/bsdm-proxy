@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Generate a BasicAuth JSON user entry (SHA-256 hex password hash).
+# Generate a BasicAuth JSON user entry (Argon2id PHC password hash).
 #
 # Usage (preferred — the password never appears in argv):
 #   ./scripts/gen-basic-auth-user.sh pilot                    # prompts twice on a tty
@@ -13,16 +13,25 @@
 # Output goes to stdout, e.g.:
 #   ./scripts/gen-basic-auth-user.sh pilot >> config/basic-auth-users.json
 #
-# !!! DO NOT CHANGE THE HASHING ALGORITHM !!!
-# The unsalted SHA-256 of the raw password bytes is fixed by the Rust side:
-# AuthManager::hash_password_stable (proxy/src/auth.rs). Switching to bcrypt /
-# argon2 / adding a salt here silently invalidates every existing user database
-# — all logins fail after the next restart. Any change must land in the Rust
-# verifier and a migration path first.
+# Hash format: Argon2id PHC string, e.g.
+#   $argon2id$v=19$m=19456,t=2,p=1$<salt-b64>$<hash-b64>
+# The algorithm is defined in exactly one place — proxy/src/auth.rs
+# (hash_password_argon2). This script does NOT reimplement it: it shells out to
+# `proxy hash-password` (password on stdin), so the script and the verifier can
+# never drift apart.
+#
+# Migration: legacy entries (64-hex unsalted SHA-256, pre-0.9.14) keep working.
+# The proxy upgrades each of them to Argon2id on the first successful login and
+# rewrites BASIC_USERS_FILE atomically (disable with
+# BASIC_AUTH_REHASH_ON_LOGIN=false). To migrate offline instead, regenerate the
+# entry with this script and replace it in config/basic-auth-users.json.
+#
+# Binary lookup order: $BSDM_PROXY_BIN, ./target/release/proxy,
+# ./target/debug/proxy, `proxy` on $PATH.
 set -euo pipefail
 
 usage() {
-  sed -n '2,22p' "$0" >&2
+  sed -n '2,14p' "$0" >&2
   exit 1
 }
 
@@ -114,19 +123,35 @@ if [[ -z "$PASS" ]]; then
   exit 2
 fi
 
-# Unsalted SHA-256 hex — must match AuthManager::hash_password_stable. See the
-# warning at the top of this file before touching anything below.
-if command -v sha256sum >/dev/null 2>&1; then
-  HASH="$(printf '%s' "$PASS" | sha256sum | awk '{print $1}')"
-elif command -v shasum >/dev/null 2>&1; then
-  HASH="$(printf '%s' "$PASS" | shasum -a 256 | awk '{print $1}')"
-elif command -v openssl >/dev/null 2>&1; then
-  HASH="$(printf '%s' "$PASS" | openssl dgst -sha256 | awk '{print $NF}')"
-else
-  echo "need sha256sum, shasum, or openssl" >&2
+# Single source of truth for the hashing algorithm: the proxy binary itself.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROXY_BIN="${BSDM_PROXY_BIN:-}"
+if [[ -z "$PROXY_BIN" ]]; then
+  for candidate in \
+    "$REPO_ROOT/target/release/proxy" \
+    "$REPO_ROOT/target/debug/proxy" \
+    "$(command -v proxy 2>/dev/null || true)"; do
+    if [[ -n "$candidate" && -x "$candidate" ]]; then
+      PROXY_BIN="$candidate"
+      break
+    fi
+  done
+fi
+if [[ -z "$PROXY_BIN" || ! -x "$PROXY_BIN" ]]; then
+  echo "error: proxy binary not found — Argon2id hashing is done by the proxy itself." >&2
+  echo "       Build it (cargo build --release -p bsdm-proxy) or set BSDM_PROXY_BIN=/path/to/proxy." >&2
   exit 1
 fi
+
+HASH="$(printf '%s' "$PASS" | "$PROXY_BIN" hash-password)" || {
+  echo "error: ${PROXY_BIN} hash-password failed" >&2
+  exit 1
+}
 unset PASS
+if [[ -z "$HASH" ]]; then
+  echo "error: empty hash returned by ${PROXY_BIN} hash-password" >&2
+  exit 1
+fi
 
 python3 - "$USER" "$HASH" "$ROLE" <<'PY'
 import json, sys

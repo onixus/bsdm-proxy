@@ -78,7 +78,10 @@ pub use acl_config::{load_acl_engine_from_file, parse_acl_action, save_acl_engin
 pub use auth::KerberosConfig;
 #[cfg(feature = "auth-ntlm")]
 pub use auth::NtlmConfig;
-pub use auth::{AuthBackend, AuthConfig, AuthManager, ConnAuthCache, ProxyAuthOutcome, UserInfo};
+pub use auth::{
+    hash_password_argon2, is_legacy_sha256_hash, verify_password_hash, AuthBackend, AuthConfig,
+    AuthManager, ConnAuthCache, PasswordCheck, ProxyAuthOutcome, UserInfo,
+};
 pub use bsdm_events::CacheEvent;
 pub use cache::{CacheConfig, CachedResponse};
 pub use cache_body::{ensure_private_spill_dir, CachedBody};
