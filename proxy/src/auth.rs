@@ -1485,39 +1485,45 @@ mod tests {
 
     #[test]
     fn legacy_sha256_hash_is_detected_and_verified() {
-        let stored = AuthManager::hash_password_stable("testpass");
+        let password = test_password();
+        let wrong = test_password();
+        let stored = AuthManager::hash_password_stable(&password);
         assert!(is_legacy_sha256_hash(&stored));
         assert_eq!(
-            verify_password_hash(&stored, "testpass"),
+            verify_password_hash(&stored, &password),
             PasswordCheck::Valid { needs_rehash: true }
         );
         assert_eq!(
-            verify_password_hash(&stored, "wrongpass"),
+            verify_password_hash(&stored, &wrong),
             PasswordCheck::Invalid
         );
     }
 
     #[test]
     fn argon2_hash_round_trips() {
-        let stored = hash_password_argon2("testpass").expect("hash");
+        let password = test_password();
+        let stored = hash_password_argon2(&password).expect("hash");
         assert!(stored.starts_with("$argon2id$v=19$"));
         assert!(!is_legacy_sha256_hash(&stored));
         assert_eq!(
-            verify_password_hash(&stored, "testpass"),
+            verify_password_hash(&stored, &password),
             PasswordCheck::Valid {
                 needs_rehash: false
             }
         );
+        // One character short: a near miss must still be rejected.
+        let truncated = &password[..password.len() - 1];
         assert_eq!(
-            verify_password_hash(&stored, "testpas"),
+            verify_password_hash(&stored, truncated),
             PasswordCheck::Invalid
         );
     }
 
     #[test]
     fn argon2_hashes_are_salted() {
-        let a = hash_password_argon2("same").expect("hash");
-        let b = hash_password_argon2("same").expect("hash");
+        let password = test_password();
+        let a = hash_password_argon2(&password).expect("hash");
+        let b = hash_password_argon2(&password).expect("hash");
         assert_ne!(
             a, b,
             "identical passwords must not produce identical hashes"
@@ -1526,16 +1532,27 @@ mod tests {
 
     #[test]
     fn garbage_hash_is_rejected() {
+        let password = test_password();
         assert_eq!(
-            verify_password_hash("$nonsense$", "x"),
+            verify_password_hash("$nonsense$", &password),
             PasswordCheck::Invalid
         );
-        assert_eq!(verify_password_hash("", "x"), PasswordCheck::Invalid);
+        assert_eq!(verify_password_hash("", &password), PasswordCheck::Invalid);
         // Legacy-looking but wrong length: still rejected, never panics.
         assert_eq!(
-            verify_password_hash("deadbeef", "x"),
+            verify_password_hash("deadbeef", &password),
             PasswordCheck::Invalid
         );
+    }
+
+    /// A fresh random password for each call.
+    ///
+    /// Tests deliberately hold no literal credentials: what is under test is the
+    /// hash round-trip and the legacy-upgrade path, never one particular string.
+    /// Generating the value also keeps CodeQL's hard-coded-credential query
+    /// honest instead of silencing it.
+    fn test_password() -> String {
+        format!("pw-{}", hex::encode(rand::random::<[u8; 16]>()))
     }
 
     fn users_file_with(hash: &str) -> tempfile::NamedTempFile {
@@ -1554,7 +1571,9 @@ mod tests {
 
     #[tokio::test]
     async fn legacy_hash_authenticates_and_is_rehashed_on_disk() {
-        let legacy = AuthManager::hash_password_stable("s3cret");
+        let password = test_password();
+        let wrong = test_password();
+        let legacy = AuthManager::hash_password_stable(&password);
         let file = users_file_with(&legacy);
         let path = file.path().to_string_lossy().to_string();
         let manager = AuthManager::new(AuthConfig {
@@ -1565,13 +1584,13 @@ mod tests {
         });
 
         // Wrong password on a legacy hash is rejected and does not rewrite the file.
-        assert!(manager.authenticate("legacyuser", "nope").await.is_err());
+        assert!(manager.authenticate("legacyuser", &wrong).await.is_err());
         assert!(std::fs::read_to_string(&path)
             .expect("read")
             .contains(&legacy));
 
         let user = manager
-            .authenticate("legacyuser", "s3cret")
+            .authenticate("legacyuser", &password)
             .await
             .expect("legacy login must succeed");
         assert_eq!(user.groups, vec!["users".to_string()]);
@@ -1612,13 +1631,16 @@ mod tests {
             basic_users_file: Some(path.clone()),
             ..Default::default()
         });
-        assert!(fresh.authenticate("legacyuser", "s3cret").await.is_ok());
-        assert!(fresh.authenticate("legacyuser", "s3cret ").await.is_err());
+        assert!(fresh.authenticate("legacyuser", &password).await.is_ok());
+        // Trailing whitespace must not be trimmed into a successful match.
+        let padded = format!("{password} ");
+        assert!(fresh.authenticate("legacyuser", &padded).await.is_err());
     }
 
     #[tokio::test]
     async fn argon2_user_from_file_authenticates_without_rewrite() {
-        let hash = hash_password_argon2("s3cret").expect("hash");
+        let password = test_password();
+        let hash = hash_password_argon2(&password).expect("hash");
         let file = users_file_with(&hash);
         let path = file.path().to_string_lossy().to_string();
         let manager = AuthManager::new(AuthConfig {
@@ -1628,8 +1650,8 @@ mod tests {
             ..Default::default()
         });
 
-        assert!(manager.authenticate("legacyuser", "s3cret").await.is_ok());
-        assert!(manager.authenticate("unknown", "s3cret").await.is_err());
+        assert!(manager.authenticate("legacyuser", &password).await.is_ok());
+        assert!(manager.authenticate("unknown", &password).await.is_err());
         let on_disk = std::fs::read_to_string(&path).expect("read users file");
         assert!(
             on_disk.contains(&hash),
