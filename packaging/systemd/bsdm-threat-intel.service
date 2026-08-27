@@ -8,7 +8,10 @@ Wants=network-online.target
 Type=simple
 User=bsdm-proxy
 Group=bsdm-proxy
-EnvironmentFile=-/etc/bsdm-proxy/threat-intel.env
+# Mandatory: TI_API_TOKEN, feed URLs and TI_OUTPUT_DIR live here. Starting on
+# built-in defaults would silently ingest nothing and serve an empty IOC feed.
+EnvironmentFile=/etc/bsdm-proxy/threat-intel.env
+EnvironmentFile=-/etc/bsdm-proxy/conf.d/threat-intel.d/*.env
 ExecStart=/opt/bsdm-proxy/bin/threat-intel
 StateDirectory=bsdm-proxy/threat-intel
 Restart=on-failure

@@ -19,11 +19,30 @@ services:
       - awg-config:/etc/amnezia/amneziawg
 
   amneziawg:
-    image: amneziavpn/amneziawg-go:latest
+    image: amneziavpn/amneziawg-go:3.1.20260814
     container_name: bsdm-amneziawg
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # NET_ADMIN only: needed to create/configure the awg0 interface.
+    #
+    # SYS_MODULE is deliberately NOT granted — it lets the container load
+    # arbitrary kernel modules, i.e. full host takeover from a third-party
+    # image that terminates untrusted UDP on :51820.
+    #
+    # PREREQUISITE ON THE HOST: the kernel module must be loaded before `up`:
+    #   sudo modprobe amneziawg           # or: sudo modprobe wireguard
+    #   echo amneziawg | sudo tee /etc/modules-load.d/amneziawg.conf
+    # (also ensure /dev/net/tun exists on the host: sudo modprobe tun)
+    #
+    # MKNOD is kept because the entrypoint of this image creates /dev/net/tun
+    # itself when the device is not passed in; it is part of Docker's default
+    # capability set, so this is not a privilege increase over the old config.
     cap_add:
       - NET_ADMIN
-      - SYS_MODULE
+      - MKNOD
+    pids_limit: 512
     ports:
       - "51820:51820/udp"
     environment:
@@ -45,6 +64,13 @@ services:
     networks:
       - bsdm-lite
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 512M
+        reservations:
+          memory: 128M
 
 volumes:
   awg-config:

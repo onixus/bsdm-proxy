@@ -8,12 +8,60 @@ Wants=network-online.target
 Type=simple
 User=bsdm-agent
 Group=bsdm-agent
-EnvironmentFile=-/etc/bsdm-agent/agent.env
+# Mandatory: CONTROL_PLANE_URL, CONTROL_API_TOKEN / AGENT_ENROLL_TOKEN and the
+# device identity live here. Without the file the agent would fall back to
+# http://127.0.0.1:9090 with no token and DEVICE_ID=dev-mac-001, i.e. silently
+# enroll as the wrong device against the wrong control plane.
+EnvironmentFile=/etc/bsdm-agent/agent.env
+EnvironmentFile=-/etc/bsdm-agent/conf.d/*.env
 # Enroll once if DEVICE_TOKEN unset; then heartbeat + policy watch.
 ExecStart=/opt/bsdm-agent/bin/bsdm-agent
 Restart=on-failure
 RestartSec=5
+
+# Writable state: /var/lib/bsdm-agent (also the account's home, created by
+# packaging/agent/install-linux.sh). The agent writes the AmneziaWG client
+# config there (AWG_CLIENT_CONFIG_PATH defaults to ./certs/awg/client.conf,
+# resolved against WorkingDirectory) and persists device state.
+StateDirectory=bsdm-agent
+WorkingDirectory=/var/lib/bsdm-agent
+
+# Hardening.
 NoNewPrivileges=true
+UMask=0077
+# Outbound HTTPS to the control plane only. AGENT_MANAGE_SYSTEM_PROXY=1 is NOT
+# supported under this unit: writing /etc/profile.d/bsdm-agent-proxy.sh needs
+# root and is blocked by ProtectSystem=strict — run
+# `bsdm-agent --set-system-proxy` from the installer instead.
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+# No JIT/WASM in the agent binary (cargo tree -p agent-spike: no
+# wasmtime/cranelift), so W^X is safe.
+MemoryDenyWriteExecute=true
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallArchitectures=native
+
+# Endpoint agent: keep the footprint small. Override with a drop-in
+# (/etc/systemd/system/bsdm-agent.service.d/20-limits.conf).
+TasksMax=128
+MemoryMax=256M
 
 [Install]
 WantedBy=multi-user.target
