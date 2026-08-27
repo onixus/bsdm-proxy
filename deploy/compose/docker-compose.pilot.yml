@@ -96,11 +96,17 @@ services:
 
       # --- Core controls ---
       ACL_ENABLED: "${ACL_ENABLED:-true}"
+      # fail-closed: unmatched traffic is blocked with 403. Load your allow rules
+      # into ACL_RULES_PATH before cutover. ACL_DEFAULT_ACTION=allow restores the
+      # old blocklist-only behaviour (unmatched traffic passes unfiltered).
       ACL_DEFAULT_ACTION: "${ACL_DEFAULT_ACTION:-allow}"
-      AUTH_ENABLED: "${AUTH_ENABLED:-false}"
+      # On by default: pilot clients must authenticate (407 otherwise).
+      AUTH_ENABLED: "${AUTH_ENABLED:-true}"
       AUTH_BACKEND: "${AUTH_BACKEND:-basic}"
       AUTH_REALM: "${AUTH_REALM:-BSDM Pilot}"
-      # When AUTH_ENABLED=true, point at a users file (example password: pilot-secret).
+      # Required with AUTH_ENABLED=true + basic backend, otherwise ANY credentials
+      # are accepted. Defaults to the mounted file below; the shipped example has
+      # public hashes (password: pilot-secret) — override BASIC_AUTH_USERS_HOST.
       BASIC_AUTH_USERS_FILE: "${BASIC_AUTH_USERS_FILE:-/etc/bsdm-proxy/basic-auth-users.json}"
       CATEGORIZATION_ENABLED: "${CATEGORIZATION_ENABLED:-false}"
       UT1_ENABLED: "${UT1_ENABLED:-false}"

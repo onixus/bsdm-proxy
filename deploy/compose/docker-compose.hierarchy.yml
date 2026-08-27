@@ -2,6 +2,11 @@
 # outside the repo root (Compose would otherwise derive it from the directory).
 name: bsdm-proxy
 
+# LAB STACK — NOT FOR PRODUCTION.
+# Deliberately permissive: AUTH_ENABLED=false, ACL_ENABLED=false on every tier,
+# so the demo shows cache hierarchy behaviour without auth noise. Reference
+# defaults live in bsdm-proxy.env / docker-compose.yml.
+
 # 3-tier cache hierarchy demo: child → sibling (ICP) / parent → upstream
 #
 # Usage:

@@ -2,6 +2,14 @@
 # outside the repo root (Compose would otherwise derive it from the directory).
 name: bsdm-proxy
 
+# LAB / CI STACK — NOT FOR PRODUCTION.
+# Deliberately permissive: AUTH_ENABLED=false, ACL_ENABLED=false,
+# ACL_DEFAULT_ACTION=allow, CONTROL_API_ALLOW_INSECURE=true,
+# SEARCH_API_ALLOW_INSECURE=true. The control and search APIs are open to
+# anyone who can reach the port. This profile exists for zero-config demos and
+# CI load tests; use docker-compose.yml + deploy/compose/docker-compose.pilot.yml
+# for anything real.
+
 # Zero-config Lite profile: caching HTTPS proxy + optional SQLite search.
 # No Kafka / ClickHouse / Prometheus / Grafana.
 #

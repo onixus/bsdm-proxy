@@ -2,6 +2,11 @@
 # outside the repo root (Compose would otherwise derive it from the directory).
 name: bsdm-proxy
 
+# LAB STACK — NOT FOR PRODUCTION.
+# Deliberately permissive: AUTH_ENABLED=false, ACL_ENABLED=false, so the L2
+# cache demo needs no credentials. Reference defaults live in bsdm-proxy.env /
+# docker-compose.yml.
+
 # Redis L2 cache demo — shared cache between proxy instances
 #
 # Usage:

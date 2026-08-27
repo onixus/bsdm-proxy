@@ -2,6 +2,11 @@
 # outside the repo root (Compose would otherwise derive it from the directory).
 name: bsdm-proxy
 
+# LAB STACK — NOT FOR PRODUCTION.
+# Deliberately permissive: AUTH_ENABLED=false, ACL_ENABLED=false on both proxy
+# instances, so the HA/failover sketch needs no credentials. Reference defaults
+# live in bsdm-proxy.env / docker-compose.yml.
+
 # HA sketch: 2 proxy instances + Redis L2 behind implicit round-robin.
 # No k8s required — validates L2-HIT across restarts before Helm deploy.
 #

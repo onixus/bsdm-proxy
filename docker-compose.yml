@@ -2,6 +2,17 @@
 # directory name (Compose derives it from the directory otherwise).
 name: bsdm-proxy
 
+# Reference (production-shaped) stack. Defaults are fail-closed and mirror
+# bsdm-proxy.env: AUTH_ENABLED=true, ACL_ENABLED=true,
+# CONTROL_API_ALLOW_INSECURE=false, SEARCH_API_ALLOW_INSECURE=false.
+#
+# Required before `docker compose up`:
+#   export CONTROL_API_TOKEN=...   # proxy exits without it (profile=production)
+#   export SEARCH_API_TOKEN=...    # cache-indexer exits without it
+#   export BASIC_AUTH_USERS_HOST=/path/to/your/basic-auth-users.json
+#   ./scripts/gen-ca.sh
+# For a disposable lab stack use deploy/compose/docker-compose.lite.yml instead.
+
 x-logging: &default-logging
   driver: "json-file"
   options:
@@ -149,10 +160,27 @@ services:
       # Agent Phase C device inventory (survives restart); empty path = memory-only
       - AGENT_DEVICES_PATH=${AGENT_DEVICES_PATH:-/var/lib/bsdm-proxy/agent-devices.json}
       - MITM_ENABLED=true
-      - AUTH_ENABLED=false
+      # Proxy auth is ON by default (matches bsdm-proxy.env). Clients must send
+      # Proxy-Authorization; unauthenticated requests get 407.
+      - AUTH_ENABLED=${AUTH_ENABLED:-true}
+      - AUTH_BACKEND=${AUTH_BACKEND:-basic}
+      # MUST be set whenever AUTH_ENABLED=true with the basic backend: without it
+      # the proxy accepts ANY credentials (auth theatre). Defaults to the mounted
+      # example file below, whose password hashes are public — override
+      # BASIC_AUTH_USERS_HOST with your own file before any real deployment.
+      # Generate one with scripts/gen-basic-auth-user.sh (docs/getting-started/pilot-auth.md).
+      - BASIC_AUTH_USERS_FILE=${BASIC_AUTH_USERS_FILE:-/etc/bsdm-proxy/basic-auth-users.json}
       - SHUTDOWN_TIMEOUT_SECONDS=30
-      - ACL_ENABLED=false
-      - ACL_DEFAULT_ACTION=allow
+      - ACL_ENABLED=${ACL_ENABLED:-true}
+      # The shipped ACL is a blocklist: config/bsdm-etc/acl-rules.json holds 85
+      # rules, all of them deny, and no allow rule at all. default_action=deny
+      # would therefore block every request instead of hardening anything, so
+      # allow is deliberate here. It is also only a fallback — acl_config.rs
+      # takes "default_action" from the rules file when present, and every
+      # shipped rule set says "allow". Inspect the value actually in effect:
+      #   curl -H "Authorization: Bearer $CONTROL_API_TOKEN" \
+      #        http://127.0.0.1:9090/api/acl/config
+      - ACL_DEFAULT_ACTION=${ACL_DEFAULT_ACTION:-allow}
       - ACL_RULES_PATH=/etc/bsdm-proxy/acl-rules.json
       - ACL_AUTO_RELOAD=false
       # Writable env persist (Admin Settings Apply); not cwd /
@@ -165,10 +193,14 @@ services:
       - DNS_SINKHOLE_RELOAD_URL=http://dns-sinkhole:8092/api/zone/reload
       - CATEGORIZATION_ENABLED=false
       - UT1_ENABLED=false
-      # Control plane: set real secrets for pilot. Lab compose allows insecure open APIs.
+      # Control plane is fail-closed: DEPLOYMENT_PROFILE=production above means
+      # the proxy REFUSES TO START without CONTROL_API_TOKEN (or ACL_API_TOKEN).
+      # Export CONTROL_API_TOKEN before `docker compose up`. For a throwaway lab
+      # only, set CONTROL_API_ALLOW_INSECURE=true to leave the mutating control
+      # APIs open — never on a network anyone else can reach.
       - CONTROL_API_TOKEN=${CONTROL_API_TOKEN:-}
       - ACL_API_TOKEN=${ACL_API_TOKEN:-}
-      - CONTROL_API_ALLOW_INSECURE=${CONTROL_API_ALLOW_INSECURE:-true}
+      - CONTROL_API_ALLOW_INSECURE=${CONTROL_API_ALLOW_INSECURE:-false}
       - METRICS_BIND=${METRICS_BIND:-0.0.0.0}
       - DLP_ENABLED=${DLP_ENABLED:-false}
       - THREAT_SCORE_ENABLED=${THREAT_SCORE_ENABLED:-false}
@@ -189,6 +221,9 @@ services:
       - ./certs:/certs:ro
       # Writable /etc/bsdm-proxy (ACL persist needs sibling *.tmp)
       - ./config/bsdm-etc:/etc/bsdm-proxy
+      # Basic-auth users for AUTH_ENABLED=true. The default is the EXAMPLE file
+      # (public password hashes) — point BASIC_AUTH_USERS_HOST at your own file.
+      - ${BASIC_AUTH_USERS_HOST:-./config/basic-auth-users.example.json}:/etc/bsdm-proxy/basic-auth-users.json:ro
       - pinning-audit:/var/log/bsdm-proxy
       - agent-devices:/var/lib/bsdm-proxy
       - proxy-spill:/var/cache/bsdm-spill
@@ -239,8 +274,11 @@ services:
       - CLICKHOUSE_TABLE=http_cache
       - METRICS_PORT=8080
       - SEARCH_API_ENABLED=true
+      # Same fail-closed posture as the proxy control plane: with
+      # DEPLOYMENT_PROFILE=production, cache-indexer exits at startup unless
+      # SEARCH_API_TOKEN is set (or SEARCH_API_ALLOW_INSECURE=true, lab only).
       - SEARCH_API_TOKEN=${SEARCH_API_TOKEN:-}
-      - SEARCH_API_ALLOW_INSECURE=${SEARCH_API_ALLOW_INSECURE:-true}
+      - SEARCH_API_ALLOW_INSECURE=${SEARCH_API_ALLOW_INSECURE:-false}
       - DEPLOYMENT_PROFILE=${DEPLOYMENT_PROFILE:-production}
       - RUST_LOG=info,cache_indexer=debug
       - RUST_BACKTRACE=1

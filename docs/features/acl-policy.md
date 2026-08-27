@@ -223,7 +223,7 @@ Default:      Deny all
 ```bash
 # Enable ACL
 ACL_ENABLED=true
-ACL_DEFAULT_ACTION=deny  # allow, deny, redirect
+ACL_DEFAULT_ACTION=allow  # allow, deny, redirect
 
 # Rules file
 ACL_RULES_PATH=/etc/bsdm-proxy/acl-rules.json
@@ -232,6 +232,13 @@ ACL_RULES_PATH=/etc/bsdm-proxy/acl-rules.json
 ACL_AUTO_RELOAD=true
 ACL_RELOAD_INTERVAL=60  # seconds
 ```
+
+> `ACL_DEFAULT_ACTION=deny` only makes sense once your rules file contains a
+> baseline of `allow` rules for legitimate traffic. The rule set shipped in
+> `config/bsdm-etc/acl-rules.json` is a pure blocklist (85 deny rules, no allow
+> rule), so switching the default to `deny` on top of it blocks every request.
+> Note also that this variable is a fallback: `default_action` inside the rules
+> file wins whenever the file sets it.
 
 ### Rules File Format
 
