@@ -17,6 +17,8 @@ install_native() {
   [[ -x "${root}/scripts/build-package.sh" ]] || die "Missing canonical package builder"
   [[ -f "${root}/proxy/Cargo.toml" ]] || die "Cargo workspace not found"
 
+  # The CA now lives under /etc/bsdm-proxy/certs (covered by the first path);
+  # /certs is still backed up for installs that predate the move.
   backup_installation "/etc/bsdm-proxy" "/certs" >/dev/null
 
   info "Building canonical release package"
@@ -45,10 +47,10 @@ install_native() {
     --systemd
 
   configure_native_proxy "$root" /etc/bsdm-proxy "$http_port" "$metrics_port" "$enable_acl"
-  ensure_ca /certs
+  ensure_ca /etc/bsdm-proxy/certs
 
   if id bsdm-proxy >/dev/null 2>&1; then
-    chown -R bsdm-proxy:bsdm-proxy /certs
+    chown -R bsdm-proxy:bsdm-proxy /etc/bsdm-proxy/certs
   fi
 
   systemctl daemon-reload

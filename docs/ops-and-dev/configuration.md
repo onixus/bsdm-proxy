@@ -20,6 +20,7 @@ native install находятся в `packaging/config/*.env.example`; Compose �
 | `PINNING_AUDIT_LOG_PATH` | `<registry>.audit.jsonl` | Append-only audit trail изменений реестра |
 | `PINNING_EXCEPTIONS` | `.slack.com,.teams.microsoft.com,.zoom.us` | Legacy startup fallback; без reload и аудита |
 | `MITM_ENABLED` | `true` | HTTPS MITM; требует `ca.key` и `ca.crt` при POLICY_MODE != sni |
+| `MITM_CA_DIR` | `/etc/bsdm-proxy/certs` | Каталог с `ca.key`/`ca.crt`; при отсутствии CA читаются устаревшие `/certs` и `./certs` (с warning) |
 | `TLS_OCSP_STAPLING` | `true` | OCSP staple (RFC 6960 DER, CA-signed **good**) on MITM/control TLS leaves |
 | `TLS_OCSP_STAPLE_REFRESH_SECS` | `900` | TTL refresh cached `ServerConfig` + staple (60–86400) |
 | `MITM_CERT_CACHE_MAX_ENTRIES` | `10000` | Лимит записей в кэшах MITM-сертификатов и `ServerConfig` (ключ — SNI); значения ниже `128` поднимаются до `128`. При заполнении вытесняются самые старые записи |

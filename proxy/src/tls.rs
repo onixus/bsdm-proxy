@@ -16,6 +16,7 @@ use rustls_pemfile::certs;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::io::Cursor;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::RwLock;
@@ -29,6 +30,44 @@ pub type CertPair = (Bytes, Bytes);
 /// unbounded map grows with every unique hostname a client asks for.
 const DEFAULT_CERT_CACHE_MAX_ENTRIES: usize = 10_000;
 const MIN_CERT_CACHE_MAX_ENTRIES: usize = 128;
+
+/// FHS location of the MITM CA; override with `MITM_CA_DIR`.
+const DEFAULT_MITM_CA_DIR: &str = "/etc/bsdm-proxy/certs";
+/// Pre-FHS location, kept as a read-only fallback for existing installs.
+const LEGACY_MITM_CA_DIR: &str = "/certs";
+/// Working-directory CA used by `scripts/gen-ca.sh` and the compose stacks.
+const RELATIVE_MITM_CA_DIR: &str = "./certs";
+
+/// Directory the operator configured for `ca.key` / `ca.crt`.
+fn configured_ca_dir() -> PathBuf {
+    std::env::var("MITM_CA_DIR")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_MITM_CA_DIR))
+}
+
+/// Directories searched for the CA, in order: configured first, then the
+/// legacy locations that pre-date `MITM_CA_DIR`.
+fn ca_dir_candidates(configured: &Path) -> Vec<PathBuf> {
+    let mut dirs = vec![configured.to_path_buf()];
+    for legacy in [LEGACY_MITM_CA_DIR, RELATIVE_MITM_CA_DIR] {
+        let legacy = PathBuf::from(legacy);
+        if !dirs.contains(&legacy) {
+            dirs.push(legacy);
+        }
+    }
+    dirs
+}
+
+/// First candidate directory that actually holds a CA key.
+fn select_ca_dir(candidates: &[PathBuf]) -> Option<PathBuf> {
+    candidates
+        .iter()
+        .find(|dir| dir.join("ca.key").is_file())
+        .cloned()
+}
 
 struct CachedCert {
     pair: CertPair,
@@ -118,30 +157,57 @@ impl CertCache {
 
     /// Load CA for proxy startup. When MITM is off, missing CA files are allowed.
     pub async fn load_for_startup(mitm_enabled: bool) -> Result<Self, Box<dyn std::error::Error>> {
-        async fn read_key() -> std::io::Result<Vec<u8>> {
-            tokio::fs::read("/certs/ca.key")
-                .await
-                .or_else(|_| std::fs::read("./certs/ca.key"))
+        let configured = configured_ca_dir();
+        let candidates = ca_dir_candidates(&configured);
+        let dir = select_ca_dir(&candidates);
+
+        if let Some(dir) = dir.as_deref() {
+            if dir != configured.as_path() {
+                warn!(
+                    ca_dir = %dir.display(),
+                    configured = %configured.display(),
+                    "MITM CA loaded from a deprecated location; move ca.key/ca.crt to the configured directory or set MITM_CA_DIR"
+                );
+            }
         }
 
-        async fn read_cert() -> Vec<u8> {
-            tokio::fs::read("/certs/ca.crt")
-                .await
-                .or_else(|_| std::fs::read("./certs/ca.crt"))
-                .unwrap_or_default()
+        async fn read_key(dir: Option<&Path>) -> std::io::Result<Vec<u8>> {
+            match dir {
+                Some(dir) => tokio::fs::read(dir.join("ca.key")).await,
+                None => Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "no CA directory holds ca.key",
+                )),
+            }
+        }
+
+        async fn read_cert(dir: Option<&Path>) -> Vec<u8> {
+            match dir {
+                Some(dir) => tokio::fs::read(dir.join("ca.crt"))
+                    .await
+                    .unwrap_or_default(),
+                None => Vec::new(),
+            }
         }
 
         if mitm_enabled {
-            let ca_key = read_key().await.map_err(|e| {
-                format!("MITM enabled but CA key not found at /certs/ca.key or ./certs/ca.key: {e}")
+            let ca_key = read_key(dir.as_deref()).await.map_err(|e| {
+                let searched: Vec<String> = candidates
+                    .iter()
+                    .map(|d| d.join("ca.key").display().to_string())
+                    .collect();
+                format!(
+                    "MITM enabled but CA key not found (searched {}): {e}",
+                    searched.join(", ")
+                )
             })?;
-            let ca_cert = read_cert().await;
+            let ca_cert = read_cert(dir.as_deref()).await;
             return Self::from_pem(&ca_key, &ca_cert);
         }
 
-        match read_key().await {
+        match read_key(dir.as_deref()).await {
             Ok(ca_key) => {
-                let ca_cert = read_cert().await;
+                let ca_cert = read_cert(dir.as_deref()).await;
                 Self::from_pem(&ca_key, &ca_cert)
             }
             Err(_) => {
@@ -576,6 +642,97 @@ pub fn rewrite_mitm_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    /// `MITM_CA_DIR` is process-global and `cargo test` runs these on separate
+    /// threads. Same pattern as `cache_compress::tests::env_lock`.
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    #[test]
+    fn ca_dir_defaults_to_fhs_location() {
+        let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("MITM_CA_DIR");
+
+        let configured = configured_ca_dir();
+        assert_eq!(configured, Path::new(DEFAULT_MITM_CA_DIR));
+
+        let candidates = ca_dir_candidates(&configured);
+        assert_eq!(
+            candidates,
+            vec![
+                PathBuf::from(DEFAULT_MITM_CA_DIR),
+                PathBuf::from(LEGACY_MITM_CA_DIR),
+                PathBuf::from(RELATIVE_MITM_CA_DIR),
+            ],
+            "the default location must be searched before the legacy ones"
+        );
+    }
+
+    #[test]
+    fn explicit_ca_dir_wins_over_legacy_locations() {
+        let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("ca.key"), b"key").unwrap();
+        std::env::set_var("MITM_CA_DIR", dir.path());
+
+        let configured = configured_ca_dir();
+        let candidates = ca_dir_candidates(&configured);
+        std::env::remove_var("MITM_CA_DIR");
+
+        assert_eq!(configured, dir.path());
+        assert_eq!(candidates.first().unwrap(), dir.path());
+        assert_eq!(select_ca_dir(&candidates).as_deref(), Some(dir.path()));
+    }
+
+    #[test]
+    fn blank_ca_dir_falls_back_to_default() {
+        let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("MITM_CA_DIR", "  ");
+        let configured = configured_ca_dir();
+        std::env::remove_var("MITM_CA_DIR");
+
+        assert_eq!(configured, Path::new(DEFAULT_MITM_CA_DIR));
+    }
+
+    #[test]
+    fn legacy_dir_is_used_when_configured_dir_has_no_ca() {
+        let root = tempfile::tempdir().unwrap();
+        let configured = root.path().join("etc-certs");
+        let legacy = root.path().join("legacy-certs");
+        std::fs::create_dir_all(&configured).unwrap();
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(legacy.join("ca.key"), b"key").unwrap();
+
+        let candidates = vec![configured.clone(), legacy.clone()];
+        assert_eq!(
+            select_ca_dir(&candidates),
+            Some(legacy),
+            "an empty configured directory must fall back to the legacy CA"
+        );
+
+        std::fs::write(configured.join("ca.key"), b"key").unwrap();
+        assert_eq!(
+            select_ca_dir(&candidates),
+            Some(configured),
+            "the configured directory wins once it holds a CA"
+        );
+    }
+
+    #[test]
+    fn select_ca_dir_reports_none_when_no_candidate_has_a_key() {
+        let root = tempfile::tempdir().unwrap();
+        let empty = root.path().join("empty");
+        std::fs::create_dir_all(&empty).unwrap();
+
+        assert_eq!(
+            select_ca_dir(&[empty, root.path().join("missing")]),
+            None,
+            "a missing CA must not resolve to a directory"
+        );
+    }
 
     #[test]
     fn evict_oldest_frees_capacity_and_drops_oldest_first() {
@@ -635,6 +792,36 @@ mod tests {
         std::env::set_current_dir(prev).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
         assert!(result.is_ok());
+    }
+
+    /// Not a `#[tokio::test]`: the env guard must stay held around the load, and
+    /// `block_on` keeps it off an await point.
+    #[test]
+    fn load_for_startup_uses_ca_from_mitm_ca_dir() {
+        let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        let key_pair = KeyPair::generate().unwrap();
+        let ca_cert = CertCache::in_memory_ca_params()
+            .unwrap()
+            .self_signed(&key_pair)
+            .unwrap();
+        std::fs::write(dir.path().join("ca.key"), key_pair.serialize_pem()).unwrap();
+        std::fs::write(dir.path().join("ca.crt"), ca_cert.pem()).unwrap();
+
+        std::env::set_var("MITM_CA_DIR", dir.path());
+        let cache = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(CertCache::load_for_startup(true));
+        std::env::remove_var("MITM_CA_DIR");
+
+        let cache = cache.expect("MITM must start with a CA in MITM_CA_DIR");
+        assert_eq!(
+            cache.ca_cert_pem,
+            Bytes::from(ca_cert.pem().into_bytes()),
+            "the CA from MITM_CA_DIR must be the one served"
+        );
     }
 
     #[test]

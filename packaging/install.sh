@@ -128,9 +128,10 @@ if [[ ! -f "${ETC_DIR}/acl-rules.json" ]]; then
   echo "Installed ${ETC_DIR}/acl-rules.json"
 fi
 
-install -d -m 0750 /certs
+CERTS_DIR="${ETC_DIR}/certs"
+install -d -m 0750 "${CERTS_DIR}"
 if $CREATE_USER; then
-  chown bsdm-proxy:bsdm-proxy /certs "${ETC_DIR}"
+  chown bsdm-proxy:bsdm-proxy "${CERTS_DIR}" "${ETC_DIR}"
   chown -R bsdm-proxy:bsdm-proxy "${PREFIX}"
 fi
 
@@ -157,8 +158,10 @@ cat <<EOF
 BSDM-Proxy installed to ${PREFIX}
 
 MITM requires CA certificates:
-  /certs/ca.key
-  /certs/ca.crt
+  ${CERTS_DIR}/ca.key
+  ${CERTS_DIR}/ca.crt
+
+Set MITM_CA_DIR in ${ETC_DIR}/bsdm-proxy.env to use another directory.
 
 Health check: curl http://127.0.0.1:9090/health
 Metrics:      http://127.0.0.1:9090/metrics

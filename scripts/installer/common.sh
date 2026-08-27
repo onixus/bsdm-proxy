@@ -128,8 +128,17 @@ upsert_env() {
 
 ensure_ca() {
   local certs_dir="$1"
+  local legacy_dir="${2:-/certs}"
   require_cmd openssl
   install -d -m 0750 "$certs_dir"
+
+  # Installs that predate MITM_CA_DIR keep their CA in /certs. Carry it over so
+  # clients that already trust it keep working instead of meeting a fresh CA.
+  if [[ ! -e "${certs_dir}/ca.key" && "$legacy_dir" != "$certs_dir" \
+        && -f "${legacy_dir}/ca.key" && -f "${legacy_dir}/ca.crt" ]]; then
+    cp -p -- "${legacy_dir}/ca.key" "${legacy_dir}/ca.crt" "$certs_dir"
+    info "Migrated MITM CA from ${legacy_dir} to ${certs_dir}"
+  fi
 
   if [[ -f "${certs_dir}/ca.key" && -f "${certs_dir}/ca.crt" ]]; then
     info "Existing MITM CA preserved in ${certs_dir}"

@@ -17,7 +17,7 @@ NC='\033[0m'
 REPO="onixus/bsdm-proxy"
 PREFIX="/opt/bsdm-proxy"
 ETC_DIR="/etc/bsdm-proxy"
-CERTS_DIR="/certs"
+CERTS_DIR="${ETC_DIR}/certs"
 
 banner() {
   echo -e "${CYAN}${BOLD}"
@@ -124,6 +124,14 @@ download_and_install() {
 
   echo -e "${GREEN}✓ Installing pre-compiled binaries and configuration...${NC}"
   "${unpacked_dir}/install.sh" --prefix "$PREFIX" --etc "$ETC_DIR" --create-user --systemd
+
+  # Installs that predate MITM_CA_DIR keep their CA in /certs; carry it over so
+  # clients that already trust it keep working.
+  if [[ ! -e "${CERTS_DIR}/ca.key" && -f /certs/ca.key && -f /certs/ca.crt ]]; then
+    install -d -m 0750 "$CERTS_DIR"
+    cp -p -- /certs/ca.key /certs/ca.crt "$CERTS_DIR"
+    echo -e "${GREEN}✓ Migrated MITM CA from /certs to ${CERTS_DIR}${NC}"
+  fi
 
   if [[ -e "${CERTS_DIR}/ca.key" || -e "${CERTS_DIR}/ca.crt" ]]; then
     if [[ ! -f "${CERTS_DIR}/ca.key" || ! -f "${CERTS_DIR}/ca.crt" ]]; then
