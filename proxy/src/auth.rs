@@ -429,7 +429,19 @@ fn write_users_atomically(path: &str, json: &str) -> Result<(), String> {
     }
     let tmp = path.with_extension("json.tmp");
     {
-        let mut f = std::fs::File::create(&tmp)
+        // The file holds password hashes, so keep it owner-only. Permissions are
+        // set on the temp file before any content reaches it: creating it 0644
+        // and chmod'ing afterwards would expose the hashes for the duration of
+        // the write.
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let mut f = opts
+            .open(&tmp)
             .map_err(|e| format!("create temp basic users file {}: {e}", tmp.display()))?;
         f.write_all(json.as_bytes())
             .map_err(|e| format!("write temp basic users file: {e}"))?;
@@ -1570,6 +1582,19 @@ mod tests {
             "hash was not upgraded on disk: {on_disk}"
         );
         assert!(!on_disk.contains(&legacy), "legacy hash still present");
+
+        // The rewritten file carries password hashes and must stay owner-only.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).expect("stat").permissions().mode();
+            assert_eq!(
+                mode & 0o777,
+                0o600,
+                "users file must be 0600 after rehash, got {:o}",
+                mode & 0o777
+            );
+        }
 
         let in_memory = manager
             .basic_users

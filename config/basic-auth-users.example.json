@@ -1,12 +1,12 @@
 [
   {
     "username": "pilot",
-    "password_hash": "ad939580b000f8e506e332bbbc44e2a83e48506b7c702775d106d8cba635bdec",
+    "password_hash": "$argon2id$v=19$m=19456,t=2,p=1$t/msQueFgopIHyBXmzIbmg$M1QKEgaDVy5mDZgIUPHI839THetDTrAkkdvt7p6wbK8",
     "role": "users"
   },
   {
     "username": "admin",
-    "password_hash": "ad939580b000f8e506e332bbbc44e2a83e48506b7c702775d106d8cba635bdec",
+    "password_hash": "$argon2id$v=19$m=19456,t=2,p=1$C/WoHOcAaIvCTfBX0r2J6A$EwT9GrW28tITQ/GroCZWzTWileSw/tD+QjgD8zY05Mo",
     "role": "admins"
   }
 ]

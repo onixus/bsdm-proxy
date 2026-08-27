@@ -27,11 +27,17 @@ Forward proxy auth uses `Proxy-Authorization`. Admin Console control API uses
 
 ### 1. Create users file
 
-Password hash = **SHA-256 hex of the raw password** (see `AuthManager::hash_password_stable`).
+Password hash = **Argon2id PHC string**. The algorithm lives only in the proxy
+binary; `gen-basic-auth-user.sh` calls `proxy hash-password` rather than
+reimplementing it, so the two can never drift apart.
+
+Older files holding unsalted SHA-256 hex digests keep working: they are
+recognised by the missing leading `$` and rewritten to Argon2id after the first
+successful login, provided the users file and its directory are writable.
 
 ```bash
-# Generate one user entry
-./scripts/gen-basic-auth-user.sh pilot 'your-strong-password' users
+# Generate one user entry (password read from stdin, never from argv)
+printf '%s' 'your-strong-password' | ./scripts/gen-basic-auth-user.sh --stdin --role users pilot
 
 # Example file (password for both users is pilot-secret — change before production):
 cp config/basic-auth-users.example.json /etc/bsdm-proxy/basic-auth-users.json
@@ -44,7 +50,7 @@ Example shape:
 [
   {
     "username": "pilot",
-    "password_hash": "<sha256-hex>",
+    "password_hash": "$argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>",
     "role": "users"
   }
 ]
@@ -170,7 +176,7 @@ user/password; ACL rule using LDAP groups if enrichment is configured.
 
 | Symptom | Check |
 |---|---|
-| Always 407 with correct password | Hash algorithm (SHA-256 hex of password only); file path mounted; JSON parse errors in logs |
+| Always 407 with correct password | Hash format (Argon2id PHC string, or legacy SHA-256 hex); file path mounted; JSON parse errors in logs |
 | 200 without password | `AUTH_ENABLED` false or users DB empty without file |
 | ACL deny after auth | Rule match on username/groups (`role` → group) |
 | CONNECT fails auth | Client must send Proxy-Authorization on CONNECT as well |
