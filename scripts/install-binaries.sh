@@ -17,7 +17,15 @@ NC='\033[0m'
 REPO="onixus/bsdm-proxy"
 PREFIX="/opt/bsdm-proxy"
 ETC_DIR="/etc/bsdm-proxy"
-CERTS_DIR="/certs"
+# MITM CA directory. New installs use ${ETC_DIR}/certs (inside the FHS and
+# covered by the systemd units' ReadWritePaths=/etc/bsdm-proxy); a pre-existing
+# legacy /certs directory is reused so that already-trusted CAs keep working.
+LEGACY_CERTS_DIR="/certs"
+if [[ -d "$LEGACY_CERTS_DIR" && ! -L "$LEGACY_CERTS_DIR" ]]; then
+  CERTS_DIR="$LEGACY_CERTS_DIR"
+else
+  CERTS_DIR="${ETC_DIR}/certs"
+fi
 
 banner() {
   echo -e "${CYAN}${BOLD}"
@@ -123,7 +131,16 @@ download_and_install() {
   }
 
   echo -e "${GREEN}✓ Installing pre-compiled binaries and configuration...${NC}"
-  "${unpacked_dir}/install.sh" --prefix "$PREFIX" --etc "$ETC_DIR" --create-user --systemd
+  # --certs only exists in packages built after the CA moved into ${ETC_DIR};
+  # older release tarballs reject unknown options, so probe before passing it.
+  local install_args=(--prefix "$PREFIX" --etc "$ETC_DIR" --create-user --systemd)
+  if grep -q -- '--certs' "${unpacked_dir}/install.sh"; then
+    install_args+=(--certs "$CERTS_DIR")
+  else
+    CERTS_DIR="$LEGACY_CERTS_DIR"
+    echo -e "${YELLOW}Release package predates the CA directory move; using ${CERTS_DIR}.${NC}"
+  fi
+  "${unpacked_dir}/install.sh" "${install_args[@]}"
 
   if [[ -e "${CERTS_DIR}/ca.key" || -e "${CERTS_DIR}/ca.crt" ]]; then
     if [[ ! -f "${CERTS_DIR}/ca.key" || ! -f "${CERTS_DIR}/ca.crt" ]]; then
@@ -133,12 +150,21 @@ download_and_install() {
     echo -e "${GREEN}✓ Existing MITM CA preserved${NC}"
   else
     echo -e "${YELLOW}Generating MITM CA keypair in ${CERTS_DIR}...${NC}"
-    install -d -m 0750 "$CERTS_DIR"
-    openssl req -x509 -newkey rsa:4096 \
-      -keyout "${CERTS_DIR}/ca.key" \
-      -out "${CERTS_DIR}/ca.crt" \
-      -days 3650 -nodes \
-      -subj "/CN=BSDM Proxy Root CA/O=BSDM Security"
+    # 0700, not 0750: the directory holds ca.key; group read would let any
+    # member of the group mint certificates for any intercepted site.
+    install -d -m 0700 "$CERTS_DIR"
+    # umask BEFORE openssl: `openssl req` creates ca.key world-readable (0644
+    # minus umask) and only the chmod below narrows it — that window is enough
+    # to steal the CA key. Same fix as scripts/gen-ca.sh:30. Subshell keeps the
+    # caller's umask intact.
+    (
+      umask 077
+      openssl req -x509 -newkey rsa:4096 \
+        -keyout "${CERTS_DIR}/ca.key" \
+        -out "${CERTS_DIR}/ca.crt" \
+        -days 3650 -nodes \
+        -subj "/CN=BSDM Proxy Root CA/O=BSDM Security"
+    )
     chmod 0600 "${CERTS_DIR}/ca.key"
     chmod 0644 "${CERTS_DIR}/ca.crt"
     if id bsdm-proxy >/dev/null 2>&1; then

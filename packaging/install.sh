@@ -6,6 +6,38 @@ PREFIX="/opt/bsdm-proxy"
 ETC_DIR="/etc/bsdm-proxy"
 INSTALL_SYSTEMD=false
 CREATE_USER=false
+# MITM CA lives under the config directory (FHS) so that it is covered by the
+# systemd units' ReadWritePaths=/etc/bsdm-proxy. See LEGACY_CERTS_DIR below.
+CERTS_DIR=""
+LEGACY_CERTS_DIR="/certs"
+
+# Mirrors validate_install_path() from scripts/installer/common.sh. It is
+# duplicated on purpose: the release tarball ships only this file (see
+# scripts/build-package.sh), so common.sh cannot be sourced here. The extra
+# character-class check matters because PREFIX is substituted into a systemd
+# unit via sed below — an unvalidated value would be unit-file injection
+# executed by root (e.g. --prefix '/x|d;s|ExecStart=.*|ExecStart=/bin/sh -c ...').
+validate_install_path() {
+  local value="$1"
+  local label="$2"
+  [[ "$value" == /* ]] || { echo "${label} must be an absolute path: ${value}" >&2; exit 2; }
+  [[ "$value" != *".."* ]] || { echo "${label} must not contain '..': ${value}" >&2; exit 2; }
+  [[ "$value" =~ ^[A-Za-z0-9._/-]+$ ]] || {
+    echo "${label} may only contain letters, digits and . _ - / : ${value}" >&2
+    exit 2
+  }
+  case "${value%/}" in
+    ''|/|/etc|/usr|/var|/opt|/home|/root|/bin|/sbin|/lib|/lib64)
+      echo "${label} must not be a system root directory: ${value}" >&2
+      exit 2
+      ;;
+  esac
+}
+
+need_value() {
+  # need_value <option> <remaining-argc>
+  [[ "$2" -ge 2 ]] || { echo "error: $1 requires a value" >&2; exit 2; }
+}
 
 usage() {
   cat <<'EOF'
@@ -14,6 +46,8 @@ Usage: sudo ./install.sh [OPTIONS]
 Options:
   --prefix PATH       Install binaries to PATH (default: /opt/bsdm-proxy)
   --etc PATH          Config directory (default: /etc/bsdm-proxy)
+  --certs PATH        MITM CA directory (default: <etc>/certs; an existing
+                      legacy /certs directory is reused and kept in place)
   --systemd           Install and enable systemd units
   --create-user       Create system user 'bsdm-proxy'
   -h, --help          Show this help
@@ -26,11 +60,18 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --prefix)
+      need_value "$1" "$#"
       PREFIX="$2"
       shift 2
       ;;
     --etc)
+      need_value "$1" "$#"
       ETC_DIR="$2"
+      shift 2
+      ;;
+    --certs)
+      need_value "$1" "$#"
+      CERTS_DIR="$2"
       shift 2
       ;;
     --systemd)
@@ -67,6 +108,12 @@ if [[ "$(id -u)" -ne 0 ]]; then
   exit 1
 fi
 
+validate_install_path "$PREFIX" "--prefix"
+validate_install_path "$ETC_DIR" "--etc"
+if [[ -n "$CERTS_DIR" ]]; then
+  validate_install_path "$CERTS_DIR" "--certs"
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [[ ! -x "${SCRIPT_DIR}/bin/proxy" ]]; then
@@ -100,15 +147,15 @@ if [[ ! -f "${ETC_DIR}/bsdm-proxy.env" ]]; then
   install -m 0640 "${SCRIPT_DIR}/config/bsdm-proxy.env.example" "${ETC_DIR}/bsdm-proxy.env"
   echo "" >> "${ETC_DIR}/bsdm-proxy.env"
   echo "# Security and API Control" >> "${ETC_DIR}/bsdm-proxy.env"
-  echo "CONTROL_API_TOKEN=$(openssl rand -hex 16)" >> "${ETC_DIR}/bsdm-proxy.env"
-  echo "ACL_API_TOKEN=$(openssl rand -hex 16)" >> "${ETC_DIR}/bsdm-proxy.env"
+  echo "CONTROL_API_TOKEN=$(openssl rand -hex 32)" >> "${ETC_DIR}/bsdm-proxy.env"
+  echo "ACL_API_TOKEN=$(openssl rand -hex 32)" >> "${ETC_DIR}/bsdm-proxy.env"
   echo "Installed ${ETC_DIR}/bsdm-proxy.env"
 fi
 if [[ ! -f "${ETC_DIR}/cache-indexer.env" ]]; then
   install -m 0640 "${SCRIPT_DIR}/config/cache-indexer.env.example" "${ETC_DIR}/cache-indexer.env"
   echo "" >> "${ETC_DIR}/cache-indexer.env"
   echo "# Security and API Control" >> "${ETC_DIR}/cache-indexer.env"
-  echo "SEARCH_API_TOKEN=$(openssl rand -hex 16)" >> "${ETC_DIR}/cache-indexer.env"
+  echo "SEARCH_API_TOKEN=$(openssl rand -hex 32)" >> "${ETC_DIR}/cache-indexer.env"
   echo "Installed ${ETC_DIR}/cache-indexer.env"
 fi
 if [[ ! -f "${ETC_DIR}/alert-worker.env" ]]; then
@@ -128,18 +175,56 @@ if [[ ! -f "${ETC_DIR}/acl-rules.json" ]]; then
   echo "Installed ${ETC_DIR}/acl-rules.json"
 fi
 
-install -d -m 0750 /certs
+# MITM CA directory.
+#
+# New installs put the CA under ${ETC_DIR}/certs: /certs is outside the FHS and
+# is not covered by the systemd units' ProtectSystem=strict + ReadWritePaths.
+# Existing installs keep /certs (moving a live CA would break every client that
+# already trusts it and every running proxy holding the old path).
+#
+# The proxy binary still resolves the CA from the hardcoded /certs (and ./certs)
+# — see proxy/src/tls.rs:load_for_startup — so on new installs /certs is created
+# as a symlink to the real directory. Do not delete it.
+if [[ -z "$CERTS_DIR" ]]; then
+  if [[ -d "$LEGACY_CERTS_DIR" && ! -L "$LEGACY_CERTS_DIR" ]]; then
+    CERTS_DIR="$LEGACY_CERTS_DIR"
+    echo "Note: keeping the existing MITM CA directory ${LEGACY_CERTS_DIR}."
+    echo "      New installs use ${ETC_DIR}/certs; to migrate, stop bsdm-proxy, then:"
+    echo "        mv ${LEGACY_CERTS_DIR} ${ETC_DIR}/certs && ln -s ${ETC_DIR}/certs ${LEGACY_CERTS_DIR}"
+  else
+    CERTS_DIR="${ETC_DIR}/certs"
+  fi
+fi
+
+# 0700, not 0750: the directory holds ca.key. Group read buys nothing here and
+# gives every member of the group the ability to mint certificates for any site.
+install -d -m 0700 "$CERTS_DIR"
+
+if [[ "$CERTS_DIR" != "$LEGACY_CERTS_DIR" && ! -e "$LEGACY_CERTS_DIR" ]]; then
+  ln -s "$CERTS_DIR" "$LEGACY_CERTS_DIR"
+  echo "Linked ${LEGACY_CERTS_DIR} -> ${CERTS_DIR} (proxy resolves the CA from ${LEGACY_CERTS_DIR})"
+fi
+
 if $CREATE_USER; then
-  chown bsdm-proxy:bsdm-proxy /certs "${ETC_DIR}"
+  chown bsdm-proxy:bsdm-proxy "$CERTS_DIR" "${ETC_DIR}"
   chown -R bsdm-proxy:bsdm-proxy "${PREFIX}"
 fi
 
 if $INSTALL_SYSTEMD; then
   for unit in bsdm-proxy bsdm-cache-indexer bsdm-alert-worker bsdm-ml-worker bsdm-dns-sinkhole bsdm-threat-intel; do
     if [[ -f "${SCRIPT_DIR}/systemd/${unit}.service" ]]; then
-      sed "s|/opt/bsdm-proxy|${PREFIX}|g" \
+      # PREFIX/ETC_DIR are validated above (absolute, no '..', no sed
+      # metacharacters such as | & \ or newline), so this substitution cannot
+      # inject additional directives into a root-executed unit file.
+      # ETC_DIR is substituted too: the units now hard-require their
+      # EnvironmentFile, so a non-default --etc must be reflected here.
+      unit_tmp="$(mktemp)"
+      sed -e "s|/opt/bsdm-proxy|${PREFIX}|g" \
+        -e "s|/etc/bsdm-proxy|${ETC_DIR}|g" \
         "${SCRIPT_DIR}/systemd/${unit}.service" \
-        >"/etc/systemd/system/${unit}.service"
+        >"${unit_tmp}"
+      install -m 0644 "${unit_tmp}" "/etc/systemd/system/${unit}.service"
+      rm -f "${unit_tmp}"
     fi
   done
   systemctl daemon-reload
@@ -156,9 +241,9 @@ cat <<EOF
 
 BSDM-Proxy installed to ${PREFIX}
 
-MITM requires CA certificates:
-  /certs/ca.key
-  /certs/ca.crt
+MITM requires CA certificates (0600 ca.key, owned by bsdm-proxy):
+  ${CERTS_DIR}/ca.key
+  ${CERTS_DIR}/ca.crt
 
 Health check: curl http://127.0.0.1:9090/health
 Metrics:      http://127.0.0.1:9090/metrics

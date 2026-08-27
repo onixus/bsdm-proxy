@@ -75,6 +75,11 @@ configure_compose_secrets() {
   ensure_secret "$env_file" CONTROL_API_TOKEN
   ensure_secret "$env_file" ACL_API_TOKEN
   ensure_secret "$env_file" SEARCH_API_TOKEN
+  # Grafana is fail-closed in docker-compose.yml
+  # (GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?...}), so without this
+  # `docker compose config` in installer/docker.sh aborts before anything starts.
+  # Generated like every other secret here: 32 random bytes, never printed.
+  ensure_secret "$env_file" GRAFANA_ADMIN_PASSWORD
   upsert_env "$env_file" CONTROL_API_ALLOW_INSECURE "false"
 
   chmod 0600 "$env_file"
