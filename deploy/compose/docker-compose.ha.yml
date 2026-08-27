@@ -18,6 +18,22 @@ services:
     image: redis:7.4-alpine
     networks:
       - ha-net
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Official entrypoint starts as root, chowns /data and drops to `redis`.
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETGID
+      - SETUID
+    deploy:
+      resources:
+        limits:
+          pids: 512
+          cpus: "0.50"
+          memory: 512M
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -28,6 +44,19 @@ services:
     image: kennethreitz/httpbin:latest
     networks:
       - ha-net
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # gunicorn in this image listens on :80 inside the container.
+    cap_add:
+      - NET_BIND_SERVICE
+    deploy:
+      resources:
+        limits:
+          pids: 512
+          cpus: "0.50"
+          memory: 256M
 
   proxy-a:
     build:
@@ -53,6 +82,20 @@ services:
       - RUST_LOG=info,bsdm_proxy=info
     volumes:
       - spill-a:/var/cache/bsdm-spill
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Cache spill is the only writable path and it is a volume above.
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    deploy:
+      resources:
+        limits:
+          pids: 512
+          cpus: "2.00"
+          memory: 1G
     depends_on:
       redis:
         condition: service_healthy
@@ -86,6 +129,20 @@ services:
       - RUST_LOG=info,bsdm_proxy=info
     volumes:
       - spill-b:/var/cache/bsdm-spill
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Cache spill is the only writable path and it is a volume above.
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    deploy:
+      resources:
+        limits:
+          pids: 512
+          cpus: "2.00"
+          memory: 1G
     depends_on:
       redis:
         condition: service_healthy

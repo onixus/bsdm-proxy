@@ -42,7 +42,6 @@ services:
     cap_add:
       - NET_ADMIN
       - MKNOD
-    pids_limit: 512
     ports:
       - "51820:51820/udp"
     environment:
@@ -67,6 +66,7 @@ services:
     deploy:
       resources:
         limits:
+          pids: 512
           cpus: "1.00"
           memory: 512M
         reservations:

@@ -44,7 +44,8 @@ services:
   redis:
     image: redis:7.4-alpine
     ports:
-      - "6379:6379"
+      # No AUTH / TLS configured — never publish beyond loopback.
+      - "127.0.0.1:6379:6379"
     command:
       - redis-server
       - --maxmemory
@@ -63,9 +64,20 @@ services:
       timeout: 3s
       retries: 10
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Official entrypoint starts as root, chowns /data and drops to `redis`.
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETGID
+      - SETUID
     deploy:
       resources:
         limits:
+          pids: 512
           cpus: "0.50"
           memory: 768M
 
@@ -203,7 +215,7 @@ services:
       - "--web.console.libraries=/usr/share/prometheus/console_libraries"
       - "--web.console.templates=/usr/share/prometheus/consoles"
       - "--storage.tsdb.retention.time=5d"
-      - "--web.enable-lifecycle"
+      # --web.enable-lifecycle stays off: unauthenticated POST /-/reload + /-/quit.
     deploy:
       resources:
         limits:

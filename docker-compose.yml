@@ -22,10 +22,10 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
-    pids_limit: 2048
     deploy:
       resources:
         limits:
+          pids: 2048
           cpus: "0.25"
           memory: 512M
         reservations:
@@ -54,7 +54,6 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
-    pids_limit: 2048
     healthcheck:
       test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 >/dev/null 2>&1"]
       interval: 10s
@@ -64,6 +63,7 @@ services:
     deploy:
       resources:
         limits:
+          pids: 2048
           cpus: "0.50"
           memory: 1G
         reservations:
@@ -98,7 +98,6 @@ services:
       - FOWNER
       - SETGID
       - SETUID
-    pids_limit: 2048
     healthcheck:
       test: ["CMD-SHELL", "clickhouse-client --query 'SELECT 1' || exit 1"]
       interval: 10s
@@ -112,6 +111,7 @@ services:
     deploy:
       resources:
         limits:
+          pids: 2048
           cpus: "1.00"
           memory: 2G
         reservations:
@@ -206,7 +206,6 @@ services:
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=64m
-    pids_limit: 512
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:9090/health | grep -q ok"]
       interval: 10s
@@ -215,6 +214,7 @@ services:
     deploy:
       resources:
         limits:
+          pids: 512
           cpus: "2.00"
           memory: 512M
         reservations:
@@ -261,7 +261,6 @@ services:
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=64m
-    pids_limit: 512
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8080/health | grep -q ok"]
       interval: 10s
@@ -270,6 +269,7 @@ services:
     deploy:
       resources:
         limits:
+          pids: 512
           cpus: "0.50"
           memory: 512M
         reservations:
@@ -313,7 +313,6 @@ services:
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=64m
-    pids_limit: 512
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8090/health | grep -q ok"]
       interval: 15s
@@ -322,6 +321,7 @@ services:
     deploy:
       resources:
         limits:
+          pids: 512
           cpus: "0.50"
           memory: 512M
         reservations:
@@ -378,7 +378,6 @@ services:
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=64m
-    pids_limit: 512
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8091/health | grep -q ok"]
       interval: 15s
@@ -387,6 +386,7 @@ services:
     deploy:
       resources:
         limits:
+          pids: 512
           cpus: "0.50"
           memory: 512M
         reservations:
@@ -410,12 +410,12 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
-    pids_limit: 512
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:9093/-/healthy || exit 1"]
     deploy:
       resources:
         limits:
+          pids: 512
           cpus: "0.25"
           memory: 512M
         reservations:
@@ -445,7 +445,6 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
-    pids_limit: 512
     depends_on:
       - proxy
       - alertmanager
@@ -457,6 +456,7 @@ services:
     deploy:
       resources:
         limits:
+          pids: 512
           cpus: "0.50"
           memory: 512M
         reservations:
@@ -487,7 +487,6 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
-    pids_limit: 512
     depends_on:
       - prometheus
       - clickhouse
@@ -500,6 +499,7 @@ services:
     deploy:
       resources:
         limits:
+          pids: 512
           cpus: "0.50"
           memory: 512M
         reservations:
@@ -525,10 +525,10 @@ services:
       - DAC_OVERRIDE
       - SETGID
       - SETUID
-    pids_limit: 512
     deploy:
       resources:
         limits:
+          pids: 512
           cpus: "1.00"
           memory: 1G
         reservations:
@@ -579,7 +579,6 @@ services:
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=64m
-    pids_limit: 512
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8092/health | grep -q ok"]
       interval: 15s
@@ -589,6 +588,7 @@ services:
     deploy:
       resources:
         limits:
+          pids: 512
           cpus: "0.25"
           memory: 256M
         reservations:
@@ -641,7 +641,6 @@ services:
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=64m
-    pids_limit: 512
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8093/health | grep -q ok"]
       interval: 15s
@@ -651,6 +650,7 @@ services:
     deploy:
       resources:
         limits:
+          pids: 512
           cpus: "0.50"
           memory: 512M
         reservations:

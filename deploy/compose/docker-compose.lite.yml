@@ -46,7 +46,6 @@ services:
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=64m
-    pids_limit: 512
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8080/health | grep -q ok"]
       interval: 10s
@@ -56,6 +55,7 @@ services:
     deploy:
       resources:
         limits:
+          pids: 512
           cpus: "0.50"
           memory: 512M
         reservations:
@@ -119,7 +119,6 @@ services:
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=64m
-    pids_limit: 512
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:9090/health | grep -q ok"]
       interval: 10s
@@ -129,6 +128,7 @@ services:
     deploy:
       resources:
         limits:
+          pids: 512
           cpus: "2.00"
           memory: 1G
         reservations:
@@ -152,6 +152,16 @@ services:
       - MOCK_PORT=18080
     command: ["python3", "/mock-upstream.py"]
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          pids: 512
+          cpus: "1.00"
+          memory: 512M
 
 networks:
   bsdm-lite:
