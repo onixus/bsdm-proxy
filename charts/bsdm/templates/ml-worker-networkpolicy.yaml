@@ -1,0 +1,41 @@
+{{- if and .Values.mlWorker .Values.mlWorker.enabled .Values.networkPolicy.enabled }}
+# ml-worker: reads features from ClickHouse, writes scores back. No inbound
+# traffic other than scraping.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "bsdm.fullname" . }}-ml-worker
+  labels:
+    {{- include "bsdm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ml-worker
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "bsdm.mlWorkerSelectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.monitoringNamespace | default "monitoring" }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.mlWorker.service.port }}
+  egress:
+    {{- if .Values.networkPolicy.clickhouseNamespace }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.clickhouseNamespace }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.networkPolicy.clickhousePort | default 8123 }}
+    {{- else }}
+    - ports:
+        - protocol: TCP
+          port: {{ .Values.networkPolicy.clickhousePort | default 8123 }}
+    {{- end }}
+    {{- include "bsdm.dnsEgress" . | nindent 4 }}
+{{- end }}

@@ -15,18 +15,20 @@ spec:
     metadata:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/indexer-configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/indexer-secret.yaml") . | sha256sum }}
       labels:
         {{- include "bsdm.indexerSelectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: {{ include "bsdm.serviceAccountName" . }}
+      automountServiceAccountToken: false
       securityContext:
-        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        {{- include "bsdm.podSecurityContext" (dict "ctx" . "component" .Values.indexer) | nindent 8 }}
       containers:
         - name: cache-indexer
           image: "{{ .Values.indexer.image.repository }}:{{ .Values.indexer.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.indexer.image.pullPolicy }}
           securityContext:
-            {{- toYaml .Values.securityContext | nindent 12 }}
+            {{- include "bsdm.containerSecurityContext" (dict "ctx" . "component" .Values.indexer) | nindent 12 }}
           ports:
             - name: admin
               containerPort: {{ .Values.indexer.service.port }}
@@ -34,8 +36,24 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "bsdm.fullname" . }}-indexer-env
-          {{- if .Values.indexer.clickhouse.existingSecret }}
+          {{- if .Values.indexer.clickhouse.password }}
+          {{- fail "indexer.clickhouse.password is no longer supported: an inline password is rendered into the Deployment spec, visible to anyone with `get deployments` and stored in whatever holds your values file. Create a Secret with keys username/password (kubectl create secret generic bsdm-clickhouse --from-literal=username=<user> --from-literal=password=<pass>), set indexer.clickhouse.existingSecret=bsdm-clickhouse and clear indexer.clickhouse.password." }}
+          {{- end }}
+          {{- if and .Values.indexer.clickhouse.user (not .Values.indexer.clickhouse.existingSecret) }}
+          {{- fail "indexer.clickhouse.user is set but indexer.clickhouse.existingSecret is empty: the chart has no way to supply the matching password. Put both username and password in a Secret and set indexer.clickhouse.existingSecret, or clear indexer.clickhouse.user for an anonymous ClickHouse." }}
+          {{- end }}
+          {{- $searchSecret := "" }}
+          {{- $searchKey := "" }}
+          {{- if .Values.indexer.searchApi.existingSecret }}
+          {{- $searchSecret = .Values.indexer.searchApi.existingSecret }}
+          {{- $searchKey = .Values.indexer.searchApi.existingSecretKey | default "search-api-token" }}
+          {{- else if .Values.indexer.searchApi.token }}
+          {{- $searchSecret = printf "%s-indexer-secrets" (include "bsdm.fullname" .) }}
+          {{- $searchKey = "search-api-token" }}
+          {{- end }}
+          {{- if or .Values.indexer.clickhouse.existingSecret $searchSecret }}
           env:
+            {{- if .Values.indexer.clickhouse.existingSecret }}
             - name: CLICKHOUSE_USER
               valueFrom:
                 secretKeyRef:
@@ -46,10 +64,14 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.indexer.clickhouse.existingSecret }}
                   key: password
-          {{- else if .Values.indexer.clickhouse.password }}
-          env:
-            - name: CLICKHOUSE_PASSWORD
-              value: {{ .Values.indexer.clickhouse.password | quote }}
+            {{- end }}
+            {{- if $searchSecret }}
+            - name: SEARCH_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $searchSecret }}
+                  key: {{ $searchKey }}
+            {{- end }}
           {{- end }}
           livenessProbe:
             httpGet:
