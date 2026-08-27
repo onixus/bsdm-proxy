@@ -16,6 +16,33 @@ Generate the initial pair with:
 Local generation creates `certs/ca.key` with mode `0600`, `certs/ca.crt` with
 mode `0644`, and the containing directory with mode `0700`.
 
+### Parameters of newly issued CAs
+
+Every issuance path (`scripts/gen-ca.sh`, `scripts/rotate-ca.sh prepare`,
+`scripts/installer/common.sh`, `scripts/install-binaries.sh`) produces the same
+certificate profile:
+
+| Parameter | Value |
+| --- | --- |
+| Key | RSA 4096, no passphrase (loaded unattended at proxy startup) |
+| Validity | **730 days (2 years)**; override with `--days N` or `CA_DAYS=N` |
+| `basicConstraints` | `critical, CA:TRUE, pathlen:0` — may sign leaf certificates only, never a sub-CA |
+| `keyUsage` | `critical, keyCertSign, cRLSign` — signing certificates and CRLs only |
+| `subjectKeyIdentifier` | hash |
+
+Extensions are supplied through a generated OpenSSL config file rather than
+`-addext`, so issuance also works on OpenSSL 1.0.2 (RHEL 7 / older SLES).
+
+Two years instead of the previous ten bounds the window in which a leaked
+`ca.key` remains trusted and makes rotation a routine, rehearsed operation
+rather than a once-a-decade event. **Plan a rotation every two years** using
+`scripts/rotate-ca.sh` (procedure below); the mechanism already exists and is
+exercised by `scripts/test-ca-rotation.sh` in CI.
+
+These parameters apply only to newly issued CAs. Already deployed CAs keep
+their original validity and extensions and continue to work unchanged; they are
+migrated to the new profile the next time they are rotated.
+
 - Never commit the key, bake it into an image, attach it to a ticket, or copy it
   into a world-readable/shared volume.
 - The private key must have no permissions for `other`. Local files should be
@@ -34,8 +61,12 @@ distributing `ca.key`.
 
 ## Planned two-phase rotation
 
-Rotate at least annually, before certificate expiry, or immediately after
-suspected key compromise.
+Rotate every two years at the latest — CAs issued by current scripts are valid
+730 days — and always well before certificate expiry (start at least one month
+ahead so dual trust can be established), or immediately after suspected key
+compromise. `openssl x509 -in certs/ca.crt -noout -enddate` shows the deadline;
+there is currently no automatic expiry alert, so keep the date in the change
+calendar.
 
 ### 1. Prepare and establish dual trust
 

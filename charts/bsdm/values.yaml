@@ -20,16 +20,27 @@ service:
 serviceAccount:
   create: true
   annotations: {}
+  # Required when create=false: the chart refuses to fall back to the
+  # namespace "default" ServiceAccount.
   name: ""
 
 podAnnotations: {}
 podLabels: {}
 
+# Applied to all six workloads (proxy, indexer, alert-worker, ml-worker,
+# threat-intel, dns-sinkhole). seccompProfile is what makes the chart pass
+# Pod Security Standards "restricted"; do not drop it.
 podSecurityContext:
   runAsNonRoot: true
   runAsUser: 65532
+  runAsGroup: 65532
   fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
 
+# Default container securityContext. Each component may override it with
+# <component>.securityContext (see indexer.securityContext below) so that a
+# relaxation for one workload does not weaken the other five.
 securityContext:
   allowPrivilegeEscalation: false
   readOnlyRootFilesystem: true
@@ -90,6 +101,13 @@ proxy:
   # Categorization sources
   urlhausEnabled: false
   phishtankEnabled: false
+  # PhishTank API key is a credential: it is injected via secretKeyRef, never
+  # via the env ConfigMap. Prefer an existing Secret:
+  #   kubectl create secret generic bsdm-phishtank --from-literal=phishtank-api-key=...
+  # If phishtankExistingSecret is empty and phishtankApiKey is set, the chart
+  # creates the Secret itself (the value then lives in your values file).
+  phishtankExistingSecret: ""
+  phishtankExistingSecretKey: "phishtank-api-key"
   phishtankApiKey: ""
   customDbEnabled: false
   customDbPath: ""
@@ -129,16 +147,53 @@ pdb:
   minAvailable: 1
 
 networkPolicy:
-  enabled: false
-  proxyIngressCidrs:
-    - 10.0.0.0/8
-  # Namespace allowed to scrape metrics (proxy + threat-intel).
+  # Enabled by default: every chart workload is covered by an explicit policy
+  # and by a default-deny that selects this release's pods. Requires a CNI that
+  # enforces NetworkPolicy (Calico/Cilium/Antrea); on a CNI that ignores them
+  # this is a no-op, not a breakage.
+  enabled: true
+  # BREAKING vs <=0.6.1: the previous default was `10.0.0.0/8`, which also
+  # covered the pod CIDR (i.e. every pod in the cluster could open the proxy
+  # port). Pods in the release namespace are always allowed; list additional
+  # client namespaces and *narrow* external/on-prem CIDRs here.
+  proxyIngressCidrs: []
+  # Namespaces (by kubernetes.io/metadata.name) whose pods may use the proxy.
+  proxyClientNamespaces: []
+  # Namespace allowed to scrape metrics (all components).
   monitoringNamespace: "monitoring"
   # Namespaces allowed to call the threat-intel admin/SOAR API on :8093.
   threatIntelAdminNamespaces: []
+  # Consumers of the cache-indexer Search API (:8080). Same shape as above.
+  searchApiNamespaces: []
+  searchApiCidrs: []
+  # Clients of the DNS sinkhole (:53/UDP). Release-namespace pods are always
+  # allowed so the proxy can resolve through it.
+  dnsSinkholeClientNamespaces: []
+  dnsSinkholeClientCidrs: []
   allowEgressInternet: true
   redisNamespace: ""
   kafkaNamespace: ""
+  # Namespace hosting ClickHouse. When empty, egress to the ClickHouse port is
+  # allowed to any destination (port-restricted only) so that managed/external
+  # ClickHouse keeps working; set it to lock egress down to one namespace.
+  clickhouseNamespace: ""
+  clickhousePort: 8123
+  # Cluster DNS. Egress to :53 is restricted to these pods instead of being
+  # open to the whole world (DNS tunnelling / exfiltration path).
+  dnsNamespace: "kube-system"
+  dnsPodSelector:
+    k8s-app: kube-dns
+  # Upstream resolvers the dns-sinkhole forwards to (DNS_SINKHOLE_UPSTREAM,
+  # default 1.1.1.1:53). Public resolvers only — private ranges are excluded.
+  dnsSinkholeUpstreamCidrs:
+    - 0.0.0.0/0
+  # Deny-all baseline for this release's pods. Scoped by
+  # app.kubernetes.io/instance so it cannot cut off co-located third-party
+  # workloads (Redis, ClickHouse) living in the same namespace.
+  defaultDeny: true
+  # Stricter variant: deny-all for *every* pod in the namespace. Only enable
+  # when the namespace holds nothing but this release.
+  defaultDenyNamespace: false
 
 serviceMonitor:
   enabled: false
@@ -154,6 +209,12 @@ indexer:
     repository: ghcr.io/onixus/bsdm-cache-indexer
     tag: "0.6.1-1"
     pullPolicy: IfNotPresent
+  # Per-workload override; falls back to the chart-wide .securityContext.
+  # securityContext:
+  #   allowPrivilegeEscalation: false
+  #   readOnlyRootFilesystem: true
+  #   capabilities:
+  #     drop: [ALL]
   resources:
     requests:
       cpu: "250m"
@@ -171,11 +232,23 @@ indexer:
     url: "http://clickhouse-bsdm.bsdm-analytics.svc.cluster.local:8123"
     database: bsdm
     table: http_cache
+    # Credentials come from a Secret with keys username / password:
+    #   kubectl create secret generic bsdm-clickhouse \
+    #     --from-literal=username=bsdm --from-literal=password=...
     existingSecret: ""
+    # Non-secret username for an unauthenticated/anonymous ClickHouse. Setting
+    # it without existingSecret is a hard error (see indexer-deployment.yaml).
     user: ""
+    # REMOVED: an inline password rendered straight into the Deployment spec.
+    # Setting it now fails the render — use existingSecret.
     password: ""
   searchApi:
     enabled: true
+    # Search API bearer token. Injected via secretKeyRef, never via ConfigMap.
+    #   kubectl create secret generic bsdm-search --from-literal=search-api-token=...
+    existingSecret: ""
+    existingSecretKey: "search-api-token"
+    # If existingSecret is empty and token is set, the chart creates the Secret.
     token: ""
     maxLimit: 10000
     defaultDays: 30
@@ -251,12 +324,17 @@ threatIntel:
   # Admin/SOAR API bind inside the pod. Mutating /api/v1/soar/* endpoints are
   # fail-closed until apiToken is set (Bearer TI_API_TOKEN).
   adminBind: "0.0.0.0"
-  # SOAR token. Prefer an existing Secret: apiToken lands in the Deployment spec
-  # in plaintext and in Git if values.yaml is committed.
+  # SOAR token. Must come from a Secret:
   #   kubectl create secret generic bsdm-ti --from-literal=ti-api-token=...
   existingSecret: ""
   existingSecretKey: "ti-api-token"
+  # REMOVED: an inline token rendered straight into the Deployment spec.
+  # Setting it now fails the render — use existingSecret. Leaving both empty is
+  # supported and keeps the mutating SOAR endpoints fail-closed.
   apiToken: ""
+  # emptyDir cap for the snapshot volume when persistence is disabled; without
+  # it a runaway feed fills the node's ephemeral storage and evicts neighbours.
+  emptyDirSizeLimit: 1Gi
   # Snapshots are rebuilt on every cycle, so an emptyDir is enough unless the
   # IOC store (TASK-TI-002) needs them to survive a restart.
   persistence:

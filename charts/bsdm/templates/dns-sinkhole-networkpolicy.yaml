@@ -1,0 +1,64 @@
+{{- if and .Values.dnsSinkhole .Values.dnsSinkhole.enabled .Values.networkPolicy.enabled }}
+# dns-sinkhole: RPZ-lite forwarder. It binds :53 on 0.0.0.0, so without a
+# policy it is an open resolver for the whole cluster — usable both as an
+# amplification source and as a way to bypass the blocklist by querying it
+# directly with a spoofed source.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "bsdm.fullname" . }}-dns-sinkhole
+  labels:
+    {{- include "bsdm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dns-sinkhole
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "bsdm.dnsSinkholeSelectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        # Release-namespace pods (the proxy resolves through the sinkhole).
+        - podSelector: {}
+        {{- range .Values.networkPolicy.dnsSinkholeClientNamespaces }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+        {{- end }}
+        {{- range .Values.networkPolicy.dnsSinkholeClientCidrs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+      ports:
+        - protocol: UDP
+          port: 53
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.monitoringNamespace | default "monitoring" }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.dnsSinkhole.service.metricsPort }}
+  egress:
+    # Forwarding to the upstream resolver (DNS_SINKHOLE_UPSTREAM, 1.1.1.1:53 by
+    # default). Private ranges are excluded so this rule cannot be turned into
+    # in-cluster reconnaissance.
+    {{- range .Values.networkPolicy.dnsSinkholeUpstreamCidrs }}
+    - to:
+        - ipBlock:
+            cidr: {{ . }}
+            {{- if eq . "0.0.0.0/0" }}
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+            {{- end }}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- end }}
+    {{- include "bsdm.dnsEgress" . | nindent 4 }}
+{{- end }}

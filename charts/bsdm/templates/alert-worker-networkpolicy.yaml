@@ -1,0 +1,56 @@
+{{- if and .Values.alertWorker .Values.alertWorker.enabled .Values.networkPolicy.enabled }}
+# alert-worker: polls ClickHouse, pushes to a webhook / SIEM.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "bsdm.fullname" . }}-alert-worker
+  labels:
+    {{- include "bsdm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: alert-worker
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "bsdm.alertWorkerSelectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.monitoringNamespace | default "monitoring" }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.alertWorker.service.port }}
+  egress:
+    {{- if .Values.networkPolicy.clickhouseNamespace }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.clickhouseNamespace }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.networkPolicy.clickhousePort | default 8123 }}
+    {{- else }}
+    - ports:
+        - protocol: TCP
+          port: {{ .Values.networkPolicy.clickhousePort | default 8123 }}
+    {{- end }}
+    {{- if .Values.networkPolicy.allowEgressInternet }}
+    # WEBHOOK_URL / SIEM endpoint. An in-cluster webhook needs an explicit rule
+    # instead — the private ranges are excluded on purpose.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 80
+    {{- end }}
+    {{- include "bsdm.dnsEgress" . | nindent 4 }}
+{{- end }}

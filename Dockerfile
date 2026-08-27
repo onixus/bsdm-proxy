@@ -3,7 +3,10 @@
 # ============================================================
 # Unified builder stage - собирает все бинарники
 # ============================================================
-FROM rust:alpine AS builder
+# Pinned toolchain: the project requires Rust 1.88+ (docs/ops-and-dev/development.md,
+# Jenkinsfile agent label) and the alpine3.21 variant matches the runtime base below.
+# TODO: pin by digest (rust:1.88-alpine3.21@sha256:...) once we can verify hashes in CI.
+FROM rust:1.88-alpine3.21 AS builder
 ARG TARGETARCH
 ARG LITE_BUILD=0
 WORKDIR /build

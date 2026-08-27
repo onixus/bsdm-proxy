@@ -33,6 +33,16 @@ cd bsdm-proxy
 ```bash
 git clone https://github.com/onixus/bsdm-proxy.git
 cd bsdm-proxy
+# 0. Обязательные секреты (стек fail-closed и не стартует без них)
+export GRAFANA_ADMIN_PASSWORD='...'
+export CONTROL_API_TOKEN="$(openssl rand -hex 32)"
+export SEARCH_API_TOKEN="$(openssl rand -hex 32)"
+# AUTH_ENABLED=true по умолчанию: подставьте свой файл пользователей
+# (scripts/gen-basic-auth-user.sh), иначе смонтируется пример с публичными хешами.
+export BASIC_AUTH_USERS_HOST=./config/basic-auth-users.json
+# MITM CA: 4096-bit RSA, 730 дней (2 года), CA:TRUE pathlen:0,
+# keyUsage=keyCertSign,cRLSign. Срок переопределяется: --days N.
+# Ротация раз в два года: docs/ops-and-dev/ca-lifecycle.md (scripts/rotate-ca.sh).
 ./scripts/gen-ca.sh
 docker compose up -d --build
 docker compose ps

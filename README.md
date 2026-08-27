@@ -202,6 +202,14 @@ curl 'http://127.0.0.1:8080/api/search?limit=5'
 Развёртывание полного стека с аналитикой, Kafka, ClickHouse и мониторингом:
 
 ```bash
+# 0. Обязательные секреты (стек fail-closed и не стартует без них)
+export GRAFANA_ADMIN_PASSWORD='...'
+export CONTROL_API_TOKEN="$(openssl rand -hex 32)"
+export SEARCH_API_TOKEN="$(openssl rand -hex 32)"
+# AUTH_ENABLED=true по умолчанию: подставьте свой файл пользователей
+# (scripts/gen-basic-auth-user.sh), иначе смонтируется пример с публичными хешами.
+export BASIC_AUTH_USERS_HOST=./config/basic-auth-users.json
+
 # 1. Генерация CA сертификатов
 ./scripts/gen-ca.sh
 

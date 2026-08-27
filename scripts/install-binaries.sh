@@ -17,7 +17,17 @@ NC='\033[0m'
 REPO="onixus/bsdm-proxy"
 PREFIX="/opt/bsdm-proxy"
 ETC_DIR="/etc/bsdm-proxy"
-CERTS_DIR="${ETC_DIR}/certs"
+# MITM CA directory. New installs use ${ETC_DIR}/certs (inside the FHS and
+# covered by the systemd units' ReadWritePaths=/etc/bsdm-proxy); a pre-existing
+# legacy /certs directory is reused so that already-trusted CAs keep working.
+# Either way the package installer records the choice as MITM_CA_DIR, so the
+# proxy reads the CA from where it actually is — no /certs symlink involved.
+LEGACY_CERTS_DIR="/certs"
+if [[ -d "$LEGACY_CERTS_DIR" && ! -L "$LEGACY_CERTS_DIR" ]]; then
+  CERTS_DIR="$LEGACY_CERTS_DIR"
+else
+  CERTS_DIR="${ETC_DIR}/certs"
+fi
 
 banner() {
   echo -e "${CYAN}${BOLD}"
@@ -123,15 +133,16 @@ download_and_install() {
   }
 
   echo -e "${GREEN}✓ Installing pre-compiled binaries and configuration...${NC}"
-  "${unpacked_dir}/install.sh" --prefix "$PREFIX" --etc "$ETC_DIR" --create-user --systemd
-
-  # Installs that predate MITM_CA_DIR keep their CA in /certs; carry it over so
-  # clients that already trust it keep working.
-  if [[ ! -e "${CERTS_DIR}/ca.key" && -f /certs/ca.key && -f /certs/ca.crt ]]; then
-    install -d -m 0750 "$CERTS_DIR"
-    cp -p -- /certs/ca.key /certs/ca.crt "$CERTS_DIR"
-    echo -e "${GREEN}✓ Migrated MITM CA from /certs to ${CERTS_DIR}${NC}"
+  # --certs only exists in packages built after the CA moved into ${ETC_DIR};
+  # older release tarballs reject unknown options, so probe before passing it.
+  local install_args=(--prefix "$PREFIX" --etc "$ETC_DIR" --create-user --systemd)
+  if grep -q -- '--certs' "${unpacked_dir}/install.sh"; then
+    install_args+=(--certs "$CERTS_DIR")
+  else
+    CERTS_DIR="$LEGACY_CERTS_DIR"
+    echo -e "${YELLOW}Release package predates the CA directory move; using ${CERTS_DIR}.${NC}"
   fi
+  "${unpacked_dir}/install.sh" "${install_args[@]}"
 
   if [[ -e "${CERTS_DIR}/ca.key" || -e "${CERTS_DIR}/ca.crt" ]]; then
     if [[ ! -f "${CERTS_DIR}/ca.key" || ! -f "${CERTS_DIR}/ca.crt" ]]; then
@@ -141,18 +152,49 @@ download_and_install() {
     echo -e "${GREEN}✓ Existing MITM CA preserved${NC}"
   else
     echo -e "${YELLOW}Generating MITM CA keypair in ${CERTS_DIR}...${NC}"
-    install -d -m 0750 "$CERTS_DIR"
-    openssl req -x509 -newkey rsa:4096 \
-      -keyout "${CERTS_DIR}/ca.key" \
-      -out "${CERTS_DIR}/ca.crt" \
-      -days 3650 -nodes \
-      -subj "/CN=BSDM Proxy Root CA/O=BSDM Security"
+    # 0700, not 0750: the directory holds ca.key; group read would let any
+    # member of the group mint certificates for any intercepted site.
+    install -d -m 0700 "$CERTS_DIR"
+    # umask BEFORE openssl: `openssl req` creates ca.key world-readable (0644
+    # minus umask) and only the chmod below narrows it — that window is enough
+    # to steal the CA key. Same fix as scripts/gen-ca.sh:30. Subshell keeps the
+    # caller's umask intact.
+    ca_days="${CA_DAYS:-730}"
+    # Extensions via a config file rather than `-addext`: `-addext` needs OpenSSL
+    # 1.1.1+, and installers still land on RHEL 7 / older SLES with 1.0.2.
+    # 730 days (2y), not 10y: bounds the exposure window of a leaked ca.key.
+    # Rotate with scripts/rotate-ca.sh before expiry.
+    ext_conf="$(mktemp "${TMPDIR:-/tmp}/bsdm-ca-ext.XXXXXX")"
+    cat >"${ext_conf}" <<'EOF'
+[req]
+distinguished_name = ca_dn
+prompt = no
+x509_extensions = v3_ca
+
+[ca_dn]
+CN = BSDM Proxy Root CA
+
+[v3_ca]
+basicConstraints = critical,CA:TRUE,pathlen:0
+keyUsage = critical,keyCertSign,cRLSign
+subjectKeyIdentifier = hash
+EOF
+    (
+      umask 077
+      openssl req -x509 -newkey rsa:4096 \
+        -keyout "${CERTS_DIR}/ca.key" \
+        -out "${CERTS_DIR}/ca.crt" \
+        -days "${ca_days}" -nodes \
+        -config "${ext_conf}" \
+        -subj "/CN=BSDM Proxy Root CA/O=BSDM Security"
+    ) || { rm -f "${ext_conf}"; echo -e "${RED}CA generation failed${NC}" >&2; exit 1; }
+    rm -f "${ext_conf}"
     chmod 0600 "${CERTS_DIR}/ca.key"
     chmod 0644 "${CERTS_DIR}/ca.crt"
     if id bsdm-proxy >/dev/null 2>&1; then
       chown bsdm-proxy:bsdm-proxy "${CERTS_DIR}/ca.key" "${CERTS_DIR}/ca.crt"
     fi
-    echo -e "${GREEN}✓ MITM Root CA generated successfully${NC}"
+    echo -e "${GREEN}✓ MITM Root CA generated (valid ${ca_days} days, CA:TRUE pathlen:0)${NC}"
   fi
 }
 

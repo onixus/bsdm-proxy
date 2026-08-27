@@ -164,6 +164,15 @@ Redis должен иметь явные `maxmemory` и eviction policy.
 | `AUTH_CONN_CACHE_TTL_SECONDS` | `300` |
 | `BASIC_AUTH_USERS_FILE` | unset |
 
+> Колонка Default — это встроенный fallback, когда переменная не задана вообще.
+> Поставляемые эталонные конфиги (`bsdm-proxy.env`, корневой `docker-compose.yml`,
+> `deploy/compose/docker-compose.pilot.yml`) задают `AUTH_ENABLED=true`.
+> При `AUTH_BACKEND=basic` обязательно задайте `BASIC_AUTH_USERS_FILE`: без него
+> прокси принимает ЛЮБЫЕ учётные данные. Лабораторные стеки
+> (`docker-compose.lite.yml`, `.test.yml`, `.ha.yml`, `.hierarchy.yml`,
+> `.redis-l2.yml`) намеренно оставлены с `AUTH_ENABLED=false` и не предназначены
+> для прода.
+
 Backend-specific:
 
 - LDAP: `LDAP_SERVERS`, `LDAP_BASE_DN`, `LDAP_BIND_DN`,
@@ -194,8 +203,17 @@ Backend-specific:
 | `CUSTOM_DB_PATH` | unset |
 | `LOCAL_CATEGORY_DB_PATH` | unset |
 | `CATEGORIZATION_CACHE_TTL` | source-specific |
-| `POLICY_DECISION_CACHE_TTL_SECONDS` | `120` |
-| `POLICY_DECISION_CACHE_MAX_KEYS` | `10000` |
+
+> Как и выше, колонка Default — встроенный fallback. Эталонные конфиги
+> (`bsdm-proxy.env`, корневой `docker-compose.yml`, pilot-overlay) поставляются
+> с `ACL_ENABLED=true`, но с `ACL_DEFAULT_ACTION=allow`. Это не упущение:
+> поставляемый набор `config/bsdm-etc/acl-rules.json` — blocklist (85 правил,
+> все `deny`, ни одного `allow`), поэтому `deny` по умолчанию заблокировал бы
+> весь трафик, а не ужесточил политику. Учтите также, что переменная работает
+> лишь как fallback: `default_action` берётся из JSON-файла правил, когда он
+> её задаёт, а все поставляемые наборы задают `allow`. Перевод ACL в
+> fail-closed — отдельная работа: сначала baseline из `allow`-правил под
+> реальный трафик, затем `"default_action": "deny"` в самом файле правил.
 
 Online/offline feeds также используют `URLHAUS_API`, `PHISHTANK_API`,
 `PHISHTANK_API_KEY`, `RKN_SYNC_URL` и `RKN_SYNC_INTERVAL_SECS`.
@@ -476,6 +494,13 @@ fallback-зону — иначе неверный `DNS_SINKHOLE_ZONE_PATH` ти�
 
 `ICAP_ENABLED`, `ICAP_URL`, `ICAP_TIMEOUT_MS`, `ICAP_FAIL_OPEN`,
 `ICAP_REQMOD`, `ICAP_RESPMOD`, `ICAP_MAX_BODY_BYTES`.
+
+Эталонный `bsdm-proxy.env` поставляется с `ICAP_FAIL_OPEN=false` (fail-closed):
+при недоступности или таймауте ICAP-сервера запрос блокируется, а не проходит
+непроверенным. Следствие для эксплуатации: авария ICAP становится аварией
+трафика — включайте `ICAP_ENABLED=true` только с мониторингом и резервированием
+ICAP-эндпоинта. `ICAP_FAIL_OPEN=true` возвращает прежнее поведение: трафик идёт,
+но во время аварии молча НЕ сканируется (размен доступности против безопасности).
 
 ### eBPF/XDP
 

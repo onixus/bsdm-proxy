@@ -55,6 +55,42 @@ def SYS_DEPS = '''
     libssl-dev pkg-config cmake librdkafka-dev libclang-dev protobuf-compiler
 '''
 
+// Воркспейсы — на именованном томе, а не в стандартном JENKINS_HOME/workspace.
+//
+// Причина та же, что у target/ выше, только ломается git: клон в свежий
+// воркспейс на bind-mount'е падает на распаковке пака —
+// "inflate: data stream error" → "fatal: fetch-pack: invalid index-pack
+// output" (bsdm-proxy-branches #1-#3 подряд). Полный `git fsck` источника при
+// этом чист, и такой же клон с ХОСТА проходит: бьётся именно запись через
+// VirtioFS. Стадии на docker-агентах не при чём — плагин отдаёт им воркспейс
+// через --volumes-from, а не по пути.
+//
+// Том смонтирован в контроллер как /ci-ws (jenkins-local/docker-compose.yml).
+// Переезд адресный, только для этой джобы: воркспейс на томе НЕ существует на
+// хосте, поэтому любой `docker run -v "$WORKSPACE"` получил бы пустой каталог
+// молча. Здесь такие места переведены на монтирование тома по имени, а чужие
+// джобы остаются на bind-mount'е и не задеты.
+def WS_VOLUME = 'jenkins-ci-workspace'
+def WS_ROOT = '/ci-ws'
+
+// Слот = отдельный воркспейс. Параллельным стадиям нужны разные слоты (раньше
+// это делал Jenkins суффиксами @2/@3), последовательные делят один и тем самым
+// не переклонируют репозиторий.
+def wsFor = { String slot ->
+  "${WS_ROOT}/${env.JOB_NAME.replaceAll('[^A-Za-z0-9._-]', '_')}/${slot}"
+}
+
+// Страховка от самого неприятного отказа: если воркспейс вдруг окажется вне
+// тома (customWorkspace не применился), монтирование тома в дочерний контейнер
+// даст пустой каталог, и semgrep/gitleaks отчитаются об успехе, ничего не
+// просканировав. Лучше громко упасть.
+def ASSERT_WS_ON_VOLUME = '''
+  case "$WORKSPACE" in
+    /ci-ws/*) ;;
+    *) echo "воркспейс вне тома: $WORKSPACE — сканер увидел бы пустой каталог" >&2; exit 1 ;;
+  esac
+'''
+
 pipeline {
   agent none
 
@@ -69,14 +105,14 @@ pipeline {
     // Дешёвый конфиг-гейт до сборки: дефолты поставки не должны уводить
     // threat-intel из Shadow Mode (issue #330) — pure bash, секунды.
     stage('Deployment defaults') {
-      agent any
+      agent { node { label ''; customWorkspace wsFor('main') } }
       steps {
         sh './scripts/ci/check-shadow-defaults.sh'
       }
     }
 
     stage('CA rotation drill') {
-      agent { docker { image RUST_IMAGE; args CACHE_ARGS; reuseNode true } }
+      agent { docker { image RUST_IMAGE; args CACHE_ARGS; reuseNode true; customWorkspace wsFor('main') } }
       steps {
         sh """
           set -eu
@@ -93,23 +129,36 @@ pipeline {
     stage('Quality gate') {
       parallel {
         stage('SAST (semgrep)') {
-          agent any
+          agent { node { label ''; customWorkspace wsFor('sast') } }
           steps {
-            sh '''
+            // Том монтируется по ИМЕНИ, а не путь воркспейса: на хосте этого
+            // пути нет, и bind-mount дал бы пустой каталог (демон-то хостовый).
+            sh """
               set -eu
+              ${ASSERT_WS_ON_VOLUME}
               RULES="--config p/security-audit --config p/secrets --config p/rust"
+
+              # Каталог воркспейса внутри тома — для volume-subpath ниже.
+              WS_REL="\${WORKSPACE#${WS_ROOT}/}"
+
+              # Образ semgrep требует код именно в /src: adjust_for_docker()
+              # падает с "Detected Docker environment without a code volume",
+              # если /src пуст, и никакой -w этого не заменяет. Поэтому не
+              # весь том, а подкаталог воркспейса — иначе в /src приехали бы
+              # воркспейсы всех стадий разом.
+              MOUNT="--mount type=volume,src=${WS_VOLUME},dst=/src,volume-subpath=\$WS_REL"
 
               # Проход 1 — полный отчёт, все severity, билд не роняет (--no-error).
               echo "[sast] полный отчёт"
-              docker run --rm -v "$WORKSPACE":/src -w /src semgrep/semgrep:latest \
-                semgrep scan $RULES --metrics=off --no-error \
+              docker run --rm \$MOUNT -w /src semgrep/semgrep:latest \\
+                semgrep scan \$RULES --metrics=off --no-error \\
                   --json --output semgrep.json
 
               # Проход 2 — гейт: только ERROR, находки уходят в код возврата.
               echo "[sast] quality gate: блок при ERROR"
-              docker run --rm -v "$WORKSPACE":/src -w /src semgrep/semgrep:latest \
-                semgrep scan $RULES --metrics=off --severity ERROR --error
-            '''
+              docker run --rm \$MOUNT -w /src semgrep/semgrep:latest \\
+                semgrep scan \$RULES --metrics=off --severity ERROR --error
+            """
           }
           post {
             always {
@@ -122,10 +171,12 @@ pipeline {
         // рабочее дерево, gitleaks — всю историю коммитов, а утёкший ключ
         // остаётся в ней и после удаления из рабочей копии.
         stage('Secrets (gitleaks)') {
-          agent any
+          agent { node { label ''; customWorkspace wsFor('secrets') } }
           steps {
-            sh '''
+            // Том по имени — см. пояснение у SAST-стадии.
+            sh """
               set -eu
+              ${ASSERT_WS_ON_VOLUME}
               # Один проход, в отличие от semgrep: severity у находок нет,
               # делить отчёт и гейт незачем. Отчёт пишется до выхода с
               # ненулевым кодом, поэтому post заберёт его и на падении.
@@ -133,15 +184,15 @@ pipeline {
               # Ложные срабатывания глушатся .gitleaksignore в корне репо —
               # fingerprint находки берётся из gitleaks.json.
               NO_GIT=""
-              [ -d .git ] || NO_GIT="--no-git"   # не из SCM — сканируем дерево
+              [ -d "\$WORKSPACE/.git" ] || NO_GIT="--no-git"   # не из SCM — сканируем дерево
               # Версия запинена, в отличие от соседнего semgrep: подкоманда
               # detect объявлена устаревшей в пользу git/dir, и плавающий
               # :latest однажды уронит стадию не находкой, а сменой CLI.
-              docker run --rm -v "$WORKSPACE":/src -w /src zricethezav/gitleaks:v8.30.1 \
-                detect --source /src $NO_GIT \
-                  --report-format json --report-path /src/gitleaks.json \
+              docker run --rm -v ${WS_VOLUME}:${WS_ROOT} -w "\$WORKSPACE" zricethezav/gitleaks:v8.30.1 \\
+                detect --source "\$WORKSPACE" \$NO_GIT \\
+                  --report-format json --report-path "\$WORKSPACE/gitleaks.json" \\
                   --redact --no-banner --exit-code 1
-            '''
+            """
           }
           post {
             always {
@@ -151,7 +202,7 @@ pipeline {
         }
 
         stage('Dependency audit') {
-          agent { docker { image RUST_IMAGE; args CACHE_ARGS; reuseNode true } }
+          agent { docker { image RUST_IMAGE; args CACHE_ARGS; reuseNode true; customWorkspace wsFor('audit') } }
           steps {
             withEnv(RUST_ENV) {
               // rustsec/audit-check недоступен вне GHA. cargo-audit ставим через
@@ -179,7 +230,7 @@ pipeline {
     }
 
     stage('Format & lint') {
-      agent { docker { image RUST_IMAGE; args CACHE_ARGS; reuseNode true } }
+      agent { docker { image RUST_IMAGE; args CACHE_ARGS; reuseNode true; customWorkspace wsFor('main') } }
       steps {
         withEnv(RUST_ENV) {
           sh """
@@ -194,7 +245,7 @@ pipeline {
     }
 
     stage('Build') {
-      agent { docker { image RUST_IMAGE; args CACHE_ARGS; reuseNode true } }
+      agent { docker { image RUST_IMAGE; args CACHE_ARGS; reuseNode true; customWorkspace wsFor('main') } }
       steps {
         withEnv(RUST_ENV) {
           sh """
@@ -211,7 +262,7 @@ pipeline {
     }
 
     stage('Test') {
-      agent { docker { image RUST_IMAGE; args CACHE_ARGS; reuseNode true } }
+      agent { docker { image RUST_IMAGE; args CACHE_ARGS; reuseNode true; customWorkspace wsFor('main') } }
       steps {
         withEnv(RUST_ENV) {
           sh """
@@ -226,7 +277,7 @@ pipeline {
     stage('Feature gates') {
       parallel {
         stage('grpc') {
-          agent { docker { image RUST_IMAGE; args CACHE_ARGS; reuseNode true } }
+          agent { docker { image RUST_IMAGE; args CACHE_ARGS; reuseNode true; customWorkspace wsFor('main') } }
           steps {
             withEnv(RUST_ENV) {
               sh """
@@ -240,7 +291,7 @@ pipeline {
           }
         }
         stage('wasm') {
-          agent { docker { image RUST_IMAGE; args CACHE_ARGS; reuseNode true } }
+          agent { docker { image RUST_IMAGE; args CACHE_ARGS; reuseNode true; customWorkspace wsFor('wasm') } }
           steps {
             withEnv(RUST_ENV) {
               sh """

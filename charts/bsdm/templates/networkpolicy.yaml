@@ -1,4 +1,10 @@
 {{- if and (gt (int .Values.replicaCount) 0) .Values.networkPolicy.enabled }}
+# Proxy data plane.
+#
+# Ingress used to be `ipBlock: 10.0.0.0/8`, which in most clusters also covers
+# the pod CIDR — i.e. every pod in the cluster could open the forward proxy and
+# use it to reach the internet. Sources are now explicit: pods of this
+# namespace, opt-in client namespaces, and narrow external CIDRs.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -14,6 +20,13 @@ spec:
     - Egress
   ingress:
     - from:
+        # Workloads sharing the release namespace.
+        - podSelector: {}
+        {{- range .Values.networkPolicy.proxyClientNamespaces }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+        {{- end }}
         {{- range .Values.networkPolicy.proxyIngressCidrs }}
         - ipBlock:
             cidr: {{ . }}
@@ -24,7 +37,7 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: monitoring
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.monitoringNamespace | default "monitoring" }}
       ports:
         - protocol: TCP
           port: {{ .Values.service.metricsPort }}
@@ -61,9 +74,50 @@ spec:
         - protocol: TCP
           port: 9092
     {{- end }}
-    - ports:
-        - protocol: TCP
-          port: 53
+    {{- if and .Values.dnsSinkhole .Values.dnsSinkhole.enabled }}
+    # Resolution through the sinkhole deployed by this release.
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "bsdm.dnsSinkholeSelectorLabels" . | nindent 14 }}
+      ports:
         - protocol: UDP
           port: 53
+    {{- end }}
+    {{- include "bsdm.dnsEgress" . | nindent 4 }}
+{{- end }}
+{{- if and .Values.networkPolicy.enabled .Values.networkPolicy.defaultDeny }}
+---
+# Deny-all baseline: anything this release runs that is not matched by a
+# workload policy above gets no ingress and no egress. Scoped to this release's
+# pods so co-located third-party workloads (Redis, ClickHouse) are untouched.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "bsdm.fullname" . }}-default-deny
+  labels:
+    {{- include "bsdm.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+    - Egress
+{{- end }}
+{{- if and .Values.networkPolicy.enabled .Values.networkPolicy.defaultDenyNamespace }}
+---
+# Namespace-wide deny-all. Only safe when the namespace holds nothing but this
+# release: it also applies to Redis/ClickHouse/anything else living here.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "bsdm.fullname" . }}-default-deny-namespace
+  labels:
+    {{- include "bsdm.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
 {{- end }}

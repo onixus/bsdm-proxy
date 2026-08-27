@@ -12,14 +12,13 @@ install_native() {
   local http_port="${3:-3128}"
   local metrics_port="${4:-9090}"
   local enable_acl="${5:-false}"
-  local version package_version os arch staging
+  local version package_version os arch staging certs_dir
+  certs_dir="$(resolve_certs_dir /etc/bsdm-proxy /certs)"
 
   [[ -x "${root}/scripts/build-package.sh" ]] || die "Missing canonical package builder"
   [[ -f "${root}/proxy/Cargo.toml" ]] || die "Cargo workspace not found"
 
-  # The CA now lives under /etc/bsdm-proxy/certs (covered by the first path);
-  # /certs is still backed up for installs that predate the move.
-  backup_installation "/etc/bsdm-proxy" "/certs" >/dev/null
+  backup_installation "/etc/bsdm-proxy" "$certs_dir" >/dev/null
 
   info "Building canonical release package"
   (
@@ -47,10 +46,13 @@ install_native() {
     --systemd
 
   configure_native_proxy "$root" /etc/bsdm-proxy "$http_port" "$metrics_port" "$enable_acl"
-  ensure_ca /etc/bsdm-proxy/certs
+  ensure_ca "$certs_dir"
 
+  # No /certs symlink: the proxy takes the directory from MITM_CA_DIR, which the
+  # package installer writes into bsdm-proxy.env (proxy/src/tls.rs
+  # load_for_startup also falls back to a real /certs on its own).
   if id bsdm-proxy >/dev/null 2>&1; then
-    chown -R bsdm-proxy:bsdm-proxy /etc/bsdm-proxy/certs
+    chown -R bsdm-proxy:bsdm-proxy "$certs_dir"
   fi
 
   systemctl daemon-reload

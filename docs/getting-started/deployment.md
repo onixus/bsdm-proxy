@@ -58,10 +58,26 @@ curl 'http://127.0.0.1:8080/api/search?limit=5'
 Базовый стек:
 
 ```bash
+# 0. Обязательные секреты (стек fail-closed и не стартует без них)
+export GRAFANA_ADMIN_PASSWORD='...'
+export CONTROL_API_TOKEN="$(openssl rand -hex 32)"
+export SEARCH_API_TOKEN="$(openssl rand -hex 32)"
+# AUTH_ENABLED=true по умолчанию: подставьте свой файл пользователей
+# (scripts/gen-basic-auth-user.sh), иначе смонтируется пример с публичными хешами.
+export BASIC_AUTH_USERS_HOST=./config/basic-auth-users.json
 ./scripts/gen-ca.sh
 docker compose up -d --build
 docker compose ps
 ```
+
+Базовый стек fail-closed: `AUTH_ENABLED=true`, `ACL_ENABLED=true`,
+`CONTROL_API_ALLOW_INSECURE=false`,
+`SEARCH_API_ALLOW_INSECURE=false`. Без `CONTROL_API_TOKEN` proxy и без
+`SEARCH_API_TOKEN` cache-indexer завершаются на старте с сообщением, называющим
+недостающую переменную. ACL включён и применяет deny-правила из
+`config/bsdm-etc/acl-rules.json` (blocklist: всё, что не запрещено явно,
+проходит). Одноразовый стенд без всего этого:
+`deploy/compose/docker-compose.lite.yml`.
 
 Состав: proxy, dns-sinkhole, Kafka, Zookeeper, ClickHouse, cache-indexer, Prometheus,
 Alertmanager и Grafana.

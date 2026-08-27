@@ -246,9 +246,7 @@ pub fn load_policy_config() -> PolicyConfig {
     );
 
     let acl_enabled = env_flag("ACL_ENABLED");
-    let default_action = std::env::var("ACL_DEFAULT_ACTION")
-        .map(|v| parse_acl_action(&v))
-        .unwrap_or(AclAction::Allow);
+    let default_action = acl_default_action_from_env();
     let rules_path = std::env::var("ACL_RULES_PATH").ok();
     let acl_auto_reload = env_flag("ACL_AUTO_RELOAD");
     let acl_reload_interval = std::env::var("ACL_RELOAD_INTERVAL")
@@ -306,6 +304,51 @@ pub fn load_policy_config() -> PolicyConfig {
     }
 }
 
+/// Startup fail-open audit: builds the warning lines for every subsystem that is
+/// configured to let traffic through when its policy/scanner cannot decide.
+///
+/// Returns an empty vec when the deployment is fail-closed.
+pub fn fail_open_warnings(
+    acl_default_action: AclAction,
+    icap_enabled: bool,
+    icap_fail_open: bool,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    if acl_default_action == AclAction::Allow {
+        out.push(
+            "FAIL-OPEN: ACL_DEFAULT_ACTION=allow — any request not matched by an explicit ACL \
+             rule is ALLOWED. A typo in the rules file, a failed rule reload or a missing \
+             category silently turns the proxy into an open gateway. Reference defaults are \
+             fail-closed (ACL_DEFAULT_ACTION=deny)."
+                .to_string(),
+        );
+    }
+    if icap_enabled && icap_fail_open {
+        out.push(
+            "FAIL-OPEN: ICAP_FAIL_OPEN=true — when the ICAP/AV service is down, times out or \
+             returns an error, traffic is forwarded UNSCANNED (no antivirus/DLP verdict). \
+             Reference defaults are fail-closed (ICAP_FAIL_OPEN=false)."
+                .to_string(),
+        );
+    }
+    out
+}
+
+/// Emit [`fail_open_warnings`] at `warn` level during proxy startup.
+pub fn log_fail_open_warnings(acl_default_action: AclAction) {
+    let icap = crate::icap::IcapConfig::from_env();
+    for line in fail_open_warnings(acl_default_action, icap.enabled, icap.fail_open) {
+        warn!("{}", line);
+    }
+}
+
+/// Effective `ACL_DEFAULT_ACTION` as resolved at startup.
+pub fn acl_default_action_from_env() -> AclAction {
+    std::env::var("ACL_DEFAULT_ACTION")
+        .map(|v| parse_acl_action(&v))
+        .unwrap_or(AclAction::Allow)
+}
+
 pub fn reload_acl_engine(path: &str, fallback_default: AclAction) -> Result<AclEngine, String> {
     load_acl_engine_from_file(path, fallback_default)
 }
@@ -313,6 +356,25 @@ pub fn reload_acl_engine(path: &str, fallback_default: AclAction) -> Result<AclE
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fail_open_warnings_are_silent_when_fail_closed() {
+        assert!(fail_open_warnings(AclAction::Deny, true, false).is_empty());
+        // ICAP disabled: its fail-open flag is irrelevant.
+        assert!(fail_open_warnings(AclAction::Deny, false, true).is_empty());
+    }
+
+    #[test]
+    fn fail_open_warnings_flag_acl_allow_and_icap_fail_open() {
+        let acl_only = fail_open_warnings(AclAction::Allow, false, false);
+        assert_eq!(acl_only.len(), 1);
+        assert!(acl_only[0].contains("ACL_DEFAULT_ACTION=allow"));
+
+        let both = fail_open_warnings(AclAction::Allow, true, true);
+        assert_eq!(both.len(), 2);
+        assert!(both[1].contains("ICAP_FAIL_OPEN=true"));
+        assert!(both.iter().all(|w| w.starts_with("FAIL-OPEN:")));
+    }
 
     #[test]
     fn parse_acl_action_values() {

@@ -126,19 +126,26 @@ upsert_env() {
   mv -f "$tmp" "$file"
 }
 
+# Resolve the MITM CA directory: keep a pre-existing legacy /certs (moving a
+# live CA breaks every client that already trusts it), otherwise use the
+# FHS location under the config directory, which the systemd units cover via
+# ReadWritePaths=/etc/bsdm-proxy.
+resolve_certs_dir() {
+  local etc_dir="${1:-/etc/bsdm-proxy}"
+  local legacy="${2:-/certs}"
+  if [[ -d "$legacy" && ! -L "$legacy" ]]; then
+    printf '%s' "$legacy"
+  else
+    printf '%s' "${etc_dir}/certs"
+  fi
+}
+
 ensure_ca() {
   local certs_dir="$1"
-  local legacy_dir="${2:-/certs}"
   require_cmd openssl
-  install -d -m 0750 "$certs_dir"
-
-  # Installs that predate MITM_CA_DIR keep their CA in /certs. Carry it over so
-  # clients that already trust it keep working instead of meeting a fresh CA.
-  if [[ ! -e "${certs_dir}/ca.key" && "$legacy_dir" != "$certs_dir" \
-        && -f "${legacy_dir}/ca.key" && -f "${legacy_dir}/ca.crt" ]]; then
-    cp -p -- "${legacy_dir}/ca.key" "${legacy_dir}/ca.crt" "$certs_dir"
-    info "Migrated MITM CA from ${legacy_dir} to ${certs_dir}"
-  fi
+  # 0700, not 0750: the directory holds ca.key; group read means anyone in the
+  # group can mint a certificate for any site the proxy intercepts.
+  install -d -m 0700 "$certs_dir"
 
   if [[ -f "${certs_dir}/ca.key" && -f "${certs_dir}/ca.crt" ]]; then
     info "Existing MITM CA preserved in ${certs_dir}"
@@ -148,12 +155,42 @@ ensure_ca() {
   [[ ! -e "${certs_dir}/ca.key" && ! -e "${certs_dir}/ca.crt" ]] || \
     die "Incomplete CA state in ${certs_dir}; expected both ca.key and ca.crt or neither."
 
-  openssl req -x509 -newkey rsa:4096 \
-    -keyout "${certs_dir}/ca.key" \
-    -out "${certs_dir}/ca.crt" \
-    -days 3650 -nodes \
-    -subj "/CN=BSDM Proxy Root CA/O=BSDM Security"
+  # umask BEFORE openssl: `openssl req` creates ca.key with 0644 minus umask and
+  # only the chmod below narrows it. Without this there is a window in which the
+  # private CA key is world-readable — same fix as scripts/gen-ca.sh:30.
+  # Subshell so the caller's umask is untouched.
+  # Extensions via a config file rather than `-addext`: `-addext` needs OpenSSL
+  # 1.1.1+, and installers still land on RHEL 7 / older SLES with 1.0.2.
+  # 730 days (2y), not 10y: bounds the exposure window of a leaked ca.key.
+  # Rotate with scripts/rotate-ca.sh before expiry.
+  local ca_days="${CA_DAYS:-730}"
+  local ext_conf
+  ext_conf="$(mktemp "${TMPDIR:-/tmp}/bsdm-ca-ext.XXXXXX")"
+  cat >"${ext_conf}" <<'EOF'
+[req]
+distinguished_name = ca_dn
+prompt = no
+x509_extensions = v3_ca
+
+[ca_dn]
+CN = BSDM Proxy Root CA
+
+[v3_ca]
+basicConstraints = critical,CA:TRUE,pathlen:0
+keyUsage = critical,keyCertSign,cRLSign
+subjectKeyIdentifier = hash
+EOF
+  (
+    umask 077
+    openssl req -x509 -newkey rsa:4096 \
+      -keyout "${certs_dir}/ca.key" \
+      -out "${certs_dir}/ca.crt" \
+      -days "${ca_days}" -nodes \
+      -config "${ext_conf}" \
+      -subj "/CN=BSDM Proxy Root CA/O=BSDM Security"
+  ) || { rm -f "${ext_conf}"; die "CA generation failed"; }
+  rm -f "${ext_conf}"
   chmod 0600 "${certs_dir}/ca.key"
   chmod 0644 "${certs_dir}/ca.crt"
-  info "Generated MITM CA in ${certs_dir}"
+  info "Generated MITM CA in ${certs_dir} (valid ${ca_days} days, CA:TRUE pathlen:0)"
 }

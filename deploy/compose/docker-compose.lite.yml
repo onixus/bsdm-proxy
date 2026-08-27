@@ -2,6 +2,14 @@
 # outside the repo root (Compose would otherwise derive it from the directory).
 name: bsdm-proxy
 
+# LAB / CI STACK — NOT FOR PRODUCTION.
+# Deliberately permissive: AUTH_ENABLED=false, ACL_ENABLED=false,
+# ACL_DEFAULT_ACTION=allow, CONTROL_API_ALLOW_INSECURE=true,
+# SEARCH_API_ALLOW_INSECURE=true. The control and search APIs are open to
+# anyone who can reach the port. This profile exists for zero-config demos and
+# CI load tests; use docker-compose.yml + deploy/compose/docker-compose.pilot.yml
+# for anything real.
+
 # Zero-config Lite profile: caching HTTPS proxy + optional SQLite search.
 # No Kafka / ClickHouse / Prometheus / Grafana.
 #
@@ -38,12 +46,28 @@ services:
     networks:
       - bsdm-lite
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # SQLite index lives on the lite-indexer volume; nothing else is written.
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8080/health | grep -q ok"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 5s
+    deploy:
+      resources:
+        limits:
+          pids: 512
+          cpus: "0.50"
+          memory: 512M
+        reservations:
+          memory: 128M
 
   proxy:
     image: ghcr.io/onixus/bsdm-proxy:latest
@@ -95,12 +119,28 @@ services:
     networks:
       - bsdm-lite
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Writable paths (pinning audit, cache spill) are volumes above.
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:9090/health | grep -q ok"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 5s
+    deploy:
+      resources:
+        limits:
+          pids: 512
+          cpus: "2.00"
+          memory: 1G
+        reservations:
+          memory: 256M
 
   # Mock upstream for scripts/run-load-test.sh (load-test.yml CI workflow).
   # Shares the proxy container's network namespace so a single loopback
@@ -120,6 +160,16 @@ services:
       - MOCK_PORT=18080
     command: ["python3", "/mock-upstream.py"]
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          pids: 512
+          cpus: "1.00"
+          memory: 512M
 
 networks:
   bsdm-lite:

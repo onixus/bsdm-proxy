@@ -57,6 +57,9 @@ Issue tracking: **#270** (этот документ + compose), **#269** (load-t
 - [ ] **Threat Intel:** enforcement выключен (`TI_ENFORCEMENT_MODE` не задан или `shadow`); сгенерированный `threats.rpz` **не** подключён к `DNS_SINKHOLE_ZONE_PATH` ([ADR 0008](../adr/0008-threat-intel-shadow-mode.md))
 - [ ] **Хранилище:** ClickHouse TTL 5 дней (`pilot_retention.sql`), Kafka retention 48h
 - [ ] **CA:** сертификат выпущен (`./scripts/gen-ca.sh`) и установлен на тестовых хостах
+      (срок 2 года, `CA:TRUE pathlen:0`, `keyUsage=keyCertSign,cRLSign`);
+      дата истечения записана в календарь ротации — см.
+      [ca-lifecycle.md](../ops-and-dev/ca-lifecycle.md)
 - [ ] **DNS Sinkhole:** резолвит локально и фильтрует тестовые вредоносные домены (`blocked.test`)
 
 

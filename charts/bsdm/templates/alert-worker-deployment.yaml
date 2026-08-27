@@ -17,14 +17,15 @@ spec:
         {{- include "bsdm.alertWorkerSelectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: {{ include "bsdm.serviceAccountName" . }}
+      automountServiceAccountToken: false
       securityContext:
-        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        {{- include "bsdm.podSecurityContext" (dict "ctx" . "component" .Values.alertWorker) | nindent 8 }}
       containers:
         - name: alert-worker
           image: "{{ .Values.alertWorker.image.repository }}:{{ .Values.alertWorker.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.alertWorker.image.pullPolicy }}
           securityContext:
-            {{- toYaml .Values.securityContext | nindent 12 }}
+            {{- include "bsdm.containerSecurityContext" (dict "ctx" . "component" .Values.alertWorker) | nindent 12 }}
           ports:
             - name: admin
               containerPort: {{ .Values.alertWorker.service.port }}

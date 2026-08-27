@@ -36,9 +36,8 @@ data:
   # Categorization sources
   URLHAUS_ENABLED: {{ .Values.proxy.urlhausEnabled | quote }}
   PHISHTANK_ENABLED: {{ .Values.proxy.phishtankEnabled | quote }}
-  {{- if .Values.proxy.phishtankApiKey }}
-  PHISHTANK_API_KEY: {{ .Values.proxy.phishtankApiKey | quote }}
-  {{- end }}
+  # PHISHTANK_API_KEY is deliberately absent here — it is injected as a
+  # secretKeyRef in deployment.yaml (see secret-env.yaml).
   CUSTOM_DB_ENABLED: {{ .Values.proxy.customDbEnabled | quote }}
   {{- if .Values.proxy.customDbPath }}
   CUSTOM_DB_PATH: {{ .Values.proxy.customDbPath | quote }}
