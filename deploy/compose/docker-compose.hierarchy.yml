@@ -6,13 +6,13 @@ name: bsdm-proxy
 #
 # Usage:
 #   docker compose -f deploy/compose/docker-compose.hierarchy.yml up -d --build
-#   curl -x http://127.0.0.1:1488 http://upstream/get
+#   curl -x http://127.0.0.1:3128 http://upstream/get
 #   docker compose -f deploy/compose/docker-compose.hierarchy.yml down
 #
 # Ports:
-#   child proxy   1488 (HTTP), 9090 (metrics), 3130 (ICP UDP)
-#   parent proxy  1489 (HTTP), 9091 (metrics), 3131 (ICP UDP)
-#   sibling proxy 1490 (HTTP), 9092 (metrics), 3132 (ICP UDP)
+#   child proxy   3128 (HTTP), 9090 (metrics), 3130 (ICP UDP)
+#   parent proxy  3228 (HTTP), 9091 (metrics), 3131 (ICP UDP)
+#   sibling proxy 3328 (HTTP), 9092 (metrics), 3132 (ICP UDP)
 
 services:
   upstream:
@@ -26,11 +26,11 @@ services:
       dockerfile: Dockerfile
       target: proxy
     ports:
-      - "1489:1488"
+      - "3228:3128"
       - "9091:9090"
       - "3131:3130/udp"
     environment:
-      - HTTP_PORT=1488
+      - HTTP_PORT=3128
       - METRICS_PORT=9090
       - MITM_ENABLED=false
       - AUTH_ENABLED=false
@@ -57,11 +57,11 @@ services:
       dockerfile: Dockerfile
       target: proxy
     ports:
-      - "1490:1488"
+      - "3328:3128"
       - "9092:9090"
       - "3132:3130/udp"
     environment:
-      - HTTP_PORT=1488
+      - HTTP_PORT=3128
       - METRICS_PORT=9090
       - MITM_ENABLED=false
       - AUTH_ENABLED=false
@@ -88,10 +88,10 @@ services:
       dockerfile: Dockerfile
       target: proxy
     ports:
-      - "1488:1488"
+      - "3128:3128"
       - "9090:9090"
     environment:
-      - HTTP_PORT=1488
+      - HTTP_PORT=3128
       - METRICS_PORT=9090
       - MITM_ENABLED=false
       - AUTH_ENABLED=false
@@ -99,8 +99,8 @@ services:
       - CATEGORIZATION_ENABLED=false
       - HIERARCHY_ENABLED=true
       - ICP_SERVER_ENABLED=false
-      - CACHE_PARENTS=proxy-parent:1488:1.0
-      - CACHE_SIBLINGS=proxy-sibling:1488:1.0:3130
+      - CACHE_PARENTS=proxy-parent:3128:1.0
+      - CACHE_SIBLINGS=proxy-sibling:3128:1.0:3130
       - ICP_CLIENT_BIND=0.0.0.0:0
       - ICP_TIMEOUT_MS=200
       - PARENT_TIMEOUT_SECONDS=5

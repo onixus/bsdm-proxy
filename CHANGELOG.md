@@ -28,6 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Purged leftover port 1488** — remnants of the old default proxy port: the
+  `OIDC_REDIRECT_URI` fallback (`proxy/src/reverse_proxy.rs`) is now
+  `http://localhost:3128/-/callback`, the cache hierarchy demo
+  (`deploy/compose/docker-compose.hierarchy.yml`) listens on 3128 / 3228 / 3328
+  instead of 1488 / 1489 / 1490, and unit-test fixtures use 3128.
+
 - **MITM circuit breaker: bounded state and O(1) lookup** (#340) — the per-domain
   tracker map is now capped by `MITM_CIRCUIT_BREAKER_MAX_DOMAINS` (default 10000)
   with least-recently-used eviction of closed trackers, so a client looping

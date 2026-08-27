@@ -257,7 +257,7 @@ curl -x http://127.0.0.1:3128 http://upstream/get
 docker compose -f deploy/compose/docker-compose.hierarchy.yml down
 ```
 
-3-tier stack: **child** (3128) → **sibling** (ICP, 1490) / **parent** (1489) → **upstream**.
+3-tier stack: **child** (3128) → **sibling** (ICP, 3328) / **parent** (3228) → **upstream**.
 
 ### Redis L2 demo (Docker)
 

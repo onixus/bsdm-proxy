@@ -473,7 +473,7 @@ mod tests {
         // Add parent
         let parent_config = PeerConfig {
             host: "parent.example.com".to_string(),
-            port: 1488,
+            port: 3128,
             peer_type: PeerType::Parent,
             weight: 1.0,
             icp_port: None,
@@ -494,7 +494,7 @@ mod tests {
 
         let peer_config = PeerConfig {
             host: "test.example.com".to_string(),
-            port: 1488,
+            port: 3128,
             peer_type: PeerType::Parent,
             weight: 1.0,
             icp_port: None,

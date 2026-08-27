@@ -199,7 +199,7 @@ mod tests {
         let announcement = PeerAnnouncement {
             node_id: "node-1".to_string(),
             host: "10.0.0.5".to_string(),
-            http_port: 1488,
+            http_port: 3128,
             icp_port: 3130,
             weight: 1.0,
             digest_b64: None,
@@ -207,6 +207,6 @@ mod tests {
         let json = serde_json::to_string(&announcement).unwrap();
         let decoded: PeerAnnouncement = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded.node_id, "node-1");
-        assert_eq!(decoded.http_port, 1488);
+        assert_eq!(decoded.http_port, 3128);
     }
 }
