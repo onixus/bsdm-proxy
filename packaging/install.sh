@@ -182,15 +182,18 @@ fi
 # Existing installs keep /certs (moving a live CA would break every client that
 # already trusts it and every running proxy holding the old path).
 #
-# The proxy binary still resolves the CA from the hardcoded /certs (and ./certs)
-# — see proxy/src/tls.rs:load_for_startup — so on new installs /certs is created
-# as a symlink to the real directory. Do not delete it.
+# No /certs symlink: the proxy resolves the CA from MITM_CA_DIR (default
+# ${ETC_DIR}/certs) and falls back to a real /certs on its own — see
+# proxy/src/tls.rs:load_for_startup. The resolved directory is written into the
+# env file below, so a legacy install keeps working without the deprecation
+# warning that the fallback logs.
 if [[ -z "$CERTS_DIR" ]]; then
   if [[ -d "$LEGACY_CERTS_DIR" && ! -L "$LEGACY_CERTS_DIR" ]]; then
     CERTS_DIR="$LEGACY_CERTS_DIR"
     echo "Note: keeping the existing MITM CA directory ${LEGACY_CERTS_DIR}."
     echo "      New installs use ${ETC_DIR}/certs; to migrate, stop bsdm-proxy, then:"
-    echo "        mv ${LEGACY_CERTS_DIR} ${ETC_DIR}/certs && ln -s ${ETC_DIR}/certs ${LEGACY_CERTS_DIR}"
+    echo "        mv ${LEGACY_CERTS_DIR} ${ETC_DIR}/certs"
+    echo "      and set MITM_CA_DIR=${ETC_DIR}/certs in ${ETC_DIR}/bsdm-proxy.env"
   else
     CERTS_DIR="${ETC_DIR}/certs"
   fi
@@ -200,9 +203,13 @@ fi
 # gives every member of the group the ability to mint certificates for any site.
 install -d -m 0700 "$CERTS_DIR"
 
-if [[ "$CERTS_DIR" != "$LEGACY_CERTS_DIR" && ! -e "$LEGACY_CERTS_DIR" ]]; then
-  ln -s "$CERTS_DIR" "$LEGACY_CERTS_DIR"
-  echo "Linked ${LEGACY_CERTS_DIR} -> ${CERTS_DIR} (proxy resolves the CA from ${LEGACY_CERTS_DIR})"
+# Point the proxy at the directory this install actually uses, whichever it is.
+if [[ -f "${ETC_DIR}/bsdm-proxy.env" ]]; then
+  env_tmp="$(mktemp)"
+  grep -v '^[[:space:]]*MITM_CA_DIR=' "${ETC_DIR}/bsdm-proxy.env" >"${env_tmp}" || true
+  echo "MITM_CA_DIR=${CERTS_DIR}" >>"${env_tmp}"
+  install -m 0640 "${env_tmp}" "${ETC_DIR}/bsdm-proxy.env"
+  rm -f "${env_tmp}"
 fi
 
 if $CREATE_USER; then
@@ -244,6 +251,8 @@ BSDM-Proxy installed to ${PREFIX}
 MITM requires CA certificates (0600 ca.key, owned by bsdm-proxy):
   ${CERTS_DIR}/ca.key
   ${CERTS_DIR}/ca.crt
+
+The directory is recorded as MITM_CA_DIR in ${ETC_DIR}/bsdm-proxy.env.
 
 Health check: curl http://127.0.0.1:9090/health
 Metrics:      http://127.0.0.1:9090/metrics

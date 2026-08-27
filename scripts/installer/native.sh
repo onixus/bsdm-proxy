@@ -48,13 +48,9 @@ install_native() {
   configure_native_proxy "$root" /etc/bsdm-proxy "$http_port" "$metrics_port" "$enable_acl"
   ensure_ca "$certs_dir"
 
-  # The proxy binary resolves the CA from the hardcoded /certs (proxy/src/tls.rs
-  # load_for_startup), so keep that path valid as a symlink on new installs.
-  if [[ "$certs_dir" != "/certs" && ! -e /certs ]]; then
-    ln -s "$certs_dir" /certs
-    info "Linked /certs -> ${certs_dir}"
-  fi
-
+  # No /certs symlink: the proxy takes the directory from MITM_CA_DIR, which the
+  # package installer writes into bsdm-proxy.env (proxy/src/tls.rs
+  # load_for_startup also falls back to a real /certs on its own).
   if id bsdm-proxy >/dev/null 2>&1; then
     chown -R bsdm-proxy:bsdm-proxy "$certs_dir"
   fi

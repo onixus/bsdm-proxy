@@ -20,6 +20,8 @@ ETC_DIR="/etc/bsdm-proxy"
 # MITM CA directory. New installs use ${ETC_DIR}/certs (inside the FHS and
 # covered by the systemd units' ReadWritePaths=/etc/bsdm-proxy); a pre-existing
 # legacy /certs directory is reused so that already-trusted CAs keep working.
+# Either way the package installer records the choice as MITM_CA_DIR, so the
+# proxy reads the CA from where it actually is — no /certs symlink involved.
 LEGACY_CERTS_DIR="/certs"
 if [[ -d "$LEGACY_CERTS_DIR" && ! -L "$LEGACY_CERTS_DIR" ]]; then
   CERTS_DIR="$LEGACY_CERTS_DIR"
