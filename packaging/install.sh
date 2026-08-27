@@ -106,6 +106,9 @@ if [[ ! -f "${ETC_DIR}/bsdm-proxy.env" ]]; then
 fi
 if [[ ! -f "${ETC_DIR}/cache-indexer.env" ]]; then
   install -m 0640 "${SCRIPT_DIR}/config/cache-indexer.env.example" "${ETC_DIR}/cache-indexer.env"
+  echo "" >> "${ETC_DIR}/cache-indexer.env"
+  echo "# Security and API Control" >> "${ETC_DIR}/cache-indexer.env"
+  echo "SEARCH_API_TOKEN=$(openssl rand -hex 16)" >> "${ETC_DIR}/cache-indexer.env"
   echo "Installed ${ETC_DIR}/cache-indexer.env"
 fi
 if [[ ! -f "${ETC_DIR}/alert-worker.env" ]]; then
