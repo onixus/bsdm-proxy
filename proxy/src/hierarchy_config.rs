@@ -310,10 +310,10 @@ mod tests {
 
     #[test]
     fn parse_parents_list() {
-        let peers = parse_peer_list("127.0.0.1:1488:1.5", PeerType::Parent, None);
+        let peers = parse_peer_list("127.0.0.1:3128:1.5", PeerType::Parent, None);
         assert_eq!(peers.len(), 1);
         assert_eq!(peers[0].host, "127.0.0.1");
-        assert_eq!(peers[0].port, 1488);
+        assert_eq!(peers[0].port, 3128);
         assert!((peers[0].weight - 1.5).abs() < f64::EPSILON);
     }
 
@@ -324,7 +324,7 @@ mod tests {
         let path = dir.path().join("peers.json");
         std::fs::write(
             &path,
-            r#"{"parents":["127.0.0.1:1488:1.5"],"siblings":["10.0.0.2:1488"]}"#,
+            r#"{"parents":["127.0.0.1:3128:1.5"],"siblings":["10.0.0.2:3128"]}"#,
         )
         .unwrap();
         std::env::set_var("CACHE_PEERS_PATH", path.to_str().unwrap());
@@ -339,7 +339,7 @@ mod tests {
         registry
             .add_peer(PeerConfig {
                 host: "10.0.0.1".into(),
-                port: 1488,
+                port: 3128,
                 peer_type: PeerType::Parent,
                 weight: 1.0,
                 icp_port: None,
@@ -349,7 +349,7 @@ mod tests {
         registry
             .upsert_sibling(PeerConfig {
                 host: "10.0.0.9".into(),
-                port: 1488,
+                port: 3128,
                 peer_type: PeerType::Sibling,
                 weight: 1.0,
                 icp_port: Some(3130),
@@ -357,7 +357,7 @@ mod tests {
             })
             .await;
 
-        std::fs::write(&path, r#"{"parents":["10.0.0.2:1488:2.0"],"siblings":[]}"#).unwrap();
+        std::fs::write(&path, r#"{"parents":["10.0.0.2:3128:2.0"],"siblings":[]}"#).unwrap();
         let report = reload_static_peers(&registry, false).await.unwrap();
         std::env::remove_var("CACHE_PEERS_PATH");
         assert_eq!(report.source, PeerConfigSource::File);
@@ -371,13 +371,13 @@ mod tests {
 
     #[test]
     fn parse_siblings_get_default_icp_port() {
-        let peers = parse_peer_list("10.0.0.2:1488", PeerType::Sibling, Some(3130));
+        let peers = parse_peer_list("10.0.0.2:3128", PeerType::Sibling, Some(3130));
         assert_eq!(peers[0].icp_port, Some(3130));
     }
 
     #[test]
     fn parse_siblings_with_explicit_icp_port() {
-        let peers = parse_peer_list("10.0.0.2:1488:1.0:3140", PeerType::Sibling, Some(3130));
+        let peers = parse_peer_list("10.0.0.2:3128:1.0:3140", PeerType::Sibling, Some(3130));
         assert_eq!(peers[0].icp_port, Some(3140));
     }
 

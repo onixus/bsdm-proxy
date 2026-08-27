@@ -1966,7 +1966,7 @@ mod tests {
         registry
             .add_peer(PeerConfig {
                 host: "10.0.0.1".into(),
-                port: 1488,
+                port: 3128,
                 peer_type: PeerType::Parent,
                 weight: 1.0,
                 icp_port: None,

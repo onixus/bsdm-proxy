@@ -189,7 +189,7 @@ mod tests {
     fn create_test_peer(host: &str, weight: f64, rtt_ms: u64) -> Arc<CachePeer> {
         let config = PeerConfig {
             host: host.to_string(),
-            port: 1488,
+            port: 3128,
             peer_type: PeerType::Parent,
             weight,
             icp_port: None,

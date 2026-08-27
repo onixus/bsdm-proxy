@@ -24,7 +24,7 @@ impl OidcConfig {
         let client_secret = env::var("OIDC_CLIENT_SECRET").ok()?;
         let issuer_url = env::var("OIDC_ISSUER_URL").ok()?;
         let redirect_uri = env::var("OIDC_REDIRECT_URI")
-            .unwrap_or_else(|_| "http://localhost:1488/-/callback".to_string());
+            .unwrap_or_else(|_| "http://localhost:3128/-/callback".to_string());
 
         Some(Self {
             client_id,
@@ -376,7 +376,7 @@ mod tests {
                 client_id: "test-client".to_string(),
                 client_secret: "secret".to_string(),
                 issuer_url: "http://idp.example.com".to_string(),
-                redirect_uri: "http://localhost:1488/-/callback".to_string(),
+                redirect_uri: "http://localhost:3128/-/callback".to_string(),
             }),
             admin_group: None,
             sessions: RwLock::new(HashMap::new()),

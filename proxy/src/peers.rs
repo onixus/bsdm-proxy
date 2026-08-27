@@ -406,7 +406,7 @@ mod tests {
     async fn test_peer_creation() {
         let config = PeerConfig {
             host: "parent.example.com".to_string(),
-            port: 1488,
+            port: 3128,
             peer_type: PeerType::Parent,
             weight: 1.0,
             icp_port: Some(3130),
@@ -415,7 +415,7 @@ mod tests {
 
         let peer = CachePeer::new(config);
         assert_eq!(peer.config.host, "parent.example.com");
-        assert_eq!(peer.config.port, 1488);
+        assert_eq!(peer.config.port, 3128);
         assert!(peer.is_healthy());
     }
 
@@ -423,7 +423,7 @@ mod tests {
     async fn test_peer_stats() {
         let config = PeerConfig {
             host: "test.example.com".to_string(),
-            port: 1488,
+            port: 3128,
             peer_type: PeerType::Parent,
             weight: 1.0,
             icp_port: None,
@@ -449,7 +449,7 @@ mod tests {
 
         let config1 = PeerConfig {
             host: "parent1.example.com".to_string(),
-            port: 1488,
+            port: 3128,
             peer_type: PeerType::Parent,
             weight: 1.0,
             icp_port: None,
@@ -458,7 +458,7 @@ mod tests {
 
         let config2 = PeerConfig {
             host: "sibling1.example.com".to_string(),
-            port: 1488,
+            port: 3128,
             peer_type: PeerType::Sibling,
             weight: 0.5,
             icp_port: Some(3130),
@@ -484,7 +484,7 @@ mod tests {
         registry
             .add_peer(PeerConfig {
                 host: "parent.example.com".into(),
-                port: 1488,
+                port: 3128,
                 peer_type: PeerType::Parent,
                 weight: 1.0,
                 icp_port: None,
@@ -494,7 +494,7 @@ mod tests {
         registry
             .upsert_sibling(PeerConfig {
                 host: "discovered.example.com".into(),
-                port: 1488,
+                port: 3128,
                 peer_type: PeerType::Sibling,
                 weight: 1.0,
                 icp_port: Some(3130),
@@ -506,7 +506,7 @@ mod tests {
         let stats = registry
             .replace_static_peers(vec![PeerConfig {
                 host: "parent2.example.com".into(),
-                port: 1488,
+                port: 3128,
                 peer_type: PeerType::Parent,
                 weight: 1.0,
                 icp_port: None,
@@ -517,22 +517,22 @@ mod tests {
         assert_eq!(stats.added, 1);
         assert_eq!(stats.preserved_discovery, 1);
         assert_eq!(registry.all_peers().await.len(), 2);
-        assert!(registry.is_static("parent:parent2.example.com:1488").await);
+        assert!(registry.is_static("parent:parent2.example.com:3128").await);
         assert!(
             !registry
-                .is_static("sibling:discovered.example.com:1488")
+                .is_static("sibling:discovered.example.com:3128")
                 .await
         );
     }
 
     #[test]
     fn test_peer_config_parse() {
-        let result = PeerConfig::parse_from_string("parent.example.com:1488:1.5", PeerType::Parent);
+        let result = PeerConfig::parse_from_string("parent.example.com:3128:1.5", PeerType::Parent);
         assert!(result.is_ok());
 
         let config = result.unwrap();
         assert_eq!(config.host, "parent.example.com");
-        assert_eq!(config.port, 1488);
+        assert_eq!(config.port, 3128);
         assert_eq!(config.weight, 1.5);
     }
 }

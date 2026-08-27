@@ -66,7 +66,7 @@ fn evict_oldest<V>(cache: &mut HashMap<Arc<str>, V>, max: usize, stamp: impl Fn(
         .iter()
         .map(|(key, value)| (stamp(value), key.clone()))
         .collect();
-    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    entries.sort_by_key(|(stamp, _)| *stamp);
     for (_, key) in entries {
         if cache.len() <= target {
             break;
