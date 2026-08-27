@@ -159,15 +159,38 @@ ensure_ca() {
   # only the chmod below narrows it. Without this there is a window in which the
   # private CA key is world-readable — same fix as scripts/gen-ca.sh:30.
   # Subshell so the caller's umask is untouched.
+  # Extensions via a config file rather than `-addext`: `-addext` needs OpenSSL
+  # 1.1.1+, and installers still land on RHEL 7 / older SLES with 1.0.2.
+  # 730 days (2y), not 10y: bounds the exposure window of a leaked ca.key.
+  # Rotate with scripts/rotate-ca.sh before expiry.
+  local ca_days="${CA_DAYS:-730}"
+  local ext_conf
+  ext_conf="$(mktemp "${TMPDIR:-/tmp}/bsdm-ca-ext.XXXXXX")"
+  cat >"${ext_conf}" <<'EOF'
+[req]
+distinguished_name = ca_dn
+prompt = no
+x509_extensions = v3_ca
+
+[ca_dn]
+CN = BSDM Proxy Root CA
+
+[v3_ca]
+basicConstraints = critical,CA:TRUE,pathlen:0
+keyUsage = critical,keyCertSign,cRLSign
+subjectKeyIdentifier = hash
+EOF
   (
     umask 077
     openssl req -x509 -newkey rsa:4096 \
       -keyout "${certs_dir}/ca.key" \
       -out "${certs_dir}/ca.crt" \
-      -days 3650 -nodes \
+      -days "${ca_days}" -nodes \
+      -config "${ext_conf}" \
       -subj "/CN=BSDM Proxy Root CA/O=BSDM Security"
-  )
+  ) || { rm -f "${ext_conf}"; die "CA generation failed"; }
+  rm -f "${ext_conf}"
   chmod 0600 "${certs_dir}/ca.key"
   chmod 0644 "${certs_dir}/ca.crt"
-  info "Generated MITM CA in ${certs_dir}"
+  info "Generated MITM CA in ${certs_dir} (valid ${ca_days} days, CA:TRUE pathlen:0)"
 }

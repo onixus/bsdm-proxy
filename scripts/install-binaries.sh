@@ -157,20 +157,42 @@ download_and_install() {
     # minus umask) and only the chmod below narrows it — that window is enough
     # to steal the CA key. Same fix as scripts/gen-ca.sh:30. Subshell keeps the
     # caller's umask intact.
+    ca_days="${CA_DAYS:-730}"
+    # Extensions via a config file rather than `-addext`: `-addext` needs OpenSSL
+    # 1.1.1+, and installers still land on RHEL 7 / older SLES with 1.0.2.
+    # 730 days (2y), not 10y: bounds the exposure window of a leaked ca.key.
+    # Rotate with scripts/rotate-ca.sh before expiry.
+    ext_conf="$(mktemp "${TMPDIR:-/tmp}/bsdm-ca-ext.XXXXXX")"
+    cat >"${ext_conf}" <<'EOF'
+[req]
+distinguished_name = ca_dn
+prompt = no
+x509_extensions = v3_ca
+
+[ca_dn]
+CN = BSDM Proxy Root CA
+
+[v3_ca]
+basicConstraints = critical,CA:TRUE,pathlen:0
+keyUsage = critical,keyCertSign,cRLSign
+subjectKeyIdentifier = hash
+EOF
     (
       umask 077
       openssl req -x509 -newkey rsa:4096 \
         -keyout "${CERTS_DIR}/ca.key" \
         -out "${CERTS_DIR}/ca.crt" \
-        -days 3650 -nodes \
+        -days "${ca_days}" -nodes \
+        -config "${ext_conf}" \
         -subj "/CN=BSDM Proxy Root CA/O=BSDM Security"
-    )
+    ) || { rm -f "${ext_conf}"; echo -e "${RED}CA generation failed${NC}" >&2; exit 1; }
+    rm -f "${ext_conf}"
     chmod 0600 "${CERTS_DIR}/ca.key"
     chmod 0644 "${CERTS_DIR}/ca.crt"
     if id bsdm-proxy >/dev/null 2>&1; then
       chown bsdm-proxy:bsdm-proxy "${CERTS_DIR}/ca.key" "${CERTS_DIR}/ca.crt"
     fi
-    echo -e "${GREEN}✓ MITM Root CA generated successfully${NC}"
+    echo -e "${GREEN}✓ MITM Root CA generated (valid ${ca_days} days, CA:TRUE pathlen:0)${NC}"
   fi
 }
 

@@ -5,7 +5,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CERT_DIR="${ROOT}/certs"
 COMMON_NAME="BSDM Root CA"
-DAYS=3650
+# 2 years, not 10: bounds the exposure window of a leaked ca.key and keeps the
+# rotation procedure a routine, exercised operation. Override with --days.
+DAYS="${CA_DAYS:-730}"
 
 usage() {
   cat <<'EOF'
@@ -14,7 +16,8 @@ Usage:
   rotate-ca.sh verify [PATH] [--cert-dir PATH]
   rotate-ca.sh activate STAGED_PATH [--cert-dir PATH]
 
-prepare   Generate a new restricted CA pair under CERT_DIR/rotation/.
+prepare   Generate a new restricted CA pair under CERT_DIR/rotation/
+          (default 730 days, CA:TRUE pathlen:0, keyUsage keyCertSign+cRLSign).
 verify    Validate a CA pair and reject group/world-readable private keys.
 activate  Archive the current pair, then install a validated staged pair.
 
@@ -113,9 +116,30 @@ case "${COMMAND}" in
     stage_dir="${CERT_DIR}/rotation/${timestamp}"
     [[ ! -e "${stage_dir}" ]] || stage_dir="${stage_dir}-$$"
     mkdir "${stage_dir}"
+    # Extensions come from a config file rather than `-addext` so the script also
+    # runs on OpenSSL 1.0.2 (RHEL 7 / older SLES), where `-addext` does not exist.
+    ext_conf="$(mktemp "${TMPDIR:-/tmp}/bsdm-ca-ext.XXXXXX")"
+    trap 'rm -f "${ext_conf}"' EXIT
+    cat >"${ext_conf}" <<'EOF'
+[req]
+distinguished_name = ca_dn
+prompt = no
+x509_extensions = v3_ca
+
+[ca_dn]
+CN = BSDM Root CA
+
+[v3_ca]
+basicConstraints = critical,CA:TRUE,pathlen:0
+keyUsage = critical,keyCertSign,cRLSign
+subjectKeyIdentifier = hash
+EOF
     openssl genrsa -out "${stage_dir}/ca.key" 4096
     openssl req -new -x509 -days "${DAYS}" -key "${stage_dir}/ca.key" -out "${stage_dir}/ca.crt" \
+      -config "${ext_conf}" \
       -subj "/O=BSDM/CN=${COMMON_NAME}"
+    rm -f "${ext_conf}"
+    trap - EXIT
     chmod 600 "${stage_dir}/ca.key"
     chmod 644 "${stage_dir}/ca.crt"
     validate_pair "${stage_dir}"
