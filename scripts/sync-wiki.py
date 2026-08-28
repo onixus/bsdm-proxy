@@ -99,6 +99,8 @@ PAGES: tuple[Page, ...] = (
     Page("docs/adr/0004-dns-sinkhole-sidecar.md", "ADR-0004-DNS-Sinkhole-Sidecar.md", "ADRs", "ADR 0004: DNS sidecar", "Отдельный DNS first hop."),
     Page("docs/adr/0005-local-policy-agent-vs-tunnel-first.md", "ADR-0005-Local-Policy-Agent-vs-Tunnel-First.md", "ADRs", "ADR 0005: Local policy agent", "Agent vs tunnel-first architecture."),
     Page("docs/adr/0006-single-operator-console.md", "ADR-0006-Single-Operator-Console.md", "ADRs", "ADR 0006: Single operator console", "Единая поддерживаемая консоль оператора."),
+    Page("docs/adr/0007-mitm-circuit-breaker.md", "ADR-0007-MITM-Circuit-Breaker.md", "ADRs", "ADR 0007: MITM circuit breaker", "Безопасный selective MITM, circuit breaker и bypass при pinning."),
+    Page("docs/adr/0008-threat-intel-shadow-mode.md", "ADR-0008-Threat-Intel-Shadow-Mode.md", "ADRs", "ADR 0008: TI Shadow Mode", "Threat Intelligence по умолчанию только наблюдает (shadow mode)."),
 )
 
 LOAD_TEST_RESULTS_PREFIX = "docs/ops-and-dev/load-test-results/"
