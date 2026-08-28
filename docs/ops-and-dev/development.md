@@ -33,8 +33,10 @@ bsdm-proxy/
 ├── cache-indexer/      # Kafka|HTTP → ClickHouse|SQLite + Search API
 ├── ml-worker/          # M5 features/scores + threat-score API
 ├── dns-sinkhole/       # Optional DNS RPZ-lite sidecar (P3)
+├── threat-intel/       # Фоновый сбор фидов угроз (Shadow Mode)
 ├── alert-worker/       # M4 webhook alerts
 ├── bsdm-events/        # Shared CacheEvent types
+├── bsdm-wasm-sdk/      # WASM plugin SDK
 ├── e2e/                # Smoke и E2E тесты
 ├── admin-console/      # Unified admin UI (React)
 ├── charts/bsdm/        # Helm chart для Kubernetes

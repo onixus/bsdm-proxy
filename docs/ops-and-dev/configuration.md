@@ -517,9 +517,7 @@ Reverse/OIDC считается experimental и не является production
 
 ### DLP/CASB
 
-Отдельного `DLP_ENABLED` сейчас нет. Patterns и LLM domains управляются через
-experimental control API. Пилот без DLP требует явного выключателя или пустого
-набора паттернов.
+Native сигнатурный DLP управляется параметром `DLP_ENABLED` (по умолчанию `false` / unset — встроенные паттерны не загружаются и сканирование тела отключено). Для включения задайте `DLP_ENABLED=true`. Паттерны и LLM-домены также управляются в runtime через experimental control API (`POST /api/security/dlp`, передача `[]` очищает паттерны). Состояние в памяти не персистится между перезапусками.
 
 ### gRPC control plane
 

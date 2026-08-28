@@ -18,6 +18,7 @@ Kafka → cache-indexer → ClickHouse. Дополнительные серви�
 | `alert-worker/` | `alert-worker` | Обработка инцидентов ИБ, дедупликация, вебхук-рассылка |
 | `ml-worker/` | `ml-worker` | ML feature-store скоринг (phishing, beacon detection, UEBA) |
 | `dns-sinkhole/` | `dns-sinkhole` | UDP RPZ-lite DNS-сайдкар |
+| `threat-intel/` | `threat-intel` | Фоновый коллектор фидов угроз (Shadow Mode, без блокировки) |
 | `bsdm-events/` | *(lib)* | Shared `CacheEvent` и типы событий |
 | `bsdm-wasm-sdk/` | *(lib)* | SDK для написания WASM-плагинов |
 | `e2e/` | *(lib)* | End-to-end тестовый харнесс с in-process mock upstream |
@@ -29,6 +30,7 @@ proxy         → bsdm-events  (emits CacheEvent)
 cache-indexer → bsdm-events  (consumes CacheEvent from Kafka)
 ml-worker     → bsdm-events  (scoring input types)
 alert-worker  → bsdm-events  (alert trigger types)
+threat-intel  → proxy        (IOC sync / feed database)
 ```
 
 ## Build & Run
@@ -121,6 +123,7 @@ cache-indexer/  — Kafka → SQLite/ClickHouse индексатор
 alert-worker/   — обработка инцидентов, вебхуки
 ml-worker/      — ML-скоринг (UEBA, phishing, beacon)
 dns-sinkhole/   — DNS RPZ-lite сайдкар
+threat-intel/   — фоновый коллектор фидов угроз (Shadow Mode)
 bsdm-events/    — shared event types (lib)
 bsdm-wasm-sdk/  — SDK для WASM-плагинов (lib)
 e2e/            — E2E тестовый харнесс

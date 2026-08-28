@@ -1,8 +1,7 @@
 # Лицензирование и third-party компоненты
 
-Обзор лицензий переиспользуемого ПО. Числа ниже получены для BSDM-Proxy
-`0.5.0` и являются историческим снимком, а не актуальным SBOM версии
-`0.6.1-1`.
+Обзор лицензий переиспользуемого ПО. Данные валидированы для актуального
+workspace BSDM-Proxy `0.9.13`.
 
 > См. также: [NOTICE](../../NOTICE) · [LICENSE](../../LICENSE)
 
@@ -19,7 +18,11 @@ Workspace-крейты:
 | `bsdm-proxy` (proxy) | MIT |
 | `cache-indexer` | MIT |
 | `alert-worker` | MIT |
+| `ml-worker` | MIT |
+| `dns-sinkhole` | MIT |
+| `threat-intel` | MIT |
 | `bsdm-events` | MIT |
+| `bsdm-wasm-sdk` | MIT |
 | `bsdm-proxy-e2e` | MIT (только тесты, не в release) |
 
 ---
@@ -191,5 +194,5 @@ cargo audit
 
 ---
 
-*Последний зафиксированный аудит: 2026-07 · v0.5.0 · `cargo license` +
-compose manifest. Для v0.6.1-1 требуется повторный прогон.*
+*Последний зафиксированный аудит: 2026-08 · v0.9.13 · `cargo license` +
+compose manifest.*

@@ -1,6 +1,6 @@
 # Развёртывание BSDM-Proxy
-
-Текущая версия workspace: **`0.6.1-1`**.
+ 
+Текущая версия workspace: **`0.9.13`**.
 
 Сначала выберите режим:
 
@@ -85,8 +85,16 @@ Alertmanager и Grafana.
 Профили (опциональные модули):
 
 ```bash
-docker compose --profile alerts up -d --build
-docker compose --profile ml up -d --build
+# Threat Intelligence коллектор
+docker compose --profile threat-intel up -d --build
+
+# Детекция алертов и ML-скоринг
+docker compose --profile alerts --profile ml up -d --build
+
+# DNS Sinkhole
+docker compose --profile dns-sinkhole up -d --build
+
+# ICAP антивирусная проверка (ClamAV)
 docker compose --profile icap up -d
 ```
 
@@ -162,8 +170,12 @@ helm upgrade --install bsdm-indexer ../../charts/bsdm \
 | Компонент | Порт | Endpoint |
 |---|---:|---|
 | proxy | 3128 | HTTP proxy / CONNECT |
-| proxy control | 9090 | `/health`, `/ready`, `/metrics` |
+| proxy control | 9090 | `/health`, `/ready`, `/metrics`, `/admin/` |
 | cache-indexer | 8080 | `/health`, `/metrics`, `/api/search` |
+| alert-worker | 8090 | `/health`, `/metrics` (детекция инцидентов) |
+| ml-worker | 8091 | `/health`, `/metrics` (ML-скоринг) |
+| dns-sinkhole | 8092 / 5353 | `/health`, `/metrics`, DoH/DoT и RPZ DNS (5353/udp) |
+| threat-intel | 8093 | `/health`, `/metrics`, SOAR / ML API |
 | ICP | 3130/udp | hierarchy |
 | Kafka | 9092 | cache-events |
 | ClickHouse | 8123 / 9000 | HTTP / native |
