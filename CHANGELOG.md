@@ -29,7 +29,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Triple-Gate Protection** (`proxy::ti_enforce`): strict fail-safe guardrail requiring `TI_ENFORCEMENT_MODE=enforce`, non-shadow file path, and JSON `mode="enforce"` before enabling blocking.
   - **Lock-Free Hot Path**: `arc_swap::ArcSwap` snapshot matching with zero heap allocation on standard lowercase host lookups and safe subdomain traversal preventing bare TLD over-blocking.
   - **Corporate Allowlist Precedence**: explicit administrative `AclAction::Allow` rules unconditionally supersede third-party threat feeds, preventing False Positive DoS on business-critical systems.
-  - **Cache Invalidation & Telemetry**: automatic `PolicyDecisionCache` invalidation on feed hot-reload, Prometheus metrics `bsdm_proxy_ti_enforce_blocked_total{feed}` and `bsdm_proxy_ti_effective_mode{configured,effective}`, and explicit `threat_intel` decision source labeling.
+- **Pilot Operational Drills & Recovery Formalization (Issues #329 / #327)**:
+  - **Runtime CA Key Security**: added defense-in-depth Unix permission inspection (`0600` mode validation) when loading `ca.key` during proxy startup (`proxy::tls`).
+  - **Atomic Key Restoration**: updated operator restore procedures with `install -m 600` to eliminate transient umask permission exposure.
+  - **Pilot Drills Runbook**: created comprehensive operator drill execution record and runbook (`docs/ops-and-dev/pilot-drills-runbook.md`) covering CA rotation, archive rollback, ClickHouse Native backup/restore, and Control Plane security fail-closed verification.
+- **Hybrid Load-Test Benchmarks & Acceptance (Issue #326)**:
+  - **Benchmark Reports Published**: executed and published reproducible Hybrid profile benchmarks (20-user Baseline and 100-user Scale profiles) in `docs/ops-and-dev/load-test-results/` with 0.00%–0.05% error rate, ~600 RPS sustained throughput, and sub-10ms latency.
+  - **Go/No-Go Decision Record**: populated Section 2.1 (Performance) and Section 2.2 (Operational Drills) in `docs/ops-and-dev/pilot-go-no-go-template.md` with verified measurements and evidence links.
+  - **Troubleshooting & Offline Testing**: added offline mock-upstream recipes and operator troubleshooting matrix in `docs/ops-and-dev/load-test-selective-mitm.md`.
 
 ### Fixed
 

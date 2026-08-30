@@ -173,7 +173,24 @@ impl CertCache {
 
         async fn read_key(dir: Option<&Path>) -> std::io::Result<Vec<u8>> {
             match dir {
-                Some(dir) => tokio::fs::read(dir.join("ca.key")).await,
+                Some(dir) => {
+                    let key_path = dir.join("ca.key");
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        if let Ok(metadata) = std::fs::metadata(&key_path) {
+                            let mode = metadata.permissions().mode();
+                            if (mode & 0o077) != 0 {
+                                warn!(
+                                    key = %key_path.display(),
+                                    mode = format!("{mode:o}"),
+                                    "Insecure CA private key permissions! ca.key should have mode 0600 (owner-only access)"
+                                );
+                            }
+                        }
+                    }
+                    tokio::fs::read(key_path).await
+                }
                 None => Err(std::io::Error::new(
                     std::io::ErrorKind::NotFound,
                     "no CA directory holds ca.key",

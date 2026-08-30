@@ -51,9 +51,8 @@ Also retain `certs/archive/<timestamp>/` after rotations (see
 
 ```bash
 # Stop proxy first
-cp certs/archive/<timestamp>/ca.key certs/ca.key
-cp certs/archive/<timestamp>/ca.crt certs/ca.crt
-chmod 600 certs/ca.key
+install -m 600 certs/archive/<timestamp>/ca.key certs/ca.key
+install -m 644 certs/archive/<timestamp>/ca.crt certs/ca.crt
 ./scripts/rotate-ca.sh verify
 # Start proxy; verify:
 curl --cacert certs/ca.crt -x http://127.0.0.1:3128 https://httpbin.org/uuid
@@ -66,6 +65,8 @@ make rotate-ca-drill
 # or full ops drill (CA + optional CH):
 ./scripts/drill-backup-restore.sh
 ```
+
+See the full operational drill records and procedure in [pilot-drills-runbook.md](pilot-drills-runbook.md).
 
 ---
 
