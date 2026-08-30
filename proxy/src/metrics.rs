@@ -8,8 +8,8 @@
 //! - Memory usage and cache size
 
 use prometheus::{
-    Counter, CounterVec, Encoder, Gauge, Histogram, HistogramOpts, HistogramVec, Opts, Registry,
-    TextEncoder,
+    Counter, CounterVec, Encoder, Gauge, GaugeVec, Histogram, HistogramOpts, HistogramVec, Opts,
+    Registry, TextEncoder,
 };
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -73,6 +73,10 @@ pub struct Metrics {
     pub policy_decision_source_total: CounterVec,
     /// Threat-intel shadow matches by feed (observe-only, never blocks).
     pub ti_shadow_matches_total: CounterVec,
+    /// Threat-intel enforcement blocks by feed.
+    pub ti_enforce_blocked_total: CounterVec,
+    /// Effective threat-intel enforcement mode gauge.
+    pub ti_effective_mode: GaugeVec,
 
     // Rate limit metrics
     pub rate_limit_rejected_total: CounterVec,
@@ -383,6 +387,24 @@ impl Metrics {
         )?;
         registry.register(Box::new(ti_shadow_matches_total.clone()))?;
 
+        let ti_enforce_blocked_total = CounterVec::new(
+            Opts::new(
+                "bsdm_proxy_ti_enforce_blocked_total",
+                "Total requests blocked by threat intelligence enforcement by feed",
+            ),
+            &["feed"],
+        )?;
+        registry.register(Box::new(ti_enforce_blocked_total.clone()))?;
+
+        let ti_effective_mode = GaugeVec::new(
+            Opts::new(
+                "bsdm_proxy_ti_effective_mode",
+                "Effective threat intelligence enforcement mode (1 for active combination, 0 for others)",
+            ),
+            &["configured", "effective"],
+        )?;
+        registry.register(Box::new(ti_effective_mode.clone()))?;
+
         let rate_limit_rejected_total = CounterVec::new(
             Opts::new(
                 "bsdm_proxy_rate_limit_rejected_total",
@@ -602,6 +624,8 @@ impl Metrics {
             policy_cache_hit_total,
             policy_decision_source_total,
             ti_shadow_matches_total,
+            ti_enforce_blocked_total,
+            ti_effective_mode,
             rate_limit_rejected_total,
             distributed_rate_limit_hits_total,
             global_sessions_active,
@@ -673,7 +697,8 @@ impl Metrics {
 
     pub fn record_policy_decision_source(&self, source: &str) {
         let source = match source {
-            "dns" | "sni" | "mitm" | "pinning-bypass" | "auth-deny" | "local-agent" => source,
+            "dns" | "sni" | "mitm" | "pinning-bypass" | "auth-deny" | "local-agent"
+            | "threat_intel" => source,
             _ => "unknown",
         };
         self.policy_decision_source_total
@@ -686,6 +711,21 @@ impl Metrics {
         self.ti_shadow_matches_total
             .with_label_values(&[feed])
             .inc();
+    }
+
+    /// Records a blocked request due to threat intelligence enforcement.
+    pub fn record_ti_enforce_blocked(&self, feed: &str) {
+        self.ti_enforce_blocked_total
+            .with_label_values(&[feed])
+            .inc();
+    }
+
+    /// Records the current effective threat intelligence enforcement mode.
+    pub fn record_ti_effective_mode(&self, configured: &str, effective: &str) {
+        self.ti_effective_mode.reset();
+        self.ti_effective_mode
+            .with_label_values(&[configured, effective])
+            .set(1.0);
     }
 
     pub fn record_hierarchy_resolution(&self, result: &str) {

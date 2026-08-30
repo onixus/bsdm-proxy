@@ -71,6 +71,19 @@ impl ThreatScoreConfig {
     }
 }
 
+impl Default for ThreatScoreConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            poll_url: "http://127.0.0.1:8091/api/threat-scores".into(),
+            poll_interval: Duration::from_secs(60),
+            cache_ttl: Duration::from_secs(300),
+            warn_threshold: 0.7,
+            block_threshold: 0.0,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct CacheEntry {
     hit: ThreatScoreHit,

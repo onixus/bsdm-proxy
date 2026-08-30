@@ -49,6 +49,7 @@ use crate::session::{header_ci, resolve_location, SessionCorrelator};
 use crate::sharded_cache::HttpL1Cache;
 use crate::streaming_miss::TeeMissBody;
 use crate::threat_score_cache::ThreatScoreCache;
+use crate::ti_enforce::TiEnforceMatcher;
 use crate::ti_shadow::TiShadowMatcher;
 use crate::tls::CertCache;
 use crate::upstream::{UpstreamClientHandle, UpstreamTlsConfig};
@@ -435,6 +436,8 @@ pub struct ProxyService {
     threat_score_cache: Arc<ThreatScoreCache>,
     /// Observe-only threat-intel matcher (issue #330); never blocks.
     ti_shadow: Arc<TiShadowMatcher>,
+    /// Threat-intel enforcement matcher (Phase 2 / ADR-0008).
+    ti_enforce: Arc<TiEnforceMatcher>,
     miss_flights: MissFlightMap,
     semantic_config: SemanticCacheConfig,
     semantic_index: SemanticIndex,
@@ -554,6 +557,11 @@ impl ProxyService {
         self.ti_shadow.clone()
     }
 
+    /// Threat-intel enforcement matcher (Phase 2 / ADR-0008).
+    pub fn ti_enforce(&self) -> &Arc<TiEnforceMatcher> {
+        &self.ti_enforce
+    }
+
     pub fn pinning_registry(&self) -> Arc<PinningRegistry> {
         self.pinning_registry.clone()
     }
@@ -615,6 +623,7 @@ impl ProxyService {
         policy_cache: Arc<PolicyDecisionCache>,
         threat_score_cache: Arc<ThreatScoreCache>,
         reverse_proxy_config: Option<crate::reverse_proxy::ReverseProxyConfig>,
+        ti_enforce: Arc<TiEnforceMatcher>,
     ) -> Self {
         let http_cache = Arc::new(HttpL1Cache::new(
             cache_config.capacity,
@@ -679,6 +688,7 @@ impl ProxyService {
             sessions: Arc::new(SessionCorrelator::from_env()),
             threat_score_cache,
             ti_shadow: Arc::new(TiShadowMatcher::from_env()),
+            ti_enforce,
             miss_flights: MissFlightMap::new(),
             semantic_config,
             semantic_index,
@@ -809,10 +819,20 @@ impl ProxyService {
         request_start: Instant,
         decision_source: &str,
     ) {
-        self.metrics.record_policy_decision_source(decision_source);
+        let is_ti_block = decision
+            .rule_id
+            .as_ref()
+            .is_some_and(|r| r.starts_with("ti:"));
+        let eff_decision_source = if is_ti_block {
+            "threat_intel"
+        } else {
+            decision_source
+        };
+        self.metrics
+            .record_policy_decision_source(eff_decision_source);
         info!(
             domain = %domain,
-            decision_source,
+            decision_source = eff_decision_source,
             action = %decision.action,
             "ACL policy decision"
         );
@@ -861,7 +881,7 @@ impl ProxyService {
                 redirect_url,
                 dlp_violation: None,
                 casb_alert: None,
-                decision_source: Some(decision_source.to_string()),
+                decision_source: Some(eff_decision_source.to_string()),
                 bypass_reason: None,
                 threat_shadow_match: None,
                 event_id,
@@ -931,9 +951,9 @@ impl ProxyService {
         username: Option<&str>,
         groups: &[&str],
         client_ip: &str,
-    ) -> Option<AclDecision> {
+    ) -> (Option<AclDecision>, bool) {
         let Some(acl_engine) = &self.acl_engine else {
-            return None;
+            return (None, false);
         };
 
         let eval_start = Instant::now();
@@ -962,17 +982,18 @@ impl ProxyService {
                 .inc();
         }
 
+        let explicit_allow = decision.action == AclAction::Allow && decision.rule_id.is_some();
         if decision.action == AclAction::Allow {
-            None
+            (None, explicit_allow)
         } else {
             info!("ACL {} for {}: {}", decision.action, url, decision.reason);
             self.metrics
                 .record_categorization_blocked(category_names, &action_label);
-            Some(decision)
+            (Some(decision), false)
         }
     }
 
-    pub(crate) async fn check_policy(
+    pub async fn check_policy(
         &self,
         url: &str,
         domain: &str,
@@ -980,7 +1001,8 @@ impl ProxyService {
         groups: &[&str],
         client_ip: &str,
     ) -> (Option<AclDecision>, Vec<String>, Vec<String>) {
-        let policy_active = self.acl_engine.is_some() || self.categorization.is_some();
+        let policy_active =
+            self.acl_engine.is_some() || self.categorization.is_some() || self.ti_enforce.enabled();
         let mut from_cache = false;
         let (mut blocking, category_names, mut threat_sources) =
             if policy_active && self.policy_cache.enabled() {
@@ -990,17 +1012,43 @@ impl ProxyService {
                     debug!("Policy cache hit for {:?} @ {}", username, domain);
                     (hit.blocking, hit.categories, hit.threat_sources)
                 } else {
-                    let (category_names, threat_sources) = self.categorize_url(url);
-                    let blocking = self
+                    let (category_names, mut threat_sources) = self.categorize_url(url);
+                    let (mut blocking, explicit_allow) = self
                         .check_acl(url, domain, &category_names, username, groups, client_ip)
                         .await;
+                    if !explicit_allow && blocking.is_none() {
+                        if let Some(hit) = self.ti_enforce.match_domain(domain) {
+                            blocking = Some(AclDecision::deny(
+                                format!("ti:{}", hit.feed),
+                                format!(
+                                    "Threat intelligence feed match ({}): {}",
+                                    hit.feed, hit.indicator
+                                ),
+                            ));
+                            threat_sources.push(hit.feed.clone());
+                            self.metrics.record_ti_enforce_blocked(&hit.feed);
+                        }
+                    }
                     (blocking, category_names, threat_sources)
                 }
             } else {
-                let (category_names, threat_sources) = self.categorize_url(url);
-                let blocking = self
+                let (category_names, mut threat_sources) = self.categorize_url(url);
+                let (mut blocking, explicit_allow) = self
                     .check_acl(url, domain, &category_names, username, groups, client_ip)
                     .await;
+                if !explicit_allow && blocking.is_none() {
+                    if let Some(hit) = self.ti_enforce.match_domain(domain) {
+                        blocking = Some(AclDecision::deny(
+                            format!("ti:{}", hit.feed),
+                            format!(
+                                "Threat intelligence feed match ({}): {}",
+                                hit.feed, hit.indicator
+                            ),
+                        ));
+                        threat_sources.push(hit.feed.clone());
+                        self.metrics.record_ti_enforce_blocked(&hit.feed);
+                    }
+                }
                 (blocking, category_names, threat_sources)
             };
 

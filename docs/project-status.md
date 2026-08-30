@@ -30,7 +30,7 @@
 | Detection | alert-worker | Beta | Запросы правил выполняются периодически; нужен контроль ClickHouse latency. |
 | ML | UEBA, phishing, beacon, threat-score write-back | Beta | Один процесс `ml-worker` = одна модель. Пилот: UEBA `ueba_zscore_v0` + write-back ([pilot-ml.md](getting-started/pilot-ml.md)); proxy `THREAT_SCORE_*` opt-in, block off. |
 | DNS | DNS Sinkhole + RPZ (Core component) | Основной | DoH/DoT gateways; control-plane **RPZ API** (`/api/dns/rpz/*`) + zone reload. |
-| Threat Intelligence | Мониторинг угроз в режиме Shadow (`threat-intel`) | Beta | Enforcement **в разработке**: блокировка по фидам выключена по умолчанию (`TI_ENFORCEMENT_MODE=shadow`, [ADR 0008](adr/0008-threat-intel-shadow-mode.md)). Реализовано: сбор OpenPhish, PhishStats, Phishing.Database, URLhaus; нормализация URL/доменов/IP; SQLite персистентность с TTL; взвешенный скоринг; компиляция RPZ-зон и Proxy ACL экспорта в файлы; интеграция SIEM (CEF/ECS/Syslog), SOAR API (`/api/v1/soar/*`) и ML-модель репутации (`/api/v1/ml/reputation`) ([threat-intel-collector.md](features/threat-intel-collector.md)). |
+| Threat Intelligence | Мониторинг угроз (Shadow) и Data-Plane Enforcement (`threat-intel`, `ti_enforce`) | Beta | Блокировка по фидам выключена по умолчанию (`TI_ENFORCEMENT_MODE=shadow`, [ADR 0008](adr/0008-threat-intel-shadow-mode.md)). Data-plane enforcement реализован в `ti_enforce.rs` с тройным защитным барьером (Triple-Gate) и приоритетом корпоративного Allowlist, активируется при явном `TI_ENFORCEMENT_MODE=enforce`. Реализовано: сбор OpenPhish, PhishStats, Phishing.Database, URLhaus; нормализация URL/доменов/IP; SQLite персистентность с TTL; взвешенный скоринг; компиляция RPZ-зон и Proxy ACL экспорта; интеграция SIEM (CEF/ECS/Syslog), SOAR API (`/api/v1/soar/*`) и ML-модель репутации (`/api/v1/ml/reputation`) ([threat-intel-collector.md](features/threat-intel-collector.md)). |
 | AI cache | Exact LLM POST cache, local/Qdrant near-hit | Beta | Поддерживает векторный бэкенд Qdrant (`SEMANTIC_VECTOR_BACKEND=qdrant`) и квотирование по API ключам. |
 | Extensions | WASM request hook | Experimental (Frozen) | Заморожено. PoC hook с fuel limits. |
 | Inspection | ICAP REQMOD/RESPMOD | Experimental (Frozen) | Заморожено. RESPMOD требует buffered MISS (`STREAMING_MISS_ENABLED=false`). |
@@ -67,11 +67,12 @@
    мутации SOAR требуют `TI_API_TOKEN` и пишутся в аудит `TI_SOAR_AUDIT_PATH`,
    листенер по умолчанию на `127.0.0.1` (`TI_ADMIN_BIND`).
    **Режим по умолчанию — Shadow: мониторинг без блокировки** (`TI_ENFORCEMENT_MODE=shadow`,
-   [ADR 0008](adr/0008-threat-intel-shadow-mode.md)). Сгенерированные артефакты не
-   подключены к data plane: `dns-sinkhole` читает зону из `DNS_SINKHOLE_ZONE_PATH`
-   (compose: `/var/lib/bsdm-proxy/rpz/compiled.rpz`), а proxy не читает
-   `threat_domains.json`. Переход к enforcement — только по критериям ADR 0008 и
-   с явной подписью в [go/no-go](ops-and-dev/pilot-go-no-go-template.md).
+   [ADR 0008](adr/0008-threat-intel-shadow-mode.md)). В режиме shadow артефакты пишутся
+   с суффиксом `.shadow` и используются proxy (`ti_shadow.rs`) исключительно для
+   наблюдения без блокировки. При явном `TI_ENFORCEMENT_MODE=enforce` proxy (`ti_enforce.rs`)
+   загружает `threat_domains.json` с тройным защитным барьером (Triple-Gate) и
+   приоритетом корпоративного Allowlist. Переход к enforcement — только по критериям
+   ADR 0008 и с явной подписью в [go/no-go](ops-and-dev/pilot-go-no-go-template.md).
 8. `GlobalSessionStore`, Redis rate-limit path и `ThreatSyncEngine` добавлены как
    scaffolding. Текущий `main.rs` создаёт session/threat stores без Redis, а
    proxy request path не вызывает distributed rate-limit check. Название
