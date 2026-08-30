@@ -64,6 +64,7 @@ pub mod streaming_miss;
 pub mod tag_index;
 pub mod threat_score_cache;
 pub mod threat_sync;
+pub mod ti_enforce;
 pub mod ti_shadow;
 pub mod tls;
 pub mod upstream;
@@ -71,7 +72,7 @@ pub mod upstream;
 pub mod wasm_host;
 
 // Re-export commonly used types
-pub use acl::{AclAction, AclDecision, AclEngine, AclEngineHandle, AclRule};
+pub use acl::{AclAction, AclDecision, AclEngine, AclEngineHandle, AclRule, AclRuleType};
 pub use acl_api::{AclApiConfig, AclApiState};
 pub use acl_config::{load_acl_engine_from_file, parse_acl_action, save_acl_engine_to_file};
 #[cfg(feature = "auth-kerberos")]
@@ -139,6 +140,7 @@ pub use sharded_cache::HttpL1Cache;
 pub use tag_index::{parse_cache_tags, TagIndex};
 pub use threat_score_cache::{ThreatScoreCache, ThreatScoreConfig, ThreatScoreHit};
 pub use threat_sync::{ThreatSyncEngine, ThreatSyncEvent};
+pub use ti_enforce::{TiEnforceConfig, TiEnforceMatcher};
 pub use ti_shadow::{ShadowMatch, TiShadowConfig, TiShadowMatcher};
 pub use tls::CertCache;
 pub use upstream::{

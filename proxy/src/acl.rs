@@ -151,6 +151,15 @@ impl AclDecision {
         }
     }
 
+    pub fn allow_rule(rule_id: String, reason: impl Into<String>) -> Self {
+        Self {
+            action: AclAction::Allow,
+            rule_id: Some(rule_id),
+            redirect_url: None,
+            reason: reason.into(),
+        }
+    }
+
     pub fn deny(rule_id: String, reason: impl Into<String>) -> Self {
         Self {
             action: AclAction::Deny,
@@ -375,7 +384,9 @@ impl AclEngine {
                 debug!("Matched ACL rule: {} ({})", rule.name, rule.id);
 
                 return match rule.action {
-                    AclAction::Allow => AclDecision::allow(format!("Rule: {}", rule.name)),
+                    AclAction::Allow => {
+                        AclDecision::allow_rule(rule.id.clone(), format!("Rule: {}", rule.name))
+                    }
                     AclAction::Deny => AclDecision::deny(
                         rule.id.clone(),
                         format!("Blocked by rule: {}", rule.name),

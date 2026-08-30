@@ -18,7 +18,7 @@
 - [x] Automated DNS RPZ zone compilation (`threats.rpz`) with atomic rotation for `dns-sinkhole` (TASK-TI-020)
 - [x] RPZ syntax validation and zone serial management (TASK-TI-020)
 - [x] Compilation of RPZ/ACL artifacts to disk (TASK-TI-020 & 021)
-- [ ] Consumption of `threat_domains.json` by a proxy ACL engine — not implemented
+- [x] Consumption of `threat_domains.json` by proxy policy / ACL data-plane engine under `TI_ENFORCEMENT_MODE=enforce` with Triple-Gate protection and Allowlist precedence (TASK-TI-021 / Phase 2)
 - [x] Shadow Mode observation & false-positive evaluation (`threat_shadow_match`, `bsdm_proxy_ti_shadow_matches_total{feed}`) (ADR 0008)
 
 ## Phase 3 - Enterprise SIEM & SOAR
@@ -40,6 +40,6 @@
 - [x] Mechanism for measuring the per-feed false-positive rate (`threat_shadow_match`, per-feed metric — ADR 0008)
 - [ ] The measurement itself on real traffic (observation window per ADR 0008); not yet performed on any installation
 - [ ] Reliable DNS RPZ blocking — requires an explicit `TI_ENFORCEMENT_MODE=enforce` under the ADR 0008 transition criteria; not enabled in the pilot
-- [ ] Proxy ACL blocking — not implemented
+- [x] Proxy ACL blocking — implemented via `ti_enforce.rs` and gated by Triple-Gate fail-safe and Allowlist precedence
 - [x] Auditable SIEM decisions and SOAR exceptions
 - [x] Observational integration with BSDM Proxy (shadow matching, event field, per-feed metric)

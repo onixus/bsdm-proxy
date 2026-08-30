@@ -12,7 +12,7 @@ use bsdm_proxy::{
     CacheConfig, CertCache, ControlApiState, GlobalSessionStore, HtcpServer, HttpEventPipeline,
     IcpServer, L2CacheConfig, Metrics, PeerDiscoveryConfig, PerfConfig, PolicyCacheConfig,
     PolicyDecisionCache, ProxyPolicy, ProxyService, RateLimitConfig, RedisL2Cache,
-    ThreatScoreCache, ThreatScoreConfig, ThreatSyncEngine, UpstreamTlsConfig,
+    ThreatScoreCache, ThreatScoreConfig, ThreatSyncEngine, TiEnforceMatcher, UpstreamTlsConfig,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -313,6 +313,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cert_cache_for_control = cert_cache.clone();
     let cert_cache_for_mtls = cert_cache.clone();
 
+    let ti_enforce = Arc::new(TiEnforceMatcher::from_env(
+        Some(policy_cache.clone()),
+        Some(metrics.clone()),
+    ));
+
     let service = Arc::new(ProxyService::new(
         cert_cache,
         cache_config.clone(),
@@ -332,10 +337,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         policy_cache.clone(),
         threat_score_cache,
         bsdm_proxy::reverse_proxy::ReverseProxyConfig::from_env(),
+        ti_enforce.clone(),
     ));
 
     // Threat-intel shadow feed: observation only, never affects the decision path.
     service.ti_shadow().spawn_reload_task();
+    // Threat-intel enforce feed: hot-path ACL blocking when Triple-Gate passed.
+    ti_enforce.clone().spawn_reload_task();
 
     let session_store = GlobalSessionStore::new(None);
     let node_id = std::env::var("NODE_ID").unwrap_or_else(|_| "node-1".to_string());

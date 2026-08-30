@@ -22,14 +22,9 @@ suffix (`threats.rpz.shadow`, `threat_domains.json.shadow`) that no enforcement
 component loads, and `TI_RPZ_ENABLED=true` without an explicit
 `TI_ENFORCEMENT_MODE=enforce` logs a warning.
 
-Even in `enforce` these remain **files, not decisions**: `dns-sinkhole` loads the
-zone named by `DNS_SINKHOLE_ZONE_PATH` (compose:
-`/var/lib/bsdm-proxy/rpz/compiled.rpz`) and the proxy does not read
-`threat_domains.json`, so nothing blocks until an operator deliberately publishes
-the generated zone. Do not do that during a pilot — see ADR 0008.
+In `enforce` mode, the proxy data-plane loads `threat_domains.json` via `ti_enforce.rs` and applies real-time `Deny` decisions with Triple-Gate protection and Allowlist precedence (`AclAction::Allow` rules always take priority over external feeds). In `shadow` mode, `ti_shadow.rs` observes traffic matches, emits `threat_shadow_match` annotations, and collects per-feed metrics without blocking. `dns-sinkhole` loads the zone named by `DNS_SINKHOLE_ZONE_PATH` (compose: `/var/lib/bsdm-proxy/rpz/compiled.rpz`).
 
-Status: **Beta, monitoring/shadow mode by default**. Treat the output as an input to a review
-pipeline, not as an unmonitored block list.
+Status: **Beta, monitoring/shadow mode by default**. Direct automated blocking requires explicit `TI_ENFORCEMENT_MODE=enforce` and completion of transition criteria per ADR 0008.
 
 ## Quick start
 

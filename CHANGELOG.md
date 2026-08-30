@@ -25,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **SOAR Automated Response Engine** (`threat_intel::soar`): automated containment API (`/api/v1/soar/block`, `/api/v1/soar/unblock`, `/api/v1/soar/investigate`) with real-time exception tracking and lineage lookup.
   - **ML Domain Reputation & Typosquatting Engine** (`threat_intel::ml_reputation`): visual homoglyph / Unicode confusable normalization, Damerau-Levenshtein distance against protected brand dictionaries, brand keyword stacking and subdomain deception detection (`/api/v1/ml/reputation`).
   - **Pipeline & SOAR/ML Test Suites**: end-to-end integration tests (`threat-intel/tests/pipeline_test.rs`, `threat-intel/tests/soar_ml_test.rs`).
+- **Threat Intelligence Data-Plane Enforcement (Phase 2 Roadmap / ADR-0008)**:
+  - **Triple-Gate Protection** (`proxy::ti_enforce`): strict fail-safe guardrail requiring `TI_ENFORCEMENT_MODE=enforce`, non-shadow file path, and JSON `mode="enforce"` before enabling blocking.
+  - **Lock-Free Hot Path**: `arc_swap::ArcSwap` snapshot matching with zero heap allocation on standard lowercase host lookups and safe subdomain traversal preventing bare TLD over-blocking.
+  - **Corporate Allowlist Precedence**: explicit administrative `AclAction::Allow` rules unconditionally supersede third-party threat feeds, preventing False Positive DoS on business-critical systems.
+  - **Cache Invalidation & Telemetry**: automatic `PolicyDecisionCache` invalidation on feed hot-reload, Prometheus metrics `bsdm_proxy_ti_enforce_blocked_total{feed}` and `bsdm_proxy_ti_effective_mode{configured,effective}`, and explicit `threat_intel` decision source labeling.
 
 ### Fixed
 
