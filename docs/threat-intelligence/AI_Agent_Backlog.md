@@ -104,14 +104,14 @@ Support:
 
 ## TASK-TI-021 DNS RPZ Generator
 
-**Status: implemented** — `threat_intel::rpz::write_rpz_file`, automated standards-compliant DNS RPZ zone compilation for `dns-sinkhole`.
+**Status: implemented** — `threat_intel::rpz`, automated standards-compliant DNS RPZ zone compilation (`YYYYMMDDNN` monotonic BIND serials), zone backup retention (`.bak`), and atomic rollback (`rollback_rpz_zone`).
 
 Implement:
 
 - RPZ generation
-- serial management
+- monotonic serial management (`YYYYMMDDNN`)
 - validation
-- rollback
+- atomic rollback & zone backup
 
 ---
 
@@ -119,13 +119,14 @@ Implement:
 
 ## TASK-TI-030 SIEM Integration
 
-**Status: implemented** — `threat_intel::siem`, event formatting for CEF (ArcSight/QRadar/Sentinel), ECS JSON (Elastic), and Syslog RFC 5424.
+**Status: implemented** — `threat_intel::siem`, event formatting (CEF, ECS JSON, Syslog RFC 5424) and unified multi-transport delivery (`SyslogTransport` UDP/TCP, `FileSiemTransport`, `SiemDispatcher`).
 
 Support:
 
 - events
 - alerts
 - IOC lifecycle
+- delivery transports (UDP/TCP/File/Dispatcher)
 
 ---
 
@@ -145,13 +146,14 @@ Support automated response:
 
 ## TASK-TI-040 ML Reputation Model
 
-**Status: implemented** — `threat_intel::ml_reputation`, visual homoglyph / Unicode confusable normalization, Damerau-Levenshtein brand distance, keyword stacking and subdomain deception detection (`/api/v1/ml/reputation`).
+**Status: implemented** — `threat_intel::ml_reputation`, visual homoglyph / Unicode confusable normalization, Damerau-Levenshtein brand distance, phishing campaign clustering (`cluster_phishing_campaigns`), and Shannon entropy/lexical anomaly detection (`detect_domain_anomalies`, `/api/v1/ml/*`).
 
 Implement:
 
 - domain similarity detection
 - phishing campaign clustering
-- anomaly detection
+- algorithmic anomaly detection (entropy, digit ratios, deep subdomains)
+
 
 ---
 

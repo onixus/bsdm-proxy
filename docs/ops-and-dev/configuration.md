@@ -436,25 +436,26 @@ fallback-зону — иначе неверный `DNS_SINKHOLE_ZONE_PATH` ти�
 
 | Переменная | Default | Назначение |
 |---|---:|---|
-| `TI_API_TOKEN` | unset | Bearer для `POST /api/v1/soar/*`; сравнение constant-time. Без него мутации закрыты |
-| `TI_API_ALLOW_INSECURE` | `false` | Явная лабораторная лазейка: открыть мутации без токена. Не задавать в пилоте |
+| `TI_API_TOKEN` | unset | Bearer для `/api/v1/soar/*` (block, unblock, investigate); сравнение constant-time. Без него вызовы закрыты |
+| `TI_API_ALLOW_INSECURE` | `false` | Явная лабораторная лазейка: открыть SOAR API без токена. Не задавать в пилоте |
 | `TI_ADMIN_BIND` | `127.0.0.1` | Хост admin/SOAR/metrics-листенера |
 | `TI_SOAR_AUDIT_PATH` | `<TI_OUTPUT_DIR>/soar-audit.jsonl` | JSONL-аудит SOAR-действий, файл создаётся с правами `0600` |
+| `TI_SOAR_AUDIT_MAX_BYTES` | `10485760` (10 MB) | Лимит размера файла аудита, при превышении ротируется в `.1` |
+| `TI_SOAR_DEFAULT_CONFIDENCE` | `90` | Default confidence score для SOAR-индикаторов (1-100) |
+| `TI_SOAR_MAX_CONFIDENCE` | `100` | Максимальный потолок confidence score для SOAR (1-100) |
 
 Постура выбирается так: fail-closed всегда, кроме единственного случая
 `TI_API_ALLOW_INSECURE=true`. `DEPLOYMENT_PROFILE` на неё **не влияет**: эту
 переменную переключают другие сервисы по своим причинам, и раньше любое
 не-production значение тихо открывало мутации SOAR без токена.
 
-- **Отказ**: мутация без валидного Bearer получает `401 Unauthorized` с
+- **Отказ**: запрос к `/api/v1/soar/*` без валидного Bearer получает `401 Unauthorized` с
   заголовком `WWW-Authenticate: Bearer`, **до** обращения к хранилищу —
-  отклонённый вызов не создаёт и не удаляет индикаторы. Токен с другой схемой
+  отклонённый вызов не создаёт и не удаляет индикаторы и не раскрывает базу. Токен с другой схемой
   (`Basic`) или пустой Bearer считаются отсутствующими.
-- **Открытые эндпоинты**: `GET /health`, `GET /metrics`,
-  `GET /api/v1/soar/investigate`, `GET /api/v1/ml/*` — авторизация не требуется
-  (проверка применяется только к `POST /api/v1/soar/*`).
+- **Открытые эндпоинты**: `GET /health`, `GET /metrics`, `GET /api/v1/ml/*` — авторизация не требуется.
 - **Старт без токена не падает**: в отличие от proxy control plane, коллектор
-  продолжает собирать фиды, а мутации остаются закрытыми; выбранная постура
+  продолжает собирать фиды, а SOAR-эндпоинты остаются закрытыми; выбранная постура
   пишется в лог при старте (`info` при заданном токене, `warn` при его
   отсутствии и при открытом lab-режиме).
 - **Аудит**: на каждый block/unblock — и принятый, и отклонённый — добавляется
@@ -462,6 +463,7 @@ fallback-зону — иначе неверный `DNS_SINKHOLE_ZONE_PATH` ти�
   `peer` (адрес клиента), `action`, `indicator`, `change_reason` (поле `reason`),
   `mode` (`shadow`/`enforce`), `outcome` (`accepted`/`denied`), `source_path`.
   Управляющие символы вырезаются, отсутствующие значения пишутся как `unknown`.
+  При достижении лимита `TI_SOAR_AUDIT_MAX_BYTES` файл ротируется в `.1`.
 - **Сеть**: порт `8093` больше не публикуется на хост — в Compose сервис
   объявлен через `expose`, Prometheus скрейпит `/metrics` внутри сети
   `bsdm-net`, поэтому в Compose/Helm задан `TI_ADMIN_BIND=0.0.0.0`. При

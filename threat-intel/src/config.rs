@@ -81,12 +81,24 @@ pub struct Config {
     pub rpz_output_path: PathBuf,
     /// Base path of the proxy ACL feed; see [`Config::acl_artifact_path`].
     pub acl_export_path: PathBuf,
+    /// Default confidence score for SOAR manual blocks (1-100).
+    pub soar_default_confidence: u8,
+    /// Maximum ceiling for SOAR confidence score (1-100).
+    pub soar_max_confidence: u8,
     /// Shadow (default, observe-only) or explicit enforcement.
     pub enforcement_mode: EnforcementMode,
     pub user_agent: String,
     pub metrics_port: u16,
     /// Collect every source once and exit (CI smoke, cron-style runs).
     pub run_once: bool,
+    /// SIEM syslog destination address, e.g. "127.0.0.1:514".
+    pub siem_syslog_addr: Option<String>,
+    /// SIEM syslog transport protocol: "udp" or "tcp".
+    pub siem_syslog_protocol: String,
+    /// SIEM file sink export path.
+    pub siem_file_path: Option<PathBuf>,
+    /// SIEM payload format: "cef", "ecs", or "syslog".
+    pub siem_format: String,
 }
 
 impl Config {
@@ -113,6 +125,11 @@ impl Config {
             .map(PathBuf::from)
             .unwrap_or_else(|_| output_dir.join("threat_domains.json"));
 
+        let soar_default_confidence = env_u64("TI_SOAR_DEFAULT_CONFIDENCE", 90).clamp(1, 100) as u8;
+        let soar_max_confidence = env_u64("TI_SOAR_MAX_CONFIDENCE", 100)
+            .clamp(1, 100)
+            .max(soar_default_confidence as u64) as u8;
+
         let (enforcement_mode, mode_warning) =
             EnforcementMode::parse(&std::env::var("TI_ENFORCEMENT_MODE").unwrap_or_default());
         if let Some(msg) = mode_warning {
@@ -126,6 +143,19 @@ impl Config {
                  must not be wired into dns-sinkhole or proxy ACLs"
             );
         }
+
+        let siem_syslog_addr = std::env::var("TI_SIEM_SYSLOG_ADDR")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        let siem_syslog_protocol =
+            std::env::var("TI_SIEM_SYSLOG_PROTOCOL").unwrap_or_else(|_| "udp".into());
+        let siem_file_path = std::env::var("TI_SIEM_FILE_PATH")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from);
+        let siem_format = std::env::var("TI_SIEM_FORMAT").unwrap_or_else(|_| "cef".into());
 
         Ok(Self {
             sources,
@@ -143,11 +173,17 @@ impl Config {
             rpz_enabled,
             rpz_output_path,
             acl_export_path,
+            soar_default_confidence,
+            soar_max_confidence,
             enforcement_mode,
             user_agent: std::env::var("TI_USER_AGENT")
                 .unwrap_or_else(|_| format!("bsdm-threat-intel/{}", env!("CARGO_PKG_VERSION"))),
             metrics_port: env_u64("METRICS_PORT", 8093) as u16,
             run_once: env_bool("TI_RUN_ONCE", false),
+            siem_syslog_addr,
+            siem_syslog_protocol,
+            siem_file_path,
+            siem_format,
         })
     }
 
@@ -239,11 +275,39 @@ mod tests {
             rpz_enabled: true,
             rpz_output_path: PathBuf::from("/tmp/threats.rpz"),
             acl_export_path: PathBuf::from("/tmp/threat_domains.json"),
+            soar_default_confidence: 90,
+            soar_max_confidence: 100,
             enforcement_mode: EnforcementMode::default(),
             user_agent: "test".into(),
             metrics_port: 8093,
             run_once: true,
+            siem_syslog_addr: None,
+            siem_syslog_protocol: "udp".into(),
+            siem_file_path: None,
+            siem_format: "cef".into(),
         }
+    }
+
+    #[test]
+    fn parses_soar_confidence_env() {
+        let _guard = env_lock().lock().unwrap();
+        std::env::set_var("TI_OUTPUT_DIR", "/tmp/ti-conf-test");
+        std::env::set_var("TI_SOAR_DEFAULT_CONFIDENCE", "80");
+        std::env::set_var("TI_SOAR_MAX_CONFIDENCE", "95");
+        let cfg = Config::from_env().unwrap();
+        assert_eq!(cfg.soar_default_confidence, 80);
+        assert_eq!(cfg.soar_max_confidence, 95);
+
+        // Clamping invalid / out-of-range values
+        std::env::set_var("TI_SOAR_DEFAULT_CONFIDENCE", "0");
+        std::env::set_var("TI_SOAR_MAX_CONFIDENCE", "200");
+        let cfg2 = Config::from_env().unwrap();
+        assert_eq!(cfg2.soar_default_confidence, 1);
+        assert_eq!(cfg2.soar_max_confidence, 100);
+
+        std::env::remove_var("TI_OUTPUT_DIR");
+        std::env::remove_var("TI_SOAR_DEFAULT_CONFIDENCE");
+        std::env::remove_var("TI_SOAR_MAX_CONFIDENCE");
     }
 
     #[test]

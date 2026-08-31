@@ -19,6 +19,9 @@ use tracing::{info, warn};
 /// Loopback by default: the admin API must be published deliberately.
 const DEFAULT_BIND: &str = "127.0.0.1";
 
+/// Default ceiling for the audit log before rotation (10 MB).
+pub const DEFAULT_SOAR_AUDIT_MAX_BYTES: u64 = 10 * 1024 * 1024;
+
 /// Length-independent comparison, no early exit on the first differing byte.
 pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
@@ -29,6 +32,14 @@ pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
         diff |= x ^ y;
     }
     diff == 0
+}
+
+/// Verifies a bearer token against an expected token with fail-closed semantics.
+pub fn verify_token(bearer: Option<&str>, expected: Option<&str>, fail_closed: bool) -> bool {
+    match expected {
+        Some(exp) => bearer.is_some_and(|token| constant_time_eq(token.as_bytes(), exp.as_bytes())),
+        None => !fail_closed,
+    }
 }
 
 fn env_flag(name: &str) -> bool {
@@ -44,6 +55,7 @@ pub struct AdminApiSecurity {
     fail_closed: bool,
     bind_host: String,
     audit_path: PathBuf,
+    audit_max_bytes: u64,
 }
 
 impl AdminApiSecurity {
@@ -62,12 +74,18 @@ impl AdminApiSecurity {
         let audit_path = std::env::var("TI_SOAR_AUDIT_PATH")
             .map(PathBuf::from)
             .unwrap_or_else(|_| output_dir.join("soar-audit.jsonl"));
+        let audit_max_bytes = std::env::var("TI_SOAR_AUDIT_MAX_BYTES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_SOAR_AUDIT_MAX_BYTES)
+            .max(1024);
 
         let security = Self {
             token,
             fail_closed,
             bind_host,
             audit_path,
+            audit_max_bytes,
         };
         security.log_posture(allow_insecure);
         security
@@ -78,6 +96,7 @@ impl AdminApiSecurity {
             (Some(_), _) => info!(
                 bind = %self.bind_host,
                 audit_path = %self.audit_path.display(),
+                audit_max_bytes = self.audit_max_bytes,
                 "threat-intel SOAR API auth enabled (Bearer TI_API_TOKEN)"
             ),
             (None, true) => warn!(
@@ -101,15 +120,14 @@ impl AdminApiSecurity {
         &self.audit_path
     }
 
+    pub fn audit_max_bytes(&self) -> u64 {
+        self.audit_max_bytes
+    }
+
     /// Token configured → constant-time match. No token → allowed only in an
     /// explicitly opened lab profile.
     pub fn is_authorized_bearer(&self, bearer: Option<&str>) -> bool {
-        match &self.token {
-            Some(expected) => {
-                bearer.is_some_and(|token| constant_time_eq(token.as_bytes(), expected.as_bytes()))
-            }
-            None => !self.fail_closed,
-        }
+        verify_token(bearer, self.token.as_deref(), self.fail_closed)
     }
 
     /// Authorization for a raw HTTP request head.
@@ -120,11 +138,23 @@ impl AdminApiSecurity {
     /// Test constructor.
     #[cfg(test)]
     pub fn for_test(token: Option<&str>, fail_closed: bool, audit_path: PathBuf) -> Self {
+        Self::for_test_with_max_bytes(token, fail_closed, audit_path, DEFAULT_SOAR_AUDIT_MAX_BYTES)
+    }
+
+    /// Test constructor with explicit audit max bytes.
+    #[cfg(test)]
+    pub fn for_test_with_max_bytes(
+        token: Option<&str>,
+        fail_closed: bool,
+        audit_path: PathBuf,
+        audit_max_bytes: u64,
+    ) -> Self {
         Self {
             token: token.map(str::to_string),
             fail_closed,
             bind_host: DEFAULT_BIND.to_string(),
             audit_path,
+            audit_max_bytes,
         }
     }
 }
@@ -187,9 +217,11 @@ fn sanitize_audit_text(value: &str, max: usize) -> String {
 }
 
 /// Appends one SOAR action to the audit trail (JSONL, `O_APPEND`, mode 0600).
+/// If the audit file exceeds `max_bytes`, it is rotated to `<audit_path>.1`.
 #[allow(clippy::too_many_arguments)]
 pub fn append_soar_audit(
     audit_path: &Path,
+    max_bytes: u64,
     actor: &str,
     peer: &str,
     action: &str,
@@ -202,6 +234,17 @@ pub fn append_soar_audit(
         if !parent.as_os_str().is_empty() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("create audit dir {}: {e}", parent.display()))?;
+        }
+    }
+
+    if max_bytes > 0 {
+        if let Ok(metadata) = std::fs::metadata(audit_path) {
+            if metadata.len() >= max_bytes {
+                let mut rotated_name = audit_path.as_os_str().to_os_string();
+                rotated_name.push(".1");
+                let rotated_path = PathBuf::from(rotated_name);
+                let _ = std::fs::rename(audit_path, &rotated_path);
+            }
         }
     }
 
@@ -274,6 +317,15 @@ mod tests {
     }
 
     #[test]
+    fn test_verify_token_helper() {
+        assert!(verify_token(Some("secret"), Some("secret"), true));
+        assert!(!verify_token(Some("wrong"), Some("secret"), true));
+        assert!(!verify_token(None, Some("secret"), true));
+        assert!(!verify_token(None, None, true)); // fail closed
+        assert!(verify_token(None, None, false)); // fail open in lab
+    }
+
+    #[test]
     fn token_mismatch_and_missing_token_are_rejected() {
         let sec = AdminApiSecurity::for_test(Some("right"), true, PathBuf::from("/tmp/a.jsonl"));
         assert!(sec.is_authorized_bearer(Some("right")));
@@ -299,6 +351,7 @@ mod tests {
 
         append_soar_audit(
             &path,
+            DEFAULT_SOAR_AUDIT_MAX_BYTES,
             "soc1",
             "127.0.0.1:5000",
             "block",
@@ -310,6 +363,7 @@ mod tests {
         .unwrap();
         append_soar_audit(
             &path,
+            DEFAULT_SOAR_AUDIT_MAX_BYTES,
             "",
             "127.0.0.1:5001",
             "unblock",
@@ -337,6 +391,90 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             let mode = std::fs::metadata(&path).unwrap().permissions().mode();
             assert_eq!(mode & 0o777, 0o600, "audit log must stay 0600");
+        }
+    }
+
+    #[test]
+    fn audit_log_rotates_when_exceeding_max_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("soar-audit.jsonl");
+        let rotated_path = dir.path().join("soar-audit.jsonl.1");
+
+        // Set max bytes threshold to 350 bytes (each record is ~200 bytes)
+        let max_bytes = 350;
+
+        // Write first record (~150 bytes)
+        append_soar_audit(
+            &path,
+            max_bytes,
+            "soc1",
+            "127.0.0.1:5000",
+            "block",
+            "first.test",
+            "test1",
+            "shadow",
+            "accepted",
+        )
+        .unwrap();
+
+        assert!(path.exists());
+        assert!(!rotated_path.exists());
+
+        // Write second record (file will now be ~300 bytes > 200)
+        append_soar_audit(
+            &path,
+            max_bytes,
+            "soc2",
+            "127.0.0.1:5000",
+            "block",
+            "second.test",
+            "test2",
+            "shadow",
+            "accepted",
+        )
+        .unwrap();
+
+        assert!(path.exists());
+        assert!(!rotated_path.exists());
+
+        // Third record should trigger rotation before writing
+        append_soar_audit(
+            &path,
+            max_bytes,
+            "soc3",
+            "127.0.0.1:5000",
+            "block",
+            "third.test",
+            "test3",
+            "shadow",
+            "accepted",
+        )
+        .unwrap();
+
+        assert!(path.exists());
+        assert!(rotated_path.exists());
+
+        let rotated_content = std::fs::read_to_string(&rotated_path).unwrap();
+        let rotated_lines: Vec<&str> = rotated_content.lines().collect();
+        assert_eq!(rotated_lines.len(), 2);
+        assert!(rotated_content.contains("first.test"));
+        assert!(rotated_content.contains("second.test"));
+
+        let current_content = std::fs::read_to_string(&path).unwrap();
+        let current_lines: Vec<&str> = current_content.lines().collect();
+        assert_eq!(current_lines.len(), 1);
+        assert!(current_content.contains("third.test"));
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600, "new audit log must stay 0600");
+            let rot_mode = std::fs::metadata(&rotated_path)
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(rot_mode & 0o777, 0o600, "rotated log must stay 0600");
         }
     }
 }

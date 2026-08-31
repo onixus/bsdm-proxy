@@ -5,15 +5,14 @@
 //! - Plain and JSON threat lists for BSDM Proxy ACL policies.
 
 use crate::config::EnforcementMode;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use std::collections::BTreeMap;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// DNS RPZ zone configuration.
 #[derive(Debug, Clone)]
 pub struct RpzConfig {
-    #[allow(dead_code)]
     pub zone_name: String,
     pub primary_ns: String,
     pub admin_email: String,
@@ -42,11 +41,59 @@ impl Default for RpzConfig {
 /// `dns-sinkhole/src/zone.rs`.
 pub const SHADOW_MARKER_NAME: &str = "_bsdm-enforcement-mode";
 
-/// Generates a valid BIND / RPZ zone file content from a list of domain names.
-pub fn generate_rpz_zone(domains: &[String], config: &RpzConfig) -> String {
-    let now = Utc::now();
-    let serial = now.format("%Y%m%d%H").to_string();
+/// Parses the SOA serial number from RPZ zone text if present.
+pub fn parse_soa_serial(zone_content: &str) -> Option<u64> {
+    for line in zone_content.lines() {
+        let trimmed = line.trim();
+        // Look for lines like "2026083100 ; serial" or containing "; serial"
+        if let Some((before_comment, _)) = trimmed.split_once(';') {
+            let candidate = before_comment.trim();
+            if let Ok(serial) = candidate.parse::<u64>() {
+                if serial >= 1_000_000_000 {
+                    return Some(serial);
+                }
+            }
+        }
+    }
+    None
+}
 
+/// Generates the next 10-digit monotonic serial (`YYYYMMDDNN`) adhering to BIND zone standards.
+///
+/// Format: `YYYYMMDDNN` where `NN` is a 2-digit counter (00..99) that increments for same-day
+/// zone generations and never decreases across subsequent compilations.
+pub fn next_monotonic_serial(prev_serial: Option<u64>, now: DateTime<Utc>) -> u64 {
+    let date_str = now.format("%Y%m%d").to_string();
+    let date_prefix: u64 = date_str.parse().unwrap_or(0);
+    let base_today = date_prefix * 100; // YYYYMMDD00
+
+    match prev_serial {
+        Some(prev) => {
+            if prev >= base_today {
+                // Same day or clock anomaly: strictly increment
+                prev + 1
+            } else {
+                // New day and previous serial was from past date
+                base_today
+            }
+        }
+        None => base_today,
+    }
+}
+
+/// Computes the backup file path for a given RPZ zone file (`<path>.bak`).
+pub fn backup_path(path: &Path) -> PathBuf {
+    let mut name = path.as_os_str().to_os_string();
+    name.push(".bak");
+    PathBuf::from(name)
+}
+
+/// Generates a valid BIND / RPZ zone file content from a list of domain names with an explicit serial.
+pub fn generate_rpz_zone_with_serial(
+    domains: &[String],
+    config: &RpzConfig,
+    serial: u64,
+) -> String {
     let mut out = String::with_capacity(domains.len() * 64 + 512);
 
     // RPZ Zone Header
@@ -84,7 +131,35 @@ pub fn generate_rpz_zone(domains: &[String], config: &RpzConfig) -> String {
     out
 }
 
-/// Atomically writes RPZ file to the filesystem.
+/// Generates a valid BIND / RPZ zone file content with default monotonic serial calculation.
+pub fn generate_rpz_zone(domains: &[String], config: &RpzConfig) -> String {
+    let serial = next_monotonic_serial(None, Utc::now());
+    generate_rpz_zone_with_serial(domains, config, serial)
+}
+
+/// Checks whether an RPZ backup file exists for the specified zone path.
+pub fn has_rpz_backup(zone_path: impl AsRef<Path>) -> bool {
+    backup_path(zone_path.as_ref()).exists()
+}
+
+/// Atomically rolls back the active RPZ zone to the previous retained backup file (`.bak`).
+/// Returns `Ok(true)` if rollback succeeded, or `Ok(false)` if no backup exists.
+pub fn rollback_rpz_zone(zone_path: impl AsRef<Path>) -> std::io::Result<bool> {
+    let zone_path = zone_path.as_ref();
+    let bak_file = backup_path(zone_path);
+
+    if !bak_file.exists() {
+        return Ok(false);
+    }
+
+    let tmp_path = zone_path.with_extension("rollback.tmp");
+    std::fs::copy(&bak_file, &tmp_path)?;
+    std::fs::rename(&tmp_path, zone_path)?;
+    Ok(true)
+}
+
+/// Atomically writes RPZ file to the filesystem, retaining a `.bak` backup of the previous active zone
+/// and maintaining monotonic serial numbers.
 pub fn write_rpz_file(
     output_path: impl AsRef<Path>,
     domains: &[String],
@@ -95,7 +170,24 @@ pub fn write_rpz_file(
         std::fs::create_dir_all(parent)?;
     }
 
-    let content = generate_rpz_zone(domains, config);
+    // Read previous serial and create backup if active zone exists
+    let prev_serial = if output_path.exists() {
+        if let Ok(existing_content) = std::fs::read_to_string(output_path) {
+            let bak_file = backup_path(output_path);
+            let bak_tmp = output_path.with_extension("bak.tmp");
+            if std::fs::copy(output_path, &bak_tmp).is_ok() {
+                let _ = std::fs::rename(&bak_tmp, &bak_file);
+            }
+            parse_soa_serial(&existing_content)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let serial = next_monotonic_serial(prev_serial, Utc::now());
+    let content = generate_rpz_zone_with_serial(domains, config, serial);
     let tmp_path = output_path.with_extension("rpz.tmp");
 
     {
@@ -156,6 +248,8 @@ pub fn export_proxy_acl_feed(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use chrono::TimeZone;
 
     #[test]
     fn a_shadow_zone_carries_the_machine_readable_marker() {
@@ -176,7 +270,6 @@ mod tests {
         );
         assert!(!enforce.contains(SHADOW_MARKER_NAME));
     }
-    use super::*;
 
     #[test]
     fn test_generate_rpz_zone() {
@@ -189,6 +282,39 @@ mod tests {
         assert!(zone.contains("*.evil.com CNAME ."));
         assert!(zone.contains("phish.org CNAME ."));
         assert!(zone.contains("*.phish.org CNAME ."));
+    }
+
+    #[test]
+    fn test_monotonic_serial_progression() {
+        let day1 = Utc.with_ymd_and_hms(2026, 8, 31, 10, 0, 0).unwrap();
+        let day2 = Utc.with_ymd_and_hms(2026, 9, 1, 8, 0, 0).unwrap();
+
+        // 1. Initial serial for day1
+        let s0 = next_monotonic_serial(None, day1);
+        assert_eq!(s0, 2026083100);
+
+        // 2. Incremental runs on day1
+        let s1 = next_monotonic_serial(Some(s0), day1);
+        assert_eq!(s1, 2026083101);
+
+        let s2 = next_monotonic_serial(Some(s1), day1);
+        assert_eq!(s2, 2026083102);
+
+        // 3. Next day start
+        let s3 = next_monotonic_serial(Some(s2), day2);
+        assert_eq!(s3, 2026090100);
+        assert!(s3 > s2);
+
+        // 4. Backward clock skew safety: must never decrease
+        let skewed = next_monotonic_serial(Some(s3), day1);
+        assert_eq!(skewed, 2026090101);
+        assert!(skewed > s3);
+    }
+
+    #[test]
+    fn test_parse_soa_serial() {
+        let zone = "$TTL 300\n@ IN SOA ns1.test hostmaster.test (\n  2026083142 ; serial\n  3600 ; refresh\n)\n";
+        assert_eq!(parse_soa_serial(zone), Some(2026083142));
     }
 
     #[test]
@@ -232,17 +358,41 @@ mod tests {
     }
 
     #[test]
-    fn test_write_rpz_file_atomic() {
+    fn test_write_rpz_file_backup_and_rollback() {
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("threats.rpz");
-        let domains = vec!["test-malware.com".to_string()];
         let config = RpzConfig::default();
 
-        let count = write_rpz_file(&target, &domains, &config).unwrap();
+        // 1. First write: generation 1
+        let count = write_rpz_file(&target, &["v1-malware.com".to_string()], &config).unwrap();
         assert_eq!(count, 1);
         assert!(target.exists());
+        assert!(!has_rpz_backup(&target));
 
-        let content = std::fs::read_to_string(&target).unwrap();
-        assert!(content.contains("test-malware.com CNAME ."));
+        let c1 = std::fs::read_to_string(&target).unwrap();
+        assert!(c1.contains("v1-malware.com CNAME ."));
+        let serial1 = parse_soa_serial(&c1).unwrap();
+
+        // 2. Second write: generation 2 (creates backup of v1)
+        let count2 = write_rpz_file(&target, &["v2-phish.org".to_string()], &config).unwrap();
+        assert_eq!(count2, 1);
+        assert!(has_rpz_backup(&target));
+
+        let c2 = std::fs::read_to_string(&target).unwrap();
+        assert!(c2.contains("v2-phish.org CNAME ."));
+        let serial2 = parse_soa_serial(&c2).unwrap();
+        assert!(serial2 > serial1);
+
+        // Verify backup contents match v1
+        let bak = std::fs::read_to_string(backup_path(&target)).unwrap();
+        assert!(bak.contains("v1-malware.com CNAME ."));
+
+        // 3. Rollback active zone to backup
+        let rolled_back = rollback_rpz_zone(&target).unwrap();
+        assert!(rolled_back);
+
+        let restored = std::fs::read_to_string(&target).unwrap();
+        assert!(restored.contains("v1-malware.com CNAME ."));
+        assert!(!restored.contains("v2-phish.org CNAME ."));
     }
 }

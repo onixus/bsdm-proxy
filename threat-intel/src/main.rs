@@ -4,6 +4,8 @@
 //! per-source plugins, and writes normalized snapshots plus a run report for the
 //! downstream IOC store (TASK-TI-002) and scoring engine (TASK-TI-010).
 
+#![allow(dead_code)]
+
 mod api_auth;
 mod collector;
 mod config;
@@ -106,6 +108,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let run_once = config.run_once;
     let metrics_port = config.metrics_port;
     let enforcement_mode = config.enforcement_mode;
+    let default_confidence = config.soar_default_confidence;
+    let max_confidence = config.soar_max_confidence;
     let api_security = Arc::new(AdminApiSecurity::from_env(&config.output_dir));
     let collector = Arc::new(Collector::new(
         config,
@@ -129,6 +133,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             storage_clone,
             enforcement_mode,
             api_security,
+            default_confidence,
+            max_confidence,
         )
         .await;
     });
@@ -140,12 +146,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Hard limit on the admin HTTP request size (64 KB).
+const MAX_ADMIN_REQUEST_BYTES: usize = 64 * 1024;
+
 async fn run_admin_server(
     port: u16,
     metrics: Arc<CollectorMetrics>,
     storage: Option<SqliteStorage>,
     mode: EnforcementMode,
     security: Arc<AdminApiSecurity>,
+    default_confidence: u8,
+    max_confidence: u8,
 ) {
     // Loopback unless TI_ADMIN_BIND says otherwise: the SOAR API must not be
     // reachable from the network by default.
@@ -167,25 +178,123 @@ async fn run_admin_server(
         let storage = storage.clone();
         let security = security.clone();
         tokio::spawn(async move {
-            let mut buf = vec![0u8; 16384];
-            let n = socket.read(&mut buf).await.unwrap_or(0);
-            if n == 0 {
-                return;
+            match read_http_request(&mut socket, MAX_ADMIN_REQUEST_BYTES).await {
+                Ok(req) => {
+                    let response = handle_admin(
+                        &req,
+                        &metrics,
+                        storage.as_ref(),
+                        mode,
+                        &security,
+                        &peer.to_string(),
+                        default_confidence,
+                        max_confidence,
+                    );
+                    let _ = socket.write_all(&response).await;
+                }
+                Err((status, msg)) => {
+                    if status != 0 {
+                        let err_body = format!("{{\"error\":\"{}\"}}", msg);
+                        let response =
+                            http_response(status, "application/json", err_body.as_bytes());
+                        let _ = socket.write_all(&response).await;
+                    }
+                }
             }
-            let req = String::from_utf8_lossy(&buf[..n]);
-            let response = handle_admin(
-                &req,
-                &metrics,
-                storage.as_ref(),
-                mode,
-                &security,
-                &peer.to_string(),
-            );
-            let _ = socket.write_all(&response).await;
         });
     }
 }
 
+/// Reads a full HTTP request from a stream, honoring `Content-Length` and `max_bytes` ceiling.
+async fn read_http_request<R: AsyncReadExt + Unpin>(
+    stream: &mut R,
+    max_bytes: usize,
+) -> Result<String, (u16, &'static str)> {
+    let mut buf = Vec::with_capacity(1024);
+    let mut temp = [0u8; 1024];
+
+    // 1. Read until the end of the HTTP headers delimiter (\r\n\r\n or \n\n).
+    let (header_end_idx, delimiter_len) = loop {
+        if let Some(idx) = find_subslice(&buf, b"\r\n\r\n") {
+            break (idx, 4);
+        }
+        if let Some(idx) = find_subslice(&buf, b"\n\n") {
+            break (idx, 2);
+        }
+        if buf.len() >= max_bytes {
+            return Err((413, "Payload Too Large"));
+        }
+        let n = stream
+            .read(&mut temp)
+            .await
+            .map_err(|_| (400, "Read error"))?;
+        if n == 0 {
+            if buf.is_empty() {
+                return Err((0, "Connection closed"));
+            }
+            return Err((400, "Incomplete HTTP request"));
+        }
+        let to_take = n.min(max_bytes.saturating_sub(buf.len()) + 1);
+        buf.extend_from_slice(&temp[..to_take]);
+        if buf.len() > max_bytes {
+            return Err((413, "Payload Too Large"));
+        }
+    };
+
+    let header_bytes = &buf[..header_end_idx];
+    let header_str =
+        std::str::from_utf8(header_bytes).map_err(|_| (400, "Invalid UTF-8 in headers"))?;
+
+    // 2. Parse Content-Length header if present.
+    let content_length = parse_content_length(header_str)?;
+    let total_required = header_end_idx + delimiter_len + content_length;
+    if total_required > max_bytes {
+        return Err((413, "Payload Too Large"));
+    }
+
+    // 3. Read remaining body bytes up to total_required.
+    while buf.len() < total_required {
+        let n = stream
+            .read(&mut temp)
+            .await
+            .map_err(|_| (400, "Read error"))?;
+        if n == 0 {
+            return Err((400, "Incomplete request body"));
+        }
+        let needed = total_required - buf.len();
+        let to_take = n.min(needed);
+        buf.extend_from_slice(&temp[..to_take]);
+    }
+
+    buf.truncate(total_required);
+    String::from_utf8(buf).map_err(|_| (400, "Invalid UTF-8 in request body"))
+}
+
+fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
+fn parse_content_length(headers: &str) -> Result<usize, (u16, &'static str)> {
+    for line in headers.lines().skip(1) {
+        if line.trim().is_empty() {
+            break;
+        }
+        if let Some((name, value)) = line.split_once(':') {
+            if name.trim().eq_ignore_ascii_case("content-length") {
+                let val_str = value.trim();
+                let len = val_str
+                    .parse::<usize>()
+                    .map_err(|_| (400, "Invalid Content-Length"))?;
+                return Ok(len);
+            }
+        }
+    }
+    Ok(0)
+}
+
+#[allow(clippy::too_many_arguments)]
 fn handle_admin(
     req: &str,
     metrics: &CollectorMetrics,
@@ -193,6 +302,8 @@ fn handle_admin(
     mode: EnforcementMode,
     security: &AdminApiSecurity,
     peer: &str,
+    default_confidence: u8,
+    max_confidence: u8,
 ) -> Vec<u8> {
     let mut lines = req.lines();
     let request_line = lines.next().unwrap_or("");
@@ -200,17 +311,22 @@ fn handle_admin(
     let method = parts.next().unwrap_or("");
     let path = parts.next().unwrap_or("/");
 
-    // Mutating SOAR endpoints are fail-closed: an unauthenticated caller could
-    // otherwise inject confidence-100 indicators straight into the artifacts.
-    let mutating_soar = method == "POST" && path.starts_with("/api/v1/soar/");
-    if mutating_soar && !security.is_request_authorized(req) {
-        let action = if path.starts_with("/api/v1/soar/unblock") {
-            "unblock"
+    // SOAR endpoints (/api/v1/soar/*) require token authentication.
+    // Mutating endpoints are fail-closed to prevent unauthorized indicator injection;
+    // investigate is protected to prevent unauthorized IOC database enumeration.
+    let is_soar = path.starts_with("/api/v1/soar/");
+    if is_soar && !security.is_request_authorized(req) {
+        if method == "POST" {
+            let action = if path.starts_with("/api/v1/soar/unblock") {
+                "unblock"
+            } else {
+                "block"
+            };
+            audit_soar(security, req, peer, action, mode, "denied");
+            warn!(peer = %peer, path = %path, "unauthorized SOAR mutation rejected");
         } else {
-            "block"
-        };
-        audit_soar(security, req, peer, action, mode, "denied");
-        warn!(peer = %peer, path = %path, "unauthorized SOAR mutation rejected");
+            warn!(peer = %peer, path = %path, "unauthorized SOAR request rejected");
+        }
         return unauthorized_response();
     }
 
@@ -270,6 +386,42 @@ fn handle_admin(
         return http_response(200, "application/json", &body);
     }
 
+    // ML Domain Anomaly endpoint: GET /api/v1/ml/anomaly?domain=<domain>
+    if method == "GET" && path.starts_with("/api/v1/ml/anomaly") {
+        let domain = extract_query_param(path, "domain").unwrap_or_default();
+        if domain.is_empty() {
+            return http_response(
+                400,
+                "application/json",
+                b"{\"error\":\"Missing domain parameter\"}",
+            );
+        }
+        let anomaly = ml_reputation::detect_domain_anomalies(&domain);
+        let body = serde_json::to_vec_pretty(&anomaly).unwrap_or_default();
+        return http_response(200, "application/json", &body);
+    }
+
+    // ML Campaign Clustering endpoint: POST /api/v1/ml/cluster
+    if method == "POST" && path.starts_with("/api/v1/ml/cluster") {
+        let body_str = extract_http_body(req);
+        #[derive(serde::Deserialize)]
+        struct ClusterRequest {
+            domains: Vec<String>,
+        }
+        let req_payload: Result<ClusterRequest, _> = serde_json::from_str(body_str);
+        return match req_payload {
+            Ok(payload) => {
+                let clusters = ml_reputation::cluster_phishing_campaigns(&payload.domains);
+                let body = serde_json::to_vec_pretty(&clusters).unwrap_or_default();
+                http_response(200, "application/json", &body)
+            }
+            Err(e) => {
+                let err = format!("{{\"error\":\"Invalid JSON: {}\"}}", e);
+                http_response(400, "application/json", err.as_bytes())
+            }
+        };
+    }
+
     // SOAR Automated Block endpoint: POST /api/v1/soar/block
     if method == "POST" && path.starts_with("/api/v1/soar/block") {
         let Some(storage) = storage else {
@@ -278,7 +430,13 @@ fn handle_admin(
         let body_str = extract_http_body(req);
         let req_payload: Result<soar::SoarBlockRequest, _> = serde_json::from_str(body_str);
         return match req_payload {
-            Ok(payload) => match soar::execute_soar_block(storage, payload, mode) {
+            Ok(payload) => match soar::execute_soar_block_with_limits(
+                storage,
+                payload,
+                mode,
+                default_confidence,
+                max_confidence,
+            ) {
                 Ok(resp) => {
                     metrics
                         .soar_blocks
@@ -350,6 +508,7 @@ fn audit_soar(
     };
     if let Err(e) = api_auth::append_soar_audit(
         security.audit_path(),
+        security.audit_max_bytes(),
         field("operator"),
         peer,
         action,
@@ -402,9 +561,11 @@ fn http_response(status: u16, content_type: &str, body: &[u8]) -> Vec<u8> {
         200 => "OK",
         202 => "Accepted",
         400 => "Bad Request",
-        503 => "Service Unavailable",
+        401 => "Unauthorized",
         404 => "Not Found",
+        413 => "Payload Too Large",
         500 => "Internal Server Error",
+        503 => "Service Unavailable",
         _ => "Error",
     };
     let header = format!(
@@ -450,6 +611,8 @@ mod tests {
             EnforcementMode::Enforce,
             &security,
             PEER,
+            90,
+            100,
         ))
         .unwrap();
         assert!(health.starts_with("HTTP/1.1 200 OK"));
@@ -463,6 +626,8 @@ mod tests {
             EnforcementMode::Enforce,
             &security,
             PEER,
+            90,
+            100,
         ))
         .unwrap();
         assert!(scraped.contains("threat_intel_fetches_total"));
@@ -475,12 +640,46 @@ mod tests {
             EnforcementMode::Enforce,
             &security,
             PEER,
+            90,
+            100,
         ))
         .unwrap();
         assert!(ml_res.starts_with("HTTP/1.1 200 OK"));
         assert!(ml_res.contains("\"is_suspicious\": true"));
 
+        // 3a. ML Anomaly
+        let anom_res = String::from_utf8(handle_admin(
+            "GET /api/v1/ml/anomaly?domain=auth.login.verify.update.evil-bank.com HTTP/1.1",
+            &metrics,
+            Some(&storage),
+            EnforcementMode::Enforce,
+            &security,
+            PEER,
+            90,
+            100,
+        ))
+        .unwrap();
+        assert!(anom_res.starts_with("HTTP/1.1 200 OK"));
+        assert!(anom_res.contains("\"is_anomalous\": true"));
+
+        // 3b. ML Cluster
+        let cluster_req = "POST /api/v1/ml/cluster HTTP/1.1\r\nContent-Type: application/json\r\n\r\n{\"domains\":[\"login-microsoft-auth.com\",\"verify-microsoft-security.net\"]}";
+        let cluster_res = String::from_utf8(handle_admin(
+            cluster_req,
+            &metrics,
+            Some(&storage),
+            EnforcementMode::Enforce,
+            &security,
+            PEER,
+            90,
+            100,
+        ))
+        .unwrap();
+        assert!(cluster_res.starts_with("HTTP/1.1 200 OK"));
+        assert!(cluster_res.contains("\"target_brand\": \"microsoft\""));
+
         // 4. SOAR Block
+
         let block_req = "POST /api/v1/soar/block HTTP/1.1\r\nContent-Type: application/json\r\nAuthorization: Bearer test-token\r\n\r\n{\"indicator\":\"phish.example.test\",\"kind\":\"domain\",\"reason\":\"Manual SOAR containment\",\"operator\":\"soc1\"}";
         let block_resp = String::from_utf8(handle_admin(
             block_req,
@@ -489,19 +688,24 @@ mod tests {
             EnforcementMode::Enforce,
             &security,
             PEER,
+            90,
+            100,
         ))
         .unwrap();
         assert!(block_resp.starts_with("HTTP/1.1 200 OK"));
         assert!(block_resp.contains("\"success\": true"));
 
-        // 5. SOAR Investigate
+        // 5. SOAR Investigate (requires authorization)
+        let inv_req = "GET /api/v1/soar/investigate?query=phish.example.test HTTP/1.1\r\nAuthorization: Bearer test-token\r\n\r\n";
         let inv_res = String::from_utf8(handle_admin(
-            "GET /api/v1/soar/investigate?query=phish.example.test HTTP/1.1",
+            inv_req,
             &metrics,
             Some(&storage),
             EnforcementMode::Enforce,
             &security,
             PEER,
+            90,
+            100,
         ))
         .unwrap();
         assert!(inv_res.starts_with("HTTP/1.1 200 OK"));
@@ -516,6 +720,8 @@ mod tests {
             EnforcementMode::Enforce,
             &security,
             PEER,
+            90,
+            100,
         ))
         .unwrap();
         assert!(unblock_resp.starts_with("HTTP/1.1 200 OK"));
@@ -529,9 +735,65 @@ mod tests {
             EnforcementMode::Enforce,
             &security,
             PEER,
+            90,
+            100,
         ))
         .unwrap();
         assert!(missing.starts_with("HTTP/1.1 404"));
+    }
+
+    #[test]
+    fn soar_investigate_requires_a_valid_token() {
+        let metrics = CollectorMetrics::new().unwrap();
+        let storage = SqliteStorage::in_memory().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let security = test_security(&dir);
+
+        // 1. Unauthenticated request -> 401
+        let unauth_req = "GET /api/v1/soar/investigate?query=threat.test HTTP/1.1\r\n\r\n";
+        let unauth_resp = String::from_utf8(handle_admin(
+            unauth_req,
+            &metrics,
+            Some(&storage),
+            EnforcementMode::Enforce,
+            &security,
+            PEER,
+            90,
+            100,
+        ))
+        .unwrap();
+        assert!(unauth_resp.starts_with("HTTP/1.1 401 Unauthorized"));
+
+        // 2. Wrong token -> 401
+        let wrong_req = "GET /api/v1/soar/investigate?query=threat.test HTTP/1.1\r\nAuthorization: Bearer wrong-token\r\n\r\n";
+        let wrong_resp = String::from_utf8(handle_admin(
+            wrong_req,
+            &metrics,
+            Some(&storage),
+            EnforcementMode::Enforce,
+            &security,
+            PEER,
+            90,
+            100,
+        ))
+        .unwrap();
+        assert!(wrong_resp.starts_with("HTTP/1.1 401 Unauthorized"));
+
+        // 3. Valid token -> 200
+        let auth_req = "GET /api/v1/soar/investigate?query=threat.test HTTP/1.1\r\nAuthorization: Bearer test-token\r\n\r\n";
+        let auth_resp = String::from_utf8(handle_admin(
+            auth_req,
+            &metrics,
+            Some(&storage),
+            EnforcementMode::Enforce,
+            &security,
+            PEER,
+            90,
+            100,
+        ))
+        .unwrap();
+        assert!(auth_resp.starts_with("HTTP/1.1 200 OK"));
+        assert!(auth_resp.contains("\"found\": false"));
     }
 
     #[test]
@@ -549,6 +811,8 @@ mod tests {
             EnforcementMode::Shadow,
             &security,
             PEER,
+            90,
+            100,
         ))
         .unwrap();
 
@@ -561,6 +825,68 @@ mod tests {
             "shadow SOAR blocks must be counted"
         );
         assert_eq!(metrics.soar_blocks.with_label_values(&["enforce"]).get(), 0);
+    }
+
+    #[test]
+    fn soar_block_confidence_score_defaults_and_clamping() {
+        let metrics = CollectorMetrics::new().unwrap();
+        let storage = SqliteStorage::in_memory().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let security = test_security(&dir);
+
+        // 1. Default confidence (85) when unspecified
+        let req1 = "POST /api/v1/soar/block HTTP/1.1\r\nAuthorization: Bearer test-token\r\n\r\n{\"indicator\":\"conf1.test\",\"kind\":\"domain\",\"reason\":\"SOC triage\"}";
+        let _ = handle_admin(
+            req1,
+            &metrics,
+            Some(&storage),
+            EnforcementMode::Enforce,
+            &security,
+            PEER,
+            85,
+            95,
+        );
+        let ind1 = soar::execute_soar_investigation(&storage, "conf1.test", None)
+            .unwrap()
+            .indicator
+            .unwrap();
+        assert_eq!(ind1.confidence_score, 85);
+
+        // 2. Custom confidence score (92) within ceiling
+        let req2 = "POST /api/v1/soar/block HTTP/1.1\r\nAuthorization: Bearer test-token\r\n\r\n{\"indicator\":\"conf2.test\",\"kind\":\"domain\",\"reason\":\"SOC triage\",\"confidence_score\":92}";
+        let _ = handle_admin(
+            req2,
+            &metrics,
+            Some(&storage),
+            EnforcementMode::Enforce,
+            &security,
+            PEER,
+            85,
+            95,
+        );
+        let ind2 = soar::execute_soar_investigation(&storage, "conf2.test", None)
+            .unwrap()
+            .indicator
+            .unwrap();
+        assert_eq!(ind2.confidence_score, 92);
+
+        // 3. Custom score (100) clamped to ceiling (95)
+        let req3 = "POST /api/v1/soar/block HTTP/1.1\r\nAuthorization: Bearer test-token\r\n\r\n{\"indicator\":\"conf3.test\",\"kind\":\"domain\",\"reason\":\"SOC triage\",\"confidence_score\":100}";
+        let _ = handle_admin(
+            req3,
+            &metrics,
+            Some(&storage),
+            EnforcementMode::Enforce,
+            &security,
+            PEER,
+            85,
+            95,
+        );
+        let ind3 = soar::execute_soar_investigation(&storage, "conf3.test", None)
+            .unwrap()
+            .indicator
+            .unwrap();
+        assert_eq!(ind3.confidence_score, 95);
     }
 
     #[test]
@@ -590,6 +916,8 @@ mod tests {
                 EnforcementMode::Shadow,
                 &security,
                 PEER,
+                90,
+                100,
             ))
             .unwrap();
             assert!(resp.starts_with("HTTP/1.1 401 Unauthorized"), "got: {resp}");
@@ -623,7 +951,11 @@ mod tests {
         // Fail-closed posture with no token configured at all.
         let security = AdminApiSecurity::for_test(None, true, dir.path().join("soar-audit.jsonl"));
 
-        for path in ["GET /health HTTP/1.1", "GET /metrics HTTP/1.1"] {
+        for path in [
+            "GET /health HTTP/1.1",
+            "GET /metrics HTTP/1.1",
+            "GET /api/v1/ml/reputation?domain=apple.com HTTP/1.1",
+        ] {
             let resp = String::from_utf8(handle_admin(
                 path,
                 &metrics,
@@ -631,12 +963,14 @@ mod tests {
                 EnforcementMode::Shadow,
                 &security,
                 PEER,
+                90,
+                100,
             ))
             .unwrap();
             assert!(resp.starts_with("HTTP/1.1 200 OK"), "{path} -> {resp}");
         }
 
-        // ... while mutations are refused because no token is configured.
+        // ... while SOAR endpoints are refused because no token is configured.
         let blocked = String::from_utf8(handle_admin(
             "POST /api/v1/soar/block HTTP/1.1\r\n\r\n{\"indicator\":\"x.test\",\"kind\":\"domain\",\"reason\":\"r\"}",
             &metrics,
@@ -644,9 +978,24 @@ mod tests {
             EnforcementMode::Shadow,
             &security,
             PEER,
+            90,
+            100,
         ))
         .unwrap();
         assert!(blocked.starts_with("HTTP/1.1 401 Unauthorized"));
+
+        let inv_blocked = String::from_utf8(handle_admin(
+            "GET /api/v1/soar/investigate?query=x.test HTTP/1.1\r\n\r\n",
+            &metrics,
+            Some(&storage),
+            EnforcementMode::Shadow,
+            &security,
+            PEER,
+            90,
+            100,
+        ))
+        .unwrap();
+        assert!(inv_blocked.starts_with("HTTP/1.1 401 Unauthorized"));
     }
 
     #[test]
@@ -664,6 +1013,8 @@ mod tests {
             EnforcementMode::Shadow,
             &security,
             PEER,
+            90,
+            100,
         ))
         .unwrap();
         assert!(resp.starts_with("HTTP/1.1 202 Accepted"), "got: {resp}");
@@ -677,5 +1028,68 @@ mod tests {
         assert_eq!(record["indicator"], "audited.test");
         assert_eq!(record["change_reason"], "C2 beacon");
         assert_eq!(record["mode"], "shadow");
+    }
+
+    #[tokio::test]
+    async fn test_read_http_request_chunked_reads() {
+        let payload = "POST /api/v1/soar/block HTTP/1.1\r\nContent-Length: 26\r\n\r\n{\"indicator\":\"chunk.test\"}";
+        // Mock stream that delivers 5 bytes at a time
+        struct ChunkedStream<'a> {
+            data: &'a [u8],
+            pos: usize,
+            chunk_size: usize,
+        }
+
+        impl tokio::io::AsyncRead for ChunkedStream<'_> {
+            fn poll_read(
+                mut self: std::pin::Pin<&mut Self>,
+                _cx: &mut std::task::Context<'_>,
+                buf: &mut tokio::io::ReadBuf<'_>,
+            ) -> std::task::Poll<std::io::Result<()>> {
+                if self.pos >= self.data.len() {
+                    return std::task::Poll::Ready(Ok(()));
+                }
+                let end = (self.pos + self.chunk_size).min(self.data.len());
+                let slice = &self.data[self.pos..end];
+                self.pos = end;
+                buf.put_slice(slice);
+                std::task::Poll::Ready(Ok(()))
+            }
+        }
+
+        let mut stream = ChunkedStream {
+            data: payload.as_bytes(),
+            pos: 0,
+            chunk_size: 5,
+        };
+
+        let result = read_http_request(&mut stream, 64 * 1024).await.unwrap();
+        assert_eq!(result, payload);
+    }
+
+    #[tokio::test]
+    async fn test_read_http_request_payload_too_large() {
+        let payload = "POST /api/v1/soar/block HTTP/1.1\r\nContent-Length: 1000\r\n\r\n";
+        let mut cursor = std::io::Cursor::new(payload.as_bytes());
+        let err = read_http_request(&mut cursor, 50).await.unwrap_err();
+        assert_eq!(err.0, 413);
+    }
+
+    #[tokio::test]
+    async fn test_read_http_request_invalid_content_length() {
+        let payload = "POST /api/v1/soar/block HTTP/1.1\r\nContent-Length: not-a-number\r\n\r\n";
+        let mut cursor = std::io::Cursor::new(payload.as_bytes());
+        let err = read_http_request(&mut cursor, 1024).await.unwrap_err();
+        assert_eq!(err.0, 400);
+        assert_eq!(err.1, "Invalid Content-Length");
+    }
+
+    #[tokio::test]
+    async fn test_read_http_request_incomplete_body() {
+        let payload = "POST /api/v1/soar/block HTTP/1.1\r\nContent-Length: 100\r\n\r\nshort";
+        let mut cursor = std::io::Cursor::new(payload.as_bytes());
+        let err = read_http_request(&mut cursor, 1024).await.unwrap_err();
+        assert_eq!(err.0, 400);
+        assert_eq!(err.1, "Incomplete request body");
     }
 }
