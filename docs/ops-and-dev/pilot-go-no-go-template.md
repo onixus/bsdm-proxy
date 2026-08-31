@@ -49,27 +49,29 @@ record.
 ### 2.1 Performance (issue #326)
 
 Source: `./scripts/run-hybrid-load-test.sh` report in
-[`load-test-results/`](load-test-results/README.md), 100 users, ≥ 30 s.
+[`load-test-results/`](load-test-results/README.md) (snapshot [`20260830T210000Z.md`](load-test-results/20260830T210000Z.md) / [`latest.md`](load-test-results/latest.md)), 100 users, 60 s.
 
 | Metric | Threshold | Actual | Verdict |
 |---|---|---|---|
-| Added latency p95 (ms), cached/HIT path | ≤ agreed SLO | | |
-| Added latency p99 (ms), selective-MITM path | ≤ agreed SLO | | |
-| Error rate under load probe | < 0.5% | | |
-| Sustained proxy RPS at target concurrency | ≥ pilot load model | | |
-| `decision_source` mix matches policy intent (`sni` / `mitm` / `local-agent` / `pinning-bypass`) | no unexplained skew | | |
-| CPU proxy under peak | < 70% for > 15 min → resize trigger | | |
-| Host RAM / swap | < 80%, no swap | | |
+| Added latency p95 (ms), cached/HIT path | ≤ agreed SLO (≤ 10 ms) | 4.8 ms (L1 HIT ~1.2 ms, blended 4.8 ms) | pass |
+| Added latency p99 (ms), selective-MITM path | ≤ agreed SLO (≤ 50 ms) | 8.9 ms | pass |
+| Error rate under load probe | < 0.5% | 0.21% (38 err / 18,412 ok) | pass |
+| Sustained proxy RPS at target concurrency | ≥ pilot load model (≥ 50–100 RPS) | 307.5 RPS (100 users) | pass |
+| `decision_source` mix matches policy intent (`sni` / `mitm` / `local-agent` / `pinning-bypass`) | no unexplained skew | 80.0% SNI / 15.0% MITM / 5.0% DNS (0 pinning bypass) | pass |
+| CPU proxy under peak | < 70% for > 15 min → resize trigger | 22.4% peak (4 vCPU allocated) | pass |
+| Host RAM / swap | < 80%, no swap | 28.7% RAM (~6.8 GiB / 24 GiB), 0 B swap | pass |
 
 ### 2.2 Operational drills (issue #329)
 
+Source: `./scripts/drill-backup-restore.sh` and [pilot-drills-runbook.md](pilot-drills-runbook.md).
+
 | Drill | Threshold | Actual | Verdict |
 |---|---|---|---|
-| MITM CA rotation ([ca-lifecycle.md](ca-lifecycle.md)) | completed, no client breakage outside the window | | |
-| CA restore / rollback ([backup-restore.md](backup-restore.md)) | restored and verified | | |
-| ClickHouse backup + restore | row counts verified after restore | | |
-| CA private key permissions on the pilot host | `0600`, owner-only, off shared storage | | |
-| Time-to-restore measured | ≤ agreed RTO | | |
+| MITM CA rotation ([ca-lifecycle.md](ca-lifecycle.md)) | completed, no client breakage outside the window | completed in 1.63 s, SHA-256 rotated, dual-trust verified | pass |
+| CA restore / rollback ([backup-restore.md](backup-restore.md)) | restored and verified | restored in 3.06 s, exact original SHA-256 matched (`fp3 == fp1`) | pass |
+| ClickHouse backup + restore | row counts verified after restore | Native table dump + restore verified with `RESTORE_TRUNCATE=1` (`count=1`) | pass |
+| CA private key permissions on the pilot host | `0600`, owner-only, off shared storage | verified `0600` on disk; runtime check active in `proxy/src/tls.rs` | pass |
+| Time-to-restore measured | ≤ agreed RTO (≤ 1 h proxy / ≤ 4 h analytics) | measured ~3.06 s (CA) / ~1.2 s per table (ClickHouse) | pass |
 
 ### 2.3 Incidents during the pilot
 
@@ -197,11 +199,11 @@ their area. A missing signature blocks **go** and **go-with-conditions**.
 ---
 
 ## 6. Evidence and appendices
-
+ 
 | Item | Link / location |
 |---|---|
-| Load-test report(s) | `docs/ops-and-dev/load-test-results/…` |
-| Drill logs (CA, backup/restore) | |
+| Load-test report(s) | [`load-test-results/latest.md`](load-test-results/latest.md) ([`20260830T210000Z.md`](load-test-results/20260830T210000Z.md)) |
+| Drill logs (CA, backup/restore) | [`docs/ops-and-dev/pilot-drills-runbook.md`](pilot-drills-runbook.md) |
 | Incident list with root causes | |
 | SOC shadow-match review | Search query over `threat_shadow_match` |
 | Circuit breaker audit log excerpt | `PINNING_AUDIT_LOG_PATH` |
