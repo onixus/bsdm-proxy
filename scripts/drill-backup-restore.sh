@@ -33,6 +33,7 @@ stage="$(printf '%s\n' "${prep}" | sed -n 's/^Prepared CA: //p')"
 fp2="$(openssl x509 -in "${CERT_DIR}/ca.crt" -noout -fingerprint -sha256 | cut -d= -f2)"
 [[ "$fp1" != "$fp2" ]]
 archive_key="$(find "${CERT_DIR}/archive" -name ca.key -type f | head -1)"
+archive_dir="$(dirname "${archive_key}")"
 # Rollback: restore archived pair as active.
 install -m 600 "${archive_dir}/ca.key" "${CERT_DIR}/ca.key"
 install -m 644 "${archive_dir}/ca.crt" "${CERT_DIR}/ca.crt"
