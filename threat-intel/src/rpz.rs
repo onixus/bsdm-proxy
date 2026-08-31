@@ -246,6 +246,83 @@ pub fn export_proxy_acl_feed(
     Ok(())
 }
 
+/// Metadata and status report of the active DNS RPZ zone file.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct RpzStatus {
+    pub zone_path: String,
+    pub exists: bool,
+    pub file_size_bytes: u64,
+    pub modified_at: Option<chrono::DateTime<Utc>>,
+    pub soa_serial: Option<u64>,
+    pub domain_count: usize,
+    pub is_shadow: bool,
+    pub has_backup: bool,
+    pub backup_soa_serial: Option<u64>,
+}
+
+/// Inspects the current on-disk RPZ file and returns its runtime status.
+pub fn get_rpz_status(zone_path: impl AsRef<Path>) -> RpzStatus {
+    let zone_path = zone_path.as_ref();
+    let path_str = zone_path.to_string_lossy().to_string();
+    if !zone_path.exists() {
+        return RpzStatus {
+            zone_path: path_str,
+            exists: false,
+            file_size_bytes: 0,
+            modified_at: None,
+            soa_serial: None,
+            domain_count: 0,
+            is_shadow: false,
+            has_backup: false,
+            backup_soa_serial: None,
+        };
+    }
+
+    let meta = std::fs::metadata(zone_path).ok();
+    let file_size_bytes = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+    let modified_at = meta
+        .and_then(|m| m.modified().ok())
+        .map(chrono::DateTime::<Utc>::from);
+
+    let content = std::fs::read_to_string(zone_path).unwrap_or_default();
+    let soa_serial = parse_soa_serial(&content);
+    let is_shadow = content.contains(SHADOW_MARKER_NAME) || path_str.ends_with(".shadow");
+
+    // Count domain CNAME records
+    let domain_count = content
+        .lines()
+        .filter(|l| {
+            let t = l.trim();
+            !t.starts_with(';')
+                && !t.starts_with('$')
+                && !t.starts_with('@')
+                && t.ends_with("CNAME .")
+        })
+        .count();
+
+    let bak_path = backup_path(zone_path);
+    let has_backup = bak_path.exists();
+    let backup_soa_serial = if has_backup {
+        std::fs::read_to_string(&bak_path)
+            .ok()
+            .and_then(|c| parse_soa_serial(&c))
+    } else {
+        None
+    };
+
+    RpzStatus {
+        zone_path: path_str,
+        exists: true,
+        file_size_bytes,
+        modified_at,
+        soa_serial,
+        domain_count,
+        is_shadow,
+        has_backup,
+        backup_soa_serial,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

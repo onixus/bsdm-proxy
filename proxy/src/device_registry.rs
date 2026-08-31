@@ -60,6 +60,12 @@ pub struct RegisteredDevice {
     pub device_token_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub capabilities: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_proxy_enforced: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_tunnel: Option<String>,
 }
 
 impl RegisteredDevice {
@@ -91,6 +97,9 @@ impl RegisteredDevice {
             "enrolledAt": self.enrolled_at,
             "enrolled": self.device_token_hash.is_some() || self.enrolled_at.is_some(),
             "capabilities": self.capabilities,
+            "configDigest": self.config_digest,
+            "systemProxyEnforced": self.system_proxy_enforced,
+            "activeTunnel": self.active_tunnel,
         })
     }
 }
@@ -153,6 +162,9 @@ pub struct HeartbeatUpdate {
     pub cert_subject: Option<String>,
     pub cert_fingerprint: Option<String>,
     pub trust_score: Option<u8>,
+    pub config_digest: Option<String>,
+    pub system_proxy_enforced: Option<bool>,
+    pub active_tunnel: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -401,6 +413,15 @@ impl DeviceRegistry {
             enrolled_at: previous.and_then(|d| d.enrolled_at),
             device_token_hash: previous.and_then(|d| d.device_token_hash.clone()),
             capabilities: previous.map(|d| d.capabilities.clone()).unwrap_or_default(),
+            config_digest: hb
+                .config_digest
+                .or_else(|| previous.and_then(|d| d.config_digest.clone())),
+            system_proxy_enforced: hb
+                .system_proxy_enforced
+                .or_else(|| previous.and_then(|d| d.system_proxy_enforced)),
+            active_tunnel: hb
+                .active_tunnel
+                .or_else(|| previous.and_then(|d| d.active_tunnel.clone())),
         };
         info!(
             device_id = %device.id,
@@ -497,6 +518,9 @@ impl DeviceRegistry {
             enrolled_at: Some(now),
             device_token_hash: Some(token_hash),
             capabilities,
+            config_digest: None,
+            system_proxy_enforced: None,
+            active_tunnel: None,
         };
         let cert_subject = device.cert_subject.clone();
         let cert_fingerprint = device.cert_fingerprint.clone();
@@ -1050,6 +1074,9 @@ mod tests {
             enrolled_at: None,
             device_token_hash: None,
             capabilities: vec![],
+            config_digest: None,
+            system_proxy_enforced: None,
+            active_tunnel: None,
         }
     }
 
@@ -1115,6 +1142,9 @@ mod tests {
                 cert_subject: None,
                 cert_fingerprint: None,
                 trust_score: Some(91),
+                config_digest: Some("sha256:abc1234".into()),
+                system_proxy_enforced: Some(true),
+                active_tunnel: Some("amneziawg".into()),
             })
             .unwrap();
         assert!(persisted);
@@ -1131,6 +1161,9 @@ mod tests {
             cert_subject: None,
             cert_fingerprint: None,
             trust_score: None,
+            config_digest: None,
+            system_proxy_enforced: None,
+            active_tunnel: None,
         })
         .unwrap();
 
@@ -1139,6 +1172,9 @@ mod tests {
         assert_eq!(rows[0]["name"], "Laptop");
         assert_eq!(rows[0]["agentVersion"], "0.1.0");
         assert_eq!(rows[0]["status"], "Flagged");
+        assert_eq!(rows[0]["configDigest"], "sha256:abc1234");
+        assert_eq!(rows[0]["systemProxyEnforced"], true);
+        assert_eq!(rows[0]["activeTunnel"], "amneziawg");
 
         assert!(reg.revoke("d1").unwrap().0);
         let rows = reg.list_api_rows();
@@ -1164,6 +1200,9 @@ mod tests {
                 cert_subject: None,
                 cert_fingerprint: None,
                 trust_score: None,
+                config_digest: None,
+                system_proxy_enforced: None,
+                active_tunnel: None,
             }),
             Err(HeartbeatError::EmptyDeviceId)
         );
@@ -1179,6 +1218,9 @@ mod tests {
                 cert_subject: None,
                 cert_fingerprint: None,
                 trust_score: Some(101),
+                config_digest: None,
+                system_proxy_enforced: None,
+                active_tunnel: None,
             }),
             Err(HeartbeatError::InvalidTrustScore)
         );

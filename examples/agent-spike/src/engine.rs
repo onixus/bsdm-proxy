@@ -1,6 +1,7 @@
 //! Control-plane client: policy pull, heartbeat, events, sync loop.
 
 use crate::policy::{evaluate_domain, LocalDecision, LocalPolicy, RemotePolicyDto};
+use sha2::Digest;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
@@ -175,6 +176,10 @@ impl AgentEngine {
     /// Single heartbeat to `POST /api/v1/agent/heartbeat`.
     pub async fn send_heartbeat(&self, client: &reqwest::Client) -> Result<(), String> {
         let policy_version = self.policy_version().await;
+        let config_digest = format!(
+            "sha256:{}",
+            hex::encode(sha2::Sha256::digest(policy_version.as_bytes()))
+        );
         let heartbeat_url = format!(
             "{}/api/v1/agent/heartbeat",
             self.control_plane_url.trim_end_matches('/')
@@ -188,6 +193,9 @@ impl AgentEngine {
             "agent_version": env!("CARGO_PKG_VERSION"),
             "policy_version": policy_version,
             "trust_score": 90_u8,
+            "config_digest": config_digest,
+            "system_proxy_enforced": true,
+            "active_tunnel": "split-tunnel",
         });
         let request = self.apply_auth(client.post(&heartbeat_url).json(&body));
         let resp = request

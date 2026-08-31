@@ -9,9 +9,11 @@ export interface ApiSettings {
   searchBaseUrl: string
   aclBaseUrl: string
   mlBaseUrl: string
+  threatIntelBaseUrl: string
   metricsBaseUrl: string
   searchToken: string
   aclToken: string
+  threatIntelToken: string
   controlToken: string
 }
 
@@ -19,9 +21,11 @@ export interface ResolvedApiSettings {
   searchBaseUrl: string
   aclBaseUrl: string
   mlBaseUrl: string
+  threatIntelBaseUrl: string
   metricsBaseUrl: string
   searchToken: string
   aclToken: string
+  threatIntelToken: string
   mlToken: string
   controlToken: string
 }
@@ -51,24 +55,27 @@ const defaults: ApiSettings = {
   searchBaseUrl: '',
   aclBaseUrl: '',
   mlBaseUrl: '',
+  threatIntelBaseUrl: '',
   metricsBaseUrl: '',
   searchToken: '',
   aclToken: '',
+  threatIntelToken: '',
   controlToken: '',
 }
 
-type SensitiveApiKey = 'controlPlaneToken' | 'searchToken' | 'aclToken' | 'controlToken'
+type SensitiveApiKey = 'controlPlaneToken' | 'searchToken' | 'aclToken' | 'threatIntelToken' | 'controlToken'
 
 let runtimeTokens: Pick<ApiSettings, SensitiveApiKey> = {
   controlPlaneToken: '',
   searchToken: '',
   aclToken: '',
+  threatIntelToken: '',
   controlToken: '',
 }
 
 function filledTokens(source: Partial<ApiSettings>): Partial<ApiSettings> {
   const out: Partial<ApiSettings> = {}
-  for (const key of ['controlPlaneToken', 'searchToken', 'aclToken', 'controlToken'] as const) {
+  for (const key of ['controlPlaneToken', 'searchToken', 'aclToken', 'threatIntelToken', 'controlToken'] as const) {
     const value = source[key]
     if (typeof value === 'string' && value.trim()) {
       out[key] = value
@@ -88,6 +95,7 @@ export function loadApiSettings(): ApiSettings {
       parsed.searchBaseUrl,
       parsed.aclBaseUrl,
       parsed.mlBaseUrl,
+      parsed.threatIntelBaseUrl,
       parsed.metricsBaseUrl,
     ].some((value) => Boolean(value?.trim()))
     return {
@@ -106,6 +114,7 @@ const SENSITIVE_API_KEYS = [
   'controlPlaneToken',
   'searchToken',
   'aclToken',
+  'threatIntelToken',
   'controlToken',
 ] as const satisfies readonly SensitiveApiKey[]
 
@@ -122,6 +131,7 @@ export function saveApiSettings(settings: ApiSettings): void {
     controlPlaneToken: settings.controlPlaneToken,
     searchToken: settings.searchToken,
     aclToken: settings.aclToken,
+    threatIntelToken: settings.threatIntelToken,
     controlToken: settings.controlToken,
   }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(apiSettingsForStorage(settings)))
@@ -130,7 +140,7 @@ export function saveApiSettings(settings: ApiSettings): void {
 
 export function hasApiCredentials(settings: ApiSettings = loadApiSettings()): boolean {
   const resolved = resolveApiSettings(settings)
-  return [resolved.searchToken, resolved.aclToken, resolved.mlToken, resolved.controlToken]
+  return [resolved.searchToken, resolved.aclToken, resolved.threatIntelToken, resolved.mlToken, resolved.controlToken]
     .some((token) => token.trim().length > 0)
 }
 
@@ -150,9 +160,11 @@ export function resolveApiSettings(settings: ApiSettings = loadApiSettings()): R
       searchBaseUrl: baseUrl,
       aclBaseUrl: baseUrl,
       mlBaseUrl: baseUrl,
+      threatIntelBaseUrl: baseUrl,
       metricsBaseUrl: baseUrl,
       searchToken: token,
       aclToken: token,
+      threatIntelToken: token,
       mlToken: token,
       controlToken: token,
     }
@@ -162,9 +174,11 @@ export function resolveApiSettings(settings: ApiSettings = loadApiSettings()): R
     searchBaseUrl: resolveBaseUrl(settings.searchBaseUrl),
     aclBaseUrl: resolveBaseUrl(settings.aclBaseUrl),
     mlBaseUrl: resolveBaseUrl(settings.mlBaseUrl),
+    threatIntelBaseUrl: resolveBaseUrl(settings.threatIntelBaseUrl),
     metricsBaseUrl: resolveBaseUrl(settings.metricsBaseUrl),
     searchToken: settings.searchToken,
     aclToken: settings.aclToken,
+    threatIntelToken: settings.threatIntelToken,
     mlToken: '',
     controlToken: settings.controlToken,
   }

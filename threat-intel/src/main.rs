@@ -110,6 +110,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let enforcement_mode = config.enforcement_mode;
     let default_confidence = config.soar_default_confidence;
     let max_confidence = config.soar_max_confidence;
+    let rpz_path = config.rpz_artifact_path();
     let api_security = Arc::new(AdminApiSecurity::from_env(&config.output_dir));
     let collector = Arc::new(Collector::new(
         config,
@@ -135,6 +136,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             api_security,
             default_confidence,
             max_confidence,
+            rpz_path,
         )
         .await;
     });
@@ -149,6 +151,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// Hard limit on the admin HTTP request size (64 KB).
 const MAX_ADMIN_REQUEST_BYTES: usize = 64 * 1024;
 
+#[allow(clippy::too_many_arguments)]
 async fn run_admin_server(
     port: u16,
     metrics: Arc<CollectorMetrics>,
@@ -157,6 +160,7 @@ async fn run_admin_server(
     security: Arc<AdminApiSecurity>,
     default_confidence: u8,
     max_confidence: u8,
+    rpz_path: std::path::PathBuf,
 ) {
     // Loopback unless TI_ADMIN_BIND says otherwise: the SOAR API must not be
     // reachable from the network by default.
@@ -168,7 +172,7 @@ async fn run_admin_server(
             return;
         }
     };
-    info!("threat-intel admin on {bind_addr} (/metrics, /health, /api/v1/soar/*, /api/v1/ml/*)");
+    info!("threat-intel admin on {bind_addr} (/metrics, /health, /api/v1/soar/*, /api/v1/ml/*, /api/v1/rpz/*)");
 
     loop {
         let Ok((mut socket, peer)) = listener.accept().await else {
@@ -177,6 +181,7 @@ async fn run_admin_server(
         let metrics = metrics.clone();
         let storage = storage.clone();
         let security = security.clone();
+        let rpz_path = rpz_path.clone();
         tokio::spawn(async move {
             match read_http_request(&mut socket, MAX_ADMIN_REQUEST_BYTES).await {
                 Ok(req) => {
@@ -189,6 +194,7 @@ async fn run_admin_server(
                         &peer.to_string(),
                         default_confidence,
                         max_confidence,
+                        &rpz_path,
                     );
                     let _ = socket.write_all(&response).await;
                 }
@@ -304,6 +310,7 @@ fn handle_admin(
     peer: &str,
     default_confidence: u8,
     max_confidence: u8,
+    rpz_path: &std::path::Path,
 ) -> Vec<u8> {
     let mut lines = req.lines();
     let request_line = lines.next().unwrap_or("");
@@ -487,6 +494,45 @@ fn handle_admin(
         };
     }
 
+    // DNS RPZ Zone Status endpoint: GET /api/v1/rpz/status
+    if method == "GET" && path.starts_with("/api/v1/rpz/status") {
+        let status = rpz::get_rpz_status(rpz_path);
+        let body = serde_json::to_vec_pretty(&status).unwrap_or_default();
+        return http_response(200, "application/json", &body);
+    }
+
+    // DNS RPZ Zone Rollback endpoint: POST /api/v1/rpz/rollback
+    if method == "POST" && path.starts_with("/api/v1/rpz/rollback") {
+        if !security.is_request_authorized(req) {
+            return unauthorized_response();
+        }
+        return match rpz::rollback_rpz_zone(rpz_path) {
+            Ok(true) => {
+                let status = rpz::get_rpz_status(rpz_path);
+                #[derive(serde::Serialize)]
+                struct RollbackSuccess<'a> {
+                    rolled_back: bool,
+                    status: &'a rpz::RpzStatus,
+                }
+                let resp = RollbackSuccess {
+                    rolled_back: true,
+                    status: &status,
+                };
+                let body = serde_json::to_vec_pretty(&resp).unwrap_or_default();
+                http_response(200, "application/json", &body)
+            }
+            Ok(false) => http_response(
+                404,
+                "application/json",
+                b"{\"error\":\"No backup file found to rollback\"}",
+            ),
+            Err(e) => {
+                let err = format!("{{\"error\":\"{}\"}}", e);
+                http_response(500, "application/json", err.as_bytes())
+            }
+        };
+    }
+
     http_response(404, "text/plain", b"not found")
 }
 
@@ -592,6 +638,31 @@ mod tests {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn handle_admin_req(
+        req: &str,
+        metrics: &CollectorMetrics,
+        storage: Option<&SqliteStorage>,
+        mode: EnforcementMode,
+        security: &AdminApiSecurity,
+        peer: &str,
+        default_confidence: u8,
+        max_confidence: u8,
+    ) -> Vec<u8> {
+        let dummy = std::path::Path::new("/tmp/test_threats.rpz");
+        handle_admin(
+            req,
+            metrics,
+            storage,
+            mode,
+            security,
+            peer,
+            default_confidence,
+            max_confidence,
+            dummy,
+        )
+    }
+
     #[test]
     fn serves_health_metrics_soar_and_ml() {
         let metrics = CollectorMetrics::new().unwrap();
@@ -604,7 +675,7 @@ mod tests {
             .inc();
 
         // 1. Health
-        let health = String::from_utf8(handle_admin(
+        let health = String::from_utf8(handle_admin_req(
             "GET /health HTTP/1.1",
             &metrics,
             Some(&storage),
@@ -619,7 +690,7 @@ mod tests {
         assert!(health.ends_with("ok"));
 
         // 2. Metrics
-        let scraped = String::from_utf8(handle_admin(
+        let scraped = String::from_utf8(handle_admin_req(
             "GET /metrics HTTP/1.1",
             &metrics,
             Some(&storage),
@@ -633,7 +704,7 @@ mod tests {
         assert!(scraped.contains("threat_intel_fetches_total"));
 
         // 3. ML reputation
-        let ml_res = String::from_utf8(handle_admin(
+        let ml_res = String::from_utf8(handle_admin_req(
             "GET /api/v1/ml/reputation?domain=gogle.com HTTP/1.1",
             &metrics,
             Some(&storage),
@@ -648,7 +719,7 @@ mod tests {
         assert!(ml_res.contains("\"is_suspicious\": true"));
 
         // 3a. ML Anomaly
-        let anom_res = String::from_utf8(handle_admin(
+        let anom_res = String::from_utf8(handle_admin_req(
             "GET /api/v1/ml/anomaly?domain=auth.login.verify.update.evil-bank.com HTTP/1.1",
             &metrics,
             Some(&storage),
@@ -664,7 +735,7 @@ mod tests {
 
         // 3b. ML Cluster
         let cluster_req = "POST /api/v1/ml/cluster HTTP/1.1\r\nContent-Type: application/json\r\n\r\n{\"domains\":[\"login-microsoft-auth.com\",\"verify-microsoft-security.net\"]}";
-        let cluster_res = String::from_utf8(handle_admin(
+        let cluster_res = String::from_utf8(handle_admin_req(
             cluster_req,
             &metrics,
             Some(&storage),
@@ -681,7 +752,7 @@ mod tests {
         // 4. SOAR Block
 
         let block_req = "POST /api/v1/soar/block HTTP/1.1\r\nContent-Type: application/json\r\nAuthorization: Bearer test-token\r\n\r\n{\"indicator\":\"phish.example.test\",\"kind\":\"domain\",\"reason\":\"Manual SOAR containment\",\"operator\":\"soc1\"}";
-        let block_resp = String::from_utf8(handle_admin(
+        let block_resp = String::from_utf8(handle_admin_req(
             block_req,
             &metrics,
             Some(&storage),
@@ -697,7 +768,7 @@ mod tests {
 
         // 5. SOAR Investigate (requires authorization)
         let inv_req = "GET /api/v1/soar/investigate?query=phish.example.test HTTP/1.1\r\nAuthorization: Bearer test-token\r\n\r\n";
-        let inv_res = String::from_utf8(handle_admin(
+        let inv_res = String::from_utf8(handle_admin_req(
             inv_req,
             &metrics,
             Some(&storage),
@@ -713,7 +784,7 @@ mod tests {
 
         // 6. SOAR Unblock
         let unblock_req = "POST /api/v1/soar/unblock HTTP/1.1\r\nContent-Type: application/json\r\nAuthorization: Bearer test-token\r\n\r\n{\"indicator\":\"phish.example.test\",\"reason\":\"Investigation closed\"}";
-        let unblock_resp = String::from_utf8(handle_admin(
+        let unblock_resp = String::from_utf8(handle_admin_req(
             unblock_req,
             &metrics,
             Some(&storage),
@@ -728,7 +799,7 @@ mod tests {
         assert!(unblock_resp.contains("\"success\": true"));
 
         // 7. Not found
-        let missing = String::from_utf8(handle_admin(
+        let missing = String::from_utf8(handle_admin_req(
             "GET /nope HTTP/1.1",
             &metrics,
             Some(&storage),
@@ -751,7 +822,7 @@ mod tests {
 
         // 1. Unauthenticated request -> 401
         let unauth_req = "GET /api/v1/soar/investigate?query=threat.test HTTP/1.1\r\n\r\n";
-        let unauth_resp = String::from_utf8(handle_admin(
+        let unauth_resp = String::from_utf8(handle_admin_req(
             unauth_req,
             &metrics,
             Some(&storage),
@@ -766,7 +837,7 @@ mod tests {
 
         // 2. Wrong token -> 401
         let wrong_req = "GET /api/v1/soar/investigate?query=threat.test HTTP/1.1\r\nAuthorization: Bearer wrong-token\r\n\r\n";
-        let wrong_resp = String::from_utf8(handle_admin(
+        let wrong_resp = String::from_utf8(handle_admin_req(
             wrong_req,
             &metrics,
             Some(&storage),
@@ -781,7 +852,7 @@ mod tests {
 
         // 3. Valid token -> 200
         let auth_req = "GET /api/v1/soar/investigate?query=threat.test HTTP/1.1\r\nAuthorization: Bearer test-token\r\n\r\n";
-        let auth_resp = String::from_utf8(handle_admin(
+        let auth_resp = String::from_utf8(handle_admin_req(
             auth_req,
             &metrics,
             Some(&storage),
@@ -804,7 +875,7 @@ mod tests {
         let security = test_security(&dir);
 
         let block_req = "POST /api/v1/soar/block HTTP/1.1\r\nContent-Type: application/json\r\nAuthorization: Bearer test-token\r\n\r\n{\"indicator\":\"shadow-api.example.test\",\"kind\":\"domain\",\"reason\":\"SOC triage\",\"operator\":\"soc1\"}";
-        let resp = String::from_utf8(handle_admin(
+        let resp = String::from_utf8(handle_admin_req(
             block_req,
             &metrics,
             Some(&storage),
@@ -836,7 +907,7 @@ mod tests {
 
         // 1. Default confidence (85) when unspecified
         let req1 = "POST /api/v1/soar/block HTTP/1.1\r\nAuthorization: Bearer test-token\r\n\r\n{\"indicator\":\"conf1.test\",\"kind\":\"domain\",\"reason\":\"SOC triage\"}";
-        let _ = handle_admin(
+        let _ = handle_admin_req(
             req1,
             &metrics,
             Some(&storage),
@@ -854,7 +925,7 @@ mod tests {
 
         // 2. Custom confidence score (92) within ceiling
         let req2 = "POST /api/v1/soar/block HTTP/1.1\r\nAuthorization: Bearer test-token\r\n\r\n{\"indicator\":\"conf2.test\",\"kind\":\"domain\",\"reason\":\"SOC triage\",\"confidence_score\":92}";
-        let _ = handle_admin(
+        let _ = handle_admin_req(
             req2,
             &metrics,
             Some(&storage),
@@ -872,7 +943,7 @@ mod tests {
 
         // 3. Custom score (100) clamped to ceiling (95)
         let req3 = "POST /api/v1/soar/block HTTP/1.1\r\nAuthorization: Bearer test-token\r\n\r\n{\"indicator\":\"conf3.test\",\"kind\":\"domain\",\"reason\":\"SOC triage\",\"confidence_score\":100}";
-        let _ = handle_admin(
+        let _ = handle_admin_req(
             req3,
             &metrics,
             Some(&storage),
@@ -909,7 +980,7 @@ mod tests {
         ];
 
         for req in &cases {
-            let resp = String::from_utf8(handle_admin(
+            let resp = String::from_utf8(handle_admin_req(
                 req,
                 &metrics,
                 Some(&storage),
@@ -956,7 +1027,7 @@ mod tests {
             "GET /metrics HTTP/1.1",
             "GET /api/v1/ml/reputation?domain=apple.com HTTP/1.1",
         ] {
-            let resp = String::from_utf8(handle_admin(
+            let resp = String::from_utf8(handle_admin_req(
                 path,
                 &metrics,
                 Some(&storage),
@@ -971,7 +1042,7 @@ mod tests {
         }
 
         // ... while SOAR endpoints are refused because no token is configured.
-        let blocked = String::from_utf8(handle_admin(
+        let blocked = String::from_utf8(handle_admin_req(
             "POST /api/v1/soar/block HTTP/1.1\r\n\r\n{\"indicator\":\"x.test\",\"kind\":\"domain\",\"reason\":\"r\"}",
             &metrics,
             Some(&storage),
@@ -984,7 +1055,7 @@ mod tests {
         .unwrap();
         assert!(blocked.starts_with("HTTP/1.1 401 Unauthorized"));
 
-        let inv_blocked = String::from_utf8(handle_admin(
+        let inv_blocked = String::from_utf8(handle_admin_req(
             "GET /api/v1/soar/investigate?query=x.test HTTP/1.1\r\n\r\n",
             &metrics,
             Some(&storage),
@@ -1006,7 +1077,7 @@ mod tests {
         let security = test_security(&dir);
 
         let req = "POST /api/v1/soar/block HTTP/1.1\r\nAuthorization: Bearer test-token\r\n\r\n{\"indicator\":\"audited.test\",\"kind\":\"domain\",\"reason\":\"C2 beacon\",\"operator\":\"soc1\"}";
-        let resp = String::from_utf8(handle_admin(
+        let resp = String::from_utf8(handle_admin_req(
             req,
             &metrics,
             Some(&storage),
@@ -1091,5 +1162,87 @@ mod tests {
         let err = read_http_request(&mut cursor, 1024).await.unwrap_err();
         assert_eq!(err.0, 400);
         assert_eq!(err.1, "Incomplete request body");
+    }
+
+    #[test]
+    fn serves_rpz_status_and_rollback() {
+        let metrics = CollectorMetrics::new().unwrap();
+        let storage = SqliteStorage::in_memory().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let security = test_security(&dir);
+        let rpz_file = dir.path().join("threats.rpz");
+
+        // 1. Initial status when file does not exist
+        let req1 = "GET /api/v1/rpz/status HTTP/1.1\r\n\r\n";
+        let resp1 = String::from_utf8(handle_admin(
+            req1,
+            &metrics,
+            Some(&storage),
+            EnforcementMode::Shadow,
+            &security,
+            PEER,
+            90,
+            100,
+            &rpz_file,
+        ))
+        .unwrap();
+        assert!(resp1.starts_with("HTTP/1.1 200 OK"));
+        assert!(resp1.contains("\"exists\": false"));
+
+        // 2. Write RPZ file generation 1 & generation 2
+        let config = rpz::RpzConfig::default();
+        let _ = rpz::write_rpz_file(&rpz_file, &["bad-site-1.test".to_string()], &config).unwrap();
+        let _ = rpz::write_rpz_file(&rpz_file, &["bad-site-2.test".to_string()], &config).unwrap();
+
+        // 3. Status with active file and backup
+        let resp2 = String::from_utf8(handle_admin(
+            req1,
+            &metrics,
+            Some(&storage),
+            EnforcementMode::Shadow,
+            &security,
+            PEER,
+            90,
+            100,
+            &rpz_file,
+        ))
+        .unwrap();
+        assert!(resp2.starts_with("HTTP/1.1 200 OK"));
+        assert!(resp2.contains("\"exists\": true"));
+        assert!(resp2.contains("\"has_backup\": true"));
+
+        // 4. Rollback without auth -> 401
+        let rollback_unauth = "POST /api/v1/rpz/rollback HTTP/1.1\r\n\r\n";
+        let resp3 = String::from_utf8(handle_admin(
+            rollback_unauth,
+            &metrics,
+            Some(&storage),
+            EnforcementMode::Shadow,
+            &security,
+            PEER,
+            90,
+            100,
+            &rpz_file,
+        ))
+        .unwrap();
+        assert!(resp3.starts_with("HTTP/1.1 401 Unauthorized"));
+
+        // 5. Rollback with auth -> 200
+        let rollback_auth =
+            "POST /api/v1/rpz/rollback HTTP/1.1\r\nAuthorization: Bearer test-token\r\n\r\n";
+        let resp4 = String::from_utf8(handle_admin(
+            rollback_auth,
+            &metrics,
+            Some(&storage),
+            EnforcementMode::Shadow,
+            &security,
+            PEER,
+            90,
+            100,
+            &rpz_file,
+        ))
+        .unwrap();
+        assert!(resp4.starts_with("HTTP/1.1 200 OK"));
+        assert!(resp4.contains("\"rolled_back\": true"));
     }
 }

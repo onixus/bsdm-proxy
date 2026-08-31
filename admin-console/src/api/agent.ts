@@ -21,6 +21,9 @@ export interface AgentDevice {
   enrolledAt?: number | null
   enrolled?: boolean
   capabilities?: string[]
+  configDigest?: string | null
+  systemProxyEnforced?: boolean | null
+  activeTunnel?: string | null
 }
 
 export interface RevokeDeviceResult {

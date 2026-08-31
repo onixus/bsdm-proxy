@@ -755,6 +755,30 @@ impl Metrics {
             .observe(duration_secs);
     }
 
+    /// Records upstream request with bounded host cardinality.
+    pub fn record_upstream_request(&self, host: &str, status: &str) {
+        let norm_host = normalize_metric_host(host);
+        self.upstream_requests_total
+            .with_label_values(&[norm_host, status])
+            .inc();
+    }
+
+    /// Observes upstream response latency with bounded host cardinality.
+    pub fn record_upstream_duration(&self, host: &str, duration_secs: f64) {
+        let norm_host = normalize_metric_host(host);
+        self.upstream_duration_seconds
+            .with_label_values(&[norm_host])
+            .observe(duration_secs);
+    }
+
+    /// Records upstream network/TLS errors with bounded host cardinality.
+    pub fn record_upstream_error(&self, host: &str, error_type: &str) {
+        let norm_host = normalize_metric_host(host);
+        self.upstream_errors_total
+            .with_label_values(&[norm_host, error_type])
+            .inc();
+    }
+
     /// Export metrics in Prometheus text format
     pub fn export(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         let encoder = TextEncoder::new();
@@ -781,6 +805,38 @@ impl Default for Metrics {
     fn default() -> Self {
         Self::new().expect("Failed to create metrics")
     }
+}
+
+/// Normalizes hostnames for Prometheus labels to prevent unbounded time-series cardinality explosions.
+pub fn normalize_metric_host(host: &str) -> &str {
+    let host = host.split(':').next().unwrap_or(host).trim_end_matches('.');
+    if host.is_empty() {
+        return "unknown";
+    }
+    if host == "127.0.0.1" || host == "localhost" || host == "::1" {
+        return "localhost";
+    }
+    // If it looks like an IP address, return "ip_literal" to prevent IP scanning cardinality
+    if host
+        .chars()
+        .all(|c| c.is_ascii_digit() || c == '.' || c == ':')
+    {
+        return "ip_literal";
+    }
+    // Retain registered domain (eTLD+1 heuristic)
+    let parts: Vec<&str> = host.split('.').collect();
+    if parts.len() > 2 {
+        let len = parts.len();
+        let second_last = parts[len - 2];
+        let last = parts[len - 1];
+        if matches!(second_last, "co" | "com" | "org" | "net" | "edu" | "gov") && len > 2 {
+            let offset = host.len() - (parts[len - 3].len() + second_last.len() + last.len() + 2);
+            return &host[offset..];
+        }
+        let offset = host.len() - (second_last.len() + last.len() + 1);
+        return &host[offset..];
+    }
+    host
 }
 
 /// Decimal rendering of a `u16` without touching the heap.

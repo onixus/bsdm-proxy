@@ -603,9 +603,7 @@ async fn handle_connect_tunnel(
             error!("CONNECT upstream failed: {}", e);
             service
                 .metrics
-                .upstream_errors_total
-                .with_label_values(&[authority.as_str(), "connect"])
-                .inc();
+                .record_upstream_error(authority.as_str(), "connect");
         }
     }
 }

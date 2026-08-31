@@ -1174,9 +1174,7 @@ impl ProxyService {
             Err(e) => {
                 warn!("Revalidation upstream error for {}: {}", url, e);
                 self.metrics
-                    .upstream_errors_total
-                    .with_label_values(&[domain.as_str(), "revalidate"])
-                    .inc();
+                    .record_upstream_error(domain.as_str(), "revalidate");
                 return None;
             }
         };
@@ -1184,13 +1182,9 @@ impl ProxyService {
         let upstream_duration = upstream_start.elapsed().as_secs_f64();
         let status = response.status();
         self.metrics
-            .upstream_requests_total
-            .with_label_values(&[domain.as_str(), StatusLabel::new(status.as_u16()).as_str()])
-            .inc();
+            .record_upstream_request(domain.as_str(), StatusLabel::new(status.as_u16()).as_str());
         self.metrics
-            .upstream_duration_seconds
-            .with_label_values(&[&domain])
-            .observe(upstream_duration);
+            .record_upstream_duration(&domain, upstream_duration);
 
         if status == StatusCode::NOT_MODIFIED {
             let headers_map: HashMap<String, String> = response
@@ -2748,14 +2742,12 @@ impl ProxyService {
                 let status = response.status();
                 let status_code = status.as_u16();
 
+                self.metrics.record_upstream_request(
+                    domain.as_str(),
+                    StatusLabel::new(status_code).as_str(),
+                );
                 self.metrics
-                    .upstream_requests_total
-                    .with_label_values(&[domain.as_str(), StatusLabel::new(status_code).as_str()])
-                    .inc();
-                self.metrics
-                    .upstream_duration_seconds
-                    .with_label_values(&[&domain])
-                    .observe(upstream_duration);
+                    .record_upstream_duration(&domain, upstream_duration);
 
                 let headers_map = Self::headers_map_from_response(&response);
                 let store_precheck = if llm_mode {
@@ -2871,9 +2863,7 @@ impl ProxyService {
                             permit.complete(None);
                         }
                         self.metrics
-                            .upstream_errors_total
-                            .with_label_values(&[domain.as_str(), "body_read"])
-                            .inc();
+                            .record_upstream_error(domain.as_str(), "body_read");
                         let mut resp = Response::new(full(Bytes::from_static(b"502 Bad Gateway")));
                         *resp.status_mut() = StatusCode::BAD_GATEWAY;
                         Self::finish_request_metrics(
@@ -2992,9 +2982,7 @@ impl ProxyService {
                     permit.complete(None);
                 }
                 self.metrics
-                    .upstream_errors_total
-                    .with_label_values(&[domain.as_str(), "connection"])
-                    .inc();
+                    .record_upstream_error(domain.as_str(), "connection");
                 let mut response = Response::new(full(Bytes::from_static(b"502 Bad Gateway")));
                 *response.status_mut() = StatusCode::BAD_GATEWAY;
                 Self::finish_request_metrics(

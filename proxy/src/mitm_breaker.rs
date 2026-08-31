@@ -281,10 +281,21 @@ struct BreakerAuditRecord<'a> {
     source_path: &'a str,
 }
 
+const NUM_SHARDS: usize = 32;
+
+fn shard_index(key: &str) -> usize {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in key.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    (h as usize) % NUM_SHARDS
+}
+
 pub struct MitmCircuitBreaker {
     config: MitmCircuitBreakerConfig,
     audit_path: Option<PathBuf>,
-    state: RwLock<BreakerState>,
+    shards: Vec<RwLock<BreakerState>>,
 }
 
 impl MitmCircuitBreaker {
@@ -304,10 +315,14 @@ impl MitmCircuitBreaker {
     }
 
     pub fn new(config: MitmCircuitBreakerConfig, audit_path: Option<PathBuf>) -> Self {
+        let mut shards = Vec::with_capacity(NUM_SHARDS);
+        for _ in 0..NUM_SHARDS {
+            shards.push(RwLock::new(BreakerState::default()));
+        }
         Self {
             config,
             audit_path,
-            state: RwLock::new(BreakerState::default()),
+            shards,
         }
     }
 
@@ -331,14 +346,15 @@ impl MitmCircuitBreaker {
         let normalized = normalize_domain_key(domain);
         let now = Instant::now();
         let cooldown = self.config.cooldown_secs;
+        let idx = shard_index(&normalized);
 
-        let state = match self.state.read() {
+        let shard = match self.shards[idx].read() {
             Ok(t) => t,
             Err(poisoned) => poisoned.into_inner(),
         };
 
         // Keys are exact hostnames, so this is a single lookup — no scan.
-        state
+        shard
             .trackers
             .get(&normalized)
             .is_some_and(|tracker| is_active_trip(tracker, now, cooldown))
@@ -354,33 +370,35 @@ impl MitmCircuitBreaker {
         let cutoff = now
             .checked_sub(Duration::from_secs(self.config.window_secs))
             .unwrap_or(now);
+        let idx = shard_index(&domain_key);
+        let max_per_shard = (self.config.max_domains / NUM_SHARDS).max(1);
 
-        let mut state = match self.state.write() {
+        let mut shard = match self.shards[idx].write() {
             Ok(t) => t,
             Err(poisoned) => poisoned.into_inner(),
         };
 
-        if !state.trackers.contains_key(&domain_key) {
+        if !shard.trackers.contains_key(&domain_key) {
             // Cap the tracker map: an attacker looping CONNECT on random hosts must
             // not be able to grow it without limit. When nothing can be evicted the
             // sample is dropped — the breaker stops learning new domains rather than
             // growing, and existing trips keep working.
-            if !state.make_room(self.config.max_domains, cutoff) {
-                state.dropped_attempts_total += 1;
+            if !shard.make_room(max_per_shard, cutoff) {
+                shard.dropped_attempts_total += 1;
                 warn!(
                     domain = %domain_key,
-                    max_domains = self.config.max_domains,
-                    dropped_attempts_total = state.dropped_attempts_total,
-                    "MITM circuit breaker tracker map is full; attempt not recorded"
+                    max_domains = max_per_shard,
+                    dropped_attempts_total = shard.dropped_attempts_total,
+                    "MITM circuit breaker tracker shard is full; attempt not recorded"
                 );
                 return;
             }
-            state
+            shard
                 .trackers
                 .insert(domain_key.clone(), DomainTracker::new(now));
         }
 
-        let tracker = state
+        let tracker = shard
             .trackers
             .get_mut(&domain_key)
             .expect("tracker inserted above");
@@ -468,25 +486,31 @@ impl MitmCircuitBreaker {
         validate_audit_text("actor", actor, 128)?;
         validate_audit_text("reason", change_reason, 512)?;
 
-        let mut state = match self.state.write() {
-            Ok(t) => t,
-            Err(poisoned) => poisoned.into_inner(),
-        };
-
         let mut reset_domains = Vec::new();
         let pattern_norm = domain_pattern.trim().to_ascii_lowercase();
 
         if pattern_norm == "*" {
-            for (domain, tracker) in state.trackers.iter_mut() {
-                if matches!(tracker.state, DomainState::Tripped { .. }) {
-                    tracker.state = DomainState::Closed;
-                    tracker.samples.clear();
-                    reset_domains.push(domain.clone());
+            for shard_lock in &self.shards {
+                let mut shard = match shard_lock.write() {
+                    Ok(t) => t,
+                    Err(poisoned) => poisoned.into_inner(),
+                };
+                for (domain, tracker) in shard.trackers.iter_mut() {
+                    if matches!(tracker.state, DomainState::Tripped { .. }) {
+                        tracker.state = DomainState::Closed;
+                        tracker.samples.clear();
+                        reset_domains.push(domain.clone());
+                    }
                 }
             }
         } else {
             let key = normalize_domain_key(&pattern_norm);
-            if let Some(tracker) = state.trackers.get_mut(&key) {
+            let idx = shard_index(&key);
+            let mut shard = match self.shards[idx].write() {
+                Ok(t) => t,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            if let Some(tracker) = shard.trackers.get_mut(&key) {
                 if matches!(tracker.state, DomainState::Tripped { .. }) {
                     tracker.state = DomainState::Closed;
                     tracker.samples.clear();
@@ -528,15 +552,26 @@ impl MitmCircuitBreaker {
 
     /// Get snapshot of circuit breaker status and tripped domains.
     pub fn status(&self) -> MitmCircuitBreakerStatus {
-        let state = match self.state.read() {
-            Ok(t) => t,
-            Err(poisoned) => poisoned.into_inner(),
-        };
-
         let mut tripped = Vec::new();
-        for tracker in state.trackers.values() {
-            if let DomainState::Tripped { info, .. } = &tracker.state {
-                tripped.push(info.clone());
+        let mut tracked_domains = 0;
+        let mut evicted_domains_total = 0;
+        let mut evicted_tripped_domains_total = 0;
+        let mut dropped_attempts_total = 0;
+
+        for shard_lock in &self.shards {
+            let shard = match shard_lock.read() {
+                Ok(t) => t,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            tracked_domains += shard.trackers.len();
+            evicted_domains_total += shard.evicted_total;
+            evicted_tripped_domains_total += shard.evicted_tripped_total;
+            dropped_attempts_total += shard.dropped_attempts_total;
+
+            for tracker in shard.trackers.values() {
+                if let DomainState::Tripped { info, .. } = &tracker.state {
+                    tripped.push(info.clone());
+                }
             }
         }
         tripped.sort_by(|a, b| a.domain.cmp(&b.domain));
@@ -549,10 +584,10 @@ impl MitmCircuitBreaker {
             cooldown_secs: self.config.cooldown_secs,
             max_domains: self.config.max_domains,
             audit_path: self.audit_path(),
-            tracked_domains: state.trackers.len(),
-            evicted_domains_total: state.evicted_total,
-            evicted_tripped_domains_total: state.evicted_tripped_total,
-            dropped_attempts_total: state.dropped_attempts_total,
+            tracked_domains,
+            evicted_domains_total,
+            evicted_tripped_domains_total,
+            dropped_attempts_total,
             tripped_count: tripped.len(),
             tripped_domains: tripped,
         }

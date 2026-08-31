@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Threat Intel DNS RPZ Live Status & Rollback Endpoints** (`threat_intel::rpz`) — Added `GET /api/v1/rpz/status` and `POST /api/v1/rpz/rollback` enabling hot-state zone inspection (SOA serial, rule count, shadow marker) and emergency automated restoration of prior zone backups with audit logging.
+- **Threat Intel End-to-End Test Suite** (`e2e/tests/threat_intel_e2e.rs`) — Full pipeline verification covering Shadow Mode transparent forwarding with event enrichment, Enforce Mode 403 blocking with metric increments, and Triple-Gate fail-safe lock mechanics.
+- **SOC Operations & ML Domain Inspector UI** (`admin-console`) — Interactive IOC investigation modal with 1-click False Positive whitelisting and containment (`ThreatInvestigationModal.tsx`), lexical/homoglyph/entropy analyzer (`MlDomainInspector.tsx`), and real-time DNS RPZ zone telemetry in `RpzManagement.tsx`.
+- **MITM Circuit Breaker Lock Sharding** (`proxy::mitm_breaker`) — 32-way partitioned `RwLock` shards indexed by FNV-1a hash, eliminating global lock contention on high-concurrency TLS CONNECT handshakes.
+- **Prometheus Metric Host Cardinality Bounding** (`proxy::metrics`) — eTLD+1 heuristic normalization (`normalize_metric_host`) and helper methods preventing unbounded time-series explosions on upstream request and error metrics.
+- **Redis L2 Cache Resiliency & Non-Blocking Purge** (`proxy::l2_cache`) — Added 50ms per-operation timeout guards on Redis get/set/del operations and switched prefix flushing from blocking `DEL` to asynchronous `UNLINK`.
+- **Agent Fleet Configuration Drift & Telemetry** (`proxy::device_registry`, `proxy::agent_api`, `examples::agent-spike`, `admin-console`) — Extended Agent Contract with `config_digest`, `system_proxy_enforced`, and `active_tunnel` attributes; added on-device SHA-256 policy digest computation and live drift badges in the Admin Console.
+
 - **AmneziaWG Server API & Endpoint Integration** — Curve25519 cryptography, pre-shared key (PSK) generation, automated peer provisioning, Agent Contract `tunnel` capability, atomic config generation (0600 permissions), device revocation sync with CRL/Registry, and Prometheus metrics.
 - **Alternative Rust Client (`bsdm-connect`)** — standalone CLI and daemon binary in `examples/agent-spike/src/bin/bsdm-connect.rs` providing cross-platform AmneziaWG tunnel management (`up`/`down`/`status`), process execution timeouts, and atomic config persistence.
 - **Domain-Based Split Routing & PAC Engine** — local route table engine (`Direct`, `Proxy`, `Tunnel`, `Block`), exact/wildcard/suffix/CIDR pattern matching, atomic JSON persistence, and standards-compliant JavaScript `FindProxyForURL(url, host)` PAC script generation with strict JS escaping.

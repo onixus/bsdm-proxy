@@ -15,9 +15,15 @@ import { InsightPanel, ThreatIndicator } from '../components/xai/ThreatIndicator
 import { Modal } from '../components/ui/Modal'
 import { severityBadge } from '../theme/tokens'
 
+import { MlDomainInspector } from '../components/threat-intel/MlDomainInspector'
+import { ThreatInvestigationModal } from '../components/threat-intel/ThreatInvestigationModal'
+
 export function ThreatScoresPage() {
   const [lang] = useLanguage()
   const tr = translations[lang]
+
+  const [activeTab, setActiveTab] = useState<'ueba' | 'ml_inspector'>('ueba')
+  const [investigationQuery, setInvestigationQuery] = useState<string | null>(null)
 
   const result = useSourcedQuery(['threat-scores'], fetchThreatScores, { refetchInterval: 60_000 })
   const snapshot = result.data?.data ?? { scores: [] as ThreatScoreEntry[] }
@@ -58,11 +64,49 @@ export function ThreatScoresPage() {
             </p>
           )}
         </div>
-        <Button variant="secondary" onClick={() => { result.refetch(); syncResult.refetch(); }} disabled={loading}>
-          <RefreshCw className={`size-4 ${loading ? 'animate-spin' : ''}`} />
-          {tr.threatScores.refresh}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            onClick={() => setInvestigationQuery(prompt('Enter domain, IP, or URL to investigate with SOAR:') || null)}
+          >
+            <Search className="size-4" />
+            Investigate Indicator
+          </Button>
+          <Button variant="secondary" onClick={() => { result.refetch(); syncResult.refetch(); }} disabled={loading}>
+            <RefreshCw className={`size-4 ${loading ? 'animate-spin' : ''}`} />
+            {tr.threatScores.refresh}
+          </Button>
+        </div>
       </div>
+
+      {/* Tab Switcher */}
+      <div className="flex border-b border-border/50 gap-4">
+        <button
+          onClick={() => setActiveTab('ueba')}
+          className={`pb-3 text-sm font-semibold transition border-b-2 ${
+            activeTab === 'ueba'
+              ? 'border-accent text-accent'
+              : 'border-transparent text-text-secondary hover:text-text-primary'
+          }`}
+        >
+          UEBA & Cluster Sync Scores
+        </button>
+        <button
+          onClick={() => setActiveTab('ml_inspector')}
+          className={`pb-3 text-sm font-semibold transition border-b-2 ${
+            activeTab === 'ml_inspector'
+              ? 'border-accent text-accent'
+              : 'border-transparent text-text-secondary hover:text-text-primary'
+          }`}
+        >
+          ML Phishing & Homoglyph Inspector
+        </button>
+      </div>
+
+      {activeTab === 'ml_inspector' ? (
+        <MlDomainInspector />
+      ) : (
+        <>
 
       <Panel title="Real-Time Threat Sync (P2P Cluster)">
         <div className="space-y-4">
@@ -208,24 +252,45 @@ export function ThreatScoresPage() {
           </>
         )}
       </Panel>
+        </>
+      )}
 
-      <ScoreDetailModal tr={tr} entry={selected} onClose={() => setSelected(null)} />
+      <ScoreDetailModal
+        tr={tr}
+        entry={selected}
+        onClose={() => setSelected(null)}
+        onInvestigateIoC={(query) => setInvestigationQuery(query)}
+      />
+
+      {investigationQuery && (
+        <ThreatInvestigationModal
+          query={investigationQuery}
+          isOpen={Boolean(investigationQuery)}
+          onClose={() => setInvestigationQuery(null)}
+          onActionComplete={() => {
+            result.refetch()
+            syncResult.refetch()
+          }}
+        />
+      )}
     </div>
   )
 }
 
 function ScoreDetailModal({
   tr,
-
   entry,
   onClose,
+  onInvestigateIoC,
 }: {
   tr: any
   entry: ThreatScoreEntry | null
   onClose: () => void
+  onInvestigateIoC?: (query: string) => void
 }) {
   if (!entry) return null
   const factors = factorsForThreatScore(entry)
+  const rawTarget = entry.entity_id.split('|').pop() ?? entry.entity_id
 
   return (
     <Modal open onClose={onClose} title={tr.threatScores.explainabilityTitle} wide>
@@ -242,12 +307,25 @@ function ScoreDetailModal({
         </div>
         <ThreatIndicator score={entry.score} size="lg" />
         <InsightPanel factors={factors} model={entry.model} />
-        <Link
-          to={`/logs?q=${encodeURIComponent(entry.entity_id.split('|').pop() ?? entry.entity_id)}`}
-          className="inline-flex items-center gap-2 rounded-md border border-accent/40 bg-accent/10 px-3 py-2 text-sm font-medium text-accent hover:bg-accent/20"
-        >
-          <Search className="size-4" /> {tr.threatScores.investigateTraffic}
-        </Link>
+        <div className="flex flex-wrap gap-3">
+          <Link
+            to={`/logs?q=${encodeURIComponent(rawTarget)}`}
+            className="inline-flex items-center gap-2 rounded-md border border-accent/40 bg-accent/10 px-3 py-2 text-sm font-medium text-accent hover:bg-accent/20"
+          >
+            <Search className="size-4" /> {tr.threatScores.investigateTraffic}
+          </Link>
+          {onInvestigateIoC && (
+            <button
+              onClick={() => {
+                onClose()
+                onInvestigateIoC(rawTarget)
+              }}
+              className="inline-flex items-center gap-2 rounded-md border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-sm font-medium text-sky-400 hover:bg-sky-500/20"
+            >
+              <Search className="size-4" /> Threat Intel Deep Lookup
+            </button>
+          )}
+        </div>
         <p className="text-xs text-text-secondary">
           {tr.threatScores.scoredAt} {entry.scored_at} · {tr.threatScores.expiresAt} {entry.expires_at}. Proxy enriches{' '}
           <code className="rounded bg-surface-0 px-1 font-mono">threat_sources</code> when{' '}

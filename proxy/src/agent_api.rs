@@ -30,6 +30,9 @@ struct AgentHeartbeatDto {
     cert_subject: Option<String>,
     cert_fingerprint: Option<String>,
     trust_score: Option<u8>,
+    config_digest: Option<String>,
+    system_proxy_enforced: Option<bool>,
+    active_tunnel: Option<String>,
 }
 
 impl From<AgentHeartbeatDto> for HeartbeatUpdate {
@@ -45,6 +48,9 @@ impl From<AgentHeartbeatDto> for HeartbeatUpdate {
             cert_subject: hb.cert_subject,
             cert_fingerprint: hb.cert_fingerprint,
             trust_score: hb.trust_score,
+            config_digest: hb.config_digest,
+            system_proxy_enforced: hb.system_proxy_enforced,
+            active_tunnel: hb.active_tunnel,
         }
     }
 }

@@ -13,6 +13,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::{debug, warn};
 
+const REDIS_OP_TIMEOUT: Duration = Duration::from_millis(50);
+
 #[derive(Clone, Debug)]
 pub struct L2CacheConfig {
     pub enabled: bool,
@@ -170,14 +172,20 @@ impl RedisL2Cache {
     pub async fn get(&self, cache_key: &str) -> Option<CachedResponse> {
         let key = self.redis_key(cache_key);
         let mut conn = self.conn.clone();
-        let payload: Option<String> = match conn.get(&key).await {
-            Ok(v) => v,
-            Err(e) => {
-                warn!("Redis L2 get failed for {}: {}", key, e);
-                self.metrics.cache_l2_errors_total.inc();
-                return None;
-            }
-        };
+        let payload: Option<String> =
+            match tokio::time::timeout(REDIS_OP_TIMEOUT, conn.get(&key)).await {
+                Ok(Ok(v)) => v,
+                Ok(Err(e)) => {
+                    warn!("Redis L2 get failed for {}: {}", key, e);
+                    self.metrics.cache_l2_errors_total.inc();
+                    return None;
+                }
+                Err(_) => {
+                    warn!("Redis L2 get timed out after 50ms for {}", key);
+                    self.metrics.cache_l2_errors_total.inc();
+                    return None;
+                }
+            };
 
         let Some(payload) = payload else {
             self.metrics.cache_l2_misses_total.inc();
@@ -189,7 +197,7 @@ impl RedisL2Cache {
             Some(_) => {
                 debug!("Redis L2 entry expired for {}", key);
                 self.metrics.cache_l2_misses_total.inc();
-                let _ = conn.del::<_, ()>(&key).await;
+                let _ = tokio::time::timeout(REDIS_OP_TIMEOUT, conn.del::<_, ()>(&key)).await;
                 return None;
             }
             None => {
@@ -212,40 +220,68 @@ impl RedisL2Cache {
         let key = self.redis_key(cache_key);
         let ttl = Self::remaining_ttl_secs(value);
         let mut conn = self.conn.clone();
-        if let Err(e) = conn.set_ex::<_, _, ()>(&key, payload, ttl).await {
-            warn!("Redis L2 set failed for {}: {}", key, e);
-            self.metrics.cache_l2_errors_total.inc();
+        match tokio::time::timeout(
+            REDIS_OP_TIMEOUT,
+            conn.set_ex::<_, _, ()>(&key, payload, ttl),
+        )
+        .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                warn!("Redis L2 set failed for {}: {}", key, e);
+                self.metrics.cache_l2_errors_total.inc();
+            }
+            Err(_) => {
+                warn!("Redis L2 set timed out after 50ms for {}", key);
+                self.metrics.cache_l2_errors_total.inc();
+            }
         }
     }
 
     pub async fn delete(&self, cache_key: &str) {
         let key = self.redis_key(cache_key);
         let mut conn = self.conn.clone();
-        if let Err(e) = conn.del::<_, ()>(&key).await {
-            warn!("Redis L2 delete failed for {key}: {e}");
-            self.metrics.cache_l2_errors_total.inc();
+        match tokio::time::timeout(REDIS_OP_TIMEOUT, conn.del::<_, ()>(&key)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                warn!("Redis L2 delete failed for {key}: {e}");
+                self.metrics.cache_l2_errors_total.inc();
+            }
+            Err(_) => {
+                warn!("Redis L2 delete timed out after 50ms for {key}");
+                self.metrics.cache_l2_errors_total.inc();
+            }
         }
     }
 
-    /// Best-effort delete of all keys with this cache's prefix (SCAN + DEL).
+    /// Best-effort delete of all keys with this cache's prefix (SCAN + non-blocking UNLINK).
     pub async fn flush_prefix(&self) {
         let pattern = format!("{}*", self.key_prefix);
         let mut conn = self.conn.clone();
         let mut cursor: u64 = 0;
         loop {
-            let result: Result<(u64, Vec<String>), _> = redis::cmd("SCAN")
+            let mut scan_cmd = redis::cmd("SCAN");
+            scan_cmd
                 .arg(cursor)
                 .arg("MATCH")
                 .arg(&pattern)
                 .arg("COUNT")
-                .arg(200)
-                .query_async(&mut conn)
-                .await;
+                .arg(200);
+            let result: Result<Result<(u64, Vec<String>), redis::RedisError>, _> =
+                tokio::time::timeout(REDIS_OP_TIMEOUT * 4, scan_cmd.query_async(&mut conn)).await;
             match result {
-                Ok((next, keys)) => {
+                Ok(Ok((next, keys))) => {
                     if !keys.is_empty() {
-                        if let Err(e) = conn.del::<_, ()>(&keys).await {
-                            warn!("Redis L2 flush_prefix DEL failed: {e}");
+                        let mut unlink_cmd = redis::cmd("UNLINK");
+                        unlink_cmd.arg(&keys);
+                        let unlink_res: Result<Result<(), redis::RedisError>, _> =
+                            tokio::time::timeout(
+                                REDIS_OP_TIMEOUT * 4,
+                                unlink_cmd.query_async(&mut conn),
+                            )
+                            .await;
+                        if matches!(unlink_res, Ok(Err(_)) | Err(_)) {
+                            warn!("Redis L2 flush_prefix UNLINK failed: {unlink_res:?}");
                             self.metrics.cache_l2_errors_total.inc();
                         }
                     }
@@ -254,8 +290,13 @@ impl RedisL2Cache {
                         break;
                     }
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     warn!("Redis L2 flush_prefix SCAN failed: {e}");
+                    self.metrics.cache_l2_errors_total.inc();
+                    break;
+                }
+                Err(_) => {
+                    warn!("Redis L2 flush_prefix SCAN timed out");
                     self.metrics.cache_l2_errors_total.inc();
                     break;
                 }

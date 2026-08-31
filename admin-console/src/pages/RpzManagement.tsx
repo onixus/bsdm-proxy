@@ -38,6 +38,12 @@ import {
   type RpzListFormat,
 } from '../api/rpz'
 
+import {
+  fetchRpzStatus,
+  rollbackRpzZone,
+  type RpzStatusReport,
+} from '../api/threatIntel'
+
 import { Button } from '../components/ui/Button'
 import { Modal } from '../components/ui/Modal'
 import { FormField } from '../components/ui/Form'
@@ -67,6 +73,11 @@ export function RpzManagementPage() {
   const [testDomainInput, setTestDomainInput] = useState('')
   const [testResult, setTestResult] = useState<RpzTestResult | null>(null)
   const [testing, setTesting] = useState(false)
+
+  // Live RPZ status & rollback state
+  const [rpzLiveStatus, setRpzLiveStatus] = useState<RpzStatusReport | null>(null)
+  const [rollbackInProgress, setRollbackInProgress] = useState(false)
+  const [rollbackMessage, setRollbackMessage] = useState<string | null>(null)
 
   // Syncing state tracker
   const [syncingId, setSyncingId] = useState<string | null>(null)
@@ -129,6 +140,8 @@ export function RpzManagementPage() {
         setCfgLogBlocks(cfg.logBlocks)
         setCfgWildcard(cfg.wildcardMatching)
       }
+
+      fetchRpzStatus().then(setRpzLiveStatus).catch(() => {})
     } catch (err) {
       console.error('Failed loading RPZ data:', err)
     } finally {
@@ -139,6 +152,24 @@ export function RpzManagementPage() {
   useEffect(() => {
     loadData()
   }, [])
+
+  const handleRollback = async () => {
+    if (!window.confirm('Emergency Action: Are you sure you want to rollback the active RPZ zone to the previous backup?')) {
+      return
+    }
+    setRollbackInProgress(true)
+    setRollbackMessage(null)
+    try {
+      const res = await rollbackRpzZone()
+      setRpzLiveStatus(res.status)
+      setRollbackMessage('Successfully restored previous RPZ zone.')
+      loadData()
+    } catch (err: any) {
+      setRollbackMessage(`Rollback failed: ${err.message}`)
+    } finally {
+      setRollbackInProgress(false)
+    }
+  }
 
   const handleTestDomain = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -481,6 +512,79 @@ export function RpzManagementPage() {
           </div>
         </div>
       </div>
+
+      {/* Threat Intel RPZ Zone Telemetry & Emergency Rollback */}
+      {rpzLiveStatus && (
+        <div className="rounded-xl border border-border bg-surface-1 p-5 shadow-sm space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Database className="size-5 text-accent" />
+              <div>
+                <h2 className="text-base font-semibold text-text-primary">
+                  Threat Intel DNS RPZ Live Zone Telemetry
+                </h2>
+                <p className="font-mono text-xs text-text-secondary">{rpzLiveStatus.zone_path}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span
+                className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${
+                  rpzLiveStatus.is_shadow
+                    ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                    : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                }`}
+              >
+                {rpzLiveStatus.is_shadow ? 'Shadow Mode (No DNS NXDOMAIN)' : 'Enforced RPZ'}
+              </span>
+              {rpzLiveStatus.has_backup && (
+                <Button
+                  variant="secondary"
+                  onClick={handleRollback}
+                  disabled={rollbackInProgress}
+                  className="text-xs border-danger/40 text-danger hover:bg-danger/10"
+                >
+                  {rollbackInProgress ? 'Restoring...' : 'Emergency Zone Rollback'}
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {rollbackMessage && (
+            <div className="rounded-lg border border-accent/40 bg-accent/10 p-3 text-xs text-accent">
+              {rollbackMessage}
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+            <div className="rounded-lg border border-border bg-surface-0 p-3">
+              <span className="text-text-secondary">SOA Serial</span>
+              <p className="mt-1 font-mono font-bold text-text-primary">
+                {rpzLiveStatus.soa_serial ?? 'N/A'}
+              </p>
+            </div>
+            <div className="rounded-lg border border-border bg-surface-0 p-3">
+              <span className="text-text-secondary">Exported RPZ Rules</span>
+              <p className="mt-1 font-mono font-bold text-accent">
+                {rpzLiveStatus.domain_count.toLocaleString()}
+              </p>
+            </div>
+            <div className="rounded-lg border border-border bg-surface-0 p-3">
+              <span className="text-text-secondary">File Size</span>
+              <p className="mt-1 font-mono font-bold text-text-primary">
+                {(rpzLiveStatus.file_size_bytes / 1024).toFixed(1)} KB
+              </p>
+            </div>
+            <div className="rounded-lg border border-border bg-surface-0 p-3">
+              <span className="text-text-secondary">Zone Backup</span>
+              <p className="mt-1 font-mono font-bold text-text-primary">
+                {rpzLiveStatus.has_backup
+                  ? `Available (SOA: ${rpzLiveStatus.backup_soa_serial ?? 'auto'})`
+                  : 'None'}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Interactive RPZ Query Simulator Widget */}
       <div className="rounded-xl border border-border bg-surface-1 p-5 shadow-sm">

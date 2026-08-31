@@ -254,11 +254,28 @@ export function DevicesPage() {
                     ) : null}
                   </td>
                   <td className="px-4 py-3">
-                    <span
-                      className={`inline-flex rounded-md border px-2 py-0.5 text-xs font-medium ${statusClass(device.status)}`}
-                    >
-                      {device.status}
-                    </span>
+                    <div className="flex flex-col gap-1 items-start">
+                      <span
+                        className={`inline-flex rounded-md border px-2 py-0.5 text-xs font-medium ${statusClass(device.status)}`}
+                      >
+                        {device.status}
+                      </span>
+                      {policy && device.policyVersion && device.policyVersion !== policy.policy_version && (
+                        <span className="inline-flex rounded border border-amber-500/30 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-400">
+                          Drift: {device.policyVersion}
+                        </span>
+                      )}
+                      {device.systemProxyEnforced && (
+                        <span className="inline-flex rounded border border-emerald-500/30 bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400">
+                          OS Proxy Active
+                        </span>
+                      )}
+                      {device.activeTunnel && (
+                        <span className="inline-flex rounded border border-sky-500/30 bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-medium text-sky-400">
+                          {device.activeTunnel}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-text-secondary">
                     {device.trustScore != null ? device.trustScore : '—'}
