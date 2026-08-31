@@ -389,6 +389,10 @@ fn handle_admin(
             );
         }
         let score = ml_reputation::evaluate_domain_reputation(&domain, None);
+        metrics
+            .ml_evaluations
+            .with_label_values(&["reputation"])
+            .inc();
         let body = serde_json::to_vec_pretty(&score).unwrap_or_default();
         return http_response(200, "application/json", &body);
     }
@@ -404,6 +408,10 @@ fn handle_admin(
             );
         }
         let anomaly = ml_reputation::detect_domain_anomalies(&domain);
+        metrics
+            .ml_evaluations
+            .with_label_values(&["anomaly"])
+            .inc();
         let body = serde_json::to_vec_pretty(&anomaly).unwrap_or_default();
         return http_response(200, "application/json", &body);
     }
@@ -419,6 +427,10 @@ fn handle_admin(
         return match req_payload {
             Ok(payload) => {
                 let clusters = ml_reputation::cluster_phishing_campaigns(&payload.domains);
+                metrics
+                    .ml_evaluations
+                    .with_label_values(&["cluster"])
+                    .inc();
                 let body = serde_json::to_vec_pretty(&clusters).unwrap_or_default();
                 http_response(200, "application/json", &body)
             }
@@ -478,6 +490,10 @@ fn handle_admin(
         return match req_payload {
             Ok(payload) => match soar::execute_soar_unblock(storage, payload, mode) {
                 Ok(resp) => {
+                    metrics
+                        .soar_unblocks
+                        .with_label_values(&[mode.as_str()])
+                        .inc();
                     audit_soar(security, req, peer, "unblock", mode, "accepted");
                     let body = serde_json::to_vec_pretty(&resp).unwrap_or_default();
                     http_response(200, "application/json", &body)
@@ -508,6 +524,7 @@ fn handle_admin(
         }
         return match rpz::rollback_rpz_zone(rpz_path) {
             Ok(true) => {
+                metrics.rpz_rollbacks.inc();
                 let status = rpz::get_rpz_status(rpz_path);
                 #[derive(serde::Serialize)]
                 struct RollbackSuccess<'a> {

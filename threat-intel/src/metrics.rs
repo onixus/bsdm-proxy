@@ -31,6 +31,12 @@ pub struct CollectorMetrics {
     pub enforcement_mode: IntGaugeVec,
     /// SOAR block actions by enforcement mode (`shadow`, `enforce`).
     pub soar_blocks: IntCounterVec,
+    /// SOAR unblock / false-positive resolution actions.
+    pub soar_unblocks: IntCounterVec,
+    /// Emergency DNS RPZ zone rollback operations.
+    pub rpz_rollbacks: prometheus::IntCounter,
+    /// ML reputation and anomaly evaluation requests.
+    pub ml_evaluations: IntCounterVec,
 }
 
 impl CollectorMetrics {
@@ -122,6 +128,24 @@ impl CollectorMetrics {
             ),
             &["mode"],
         )?;
+        let soar_unblocks = IntCounterVec::new(
+            Opts::new(
+                "threat_intel_soar_unblocks_total",
+                "SOAR unblock / false-positive actions by enforcement mode",
+            ),
+            &["mode"],
+        )?;
+        let rpz_rollbacks = prometheus::IntCounter::new(
+            "threat_intel_rpz_rollbacks_total",
+            "Emergency DNS RPZ zone rollback operations",
+        )?;
+        let ml_evaluations = IntCounterVec::new(
+            Opts::new(
+                "threat_intel_ml_evaluations_total",
+                "ML reputation, homoglyph, and anomaly evaluations",
+            ),
+            &["endpoint"],
+        )?;
 
         registry.register(Box::new(fetches.clone()))?;
         registry.register(Box::new(retries.clone()))?;
@@ -135,6 +159,9 @@ impl CollectorMetrics {
         registry.register(Box::new(purged_expired.clone()))?;
         registry.register(Box::new(rpz_records.clone()))?;
         registry.register(Box::new(soar_blocks.clone()))?;
+        registry.register(Box::new(soar_unblocks.clone()))?;
+        registry.register(Box::new(rpz_rollbacks.clone()))?;
+        registry.register(Box::new(ml_evaluations.clone()))?;
         registry.register(Box::new(enforcement_mode.clone()))?;
 
         Ok(Arc::new(Self {
@@ -150,8 +177,11 @@ impl CollectorMetrics {
             stored_indicators,
             purged_expired,
             rpz_records,
-            soar_blocks,
             enforcement_mode,
+            soar_blocks,
+            soar_unblocks,
+            rpz_rollbacks,
+            ml_evaluations,
         }))
     }
 
