@@ -237,6 +237,12 @@ preflight() {
   shadow_defaults
 }
 
+cis_audit() {
+  require_commands python3
+  log "CIS Benchmark Compliance Audit"
+  python3 scripts/cis-benchmark-audit.py
+}
+
 usage() {
   cat <<'EOF'
 Usage: scripts/ci/run.sh <task>
@@ -244,6 +250,7 @@ Usage: scripts/ci/run.sh <task>
 Tasks:
   preflight          Check the base CI toolchain and deployment safety defaults
   shadow-defaults    Assert threat-intel Shadow Mode stays the shipped default
+  cis-audit          Run CIS Benchmark compliance audits (Docker, K8s, NGINX, Linux)
   rust-all           Run the complete Rust quality gate
   rust-ca            Run the offline CA rotation drill
   rust-fmt           Check rustfmt
@@ -270,6 +277,7 @@ task="${1:-}"
 case "$task" in
   preflight) preflight ;;
   shadow-defaults) shadow_defaults ;;
+  cis-audit) cis_audit ;;
   rust-all) rust_all ;;
   rust-ca) rust_ca ;;
   rust-fmt) rust_fmt ;;
