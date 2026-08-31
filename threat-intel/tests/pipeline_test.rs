@@ -91,6 +91,7 @@ fn pipeline_config(output_dir: &std::path::Path, mode: EnforcementMode) -> Confi
         siem_syslog_protocol: "udp".into(),
         siem_file_path: None,
         siem_format: "cef".into(),
+        sinkhole_reload_url: None,
     }
 }
 

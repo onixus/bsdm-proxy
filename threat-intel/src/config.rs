@@ -99,6 +99,8 @@ pub struct Config {
     pub siem_file_path: Option<PathBuf>,
     /// SIEM payload format: "cef", "ecs", or "syslog".
     pub siem_format: String,
+    /// Optional webhook/reload URL to trigger sinkhole zone reload.
+    pub sinkhole_reload_url: Option<String>,
 }
 
 impl Config {
@@ -156,6 +158,10 @@ impl Config {
             .filter(|s| !s.is_empty())
             .map(PathBuf::from);
         let siem_format = std::env::var("TI_SIEM_FORMAT").unwrap_or_else(|_| "cef".into());
+        let sinkhole_reload_url = std::env::var("TI_SINKHOLE_RELOAD_URL")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
 
         Ok(Self {
             sources,
@@ -184,6 +190,7 @@ impl Config {
             siem_syslog_protocol,
             siem_file_path,
             siem_format,
+            sinkhole_reload_url,
         })
     }
 
@@ -285,6 +292,7 @@ mod tests {
             siem_syslog_protocol: "udp".into(),
             siem_file_path: None,
             siem_format: "cef".into(),
+            sinkhole_reload_url: None,
         }
     }
 

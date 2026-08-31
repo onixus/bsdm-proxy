@@ -274,6 +274,31 @@ impl Collector {
                         mode = mode.as_str(),
                         "generated DNS RPZ zone file"
                     );
+
+                    if mode.is_enforce() {
+                        if let Some(reload_url) = &self.config.sinkhole_reload_url {
+                            let url = reload_url.clone();
+                            tokio::spawn(async move {
+                                let client = reqwest::Client::new();
+                                match client
+                                    .post(&url)
+                                    .timeout(std::time::Duration::from_secs(5))
+                                    .send()
+                                    .await
+                                {
+                                    Ok(resp) if resp.status().is_success() => {
+                                        info!(%url, "DNS sinkhole zone reload triggered successfully");
+                                    }
+                                    Ok(resp) => {
+                                        warn!(%url, status = %resp.status(), "DNS sinkhole zone reload returned error status");
+                                    }
+                                    Err(e) => {
+                                        warn!(%url, err = %e, "failed to trigger DNS sinkhole zone reload");
+                                    }
+                                }
+                            });
+                        }
+                    }
                 }
 
                 if let Err(e) = crate::rpz::export_proxy_acl_feed(&acl_path, domains, mode, feeds) {
@@ -408,6 +433,7 @@ mod tests {
             siem_syslog_protocol: "udp".into(),
             siem_file_path: None,
             siem_format: "cef".into(),
+            sinkhole_reload_url: None,
         }
     }
 

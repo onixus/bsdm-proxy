@@ -525,6 +525,30 @@ fn handle_admin(
         return match rpz::rollback_rpz_zone(rpz_path) {
             Ok(true) => {
                 metrics.rpz_rollbacks.inc();
+                if let Ok(reload_url) = std::env::var("TI_SINKHOLE_RELOAD_URL") {
+                    let url = reload_url.trim().to_string();
+                    if !url.is_empty() {
+                        tokio::spawn(async move {
+                            let client = reqwest::Client::new();
+                            match client
+                                .post(&url)
+                                .timeout(std::time::Duration::from_secs(5))
+                                .send()
+                                .await
+                            {
+                                Ok(resp) if resp.status().is_success() => {
+                                    info!(%url, "DNS sinkhole zone reload triggered after rollback");
+                                }
+                                Ok(resp) => {
+                                    warn!(%url, status = %resp.status(), "DNS sinkhole reload after rollback returned error");
+                                }
+                                Err(e) => {
+                                    warn!(%url, err = %e, "failed to notify DNS sinkhole of rollback");
+                                }
+                            }
+                        });
+                    }
+                }
                 let status = rpz::get_rpz_status(rpz_path);
                 #[derive(serde::Serialize)]
                 struct RollbackSuccess<'a> {
