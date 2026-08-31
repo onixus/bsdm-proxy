@@ -109,7 +109,7 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           chmod +x scripts/extract-release-notes.sh
           ./scripts/extract-release-notes.sh "$VERSION" > dist/RELEASE_NOTES.md
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ github.ref_name }}
           name: BSDM-Proxy ${{ github.ref_name }}

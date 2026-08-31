@@ -34,7 +34,7 @@ jobs:
       # existing SC2034/SC2155 findings fixed first (restore-clickhouse.sh,
       # ci/run-load-tests.sh, ci/run.sh).
       - name: Shellcheck
-        uses: ludeeus/action-shellcheck@master
+        uses: ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38 # 2.0.0
         with:
           scandir: .
           severity: error
