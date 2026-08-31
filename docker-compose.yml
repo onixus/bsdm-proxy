@@ -582,8 +582,8 @@ services:
       cache_from:
         - type=registry,ref=ghcr.io/onixus/bsdm-proxy:dns-sinkhole
     ports:
-      # 5353/udp is the data plane (resolver clients).
-      - "5353:53/udp"
+      # 5353/udp is the data plane (resolver clients) — customizable via DNS_PORT_HOST (e.g. 127.0.0.1:15353 on macOS).
+      - "${DNS_PORT_HOST:-5353}:53/udp"
       # 8092 is metrics + zone-reload API — loopback only.
       - "127.0.0.1:8092:8092"
     environment:
