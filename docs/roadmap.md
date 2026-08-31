@@ -77,6 +77,10 @@ Roadmap определяет порядок работ в рамках стра�
 - [x] **Enterprise SIEM Integration & Delivery Transports** (TASK-TI-030) — форматирование событий в CEF (ArcSight/QRadar/Splunk), ECS JSON (Elastic), Syslog RFC 5424 и сетевая/файловая доставка (`SyslogTransport` UDP/TCP, `FileSiemTransport`, `SiemDispatcher`).
 - [x] **SOAR Automated Response API** (TASK-TI-031) — автоматизированные действия сдерживания и расследования (`/api/v1/soar/block`, `/api/v1/soar/unblock`, `/api/v1/soar/investigate`).
 - [x] **ML Domain Reputation, Phishing Clustering & Anomaly Engine** (TASK-TI-040) — детекция омоглифов (Unicode confusables), Damerau-Levenshtein расстояние до брендов, кластеризация фишинговых кампаний (`cluster_phishing_campaigns`) и энтропийный анализ аномалий (`detect_domain_anomalies`, `/api/v1/ml/*`).
+- [x] **DNS RPZ Live Status & Rollback API** — оперативный мониторинг SOA-серийника и правил (`/api/v1/rpz/status`), аварийный откат зоны (`/api/v1/rpz/rollback`) и интеграция с панелью RPZ в Admin Console.
+- [x] **SOC Operations & False Positive Triage UI** — интерактивное расследование индикаторов с 1-click unblock/whitelist (`ThreatInvestigationModal.tsx`), инспектор брендового фишинга и Unicode-омоглифов (`MlDomainInspector.tsx`).
+- [x] **Core Proxy Lock Sharding & Metrics Guard** — 32-секторное шардирование `MitmCircuitBreaker`, защита от взрыва кардинальности Prometheus-метрик (eTLD+1) и 50ms таймауты L2 Redis с неблокирующим `UNLINK`.
+- [x] **Agent Fleet Drift & OS Proxy Enforcement** — вычисление SHA-256 дайджеста локальных правил, мониторинг системного перехвата прокси и индикация дрифта в Admin Console.
 
 
 ---
