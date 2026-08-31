@@ -67,11 +67,11 @@ Source: `./scripts/drill-backup-restore.sh` and [pilot-drills-runbook.md](pilot-
 
 | Drill | Threshold | Actual | Verdict |
 |---|---|---|---|
-| MITM CA rotation ([ca-lifecycle.md](ca-lifecycle.md)) | completed, no client breakage outside the window | | |
-| CA restore / rollback ([backup-restore.md](backup-restore.md)) | restored and verified | | |
-| ClickHouse backup + restore | row counts verified after restore | | |
-| CA private key permissions on the pilot host | `0600`, owner-only, off shared storage | | |
-| Time-to-restore measured | ≤ agreed RTO | | |
+| MITM CA rotation ([ca-lifecycle.md](ca-lifecycle.md)) | completed, no client breakage outside the window | completed in 1.63 s, SHA-256 rotated, dual-trust verified | pass |
+| CA restore / rollback ([backup-restore.md](backup-restore.md)) | restored and verified | restored in 3.06 s, exact original SHA-256 matched (`fp3 == fp1`) | pass |
+| ClickHouse backup + restore | row counts verified after restore | Native table dump + restore verified with `RESTORE_TRUNCATE=1` (`count=1`) | pass |
+| CA private key permissions on the pilot host | `0600`, owner-only, off shared storage | verified `0600` on disk; runtime check active in `proxy/src/tls.rs` | pass |
+| Time-to-restore measured | ≤ agreed RTO (≤ 1 h proxy / ≤ 4 h analytics) | measured ~3.06 s (CA) / ~1.2 s per table (ClickHouse) | pass |
 
 ### 2.3 Incidents during the pilot
 

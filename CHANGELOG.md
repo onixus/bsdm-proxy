@@ -34,7 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Atomic Key Restoration**: updated operator restore procedures with `install -m 600` to eliminate transient umask permission exposure.
   - **Pilot Drills Runbook**: created comprehensive operator drill execution record and runbook (`docs/ops-and-dev/pilot-drills-runbook.md`) covering CA rotation, archive rollback, ClickHouse Native backup/restore, and Control Plane security fail-closed verification.
 - **Hybrid Load-Test Benchmarks & Acceptance (Issue #326)**:
-  - **Benchmark Reports Published**: executed and published reproducible Hybrid profile benchmarks (20-user Baseline and 100-user Scale profiles) in `docs/ops-and-dev/load-test-results/` with 0.00%–0.05% error rate, ~600 RPS sustained throughput, and sub-10ms latency.
+  - **Benchmark Reports Published**: executed and published reproducible Hybrid profile benchmarks (20-user Baseline and 100-user Scale profiles) in `docs/ops-and-dev/load-test-results/` (0.00%–0.21% error rate, 307–636 RPS sustained throughput, sub-10ms p95 latency, meeting all pilot SLOs).
   - **Go/No-Go Decision Record**: populated Section 2.1 (Performance) and Section 2.2 (Operational Drills) in `docs/ops-and-dev/pilot-go-no-go-template.md` with verified measurements and evidence links.
   - **Troubleshooting & Offline Testing**: added offline mock-upstream recipes and operator troubleshooting matrix in `docs/ops-and-dev/load-test-selective-mitm.md`.
 
