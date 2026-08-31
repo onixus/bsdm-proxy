@@ -5,7 +5,7 @@ replicaCount: 2
 
 image:
   repository: ghcr.io/onixus/bsdm-proxy
-  tag: "0.6.1-1"
+  tag: "0.9.14"
   pullPolicy: IfNotPresent
 
 nameOverride: ""
@@ -207,7 +207,7 @@ indexer:
   replicaCount: 2
   image:
     repository: ghcr.io/onixus/bsdm-cache-indexer
-    tag: "0.6.1-1"
+    tag: "0.9.14"
     pullPolicy: IfNotPresent
   # Per-workload override; falls back to the chart-wide .securityContext.
   # securityContext:
@@ -260,7 +260,7 @@ alertWorker:
   replicaCount: 1
   image:
     repository: ghcr.io/onixus/bsdm-alert-worker
-    tag: "0.6.1-1"
+    tag: "0.9.14"
     pullPolicy: IfNotPresent
   resources:
     requests:
@@ -282,7 +282,7 @@ mlWorker:
   replicaCount: 1
   image:
     repository: ghcr.io/onixus/bsdm-ml-worker
-    tag: "0.6.1-1"
+    tag: "0.9.14"
     pullPolicy: IfNotPresent
   resources:
     requests:
@@ -302,7 +302,7 @@ threatIntel:
   replicaCount: 1
   image:
     repository: ghcr.io/onixus/bsdm-threat-intel
-    tag: "0.6.1-1"
+    tag: "0.9.14"
     pullPolicy: IfNotPresent
   resources:
     requests:
@@ -349,7 +349,7 @@ dnsSinkhole:
   replicaCount: 1
   image:
     repository: ghcr.io/onixus/bsdm-dns-sinkhole
-    tag: "0.6.1-1"
+    tag: "0.9.14"
     pullPolicy: IfNotPresent
   resources:
     requests:

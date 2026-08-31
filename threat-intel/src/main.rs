@@ -408,10 +408,7 @@ fn handle_admin(
             );
         }
         let anomaly = ml_reputation::detect_domain_anomalies(&domain);
-        metrics
-            .ml_evaluations
-            .with_label_values(&["anomaly"])
-            .inc();
+        metrics.ml_evaluations.with_label_values(&["anomaly"]).inc();
         let body = serde_json::to_vec_pretty(&anomaly).unwrap_or_default();
         return http_response(200, "application/json", &body);
     }
@@ -427,10 +424,7 @@ fn handle_admin(
         return match req_payload {
             Ok(payload) => {
                 let clusters = ml_reputation::cluster_phishing_campaigns(&payload.domains);
-                metrics
-                    .ml_evaluations
-                    .with_label_values(&["cluster"])
-                    .inc();
+                metrics.ml_evaluations.with_label_values(&["cluster"]).inc();
                 let body = serde_json::to_vec_pretty(&clusters).unwrap_or_default();
                 http_response(200, "application/json", &body)
             }

@@ -88,7 +88,7 @@ fetch_latest_version() {
   fi
 
   if [[ -z "${VERSION:-}" ]]; then
-    echo -e "${RED}Could not determine the latest release. Pass an explicit version, for example: sudo ./scripts/install-binaries.sh 0.9.13${NC}" >&2
+    echo -e "${RED}Could not determine the latest release. Pass an explicit version, for example: sudo ./scripts/install-binaries.sh 0.9.14${NC}" >&2
     exit 1
   fi
 

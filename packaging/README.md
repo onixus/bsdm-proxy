@@ -24,7 +24,7 @@ The release publishes `<archive>.sha256` beside every tarball.
 ## Quick start
 
 ```bash
-VERSION=0.9.13
+VERSION=0.9.14
 ARCH=x86_64
 sha256sum -c bsdm-proxy-${VERSION}-linux-${ARCH}.tar.gz.sha256
 tar xzf bsdm-proxy-${VERSION}-linux-${ARCH}.tar.gz

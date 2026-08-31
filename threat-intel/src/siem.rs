@@ -166,7 +166,8 @@ impl SiemEvent {
         }
 
         format!(
-            "CEF:0|BSDM-Proxy|ThreatIntel|0.9.13|{}|{}|{}|{}",
+            "CEF:0|BSDM-Proxy|ThreatIntel|{}|{}|{}|{}|{}",
+            env!("CARGO_PKG_VERSION"),
             self.action.as_str().to_uppercase(),
             escape_cef_header(&self.message),
             self.severity,
@@ -463,7 +464,11 @@ mod tests {
         let event = SiemEvent::from_stored(&ind, SiemEventAction::Detected);
         let cef = event.to_cef();
 
-        assert!(cef.starts_with("CEF:0|BSDM-Proxy|ThreatIntel|0.9.13|IOC_DETECTED|"));
+        let expected = format!(
+            "CEF:0|BSDM-Proxy|ThreatIntel|{}|IOC_DETECTED|",
+            env!("CARGO_PKG_VERSION")
+        );
+        assert!(cef.starts_with(&expected));
         assert!(cef.contains("cs1=openphish"));
         assert!(cef.contains("cn1=95"));
         assert!(cef.contains("request=http://phish-bank.com/login"));
@@ -514,7 +519,11 @@ mod tests {
         let (len, _) = receiver.recv_from(&mut buf).unwrap();
         let received = std::str::from_utf8(&buf[..len]).unwrap();
 
-        assert!(received.starts_with("CEF:0|BSDM-Proxy|ThreatIntel|0.9.13|IOC_DETECTED|"));
+        let expected = format!(
+            "CEF:0|BSDM-Proxy|ThreatIntel|{}|IOC_DETECTED|",
+            env!("CARGO_PKG_VERSION")
+        );
+        assert!(received.starts_with(&expected));
         assert!(received.contains("openphish"));
     }
 

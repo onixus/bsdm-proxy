@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Image tag to publish (optional, e.g. latest, edge, v0.9.13)"
+        description: "Image tag to publish (optional, e.g. latest, edge, v0.9.14)"
         required: false
         default: ""
 

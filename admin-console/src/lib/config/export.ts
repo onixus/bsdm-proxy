@@ -127,7 +127,7 @@ export function generateDockerCompose(form: ConfigFormState): string {
     restart: unless-stopped
 ${prom ? `
   prometheus:
-    image: prom/prometheus:v2.55.1
+    image: prom/prometheus:v3.12.0
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports: ["9091:9090"]
@@ -135,7 +135,7 @@ ${prom ? `
     restart: unless-stopped
 ` : ''}${graf ? `
   grafana:
-    image: grafana/grafana:11.4.0
+    image: grafana/grafana:12.3.8
     environment:
       GF_SECURITY_ADMIN_PASSWORD: admin
       GF_AUTH_ANONYMOUS_ENABLED: "false"

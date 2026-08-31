@@ -91,7 +91,7 @@
 - [ADR 0007: Safe selective MITM & circuit breaker](adr/0007-mitm-circuit-breaker.md)
 - [ADR 0008: Threat Intelligence Shadow Mode](adr/0008-threat-intel-shadow-mode.md)
 - [Roadmap](roadmap.md)
-- [Latest release notes (v0.9.13)](releases/v0.9.13.md)
+- [Latest release notes (v0.9.14)](releases/v0.9.14.md)
 - [Release history](releases/)
 
 Исторические release notes сохраняют версии и ограничения соответствующего

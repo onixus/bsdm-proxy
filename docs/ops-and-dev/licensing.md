@@ -1,7 +1,7 @@
 # Лицензирование и third-party компоненты
 
 Обзор лицензий переиспользуемого ПО. Данные валидированы для актуального
-workspace BSDM-Proxy `0.9.13`.
+workspace BSDM-Proxy `0.9.14`.
 
 > См. также: [NOTICE](../../NOTICE) · [LICENSE](../../LICENSE)
 
@@ -194,5 +194,5 @@ cargo audit
 
 ---
 
-*Последний зафиксированный аудит: 2026-08 · v0.9.13 · `cargo license` +
+*Последний зафиксированный аудит: 2026-08 · v0.9.14 · `cargo license` +
 compose manifest.*

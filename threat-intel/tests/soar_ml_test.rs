@@ -42,7 +42,11 @@ fn test_siem_cef_and_ecs_pipeline() {
 
     // Verify CEF format
     let cef = event.to_cef();
-    assert!(cef.starts_with("CEF:0|BSDM-Proxy|ThreatIntel|0.9.13|IOC_BLOCKED|"));
+    let expected_prefix = format!(
+        "CEF:0|BSDM-Proxy|ThreatIntel|{}|IOC_BLOCKED|",
+        env!("CARGO_PKG_VERSION")
+    );
+    assert!(cef.starts_with(&expected_prefix));
     assert!(cef.contains("act=ioc_blocked"));
     assert!(cef.contains("cs1=soar:soc_lead"));
     assert!(cef.contains("request=https://banking-sec-auth.net/login"));

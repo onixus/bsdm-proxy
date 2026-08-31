@@ -1,6 +1,6 @@
 # Roadmap BSDM-Proxy (Hybrid + Agent Architecture)
 
-Текущая версия workspace: **`0.9.13`**.
+Текущая версия workspace: **`0.9.14`**.
 
 Roadmap определяет порядок работ в рамках стратегии **Hybrid Policy (DNS -> SNI -> Selective MITM)**, переход к **On-Device Local Policy Agent** и интеграцию **Threat Intelligence**. Фактическая зрелость функционала фиксируется в [матрице статуса](project-status.md).
 

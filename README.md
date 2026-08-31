@@ -6,7 +6,7 @@
 [![Docs](https://github.com/onixus/bsdm-proxy/actions/workflows/docs.yml/badge.svg)](https://github.com/onixus/bsdm-proxy/actions/workflows/docs.yml)
 [![Admin Console](https://github.com/onixus/bsdm-proxy/actions/workflows/admin-console.yml/badge.svg)](https://github.com/onixus/bsdm-proxy/actions/workflows/admin-console.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.9.13-blue.svg)](https://github.com/onixus/bsdm-proxy/releases)
+[![Version](https://img.shields.io/badge/version-0.9.14-blue.svg)](https://github.com/onixus/bsdm-proxy/releases)
 [![Rust](https://img.shields.io/badge/Rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 
 **Высокопроизводительный корпоративный кеширующий HTTP/HTTPS Forward Proxy & Secure Web Gateway (SWG) на Rust.**

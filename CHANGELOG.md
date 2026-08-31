@@ -7,8 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.14] - 2026-08-31
+
+Release following **0.9.13**: Full Threat Intelligence data-plane enforcement with Triple-Gate fail-safe, SIEM/SOAR integration and ML campaign clustering, AmneziaWG and BSDM Connect client, Domain-based split routing & PAC engine, Argon2id auth security, and CIS Benchmark compliance hardening.
+
 ### Added
 
+- **CIS Benchmark Compliance Auditor & Hardening** (`scripts/audit-cis-benchmarks.sh`, `SECURITY.md`, `.github/workflows/security-scan.yml`) — Automated auditor script for Docker CIS, Helm PSS Restricted, NGINX, and Systemd security controls; GitHub CodeQL, Rust Clippy SARIF, and Trivy vulnerability scanning workflows.
+- **Argon2id Password Hashing & Migration** (`proxy::auth::basic`) — Upgraded basic authentication password storage to Argon2id with automatic in-place migration on successful login and hardened 0600 file permission validation.
+- **Dynamic RPZ Live Reload Trigger** (`threat-intel::rpz`, `dns-sinkhole`) — Automatic notification webhook to `dns-sinkhole` on new RPZ zone compilation and rollback, ensuring zero-downtime DNS policy convergence.
 - **Threat Intel DNS RPZ Live Status & Rollback Endpoints** (`threat_intel::rpz`) — Added `GET /api/v1/rpz/status` and `POST /api/v1/rpz/rollback` enabling hot-state zone inspection (SOA serial, rule count, shadow marker) and emergency automated restoration of prior zone backups with audit logging.
 - **Threat Intel End-to-End Test Suite** (`e2e/tests/threat_intel_e2e.rs`) — Full pipeline verification covering Shadow Mode transparent forwarding with event enrichment, Enforce Mode 403 blocking with metric increments, and Triple-Gate fail-safe lock mechanics.
 - **SOC Operations & ML Domain Inspector UI** (`admin-console`) — Interactive IOC investigation modal with 1-click False Positive whitelisting and containment (`ThreatInvestigationModal.tsx`), lexical/homoglyph/entropy analyzer (`MlDomainInspector.tsx`), and real-time DNS RPZ zone telemetry in `RpzManagement.tsx`.
@@ -705,7 +712,8 @@ Beta — hierarchical caching Phase 3, optional MITM CA.
 
 [GitHub Releases](https://github.com/onixus/bsdm-proxy/releases/tag/v0.2.2b)
 
-[Unreleased]: https://github.com/onixus/bsdm-proxy/compare/v0.9.13...HEAD
+[Unreleased]: https://github.com/onixus/bsdm-proxy/compare/v0.9.14...HEAD
+[0.9.14]: https://github.com/onixus/bsdm-proxy/compare/v0.9.13...v0.9.14
 [0.9.13]: https://github.com/onixus/bsdm-proxy/compare/v0.9.12...v0.9.13
 [0.9.12]: https://github.com/onixus/bsdm-proxy/compare/v0.9.11...v0.9.12
 [0.9.11]: https://github.com/onixus/bsdm-proxy/compare/v0.9.10...v0.9.11

@@ -1,6 +1,6 @@
 [package]
 name = "bsdm-events"
-version = "0.9.13"
+version = "0.9.14"
 edition = "2021"
 license = "MIT"
 description = "Shared HTTP cache event schema for BSDM-Proxy Kafka pipeline"
