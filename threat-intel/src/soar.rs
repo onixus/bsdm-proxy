@@ -19,6 +19,8 @@ pub struct SoarBlockRequest {
     pub reason: String,
     pub ttl_secs: Option<i64>,
     pub operator: Option<String>,
+    #[serde(default)]
+    pub confidence_score: Option<u8>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,11 +60,23 @@ fn shadow_mode_label() -> String {
     EnforcementMode::Shadow.as_str().to_string()
 }
 
-/// Executes an automated SOAR block action.
+/// Executes an automated SOAR block action using default confidence score bounds (90, max 100).
+#[allow(dead_code)]
 pub fn execute_soar_block(
     storage: &SqliteStorage,
     req: SoarBlockRequest,
     mode: EnforcementMode,
+) -> Result<SoarActionResponse, StorageError> {
+    execute_soar_block_with_limits(storage, req, mode, 90, 100)
+}
+
+/// Executes an automated SOAR block action with configurable default confidence and ceiling.
+pub fn execute_soar_block_with_limits(
+    storage: &SqliteStorage,
+    req: SoarBlockRequest,
+    mode: EnforcementMode,
+    default_confidence: u8,
+    max_confidence: u8,
 ) -> Result<SoarActionResponse, StorageError> {
     // Default 30 days; clamped so a client-supplied TTL cannot overflow the
     // expiry timestamp or expire the indicator on insert.
@@ -71,18 +85,25 @@ pub fn execute_soar_block(
     if !mode.is_enforce() {
         tags.push("shadow".to_string());
     }
+    let default_conf = default_confidence.clamp(1, 100);
+    let max_conf = max_confidence.clamp(1, 100).max(default_conf);
+    let confidence = req
+        .confidence_score
+        .unwrap_or(default_conf)
+        .clamp(1, max_conf);
+
     let raw = crate::indicator::RawIndicator {
         value: req.indicator.clone(),
         kind: req.kind,
         source: format!("soar:{}", req.operator.as_deref().unwrap_or("auto")),
-        source_weight: 100,
+        source_weight: confidence,
         collected_at: Utc::now(),
         reported_at: Some(Utc::now()),
         reference: Some(req.reason.clone()),
         tags,
     };
 
-    let norm = match NormalizedIndicator::from_raw(&raw, 100) {
+    let norm = match NormalizedIndicator::from_raw(&raw, confidence) {
         Some(n) => n,
         None => {
             return Ok(SoarActionResponse {
@@ -188,6 +209,7 @@ mod tests {
                 reason: "Active C2 beacon observed in SIEM".into(),
                 ttl_secs: Some(3600),
                 operator: Some("soc_analyst_1".into()),
+                confidence_score: None,
             },
             EnforcementMode::Enforce,
         )
@@ -201,7 +223,7 @@ mod tests {
         assert!(res2.found);
         assert!(res2.is_active);
         let ind = res2.indicator.unwrap();
-        assert_eq!(ind.confidence_score, 100);
+        assert_eq!(ind.confidence_score, 90);
         assert_eq!(ind.source, "soar:soc_analyst_1");
 
         // 4. Unblock
@@ -224,6 +246,57 @@ mod tests {
     }
 
     #[test]
+    fn test_soar_block_confidence_score_clamping() {
+        let storage = SqliteStorage::in_memory().unwrap();
+
+        // 1. Explicit confidence score within limits
+        execute_soar_block_with_limits(
+            &storage,
+            SoarBlockRequest {
+                indicator: "custom-conf.test".into(),
+                kind: IndicatorKind::Domain,
+                reason: "SOC tier 3".into(),
+                ttl_secs: Some(3600),
+                operator: Some("soc_analyst_2".into()),
+                confidence_score: Some(95),
+            },
+            EnforcementMode::Enforce,
+            90,
+            100,
+        )
+        .unwrap();
+
+        let ind1 = execute_soar_investigation(&storage, "custom-conf.test", None)
+            .unwrap()
+            .indicator
+            .unwrap();
+        assert_eq!(ind1.confidence_score, 95);
+
+        // 2. Score exceeding max ceiling is clamped
+        execute_soar_block_with_limits(
+            &storage,
+            SoarBlockRequest {
+                indicator: "clamped-conf.test".into(),
+                kind: IndicatorKind::Domain,
+                reason: "SOC tier 1".into(),
+                ttl_secs: Some(3600),
+                operator: Some("soc_analyst_3".into()),
+                confidence_score: Some(100),
+            },
+            EnforcementMode::Enforce,
+            80,
+            85, // max ceiling is 85
+        )
+        .unwrap();
+
+        let ind2 = execute_soar_investigation(&storage, "clamped-conf.test", None)
+            .unwrap()
+            .indicator
+            .unwrap();
+        assert_eq!(ind2.confidence_score, 85);
+    }
+
+    #[test]
     fn shadow_block_is_accepted_but_not_enforced() {
         let storage = SqliteStorage::in_memory().unwrap();
 
@@ -235,6 +308,7 @@ mod tests {
                 reason: "Suspected C2".into(),
                 ttl_secs: Some(3600),
                 operator: Some("soc_analyst_1".into()),
+                confidence_score: None,
             },
             EnforcementMode::Shadow,
         )

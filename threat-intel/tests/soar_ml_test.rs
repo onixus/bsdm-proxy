@@ -23,6 +23,7 @@ fn test_siem_cef_and_ecs_pipeline() {
             reason: "Active credential harvesting campaign".into(),
             ttl_secs: Some(86400 * 14),
             operator: Some("soc_lead".into()),
+            confidence_score: None,
         },
         EnforcementMode::Enforce,
     )
@@ -73,7 +74,7 @@ fn test_soar_full_lifecycle() {
     assert!(!inv1.found);
     assert!(!inv1.is_active);
 
-    // Step 2: SOAR automated block
+    // Step 2: SOAR automated block with default confidence
     let block_res = execute_soar_block(
         &storage,
         SoarBlockRequest {
@@ -82,17 +83,18 @@ fn test_soar_full_lifecycle() {
             reason: "Threat intel correlation hit".into(),
             ttl_secs: Some(3600),
             operator: Some("automated_soar_playbook".into()),
+            confidence_score: None,
         },
         EnforcementMode::Enforce,
     )
     .unwrap();
     assert!(block_res.success);
 
-    // Step 3: Investigate blocked domain -> found & active
+    // Step 3: Investigate blocked domain -> found & active with default confidence (90)
     let inv2 = execute_soar_investigation(&storage, domain, Some(IndicatorKind::Domain)).unwrap();
     assert!(inv2.found);
     assert!(inv2.is_active);
-    assert_eq!(inv2.indicator.as_ref().unwrap().confidence_score, 100);
+    assert_eq!(inv2.indicator.as_ref().unwrap().confidence_score, 90);
 
     // Step 4: SOAR automated unblock
     let unblock_res = execute_soar_unblock(
@@ -157,4 +159,150 @@ fn test_ml_reputation_models() {
     let score5 = evaluate_domain_reputation("rust-lang.org", None);
     assert!(!score5.is_suspicious);
     assert_eq!(score5.risk_score, 0);
+}
+
+#[test]
+fn test_siem_transport_delivery() {
+    use std::io::Read;
+    use std::net::TcpListener;
+    use threat_intel::siem::{
+        FileSiemTransport, SiemDispatcher, SiemFormat, SyslogProtocol, SyslogTransport,
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let file_path = dir.path().join("siem_dispatch.log");
+    let file_transport = FileSiemTransport::new(&file_path, SiemFormat::Cef, "gw-01").unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let tcp_transport = SyslogTransport::new(
+        format!("127.0.0.1:{port}"),
+        SyslogProtocol::Tcp,
+        SiemFormat::EcsJson,
+        "gw-01",
+    );
+
+    let dispatcher = SiemDispatcher::new(vec![Box::new(file_transport), Box::new(tcp_transport)]);
+
+    let handle = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut buf = [0u8; 2048];
+        let n = stream.read(&mut buf).unwrap();
+        String::from_utf8(buf[..n].to_vec()).unwrap()
+    });
+
+    let storage = SqliteStorage::in_memory().unwrap();
+    execute_soar_block(
+        &storage,
+        SoarBlockRequest {
+            indicator: "http://phish-attack.test/update".into(),
+            kind: IndicatorKind::Url,
+            reason: "Credential harvesting".into(),
+            ttl_secs: Some(3600),
+            operator: Some("soc".into()),
+            confidence_score: None,
+        },
+        EnforcementMode::Enforce,
+    )
+    .unwrap();
+
+    let ind = storage
+        .query_indicator("http://phish-attack.test/update", Some(IndicatorKind::Url))
+        .unwrap()
+        .unwrap();
+    let event = SiemEvent::from_stored(&ind, SiemEventAction::Blocked);
+
+    dispatcher.export_event(&event).unwrap();
+
+    let tcp_received = handle.join().unwrap();
+    assert!(tcp_received.contains("\"action\":\"ioc_blocked\""));
+    assert!(tcp_received.contains("phish-attack.test"));
+
+    let file_content = std::fs::read_to_string(&file_path).unwrap();
+    assert!(file_content.starts_with("CEF:0|BSDM-Proxy|ThreatIntel|"));
+    assert!(file_content.contains("request=http://phish-attack.test/update"));
+}
+
+#[test]
+fn test_rpz_monotonic_and_rollback_e2e() {
+    use threat_intel::rpz::{
+        backup_path, has_rpz_backup, parse_soa_serial, rollback_rpz_zone, write_rpz_file, RpzConfig,
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let rpz_path = dir.path().join("threats.rpz");
+    let cfg = RpzConfig::default();
+
+    // Gen 1
+    write_rpz_file(&rpz_path, &["bad1.com".to_string()], &cfg).unwrap();
+    assert!(rpz_path.exists());
+    assert!(!has_rpz_backup(&rpz_path));
+    let s1 = parse_soa_serial(&std::fs::read_to_string(&rpz_path).unwrap()).unwrap();
+
+    // Gen 2
+    write_rpz_file(&rpz_path, &["bad2.com".to_string()], &cfg).unwrap();
+    assert!(has_rpz_backup(&rpz_path));
+    let s2 = parse_soa_serial(&std::fs::read_to_string(&rpz_path).unwrap()).unwrap();
+    assert!(s2 > s1);
+
+    // Verify Gen 2 active and Gen 1 backup
+    let active = std::fs::read_to_string(&rpz_path).unwrap();
+    assert!(active.contains("bad2.com CNAME ."));
+    assert!(!active.contains("bad1.com CNAME ."));
+
+    let bak = std::fs::read_to_string(backup_path(&rpz_path)).unwrap();
+    assert!(bak.contains("bad1.com CNAME ."));
+
+    // Rollback
+    let ok = rollback_rpz_zone(&rpz_path).unwrap();
+    assert!(ok);
+
+    let restored = std::fs::read_to_string(&rpz_path).unwrap();
+    assert!(restored.contains("bad1.com CNAME ."));
+    assert!(!restored.contains("bad2.com CNAME ."));
+}
+
+#[test]
+fn test_ml_anomaly_and_campaign_clustering_e2e() {
+    use threat_intel::ml_reputation::{cluster_phishing_campaigns, detect_domain_anomalies};
+
+    // 1. Anomaly test
+    let anom = detect_domain_anomalies("login.auth.security.verify.apple.fake-server.net");
+    assert!(anom.is_anomalous);
+    assert!(anom.subdomain_depth >= 2);
+
+    let dga = detect_domain_anomalies("kjhgfdsazxcvbnm1234.com");
+    assert!(dga.is_anomalous);
+    assert!(dga.entropy > 3.0);
+
+    // 2. Campaign clustering
+    let batch = vec![
+        "secure-login-microsoft-auth.com".into(),
+        "portal-microsoft-update.net".into(),
+        "google-verify-account.com".into(),
+        "google-auth-service.org".into(),
+        "pzkqmlvjfrtwxya1.biz".into(),
+        "pzkqmlvjfrtwxya2.biz".into(),
+    ];
+
+    let clusters = cluster_phishing_campaigns(&batch);
+    assert!(clusters.len() >= 3);
+
+    let ms = clusters
+        .iter()
+        .find(|c| c.target_brand.as_deref() == Some("microsoft"))
+        .expect("Microsoft campaign must be identified");
+    assert_eq!(ms.domains.len(), 2);
+
+    let google = clusters
+        .iter()
+        .find(|c| c.target_brand.as_deref() == Some("google"))
+        .expect("Google campaign must be identified");
+    assert_eq!(google.domains.len(), 2);
+
+    let dga_c = clusters
+        .iter()
+        .find(|c| c.cluster_type == "dga_pattern")
+        .expect("DGA campaign must be identified");
+    assert_eq!(dga_c.domains.len(), 2);
 }

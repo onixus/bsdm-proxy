@@ -8,11 +8,15 @@
 
 The `threat-intel` worker ingests phishing/malware IOC feeds on a schedule,
 normalizes and scores indicators, persists them into SQLite with TTL management (`TI_SQLITE_PATH`),
-and compiles DNS RPZ zones (`threats.rpz`) and Proxy ACL feeds (`threat_domains.json`) to disk.
+and compiles DNS RPZ zones (`threats.rpz`) with standard `YYYYMMDDNN` monotonic BIND serials, `.bak` zone backups,
+and atomic rollback (`rollback_rpz_zone`). It also exports Proxy ACL feeds (`threat_domains.json`) to disk.
 In the default shadow mode those artifacts are written with a `.shadow` suffix that no
-data-plane component loads. It also exposes enterprise SIEM formatting (CEF/ECS/Syslog),
+data-plane component loads. It exposes enterprise SIEM formatting (CEF/ECS/Syslog) with unified network and file
+delivery transports (`SyslogTransport` UDP/TCP, `FileSiemTransport`, `SiemDispatcher`),
 a SOAR API (`/api/v1/soar/*`) which in shadow mode records indicators for observation only
-(`202`, `enforced:false`), and ML domain reputation/homoglyph evaluation (`/api/v1/ml/*`).
+(`202`, `enforced:false`), and ML domain reputation, typosquatting/homoglyph detection,
+phishing campaign clustering (`/api/v1/ml/cluster`), and algorithmic anomaly detection (`/api/v1/ml/anomaly`).
+
 
 It also **compiles enforcement artifacts** when `TI_RPZ_ENABLED` is on (default
 `true`, `threat-intel/src/config.rs`): an RPZ zone `threats.rpz` and a Proxy ACL
@@ -107,8 +111,13 @@ indicator count, attempts, duration and the last error, if any.
 | `TI_SOAR_AUDIT_PATH` | `<TI_OUTPUT_DIR>/soar-audit.jsonl` | Audit trail of SOAR mutations |
 | `TI_ADMIN_BIND` | `127.0.0.1` | Bind host for the HTTP admin/metrics listener |
 | `METRICS_PORT` | `8093` | `/metrics`, `/health`, SOAR and ML endpoints |
+| `TI_SIEM_SYSLOG_ADDR` | unset | Syslog destination endpoint (e.g. `127.0.0.1:514`) |
+| `TI_SIEM_SYSLOG_PROTOCOL` | `udp` | Syslog transport protocol (`udp` or `tcp`) |
+| `TI_SIEM_FILE_PATH` | unset | Local file path for formatted SIEM event append log |
+| `TI_SIEM_FORMAT` | `cef` | SIEM serialization format (`cef`, `ecs`, or `syslog`) |
 
 Packaged example: `packaging/config/threat-intel.env.example`.
+
 
 ## Error handling
 

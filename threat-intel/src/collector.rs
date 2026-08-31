@@ -398,10 +398,16 @@ mod tests {
             rpz_enabled: true,
             rpz_output_path: PathBuf::from(dir).join("threats.rpz"),
             acl_export_path: PathBuf::from(dir).join("threat_domains.json"),
+            soar_default_confidence: 90,
+            soar_max_confidence: 100,
             enforcement_mode: crate::config::EnforcementMode::Shadow,
             user_agent: "test".into(),
             metrics_port: 0,
             run_once: true,
+            siem_syslog_addr: None,
+            siem_syslog_protocol: "udp".into(),
+            siem_file_path: None,
+            siem_format: "cef".into(),
         }
     }
 

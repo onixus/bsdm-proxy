@@ -72,11 +72,12 @@ Roadmap определяет порядок работ в рамках стра�
 - [x] **IOC storage & SQLite persistence** (TASK-TI-002) — структурированное хранение индикаторов (`SqliteStorage`, `indicators`, `sources`, `collection_history`), дедупликация, TTL-экспирация и индексы.
 - [x] **IOC normalization and category tagging** (TASK-TI-003) — канонизация URL/доменов/IP, валидация Punycode/IDN, фильтрация bogon/private IP.
 - [x] **Confidence Scoring & Multi-source correlation** (TASK-TI-010) — алгоритм взвешенного скоринга с бонусом корреляции фидов и временным затуханием (freshness decay).
-- [x] **Automated RPZ zone generation** (TASK-TI-020) — автоматическая компиляция фидов в RPZ-зоны (`threats.rpz`) с атомарной записью. Публикация зоны в `dns-sinkhole` — отдельный явный шаг оператора (ADR 0008), по умолчанию не выполняется.
-- [x] **Proxy ACL threat feed export** (TASK-TI-021) — экспорт нормализованных доменов и URL угроз в JSON-формате (`threat_domains.json`). Файл предназначен для будущего применения в политиках proxy data-plane; сейчас proxy его не читает.
-- [x] **Enterprise SIEM Integration** (TASK-TI-030) — форматирование событий в CEF (ArcSight/QRadar/Splunk), ECS JSON (Elastic) и Syslog RFC 5424.
+- [x] **Automated RPZ zone generation & atomic rollback** (TASK-TI-021) — автоматическая компиляция фидов в RPZ-зоны (`threats.rpz`) с монотонным BIND-серийником `YYYYMMDDNN`, ротацией резервных копий (`.bak`) и поддержкой атомарного отката (`rollback_rpz_zone`). Публикация зоны в `dns-sinkhole` — отдельный явный шаг оператора (ADR 0008), по умолчанию не выполняется.
+- [x] **Proxy ACL threat feed export** (TASK-TI-020) — экспорт нормализованных доменов и URL угроз в JSON-формате (`threat_domains.json`). Файл предназначен для будущего применения в политиках proxy data-plane; сейчас proxy его не читает.
+- [x] **Enterprise SIEM Integration & Delivery Transports** (TASK-TI-030) — форматирование событий в CEF (ArcSight/QRadar/Splunk), ECS JSON (Elastic), Syslog RFC 5424 и сетевая/файловая доставка (`SyslogTransport` UDP/TCP, `FileSiemTransport`, `SiemDispatcher`).
 - [x] **SOAR Automated Response API** (TASK-TI-031) — автоматизированные действия сдерживания и расследования (`/api/v1/soar/block`, `/api/v1/soar/unblock`, `/api/v1/soar/investigate`).
-- [x] **ML Domain Reputation & Typosquatting / Homoglyph Model** (TASK-TI-040) — детекция омоглифов (Unicode confusables), Damerau-Levenshtein расстояние до защищаемых брендов и детекция спуфинга субдоменов (`/api/v1/ml/reputation`).
+- [x] **ML Domain Reputation, Phishing Clustering & Anomaly Engine** (TASK-TI-040) — детекция омоглифов (Unicode confusables), Damerau-Levenshtein расстояние до брендов, кластеризация фишинговых кампаний (`cluster_phishing_campaigns`) и энтропийный анализ аномалий (`detect_domain_anomalies`, `/api/v1/ml/*`).
+
 
 ---
 

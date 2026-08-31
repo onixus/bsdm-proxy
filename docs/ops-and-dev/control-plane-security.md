@@ -18,7 +18,7 @@ See also: [control-plane.md](../features/control-plane.md) ·
 - [ ] **3. Сетевая изоляция портов:** Порт `:9090` (Control API / Metrics) и `:8080` (Search API) привязаны к внутренней management-сети либо `127.0.0.1` (`METRICS_BIND=127.0.0.1`). Доступ из публичного интернета закрыт фаерволом хоста (iptables / nftables / security group).
 - [ ] **4. Защита приватного ключа CA:** Файл ключа `./certs/ca.key` (или `/etc/bsdm-proxy/ca.key`) имеет права `0600` (`chmod 600`) и доступен исключительно системному пользователю демона прокси (`bsdm`).
 - [ ] **5. Конфигурация Compose:** В production/pilot overlay отключен `CONTROL_API_ALLOW_INSECURE` (`CONTROL_API_ALLOW_INSECURE=false`), заданы непустые `CONTROL_API_TOKEN`, `ACL_API_TOKEN` и `SEARCH_API_TOKEN`.
-- [ ] **6. Threat Intelligence SOAR API:** Если поднят профиль `threat-intel`, задан `TI_API_TOKEN` (иначе `POST /api/v1/soar/block|unblock` отклоняются с `401`), не задан `TI_API_ALLOW_INSECURE`, порт `8093` не опубликован на хост, а `TI_SOAR_AUDIT_PATH` указывает на персистентный путь с правами `0600`. Подробнее — [configuration.md](configuration.md#adminsoar-api-коллектора-доступ-и-аудит).
+- [ ] **6. Threat Intelligence SOAR API:** Если поднят профиль `threat-intel`, задан `TI_API_TOKEN` (иначе `/api/v1/soar/*` отклоняются с `401`), не задан `TI_API_ALLOW_INSECURE`, порт `8093` не опубликован на хост, а `TI_SOAR_AUDIT_PATH` указывает на персистентный путь с правами `0600`. Подробнее — [configuration.md](configuration.md#adminsoar-api-коллектора-доступ-и-аудит).
 - [ ] **7. Threat Model:** Модель угроз и сценарии компрометации задокументированы (см. таблицу ниже).
 
 ---
@@ -34,8 +34,8 @@ See also: [control-plane.md](../features/control-plane.md) ·
 | `GET /health`, `/ready` | Low | Always open (probes) |
 | `GET /api/stats` | Cache hit ratios | Open (local monitoring) |
 | `GET /api/mitm/circuit-breaker` | Visibility of tripped domains | **Bearer required** |
-| `POST /api/v1/soar/block|unblock` (`threat-intel`, `:8093`) | Injection of confidence-100 indicators into TI artifacts / removal of existing ones | **Bearer required** (`TI_API_TOKEN`), fail-closed без токена; аудит в `TI_SOAR_AUDIT_PATH` |
-| `GET /api/v1/soar/investigate`, `GET /api/v1/ml/*`, `/metrics`, `/health` (`threat-intel`) | Раскрытие содержимого IOC-хранилища | Открыты; листенер по умолчанию на `127.0.0.1` (`TI_ADMIN_BIND`), порт не публикуется |
+| `POST /api/v1/soar/block|unblock`, `GET /api/v1/soar/investigate` (`threat-intel`, `:8093`) | Injection of indicators into TI artifacts / IOC storage enumeration | **Bearer required** (`TI_API_TOKEN`), fail-closed без токена; аудит в `TI_SOAR_AUDIT_PATH` |
+| `GET /api/v1/ml/*`, `/metrics`, `/health` (`threat-intel`) | Метрики, healthcheck и эвристический скоринг | Открыты; листенер по умолчанию на `127.0.0.1` (`TI_ADMIN_BIND`), порт не публикуется |
 
 Операторская процедура сброса брейкера (как понять, что он сработал, что
 проверить до сброса, тело запроса и аудит) —
@@ -57,10 +57,13 @@ See also: [control-plane.md](../features/control-plane.md) ·
 | `METRICS_AUTH_TOKEN` | *unset* | Bearer for `GET /metrics` |
 | `METRICS_REQUIRE_AUTH` | `false` | If true, reuse `CONTROL_API_TOKEN` for scrape auth |
 | `SEARCH_API_TOKEN` | *unset* | Bearer for Search API |
-| `TI_API_TOKEN` | *unset* | Bearer for mutating `POST /api/v1/soar/*` (`threat-intel`) |
-| `TI_API_ALLOW_INSECURE` | `false` | Lab only: open SOAR mutations without a token |
+| `TI_API_TOKEN` | *unset* | Bearer for `/api/v1/soar/*` (`threat-intel`) |
+| `TI_API_ALLOW_INSECURE` | `false` | Lab only: open SOAR endpoints without a token |
 | `TI_ADMIN_BIND` | `127.0.0.1` | Host of the collector admin/SOAR/metrics listener |
 | `TI_SOAR_AUDIT_PATH` | `<TI_OUTPUT_DIR>/soar-audit.jsonl` | Append-only JSONL audit of SOAR actions (`0600`) |
+| `TI_SOAR_AUDIT_MAX_BYTES` | `10485760` | Audit file rotation threshold in bytes |
+| `TI_SOAR_DEFAULT_CONFIDENCE` | `90` | Default confidence score for SOAR manual blocks |
+| `TI_SOAR_MAX_CONFIDENCE` | `100` | Maximum confidence score ceiling for SOAR blocks |
 | `SEARCH_API_ALLOW_INSECURE` | *unset* (inherits CONTROL insecure) | Lab open search |
 | `CONTROL_MTLS_ENABLED` | `false` | HTTPS agent API with **required** client cert |
 | `CONTROL_MTLS_BIND` | `0.0.0.0:9443` | Agent mTLS listen address |
