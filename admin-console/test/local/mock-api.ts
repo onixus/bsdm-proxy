@@ -69,6 +69,64 @@ const JSON_ROUTES: Record<string, unknown> = {
   '/api/ai/cache/entries': fx.aiCacheEntries,
   '/api/ai/cache/stats': fx.aiCacheStats,
   '/api/amneziawg/status': fx.awgStatus,
+  '/api/v1/rpz/status': {
+    zone_path: '/var/lib/threat-intel/threats.rpz',
+    exists: true,
+    file_size_bytes: 48120,
+    soa_serial: 2026083101,
+    domain_count: 1420,
+    is_shadow: false,
+    has_backup: true,
+    backup_soa_serial: 2026083100,
+  },
+  '/api/v1/rpz/rollback': {
+    rolled_back: true,
+    status: {
+      zone_path: '/var/lib/threat-intel/threats.rpz',
+      exists: true,
+      file_size_bytes: 47900,
+      soa_serial: 2026083100,
+      domain_count: 1400,
+      is_shadow: false,
+      has_backup: false,
+    },
+  },
+  '/api/v1/soar/investigate': {
+    query: 'phish.test',
+    found: true,
+    count: 1,
+    indicators: [
+      {
+        id: 1,
+        raw: 'phish.test',
+        normalized: 'phish.test',
+        kind: 'domain',
+        confidence_score: 90,
+        source: 'openphish',
+        category: 'phishing',
+        created_at: 1725100000,
+        last_seen_at: 1725100000,
+        hit_count: 5,
+      },
+    ],
+  },
+  '/api/v1/ml/reputation': {
+    domain: 'phish.test',
+    score: 88,
+    risk_level: 'High',
+    anomalies: ['homoglyph', 'brand_distance'],
+    details: { homoglyphs: [], brand_distance: 1, entropy: 3.5 },
+  },
+  '/api/v1/ml/anomaly': {
+    domain: 'phish.test',
+    entropy: 3.8,
+    is_anomaly: true,
+    labels: ['high_entropy'],
+  },
+  '/api/v1/ml/cluster': {
+    cluster_count: 1,
+    clusters: [{ name: 'phish-campaign-1', domains: ['phish.test', 'phish2.test'], size: 2 }],
+  },
 }
 
 const MIME: Record<string, string> = {

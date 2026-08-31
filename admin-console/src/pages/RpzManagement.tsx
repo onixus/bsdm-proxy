@@ -565,13 +565,13 @@ export function RpzManagementPage() {
             <div className="rounded-lg border border-border bg-surface-0 p-3">
               <span className="text-text-secondary">Exported RPZ Rules</span>
               <p className="mt-1 font-mono font-bold text-accent">
-                {rpzLiveStatus.domain_count.toLocaleString()}
+                {(rpzLiveStatus.domain_count ?? 0).toLocaleString()}
               </p>
             </div>
             <div className="rounded-lg border border-border bg-surface-0 p-3">
               <span className="text-text-secondary">File Size</span>
               <p className="mt-1 font-mono font-bold text-text-primary">
-                {(rpzLiveStatus.file_size_bytes / 1024).toFixed(1)} KB
+                {((rpzLiveStatus.file_size_bytes ?? 0) / 1024).toFixed(1)} KB
               </p>
             </div>
             <div className="rounded-lg border border-border bg-surface-0 p-3">
