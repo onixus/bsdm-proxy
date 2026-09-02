@@ -18,6 +18,7 @@ groups:
           mode: shadow
         annotations:
           summary: "Threat-intel shadow matches elevated (feed {{ $labels.feed }})"
+          dashboard: "/d/bsdm-threat-intel-shadow"
           description: "{{ $value | humanize }} shadow match(es)/s over 10m from feed {{ $labels.feed }}. Traffic was NOT blocked (TI_ENFORCEMENT_MODE=shadow). Review before flipping to enforce; see docs ADR-0008."
 
       # Enforcement must be an explicit, announced decision. The gauge carries the
@@ -32,6 +33,7 @@ groups:
           mode: enforce
         annotations:
           summary: "Threat-intel is ENFORCING (TI_ENFORCEMENT_MODE=enforce)"
+          dashboard: "/d/bsdm-threat-intel-shadow"
           description: "The collector reports the enforce posture, so feed data compiles into live RPZ/ACL artifacts and can block traffic. The gauge reflects the mode itself — it fires whether or not anyone calls SOAR. If this deployment is supposed to be in Shadow Mode, TI_ENFORCEMENT_MODE was changed; see ADR-0008."
 
       # SOAR mutations arriving in shadow mode are expected (202, no enforcement),

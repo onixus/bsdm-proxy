@@ -61,6 +61,7 @@ Enforcement is enabled per feed set and per installation. Passing these criteria
 2. The path referenced by `DNS_SINKHOLE_ZONE_PATH` is **not** a collector-generated `threats.rpz`, and no automation copies it there.
 3. The proxy ACL configuration does not reference `TI_ACL_EXPORT_PATH` / `threat_domains.json`.
 4. `bsdm_proxy_ti_shadow_matches_total` is present in `/metrics` on the proxy and grows with traffic; events carrying `threat_shadow_match` are searchable in ClickHouse.
+5. Grafana dashboard **BSDM Threat Intelligence (Shadow)** (`/d/bsdm-threat-intel-shadow`) shows both posture stats as `shadow`, "Enforce blocks" flat at 0, and the per-feed match rate plus the ClickHouse FP-review table used to fill in the transition record.
 
 **Enabling enforcement (only after the transition criteria are met):**
 
