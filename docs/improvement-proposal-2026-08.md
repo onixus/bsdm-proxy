@@ -64,12 +64,16 @@ ADR-0008 (#323) и issue #330 фиксируют решение: **никако�
 
 ### Критерии приёмки
 
-- [ ] Дефолтная конфигурация пилота не может заблокировать трафик по TI-фидам ни
-      одним переключателем — нужно явное `enforce`.
-- [ ] `threat_shadow_match` виден в аналитике; zero change в allow/deny path.
-- [ ] Метрики совпадений по фидам доступны в Prometheus/Grafana.
-- [ ] `docs/`, `project-status.md`, README синхронизированы (правило обновления
-      из `project-status.md`).
+- [x] Дефолтная конфигурация пилота не может заблокировать трафик по TI-фидам ни
+      одним переключателем — нужно явное `enforce` (`TI_ENFORCEMENT_MODE`, `.shadow`-артефакты,
+      Triple-Gate в `proxy/src/ti_enforce.rs`).
+- [x] `threat_shadow_match` виден в аналитике; zero change в allow/deny path
+      (`proxy/src/ti_shadow.rs`, колонка `threat_shadow_match` в ClickHouse).
+- [x] Метрики совпадений по фидам доступны в Prometheus/Grafana
+      (`bsdm_proxy_ti_shadow_matches_total{feed}`, алерты `prometheus/alerts/ti_shadow.yml`,
+      дашборд `grafana/dashboards/bsdm-threat-intel-shadow.json`).
+- [x] `docs/`, `project-status.md`, README синхронизированы (правило обновления
+      из `project-status.md`) — ADR 0008, `project-status.md` «Мониторинг угроз (Shadow)».
 
 ## Предложение №2 (процесс): гигиена трекера
 

@@ -49,6 +49,14 @@ curl http://127.0.0.1:8093/metrics | grep threat_intel_
 A plain binary run binds `127.0.0.1` (`TI_ADMIN_BIND`). Under Compose the port
 is published on `127.0.0.1:8093` and in Helm it is an internal service.
 
+Prometheus scrapes both the collector (`threat_intel_*`) and the proxy
+(`bsdm_proxy_ti_*`). The provisioned Grafana dashboard **BSDM Threat
+Intelligence (Shadow)** (`grafana/dashboards/bsdm-threat-intel-shadow.json`,
+uid `bsdm-threat-intel-shadow`) shows the enforcement posture of collector and
+proxy, shadow matches per feed, feed freshness and a ClickHouse table of
+shadow-matched hosts (`threat_shadow_match`) for false-positive review. The
+matching alert rules live in `prometheus/alerts/ti_shadow.yml`.
+
 Compose profile:
 
 ```bash

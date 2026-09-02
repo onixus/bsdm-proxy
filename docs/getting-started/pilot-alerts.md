@@ -16,6 +16,7 @@ Grafana dashboard `bsdm-proxy` panel **Policy Decision Sources**.
 | Admin Console → **Dashboard** | Segment bar **Hybrid decision_source** (dns/sni/mitm/pin) from `/metrics` |
 | Admin Console → **Logs** | Filter `decision_source` (server + client) |
 | Grafana → BSDM Proxy | Time series `sum(rate(bsdm_proxy_policy_decision_source_total[5m])) by (source)` |
+| Grafana → BSDM Threat Intelligence (Shadow) | Posture stats (`shadow`/`ENFORCE`), `sum(rate(bsdm_proxy_ti_shadow_matches_total[5m])) by (feed)`, ClickHouse FP-review table over `threat_shadow_match` |
 | alert-worker | Webhook JSON for deny/domain bursts (pilot rule subset) |
 
 ---
@@ -63,6 +64,7 @@ Optional later: `high_entropy_domain`, `beacon_periodic` (more ML/noise).
 - [ ] Dashboard shows decision_source bar after traffic (or honest empty state)
 - [ ] Logs can filter `decision_source=sni|mitm|…`
 - [ ] Grafana panel «Policy Decision Sources» loads when Prometheus scrapes proxy
+- [ ] Grafana dashboard «BSDM Threat Intelligence (Shadow)» shows both posture stats as `shadow` and «Enforce blocks (24h)» = 0
 - [ ] `alert-worker` healthy with pilot `ALERT_RULES` and webhook receives at least a test fire or stays quiet with empty CH
 
 ```bash

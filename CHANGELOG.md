@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Grafana dashboard «BSDM Threat Intelligence (Shadow)»** — `grafana/dashboards/bsdm-threat-intel-shadow.json` (uid `bsdm-threat-intel-shadow`): enforcement posture of collector and proxy, per-feed `bsdm_proxy_ti_shadow_matches_total`, enforce-block guard, SOAR call rate, feed freshness / fetch results / drop reasons, RPZ records and rollbacks, and ClickHouse false-positive review tables over `threat_shadow_match`. Closes the last acceptance criterion of the August 2026 improvement proposal (ADR 0008).
+
 ## [0.9.14] - 2026-08-31
 
 Release following **0.9.13**: Full Threat Intelligence data-plane enforcement with Triple-Gate fail-safe, SIEM/SOAR integration and ML campaign clustering, AmneziaWG and BSDM Connect client, Domain-based split routing & PAC engine, Argon2id auth security, and CIS Benchmark compliance hardening.
