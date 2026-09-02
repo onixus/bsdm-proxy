@@ -95,7 +95,61 @@ Starter SQL live in [`scripts/clickhouse/m4_threat_queries.sql`](../../scripts/c
 | `CLICKHOUSE_URL` | `http://127.0.0.1:8123` | |
 | `CLICKHOUSE_DATABASE` / `TABLE` | `bsdm` / `http_cache` | |
 | `CLICKHOUSE_USER` / `PASSWORD` | — | Optional basic auth |
+| `ALERT_CLICKHOUSE_TIMEOUT_MS` | `15000` | Per-query client deadline (clamped 500 ms–10 min) |
+| `ALERT_CLICKHOUSE_MAX_EXECUTION_SECS` | derived from timeout | Server-side `max_execution_time` |
+| `ALERT_CLICKHOUSE_MAX_RESULT_ROWS` | `50000` | Server-side `max_result_rows` (`result_overflow_mode=break`) |
+| `ALERT_CLICKHOUSE_SLOW_QUERY_MS` | `2000` | Slow-query log/metric threshold |
+| `ALERT_CLICKHOUSE_FAILURE_THRESHOLD` | `3` | Consecutive failed rule queries before the cycle aborts |
+| `ALERT_CLICKHOUSE_BACKOFF_MAX_SECS` | `300` | Cap of the exponential poll backoff while degraded |
+| `ALERT_CLICKHOUSE_QUERY_GUARDS` | `true` | Send `readonly=2` + limits; set `false` only for CH users pinned to `readonly=1` |
 | `METRICS_PORT` | `8090` | `/metrics`, `/health` |
+
+## ClickHouse latency control
+
+Rule evaluation is a periodic ClickHouse read, so a slow warehouse silently
+delays detection. The worker bounds and reports that latency:
+
+1. **Client deadline** — every query carries `ALERT_CLICKHOUSE_TIMEOUT_MS`
+   (no shared 30 s client timeout), so one heavy rule cannot stall the cycle.
+2. **Server-side bound** — `max_execution_time` (default: the client deadline
+   rounded up) makes ClickHouse abort the scan instead of keeping it running
+   after the worker walked away; `max_result_rows` + `result_overflow_mode=break`
+   truncate a runaway result set. `readonly=2` rejects any non-SELECT that could
+   reach the endpoint. Disable with `ALERT_CLICKHOUSE_QUERY_GUARDS=false` **only**
+   when the ClickHouse user profile already pins `readonly=1` (such a profile
+   rejects per-query setting overrides, including the guards themselves).
+3. **Degradation guard** — after `ALERT_CLICKHOUSE_FAILURE_THRESHOLD` consecutive
+   query failures the cycle aborts, and the next poll is delayed by an
+   exponential backoff (`poll_interval × 2^n`, capped by
+   `ALERT_CLICKHOUSE_BACKOFF_MAX_SECS`) so a struggling cluster is not hammered.
+   Recovery resets the interval and logs `ClickHouse recovered`.
+4. **Slow-query log** — a query above `ALERT_CLICKHOUSE_SLOW_QUERY_MS` is logged
+   with rule, latency and row count; a cycle longer than `ALERT_POLL_INTERVAL_SECS`
+   logs an explicit "ClickHouse is the bottleneck" warning.
+
+### Latency metrics (`:8090/metrics`)
+
+| Metric | Type | Meaning |
+|---|---|---|
+| `alert_worker_clickhouse_query_seconds{rule}` | histogram | Rule query latency (successful queries) |
+| `alert_worker_clickhouse_query_errors_total{rule,kind}` | counter | Failures by `timeout` / `http` / `transport` / `parse` |
+| `alert_worker_clickhouse_slow_queries_total{rule}` | counter | Queries above the slow-query threshold |
+| `alert_worker_cycle_duration_seconds` | histogram | Wall-clock duration of a full evaluation cycle |
+| `alert_worker_cycles_degraded_total` | counter | Cycles aborted on consecutive failures |
+| `alert_worker_clickhouse_degraded` | gauge | `1` while the poll backoff is active |
+| `alert_worker_last_success_timestamp_seconds` | gauge | Unix time of the last failure-free cycle |
+
+`alert_worker_clickhouse_errors_total` is retained for existing dashboards.
+Ready-made rules — `BsdmAlertWorkerClickHouseSlowQueries`,
+`…ClickHouseTimeouts`, `…ClickHouseDegraded`, `BsdmAlertWorkerStale` — ship in
+[`prometheus/alerts/m4_threat.yml`](../../prometheus/alerts/m4_threat.yml).
+
+Quick triage:
+
+```promql
+histogram_quantile(0.95, sum by (le, rule) (rate(alert_worker_clickhouse_query_seconds_bucket[10m])))
+time() - alert_worker_last_success_timestamp_seconds
+```
 
 ## Grafana Unified Alerting + Alertmanager
 

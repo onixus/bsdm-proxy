@@ -250,36 +250,13 @@ mod tests {
     use std::time::Duration;
 
     fn sample_config(rules: &[&str]) -> Config {
-        Config {
-            webhook_url: "http://example.test/hook".into(),
-            webhook_timeout: Duration::from_secs(5),
-            webhook_headers: Default::default(),
-            clickhouse_url: "http://ch:8123".into(),
-            clickhouse_database: "bsdm".into(),
-            clickhouse_table: "http_cache".into(),
-            clickhouse_user: None,
-            clickhouse_password: None,
-            poll_interval: Duration::from_secs(60),
-            lookback: Duration::from_secs(300),
-            dedupe_ttl: Duration::from_secs(3600),
-            metrics_port: 8090,
-            source: "test".into(),
-            rules: rules.iter().map(|s| (*s).to_string()).collect(),
-            blocked_burst_threshold: 10,
-            domain_burst_threshold: 50,
-            high_entropy_min_requests: 5,
-            high_entropy_min_domain_len: 16,
-            shannon_min_label_len: 12,
-            shannon_min_bits: 3.5,
-            high_entropy_mode: crate::entropy::HighEntropyMode::Either,
-            high_entropy_legacy_min_domain_len: 25,
-            off_hours_min_events: 1,
-            beacon_lookback: Duration::from_secs(3600),
-            beacon_min_hits: 5,
-            beacon_min_interval_secs: 45,
-            beacon_max_interval_secs: 900,
-            beacon_max_gap_cv: 0.25,
-        }
+        let mut config = Config::for_test();
+        config.webhook_url = "http://example.test/hook".into();
+        config.webhook_timeout = Duration::from_secs(5);
+        config.clickhouse_url = "http://ch:8123".into();
+        config.source = "test".into();
+        config.rules = rules.iter().map(|s| (*s).to_string()).collect();
+        config
     }
 
     #[test]

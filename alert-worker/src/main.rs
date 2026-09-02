@@ -56,13 +56,49 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "alert-worker started"
     );
 
+    // Seed the freshness gauge so `time() - last_success` measures uptime
+    // without a clean cycle instead of the Unix epoch.
+    metrics.last_success_timestamp.set(Utc::now().timestamp());
+
     let mut dedupe = DedupeCache::new();
+    let mut degraded_cycles: u32 = 0;
     loop {
-        if let Err(e) = evaluate_once(&config, &ch, &webhook, &mut dedupe, &metrics).await {
-            warn!("evaluation cycle failed: {e}");
+        match evaluate_once(&config, &ch, &webhook, &mut dedupe, &metrics).await {
+            Ok(CycleOutcome::Healthy) => {
+                if degraded_cycles > 0 {
+                    info!("ClickHouse recovered, resuming normal poll interval");
+                }
+                degraded_cycles = 0;
+                metrics.clickhouse_degraded.set(0);
+                metrics.last_success_timestamp.set(Utc::now().timestamp());
+            }
+            Ok(CycleOutcome::Degraded) => {
+                degraded_cycles = degraded_cycles.saturating_add(1);
+                metrics.clickhouse_degraded.set(1);
+            }
+            Err(e) => {
+                degraded_cycles = degraded_cycles.saturating_add(1);
+                metrics.clickhouse_degraded.set(1);
+                warn!("evaluation cycle failed: {e}");
+            }
         }
-        tokio::time::sleep(config.poll_interval).await;
+        let delay = config.backoff_delay(degraded_cycles);
+        if degraded_cycles > 0 {
+            warn!(
+                degraded_cycles,
+                next_poll_secs = delay.as_secs(),
+                "ClickHouse degraded — backing off next evaluation cycle"
+            );
+        }
+        tokio::time::sleep(delay).await;
     }
+}
+
+/// Health of a single evaluation cycle, used to drive the poll backoff.
+#[derive(Debug, PartialEq, Eq)]
+enum CycleOutcome {
+    Healthy,
+    Degraded,
 }
 
 async fn evaluate_once(
@@ -71,20 +107,60 @@ async fn evaluate_once(
     webhook: &WebhookClient,
     dedupe: &mut DedupeCache,
     metrics: &WorkerMetrics,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<CycleOutcome, Box<dyn std::error::Error>> {
     let queries = build_queries(config);
     let now = Instant::now();
     let fired_at = Utc::now();
+    let mut consecutive_failures: u32 = 0;
+    let mut failures: u32 = 0;
+    let mut degraded = false;
 
     for (rule, sql) in queries {
-        let rows = match ch.query_json_each_row(&sql).await {
-            Ok(rows) => rows,
+        let outcome = match ch.query_json_each_row(&sql).await {
+            Ok(outcome) => {
+                consecutive_failures = 0;
+                metrics
+                    .clickhouse_query_seconds
+                    .with_label_values(&[rule.as_str()])
+                    .observe(outcome.elapsed.as_secs_f64());
+                if outcome.elapsed >= config.clickhouse_slow_query {
+                    metrics
+                        .clickhouse_slow_queries
+                        .with_label_values(&[rule.as_str()])
+                        .inc();
+                    warn!(
+                        %rule,
+                        elapsed_ms = outcome.elapsed.as_millis() as u64,
+                        threshold_ms = config.clickhouse_slow_query.as_millis() as u64,
+                        rows = outcome.rows.len(),
+                        "slow ClickHouse rule query"
+                    );
+                }
+                outcome
+            }
             Err(e) => {
+                failures += 1;
+                consecutive_failures += 1;
                 metrics.clickhouse_errors.inc();
-                warn!(%rule, "ClickHouse query failed: {e}");
+                metrics
+                    .clickhouse_query_errors
+                    .with_label_values(&[rule.as_str(), e.kind()])
+                    .inc();
+                warn!(%rule, kind = e.kind(), "ClickHouse query failed: {e}");
+                if consecutive_failures >= config.clickhouse_failure_threshold {
+                    metrics.cycles_degraded.inc();
+                    warn!(
+                        consecutive_failures,
+                        threshold = config.clickhouse_failure_threshold,
+                        "aborting evaluation cycle — ClickHouse unhealthy"
+                    );
+                    degraded = true;
+                    break;
+                }
                 continue;
             }
         };
+        let rows = outcome.rows;
         let findings = findings_from_rows(&rule, &rows, config);
         for finding in findings {
             metrics
@@ -108,8 +184,28 @@ async fn evaluate_once(
     }
 
     metrics.evaluations.inc();
-    info!(dedupe_entries = dedupe.len(), "evaluation cycle complete");
-    Ok(())
+    let cycle_elapsed = now.elapsed();
+    metrics
+        .cycle_duration_seconds
+        .observe(cycle_elapsed.as_secs_f64());
+    if cycle_elapsed > config.poll_interval {
+        warn!(
+            cycle_ms = cycle_elapsed.as_millis() as u64,
+            poll_interval_ms = config.poll_interval.as_millis() as u64,
+            "evaluation cycle exceeded the poll interval — ClickHouse is the bottleneck"
+        );
+    }
+    info!(
+        dedupe_entries = dedupe.len(),
+        cycle_ms = cycle_elapsed.as_millis() as u64,
+        query_failures = failures,
+        "evaluation cycle complete"
+    );
+    if degraded || failures > 0 {
+        Ok(CycleOutcome::Degraded)
+    } else {
+        Ok(CycleOutcome::Healthy)
+    }
 }
 
 async fn run_admin_server(port: u16, metrics: Arc<WorkerMetrics>) {
