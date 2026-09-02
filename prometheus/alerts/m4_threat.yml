@@ -68,6 +68,46 @@ groups:
           summary: "alert-worker ClickHouse query errors"
           description: "{{ $value }} ClickHouse error(s) in 5m."
 
+      - alert: BsdmAlertWorkerClickHouseSlowQueries
+        expr: histogram_quantile(0.95, sum by (le, rule) (rate(alert_worker_clickhouse_query_seconds_bucket[10m]))) > 5
+        for: 10m
+        labels:
+          severity: warning
+          team: bsdm-m4
+        annotations:
+          summary: "alert-worker ClickHouse rule query latency degraded"
+          description: "p95 latency of rule {{ $labels.rule }} is {{ $value | humanizeDuration }} over 10m (threshold 5s). Tune ALERT_CLICKHOUSE_* or the ClickHouse cluster."
+
+      - alert: BsdmAlertWorkerClickHouseTimeouts
+        expr: increase(alert_worker_clickhouse_query_errors_total{kind="timeout"}[10m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+          team: bsdm-m4
+        annotations:
+          summary: "alert-worker ClickHouse query timeouts"
+          description: "{{ $value }} timeout(s) on rule {{ $labels.rule }} in 10m — queries exceed ALERT_CLICKHOUSE_TIMEOUT_MS / max_execution_time."
+
+      - alert: BsdmAlertWorkerClickHouseDegraded
+        expr: alert_worker_clickhouse_degraded == 1
+        for: 5m
+        labels:
+          severity: critical
+          team: bsdm-m4
+        annotations:
+          summary: "alert-worker in ClickHouse backoff"
+          description: "alert-worker has been polling ClickHouse in exponential backoff for 5m — threat rules are not being evaluated at the configured interval."
+
+      - alert: BsdmAlertWorkerStale
+        expr: time() - alert_worker_last_success_timestamp_seconds > 900
+        for: 5m
+        labels:
+          severity: critical
+          team: bsdm-m4
+        annotations:
+          summary: "alert-worker has no clean evaluation cycle"
+          description: "Last failure-free cycle was {{ $value | humanizeDuration }} ago (threshold 15m). Detection coverage is degraded."
+
       - alert: BsdmProxyAclDenyBurst
         expr: sum(rate(bsdm_proxy_acl_decisions_total{action="deny"}[5m])) > 0.5
         for: 5m
