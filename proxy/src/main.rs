@@ -9,10 +9,11 @@ use bsdm_proxy::{
     http_cache_key, icp_server_bind_addr, load_hierarchy_config, load_policy_config,
     metrics_server, policy_config::reload_acl_engine, run_peer_discovery, should_start_htcp_server,
     should_start_icp_server, validate_mitm_policy, wait_shutdown_signal, AclAction, AuthManager,
-    CacheConfig, CertCache, ControlApiState, GlobalSessionStore, HtcpServer, HttpEventPipeline,
-    IcpServer, L2CacheConfig, Metrics, PeerDiscoveryConfig, PerfConfig, PolicyCacheConfig,
-    PolicyDecisionCache, ProxyPolicy, ProxyService, RateLimitConfig, RedisL2Cache,
-    ThreatScoreCache, ThreatScoreConfig, ThreatSyncEngine, TiEnforceMatcher, UpstreamTlsConfig,
+    CacheConfig, CertCache, ControlApiState, EbpfXdpConfig, EbpfXdpManager, GlobalSessionStore,
+    HtcpServer, HttpEventPipeline, IcpServer, L2CacheConfig, Metrics, PeerDiscoveryConfig,
+    PerfConfig, PolicyCacheConfig, PolicyDecisionCache, ProxyPolicy, ProxyService, RateLimitConfig,
+    RedisL2Cache, ThreatScoreCache, ThreatScoreConfig, ThreatSyncEngine, TiEnforceMatcher,
+    UpstreamTlsConfig,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -370,10 +371,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         #[cfg(feature = "kafka")]
         kafka_for_control,
         http_for_control,
-    )
-    .with_mitm_circuit_breaker(service.mitm_circuit_breaker())
-    .with_cert_cache(cert_cache_for_control)
-    .with_config_apply(shutdown_tx.clone(), acl_api.clone());
+    );
+    let ebpf_manager = Arc::new(EbpfXdpManager::new(EbpfXdpConfig::from_env()));
+    let ebpf_for_metrics = ebpf_manager.clone();
+
+    control_builder = control_builder
+        .with_mitm_circuit_breaker(service.mitm_circuit_breaker())
+        .with_cert_cache(cert_cache_for_control)
+        .with_ebpf_manager(ebpf_manager)
+        .with_config_apply(shutdown_tx.clone(), acl_api.clone());
 
     // Multi-node agent device registry + CRL (Redis write-through).
     if let Some(url) = bsdm_proxy::device_registry::redis_url_from_env() {
@@ -395,8 +401,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let control_api = Arc::new(control_builder);
     info!(
-        "Control plane API on :{}/api/stats · :{}/api/cache/purge · :{}/api/hierarchy/* · :{}/api/upstream/tls · :{}/api/pinning/exceptions",
-        metrics_port, metrics_port, metrics_port, metrics_port, metrics_port
+        "Control plane API on :{}/api/stats · :{}/api/cache/purge · :{}/api/hierarchy/* · :{}/api/upstream/tls · :{}/api/ebpf/* · :{}/api/pinning/exceptions",
+        metrics_port, metrics_port, metrics_port, metrics_port, metrics_port, metrics_port
     );
     if !control_api.auth_required() {
         warn!(
@@ -669,6 +675,62 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+
+    if ebpf_for_metrics.is_enabled() {
+        let metrics_clone = metrics.clone();
+        let mut ebpf_shutdown_rx = shutdown_rx.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(15));
+            // Prometheus counters are monotonic, so export deltas of the kernel
+            // totals; a smaller value means the maps were reset on re-attach.
+            let mut last_packets: u64 = 0;
+            let mut last_bytes: u64 = 0;
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        let stats = ebpf_for_metrics.stats();
+                        metrics_clone
+                            .ebpf_blocked_ips
+                            .set(stats.active_blocked_ips as f64);
+
+                        let packets = stats.packets_dropped_total;
+                        let bytes = stats.bytes_dropped_total;
+                        let packet_delta = packets.saturating_sub(last_packets);
+                        let byte_delta = bytes.saturating_sub(last_bytes);
+                        if packets < last_packets || bytes < last_bytes {
+                            debug!("eBPF kernel counters reset; rebasing Prometheus counters");
+                            last_packets = packets;
+                            last_bytes = bytes;
+                        } else {
+                            if packet_delta > 0 {
+                                metrics_clone
+                                    .ebpf_packets_dropped_total
+                                    .inc_by(packet_delta as f64);
+                            }
+                            if byte_delta > 0 {
+                                metrics_clone.ebpf_bytes_dropped_total.inc_by(byte_delta as f64);
+                            }
+                            last_packets = packets;
+                            last_bytes = bytes;
+                        }
+
+                        if !stats.attached {
+                            warn!(
+                                interface = %stats.interface,
+                                "eBPF XDP is enabled but no program is attached — traffic is not being filtered"
+                            );
+                        }
+                    }
+                    changed = ebpf_shutdown_rx.changed() => {
+                        if changed.is_ok() && *ebpf_shutdown_rx.borrow() {
+                            debug!("eBPF metrics reporter stopped");
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+    }
 
     if let Some(auth_manager) = service.auth() {
         let mut auth_shutdown_rx = shutdown_rx.clone();

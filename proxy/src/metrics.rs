@@ -126,6 +126,14 @@ pub struct Metrics {
     pub awg_tx_bytes_total: Counter,
     /// AmneziaWG interface config reloads
     pub awg_reloads_total: CounterVec,
+
+    // eBPF / XDP metrics
+    /// Number of blocked IPs currently programmed in eBPF/XDP filter.
+    pub ebpf_blocked_ips: Gauge,
+    /// Total packets dropped by eBPF/XDP filter at kernel layer.
+    pub ebpf_packets_dropped_total: Counter,
+    /// Total bytes dropped by eBPF/XDP filter at kernel layer.
+    pub ebpf_bytes_dropped_total: Counter,
 }
 
 impl Metrics {
@@ -586,6 +594,24 @@ impl Metrics {
         )?;
         registry.register(Box::new(awg_reloads_total.clone()))?;
 
+        let ebpf_blocked_ips = Gauge::new(
+            "bsdm_proxy_ebpf_blocked_ips",
+            "Number of blocked IP addresses currently programmed in eBPF/XDP kernel filter",
+        )?;
+        registry.register(Box::new(ebpf_blocked_ips.clone()))?;
+
+        let ebpf_packets_dropped_total = Counter::new(
+            "bsdm_proxy_ebpf_packets_dropped_total",
+            "Total packets dropped by eBPF/XDP kernel packet filter",
+        )?;
+        registry.register(Box::new(ebpf_packets_dropped_total.clone()))?;
+
+        let ebpf_bytes_dropped_total = Counter::new(
+            "bsdm_proxy_ebpf_bytes_dropped_total",
+            "Total bytes dropped by eBPF/XDP kernel packet filter",
+        )?;
+        registry.register(Box::new(ebpf_bytes_dropped_total.clone()))?;
+
         Ok(Metrics {
             registry,
             requests_total,
@@ -650,6 +676,9 @@ impl Metrics {
             awg_rx_bytes_total,
             awg_tx_bytes_total,
             awg_reloads_total,
+            ebpf_blocked_ips,
+            ebpf_packets_dropped_total,
+            ebpf_bytes_dropped_total,
         })
     }
 
