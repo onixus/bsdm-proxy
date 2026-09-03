@@ -10,6 +10,7 @@
 |---|---|
 | [`deploy/compose/docker-compose.pilot.yml`](../../deploy/compose/docker-compose.pilot.yml) | Hybrid defaults + resource caps + 5-day retention |
 | [Load-test profile](../ops-and-dev/load-test-selective-mitm.md) | 100-user Hybrid нагрузка (#269) |
+| [Threat Intel Shadow](pilot-threat-intel.md) | Сбор фидов и теневой матчинг без блокировки |
 | [CA lifecycle](../ops-and-dev/ca-lifecycle.md) | Выпуск / ротация MITM CA |
 | [Project status](../project-status.md) | Зрелость функций |
 | [Go / no-go шаблон](../ops-and-dev/pilot-go-no-go-template.md) | Решение по итогам 4-й недели пилота (#332) |
@@ -95,6 +96,7 @@ curl -X POST http://127.0.0.1:9090/api/security/dlp \
 - [ ] Backup/restore drill once: `./scripts/drill-backup-restore.sh` (or CA-only with `SKIP_CLICKHOUSE=1`) — [backup-restore.md](../ops-and-dev/backup-restore.md)
 - [ ] If auth is on: `BASIC_AUTH_USERS_FILE` mounted + `./scripts/run-auth-pilot-smoke.sh` green — [pilot-auth.md](pilot-auth.md)
 - [ ] DNS: `./scripts/run-dns-pilot-smoke.sh` green (blocked.test / badsite.test / example.com) — [pilot-dns.md](pilot-dns.md)
+- [ ] Threat Intelligence Shadow Mode: `--profile threat-intel` + `TI_ENFORCEMENT_MODE=shadow` — [pilot-threat-intel.md](pilot-threat-intel.md)
 - [ ] Admin Console: primary nav only Hybrid pages; frozen routes show Frozen banner; mutations blocked without token (Settings → Console API)
 - [ ] Observability: Dashboard decision_source bar + Logs filter; optional alert-worker pilot pack ([pilot-alerts.md](pilot-alerts.md))
 - [ ] Optional Phase C lab: `./scripts/run-agent-pilot-smoke.sh` green — [pilot-agent.md](pilot-agent.md)
