@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **alert-worker ClickHouse latency control** (`alert-worker::clickhouse`, `::config`, `::metrics`) — per-query client deadline (`ALERT_CLICKHOUSE_TIMEOUT_MS`) replacing the shared 30 s client timeout, server-side `max_execution_time` / `max_result_rows` (`result_overflow_mode=break`) and `readonly=2` guards (opt-out `ALERT_CLICKHOUSE_QUERY_GUARDS` for profiles pinned to `readonly=1`), slow-query logging (`ALERT_CLICKHOUSE_SLOW_QUERY_MS`), early cycle abort after `ALERT_CLICKHOUSE_FAILURE_THRESHOLD` consecutive failures with capped exponential poll backoff (`ALERT_CLICKHOUSE_BACKOFF_MAX_SECS`), and new metrics `alert_worker_clickhouse_query_seconds{rule}`, `alert_worker_clickhouse_query_errors_total{rule,kind}`, `alert_worker_clickhouse_slow_queries_total{rule}`, `alert_worker_cycle_duration_seconds`, `alert_worker_cycles_degraded_total`, `alert_worker_clickhouse_degraded`, `alert_worker_last_success_timestamp_seconds` plus four Prometheus alert rules in `prometheus/alerts/m4_threat.yml`.
 - **Grafana dashboard «BSDM Threat Intelligence (Shadow)»** — `grafana/dashboards/bsdm-threat-intel-shadow.json` (uid `bsdm-threat-intel-shadow`): enforcement posture of collector and proxy, per-feed `bsdm_proxy_ti_shadow_matches_total`, enforce-block guard, SOAR call rate, feed freshness / fetch results / drop reasons, RPZ records and rollbacks, and ClickHouse false-positive review tables over `threat_shadow_match`. Closes the last acceptance criterion of the August 2026 improvement proposal (ADR 0008).
 
+### Changed
+
+- **`EBPF_XDP_ENABLED` defaults to `false` in the shipped `bsdm-proxy.env`** — the eBPF/XDP filter is a lab-only component excluded from the single-node Day-1 pilot scope (`docs/project-status.md`), while the shipped file enabled it on `eth0`. The file now matches the code default (`proxy/src/ebpf.rs`). Deployments that rely on XDP filtering must set `EBPF_XDP_ENABLED=true` explicitly.
+
 ### Security
 
 - **`wasmtime` 46.0.2 → 46.0.3** — addresses RUSTSEC-2026-0268 and RUSTSEC-2026-0269 (`proxy`, optional feature `wasm`).

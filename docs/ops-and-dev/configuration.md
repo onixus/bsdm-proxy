@@ -513,6 +513,11 @@ ICAP-эндпоинта. `ICAP_FAIL_OPEN=true` возвращает прежне
 `EBPF_XDP_ENABLED`, `EBPF_XDP_IFACE`, `EBPF_XDP_MODE`,
 `EBPF_XDP_MAX_ENTRIES`.
 
+`EBPF_XDP_ENABLED` по умолчанию `false` (и в коде, и в поставляемом
+`bsdm-proxy.env`). Компонент lab-only и не входит в Day-1 скоуп одноузлового
+пилота — включайте его осознанно и только там, где XDP-фильтр на
+`EBPF_XDP_IFACE` действительно нужен.
+
 ### Reverse proxy/OIDC
 
 Runtime включается наличием `REVERSE_PROXY_UPSTREAM`. Дополнительно:
