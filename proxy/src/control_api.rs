@@ -97,6 +97,111 @@ impl ControlApiState {
         }
     }
 
+    fn ebpf_get_config(&self) -> Response<Body> {
+        let cfg = self.ebpf_manager.config();
+        match serde_json::to_string(&cfg) {
+            Ok(json) => json_response(StatusCode::OK, &json),
+            Err(e) => json_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!(r#"{{"error":"{}"}}"#, e),
+            ),
+        }
+    }
+
+    async fn ebpf_put_config(&self, body: Bytes) -> Response<Body> {
+        match serde_json::from_slice::<crate::ebpf::EbpfXdpConfig>(&body) {
+            Ok(new_cfg) => match self.ebpf_manager.update_config(new_cfg) {
+                Ok(()) => self.ebpf_get_config(),
+                Err(err) => json_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    &format!(r#"{{"error":"{}"}}"#, err),
+                ),
+            },
+            Err(e) => json_response(
+                StatusCode::BAD_REQUEST,
+                &format!(r#"{{"error":"Invalid eBPF config JSON: {}"}}"#, e),
+            ),
+        }
+    }
+
+    fn ebpf_get_stats(&self) -> Response<Body> {
+        let stats = self.ebpf_manager.stats();
+        match serde_json::to_string(&stats) {
+            Ok(json) => json_response(StatusCode::OK, &json),
+            Err(e) => json_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!(r#"{{"error":"{}"}}"#, e),
+            ),
+        }
+    }
+
+    fn ebpf_list_ips(&self) -> Response<Body> {
+        let ips = self.ebpf_manager.list_blocked_ips();
+        match serde_json::to_string(&ips) {
+            Ok(json) => json_response(StatusCode::OK, &json),
+            Err(e) => json_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!(r#"{{"error":"{}"}}"#, e),
+            ),
+        }
+    }
+
+    async fn ebpf_block_ip(&self, body: Bytes) -> Response<Body> {
+        #[derive(Deserialize)]
+        struct BlockReq {
+            ip: String,
+            reason: Option<String>,
+        }
+
+        match serde_json::from_slice::<BlockReq>(&body) {
+            Ok(req) => match req.ip.trim().parse::<std::net::IpAddr>() {
+                Ok(ip) => match self.ebpf_manager.block_ip(ip, req.reason) {
+                    Ok(entry) => {
+                        self.metrics
+                            .ebpf_blocked_ips
+                            .set(self.ebpf_manager.stats().active_blocked_ips as f64);
+                        match serde_json::to_string(&entry) {
+                            Ok(json) => json_response(StatusCode::CREATED, &json),
+                            Err(e) => json_response(
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                &format!(r#"{{"error":"{}"}}"#, e),
+                            ),
+                        }
+                    }
+                    Err(e) => json_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        &format!(r#"{{"error":"{}"}}"#, e),
+                    ),
+                },
+                Err(_) => json_response(
+                    StatusCode::BAD_REQUEST,
+                    r#"{"error":"Invalid IP address format (must be IPv4 or IPv6)"}"#,
+                ),
+            },
+            Err(e) => json_response(
+                StatusCode::BAD_REQUEST,
+                &format!(r#"{{"error":"Invalid block request JSON: {}"}}"#, e),
+            ),
+        }
+    }
+
+    fn ebpf_delete_ip(&self, id_or_ip: &str) -> Response<Body> {
+        if self.ebpf_manager.unblock_ip(id_or_ip) {
+            self.metrics
+                .ebpf_blocked_ips
+                .set(self.ebpf_manager.stats().active_blocked_ips as f64);
+            json_response(StatusCode::OK, r#"{"status":"deleted"}"#)
+        } else {
+            json_response(StatusCode::NOT_FOUND, r#"{"error":"Blocked IP not found"}"#)
+        }
+    }
+
+    fn ebpf_clear_ips(&self) -> Response<Body> {
+        self.ebpf_manager.clear();
+        self.metrics.ebpf_blocked_ips.set(0.0);
+        json_response(StatusCode::OK, r#"{"status":"cleared"}"#)
+    }
+
     async fn amneziawg_status(&self) -> Response<Body> {
         let guard = self.awg_server.read().await;
         match serde_json::to_string(&*guard) {
@@ -776,6 +881,7 @@ pub struct ControlApiState {
     shutdown_tx: Option<watch::Sender<bool>>,
     acl_api: Option<Arc<AclApiState>>,
     rpz_api: Option<Arc<crate::rpz_api::RpzApiState>>,
+    pub(crate) ebpf_manager: Arc<crate::ebpf::EbpfXdpManager>,
 }
 
 impl ControlApiState {
@@ -842,7 +948,16 @@ impl ControlApiState {
             shutdown_tx: None,
             acl_api: None,
             rpz_api: Some(crate::rpz_api::RpzApiState::from_env()),
+            ebpf_manager: Arc::new(crate::ebpf::EbpfXdpManager::new(
+                crate::ebpf::EbpfXdpConfig::from_env(),
+            )),
         }
+    }
+
+    /// Attach eBPF XDP manager to ControlApiState.
+    pub fn with_ebpf_manager(mut self, manager: Arc<crate::ebpf::EbpfXdpManager>) -> Self {
+        self.ebpf_manager = manager;
+        self
     }
 
     /// Attach MitmCircuitBreaker from ProxyService.
@@ -1079,6 +1194,12 @@ impl ControlApiState {
             }
         }
 
+        if method == Method::DELETE {
+            if let Some(id) = path.strip_prefix("/api/ebpf/ips/") {
+                return self.ebpf_delete_ip(id);
+            }
+        }
+
         match (method, path) {
             (&Method::GET, "/api/config") => self.config_get(),
             (&Method::POST, "/api/config/apply") => self.config_apply(body).await,
@@ -1092,6 +1213,12 @@ impl ControlApiState {
             (&Method::POST, "/api/security/casb") => self.casb_update(body).await,
             (&Method::GET, "/api/security/dlp") => self.dlp_patterns(),
             (&Method::POST, "/api/security/dlp") => self.dlp_update(body).await,
+            (&Method::GET, "/api/ebpf/config") => self.ebpf_get_config(),
+            (&Method::PUT, "/api/ebpf/config") => self.ebpf_put_config(body).await,
+            (&Method::GET, "/api/ebpf/stats") => self.ebpf_get_stats(),
+            (&Method::GET, "/api/ebpf/ips") => self.ebpf_list_ips(),
+            (&Method::POST, "/api/ebpf/ips") => self.ebpf_block_ip(body).await,
+            (&Method::DELETE, "/api/ebpf/ips") => self.ebpf_clear_ips(),
             (&Method::GET, "/api/auth/basic/users") => self.basic_users_list().await,
             (&Method::POST, "/api/auth/basic/users") => self.basic_users_put(body).await,
             (&Method::DELETE, "/api/auth/basic/users") => self.basic_users_delete(body).await,
@@ -2864,5 +2991,191 @@ mod tests {
             .await;
         assert_eq!(del_resp.status(), StatusCode::OK);
         assert!(!state.pinning_registry.matches("pinned.example.com"));
+    }
+
+    #[tokio::test]
+    async fn test_ebpf_control_api_lifecycle() {
+        let metrics = Arc::new(Metrics::new().unwrap());
+        let cache = Arc::new(HttpL1Cache::new(100, 4));
+        let mut state = state_plain(metrics, cache);
+        state.api_token = Some("secret-token".to_string());
+        state.fail_closed = true;
+
+        let mut auth_headers = HeaderMap::new();
+        auth_headers.insert(
+            AUTHORIZATION,
+            "Bearer secret-token".parse().expect("valid header"),
+        );
+
+        // 1. GET /api/ebpf/config
+        let get_cfg_resp = state
+            .dispatch(
+                &Method::GET,
+                "/api/ebpf/config",
+                Bytes::new(),
+                &auth_headers,
+            )
+            .await;
+        assert_eq!(get_cfg_resp.status(), StatusCode::OK);
+        let body = BodyExt::collect(get_cfg_resp.into_body())
+            .await
+            .unwrap()
+            .to_bytes();
+        let cfg_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(cfg_json["interface"], "eth0");
+        assert_eq!(cfg_json["mode"], "skb");
+
+        // 2. PUT /api/ebpf/config
+        let update_cfg = serde_json::json!({
+            "enabled": false,
+            "interface": "eth1",
+            "mode": "driver",
+            "mapName": "bsdm_blocked_ips",
+            "maxEntries": 32768
+        });
+        let put_cfg_resp = state
+            .dispatch(
+                &Method::PUT,
+                "/api/ebpf/config",
+                Bytes::from(update_cfg.to_string()),
+                &auth_headers,
+            )
+            .await;
+        assert_eq!(put_cfg_resp.status(), StatusCode::OK);
+        let body = BodyExt::collect(put_cfg_resp.into_body())
+            .await
+            .unwrap()
+            .to_bytes();
+        let updated_cfg_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(updated_cfg_json["interface"], "eth1");
+        assert_eq!(updated_cfg_json["mode"], "driver");
+
+        // 3. GET /api/ebpf/stats
+        let stats_resp = state
+            .dispatch(&Method::GET, "/api/ebpf/stats", Bytes::new(), &auth_headers)
+            .await;
+        assert_eq!(stats_resp.status(), StatusCode::OK);
+        let body = BodyExt::collect(stats_resp.into_body())
+            .await
+            .unwrap()
+            .to_bytes();
+        let stats_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(stats_json["activeBlockedIps"], 0);
+        assert_eq!(stats_json["packetsDroppedTotal"], 0);
+
+        // 4. POST /api/ebpf/ips with invalid IP -> 400 Bad Request
+        let bad_ip_resp = state
+            .dispatch(
+                &Method::POST,
+                "/api/ebpf/ips",
+                Bytes::from_static(br#"{"ip":"invalid-ip"}"#),
+                &auth_headers,
+            )
+            .await;
+        assert_eq!(bad_ip_resp.status(), StatusCode::BAD_REQUEST);
+
+        // 5. POST /api/ebpf/ips with IPv4 -> 201 Created
+        let block_v4 = serde_json::json!({
+            "ip": "198.51.100.1",
+            "reason": "DDoS flood"
+        });
+        let block_v4_resp = state
+            .dispatch(
+                &Method::POST,
+                "/api/ebpf/ips",
+                Bytes::from(block_v4.to_string()),
+                &auth_headers,
+            )
+            .await;
+        assert_eq!(block_v4_resp.status(), StatusCode::CREATED);
+        let body = BodyExt::collect(block_v4_resp.into_body())
+            .await
+            .unwrap()
+            .to_bytes();
+        let v4_entry: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v4_entry["ip"], "198.51.100.1");
+        assert_eq!(v4_entry["reason"], "DDoS flood");
+        let v4_id = v4_entry["id"].as_str().unwrap().to_string();
+
+        // 6. POST /api/ebpf/ips with IPv6 -> 201 Created
+        let block_v6 = serde_json::json!({
+            "ip": "2001:db8::99",
+            "reason": "Abuse scanning"
+        });
+        let block_v6_resp = state
+            .dispatch(
+                &Method::POST,
+                "/api/ebpf/ips",
+                Bytes::from(block_v6.to_string()),
+                &auth_headers,
+            )
+            .await;
+        assert_eq!(block_v6_resp.status(), StatusCode::CREATED);
+
+        // 7. GET /api/ebpf/ips -> 2 entries
+        let list_resp = state
+            .dispatch(&Method::GET, "/api/ebpf/ips", Bytes::new(), &auth_headers)
+            .await;
+        assert_eq!(list_resp.status(), StatusCode::OK);
+        let body = BodyExt::collect(list_resp.into_body())
+            .await
+            .unwrap()
+            .to_bytes();
+        let list_json: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(list_json.len(), 2);
+
+        // 8. DELETE /api/ebpf/ips/:id -> 200 OK
+        let del_v4_resp = state
+            .dispatch(
+                &Method::DELETE,
+                &format!("/api/ebpf/ips/{}", v4_id),
+                Bytes::new(),
+                &auth_headers,
+            )
+            .await;
+        assert_eq!(del_v4_resp.status(), StatusCode::OK);
+
+        // 9. DELETE /api/ebpf/ips/:id already deleted -> 404 Not Found
+        let del_404_resp = state
+            .dispatch(
+                &Method::DELETE,
+                &format!("/api/ebpf/ips/{}", v4_id),
+                Bytes::new(),
+                &auth_headers,
+            )
+            .await;
+        assert_eq!(del_404_resp.status(), StatusCode::NOT_FOUND);
+
+        // 10. DELETE /api/ebpf/ips -> clear all
+        let clear_resp = state
+            .dispatch(
+                &Method::DELETE,
+                "/api/ebpf/ips",
+                Bytes::new(),
+                &auth_headers,
+            )
+            .await;
+        assert_eq!(clear_resp.status(), StatusCode::OK);
+
+        let list_after_clear = state
+            .dispatch(&Method::GET, "/api/ebpf/ips", Bytes::new(), &auth_headers)
+            .await;
+        let body = BodyExt::collect(list_after_clear.into_body())
+            .await
+            .unwrap()
+            .to_bytes();
+        let list_json: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(list_json.len(), 0);
+
+        // 11. Security check: unauthenticated call should be 401 Unauthorized
+        let unauth_resp = state
+            .dispatch(
+                &Method::POST,
+                "/api/ebpf/ips",
+                Bytes::from_static(br#"{"ip":"198.51.100.2"}"#),
+                &HeaderMap::new(),
+            )
+            .await;
+        assert_eq!(unauth_resp.status(), StatusCode::UNAUTHORIZED);
     }
 }

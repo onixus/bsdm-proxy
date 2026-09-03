@@ -9,10 +9,11 @@ use bsdm_proxy::{
     http_cache_key, icp_server_bind_addr, load_hierarchy_config, load_policy_config,
     metrics_server, policy_config::reload_acl_engine, run_peer_discovery, should_start_htcp_server,
     should_start_icp_server, validate_mitm_policy, wait_shutdown_signal, AclAction, AuthManager,
-    CacheConfig, CertCache, ControlApiState, GlobalSessionStore, HtcpServer, HttpEventPipeline,
-    IcpServer, L2CacheConfig, Metrics, PeerDiscoveryConfig, PerfConfig, PolicyCacheConfig,
-    PolicyDecisionCache, ProxyPolicy, ProxyService, RateLimitConfig, RedisL2Cache,
-    ThreatScoreCache, ThreatScoreConfig, ThreatSyncEngine, TiEnforceMatcher, UpstreamTlsConfig,
+    CacheConfig, CertCache, ControlApiState, EbpfXdpConfig, EbpfXdpManager, GlobalSessionStore,
+    HtcpServer, HttpEventPipeline, IcpServer, L2CacheConfig, Metrics, PeerDiscoveryConfig,
+    PerfConfig, PolicyCacheConfig, PolicyDecisionCache, ProxyPolicy, ProxyService, RateLimitConfig,
+    RedisL2Cache, ThreatScoreCache, ThreatScoreConfig, ThreatSyncEngine, TiEnforceMatcher,
+    UpstreamTlsConfig,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -370,10 +371,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         #[cfg(feature = "kafka")]
         kafka_for_control,
         http_for_control,
-    )
-    .with_mitm_circuit_breaker(service.mitm_circuit_breaker())
-    .with_cert_cache(cert_cache_for_control)
-    .with_config_apply(shutdown_tx.clone(), acl_api.clone());
+    );
+    let ebpf_manager = Arc::new(EbpfXdpManager::new(EbpfXdpConfig::from_env()));
+
+    control_builder = control_builder
+        .with_mitm_circuit_breaker(service.mitm_circuit_breaker())
+        .with_cert_cache(cert_cache_for_control)
+        .with_ebpf_manager(ebpf_manager)
+        .with_config_apply(shutdown_tx.clone(), acl_api.clone());
 
     // Multi-node agent device registry + CRL (Redis write-through).
     if let Some(url) = bsdm_proxy::device_registry::redis_url_from_env() {
@@ -395,8 +400,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let control_api = Arc::new(control_builder);
     info!(
-        "Control plane API on :{}/api/stats · :{}/api/cache/purge · :{}/api/hierarchy/* · :{}/api/upstream/tls · :{}/api/pinning/exceptions",
-        metrics_port, metrics_port, metrics_port, metrics_port, metrics_port
+        "Control plane API on :{}/api/stats · :{}/api/cache/purge · :{}/api/hierarchy/* · :{}/api/upstream/tls · :{}/api/ebpf/* · :{}/api/pinning/exceptions",
+        metrics_port, metrics_port, metrics_port, metrics_port, metrics_port, metrics_port
     );
     if !control_api.auth_required() {
         warn!(
