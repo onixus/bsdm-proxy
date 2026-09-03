@@ -88,10 +88,11 @@ Roadmap определяет порядок работ в рамках стра�
 ## Замороженные модули (Scope Freeze)
 
 Следующие экспериментальные модули заморожены в текущем виде для исключения фичер-крипа:
-- **eBPF/XDP**: Модернизирован в lab-режиме (dual-stack IPv4/IPv6, Control API, учет дропов ядра); не входит в Day-1 скоуп одноузлового пилота.
 - **Native String DLP**: Заморожен до появления полноценного спека.
 - **Mock OIDC Reverse Proxy**: Заморожен.
 - **Global Session / Threat Sync Scaffolding**: Заморожен до подтверждения однокластерной модели.
+
+Отдельно от заморозки: **eBPF/XDP** модернизирован в lab-режиме (dual-stack IPv4/IPv6, Control API `/api/ebpf/*`, учет дропов ядра через BPF-карту `bsdm_drop_stats`) и в Scope Freeze больше не входит. Компонент остаётся lab-only и не входит в Day-1 скоуп одноузлового пилота — см. [project-status.md](project-status.md).
 
 ---
 
