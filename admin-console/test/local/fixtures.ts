@@ -535,6 +535,7 @@ export const ebpfBlockedIps: EbpfBlockedIp[] = [
 
 export const ebpfStats: EbpfStats = {
   enabled: false,
+  attached: false,
   interface: 'eth0',
   mode: 'skb',
   activeBlockedIps: ebpfBlockedIps.length,

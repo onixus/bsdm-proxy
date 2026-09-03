@@ -98,40 +98,42 @@ impl ControlApiState {
     }
 
     fn ebpf_get_config(&self) -> Response<Body> {
-        let cfg = self.ebpf_manager.config();
-        match serde_json::to_string(&cfg) {
+        match serde_json::to_string(&self.ebpf_manager.config()) {
             Ok(json) => json_response(StatusCode::OK, &json),
-            Err(e) => json_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                &format!(r#"{{"error":"{}"}}"#, e),
-            ),
+            Err(e) => ebpf_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
         }
     }
 
     async fn ebpf_put_config(&self, body: Bytes) -> Response<Body> {
-        match serde_json::from_slice::<crate::ebpf::EbpfXdpConfig>(&body) {
-            Ok(new_cfg) => match self.ebpf_manager.update_config(new_cfg) {
-                Ok(()) => self.ebpf_get_config(),
-                Err(err) => json_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    &format!(r#"{{"error":"{}"}}"#, err),
-                ),
-            },
-            Err(e) => json_response(
-                StatusCode::BAD_REQUEST,
-                &format!(r#"{{"error":"Invalid eBPF config JSON: {}"}}"#, e),
-            ),
+        let new_cfg = match serde_json::from_slice::<crate::ebpf::EbpfXdpConfig>(&body) {
+            Ok(cfg) => cfg,
+            Err(e) => {
+                return ebpf_error(
+                    StatusCode::BAD_REQUEST,
+                    &format!("Invalid eBPF config JSON: {}", e),
+                )
+            }
+        };
+
+        // Unsupported settings are a client error, kernel failures are not.
+        if let Err(e) = new_cfg.validate() {
+            return ebpf_error(StatusCode::BAD_REQUEST, &e);
+        }
+
+        match self.ebpf_manager.update_config(new_cfg) {
+            Ok(()) => self.ebpf_get_config(),
+            Err(err) => ebpf_error(StatusCode::INTERNAL_SERVER_ERROR, &err),
         }
     }
 
     fn ebpf_get_stats(&self) -> Response<Body> {
         let stats = self.ebpf_manager.stats();
+        self.metrics
+            .ebpf_blocked_ips
+            .set(stats.active_blocked_ips as f64);
         match serde_json::to_string(&stats) {
             Ok(json) => json_response(StatusCode::OK, &json),
-            Err(e) => json_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                &format!(r#"{{"error":"{}"}}"#, e),
-            ),
+            Err(e) => ebpf_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
         }
     }
 
@@ -139,66 +141,84 @@ impl ControlApiState {
         let ips = self.ebpf_manager.list_blocked_ips();
         match serde_json::to_string(&ips) {
             Ok(json) => json_response(StatusCode::OK, &json),
-            Err(e) => json_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                &format!(r#"{{"error":"{}"}}"#, e),
-            ),
+            Err(e) => ebpf_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
         }
     }
 
+    fn refresh_ebpf_gauge(&self) {
+        self.metrics
+            .ebpf_blocked_ips
+            .set(self.ebpf_manager.blocked_ip_count() as f64);
+    }
+
     async fn ebpf_block_ip(&self, body: Bytes) -> Response<Body> {
-        #[derive(Deserialize)]
-        struct BlockReq {
-            ip: String,
-            reason: Option<String>,
+        let req = match serde_json::from_slice::<crate::ebpf::BlockIpRequest>(&body) {
+            Ok(req) => req,
+            Err(e) => {
+                return ebpf_error(
+                    StatusCode::BAD_REQUEST,
+                    &format!("Invalid block request JSON: {}", e),
+                )
+            }
+        };
+
+        let ip = match req.ip.trim().parse::<std::net::IpAddr>() {
+            Ok(ip) => ip,
+            Err(_) => {
+                return ebpf_error(
+                    StatusCode::BAD_REQUEST,
+                    "Invalid IP address format (must be IPv4 or IPv6)",
+                )
+            }
+        };
+
+        if self.ebpf_manager.is_ip_blocked(&ip) {
+            return ebpf_error(
+                StatusCode::CONFLICT,
+                &format!("IP {} is already blocked", ip),
+            );
         }
 
-        match serde_json::from_slice::<BlockReq>(&body) {
-            Ok(req) => match req.ip.trim().parse::<std::net::IpAddr>() {
-                Ok(ip) => match self.ebpf_manager.block_ip(ip, req.reason) {
-                    Ok(entry) => {
-                        self.metrics
-                            .ebpf_blocked_ips
-                            .set(self.ebpf_manager.stats().active_blocked_ips as f64);
-                        match serde_json::to_string(&entry) {
-                            Ok(json) => json_response(StatusCode::CREATED, &json),
-                            Err(e) => json_response(
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                &format!(r#"{{"error":"{}"}}"#, e),
-                            ),
-                        }
-                    }
-                    Err(e) => json_response(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        &format!(r#"{{"error":"{}"}}"#, e),
-                    ),
-                },
-                Err(_) => json_response(
-                    StatusCode::BAD_REQUEST,
-                    r#"{"error":"Invalid IP address format (must be IPv4 or IPv6)"}"#,
-                ),
-            },
-            Err(e) => json_response(
-                StatusCode::BAD_REQUEST,
-                &format!(r#"{{"error":"Invalid block request JSON: {}"}}"#, e),
-            ),
+        match self.ebpf_manager.block_ip(ip, req.reason) {
+            Ok(entry) => {
+                self.refresh_ebpf_gauge();
+                match serde_json::to_string(&entry) {
+                    Ok(json) => json_response(StatusCode::CREATED, &json),
+                    Err(e) => ebpf_error(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+                }
+            }
+            // The manager rolls the entry back when the kernel map cannot be
+            // programmed, so a failure here means the IP is genuinely not blocked.
+            Err(e) => ebpf_error(StatusCode::INTERNAL_SERVER_ERROR, &e),
         }
     }
 
     fn ebpf_delete_ip(&self, id_or_ip: &str) -> Response<Body> {
-        if self.ebpf_manager.unblock_ip(id_or_ip) {
-            self.metrics
-                .ebpf_blocked_ips
-                .set(self.ebpf_manager.stats().active_blocked_ips as f64);
-            json_response(StatusCode::OK, r#"{"status":"deleted"}"#)
-        } else {
-            json_response(StatusCode::NOT_FOUND, r#"{"error":"Blocked IP not found"}"#)
+        match self.ebpf_manager.unblock_ip(id_or_ip) {
+            Ok(true) => {
+                self.refresh_ebpf_gauge();
+                json_response(StatusCode::OK, r#"{"status":"deleted"}"#)
+            }
+            Ok(false) => ebpf_error(StatusCode::NOT_FOUND, "Blocked IP not found"),
+            Err(e) => {
+                self.refresh_ebpf_gauge();
+                ebpf_error(StatusCode::INTERNAL_SERVER_ERROR, &e)
+            }
         }
     }
 
     fn ebpf_clear_ips(&self) -> Response<Body> {
-        self.ebpf_manager.clear();
-        self.metrics.ebpf_blocked_ips.set(0.0);
+        let failures = self.ebpf_manager.clear();
+        self.refresh_ebpf_gauge();
+        if failures > 0 {
+            return ebpf_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!(
+                    "{} address(es) could not be removed from the kernel map",
+                    failures
+                ),
+            );
+        }
         json_response(StatusCode::OK, r#"{"status":"cleared"}"#)
     }
 
@@ -948,8 +968,11 @@ impl ControlApiState {
             shutdown_tx: None,
             acl_api: None,
             rpz_api: Some(crate::rpz_api::RpzApiState::from_env()),
+            // Inert placeholder: a manager built from env here would attach the
+            // XDP program and then detach it again when with_ebpf_manager()
+            // replaces it. main.rs injects the real, env-configured manager.
             ebpf_manager: Arc::new(crate::ebpf::EbpfXdpManager::new(
-                crate::ebpf::EbpfXdpConfig::from_env(),
+                crate::ebpf::EbpfXdpConfig::default(),
             )),
         }
     }
@@ -1853,6 +1876,13 @@ fn collect_purge_tags(req: &PurgeRequest) -> Vec<String> {
         }
     }
     out
+}
+
+/// Builds an error body with the message properly JSON-escaped (error text may
+/// contain quotes, so it must never be interpolated into a raw JSON literal).
+pub(crate) fn ebpf_error(status: StatusCode, message: &str) -> Response<Body> {
+    let body = serde_json::json!({ "error": message }).to_string();
+    json_response(status, &body)
 }
 
 pub(crate) fn json_response(status: StatusCode, body: &str) -> Response<Body> {
@@ -3167,7 +3197,65 @@ mod tests {
         let list_json: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
         assert_eq!(list_json.len(), 0);
 
-        // 11. Security check: unauthenticated call should be 401 Unauthorized
+        // 11. Duplicate block -> 409 Conflict (no silent counter reset)
+        let dup_first = state
+            .dispatch(
+                &Method::POST,
+                "/api/ebpf/ips",
+                Bytes::from_static(br#"{"ip":"203.0.113.7"}"#),
+                &auth_headers,
+            )
+            .await;
+        assert_eq!(dup_first.status(), StatusCode::CREATED);
+        let dup_second = state
+            .dispatch(
+                &Method::POST,
+                "/api/ebpf/ips",
+                Bytes::from_static(br#"{"ip":"203.0.113.7"}"#),
+                &auth_headers,
+            )
+            .await;
+        assert_eq!(dup_second.status(), StatusCode::CONFLICT);
+
+        // 12. Unsupported config values are rejected as 400, with a valid JSON body
+        let bad_cfg = serde_json::json!({
+            "enabled": false,
+            "interface": "eth1",
+            "mode": "driver",
+            "mapName": "attacker_owned_map",
+            "maxEntries": 32768
+        });
+        let bad_cfg_resp = state
+            .dispatch(
+                &Method::PUT,
+                "/api/ebpf/config",
+                Bytes::from(bad_cfg.to_string()),
+                &auth_headers,
+            )
+            .await;
+        assert_eq!(bad_cfg_resp.status(), StatusCode::BAD_REQUEST);
+        let body = BodyExt::collect(bad_cfg_resp.into_body())
+            .await
+            .unwrap()
+            .to_bytes();
+        let err_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(err_json["error"].as_str().unwrap().contains("mapName"));
+        // The rejected update must not have been applied.
+        assert_eq!(state.ebpf_manager.config().map_name, "bsdm_blocked_ips");
+
+        // 13. Stats expose attachment health and no synthetic latency
+        let stats_resp = state
+            .dispatch(&Method::GET, "/api/ebpf/stats", Bytes::new(), &auth_headers)
+            .await;
+        let body = BodyExt::collect(stats_resp.into_body())
+            .await
+            .unwrap()
+            .to_bytes();
+        let stats_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(stats_json["attached"], false);
+        assert!(stats_json["kernelLatencyUs"].is_null());
+
+        // 14. Security check: unauthenticated call should be 401 Unauthorized
         let unauth_resp = state
             .dispatch(
                 &Method::POST,

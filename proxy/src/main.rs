@@ -373,6 +373,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         http_for_control,
     );
     let ebpf_manager = Arc::new(EbpfXdpManager::new(EbpfXdpConfig::from_env()));
+    let ebpf_for_metrics = ebpf_manager.clone();
 
     control_builder = control_builder
         .with_mitm_circuit_breaker(service.mitm_circuit_breaker())
@@ -674,6 +675,62 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+
+    if ebpf_for_metrics.is_enabled() {
+        let metrics_clone = metrics.clone();
+        let mut ebpf_shutdown_rx = shutdown_rx.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(15));
+            // Prometheus counters are monotonic, so export deltas of the kernel
+            // totals; a smaller value means the maps were reset on re-attach.
+            let mut last_packets: u64 = 0;
+            let mut last_bytes: u64 = 0;
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        let stats = ebpf_for_metrics.stats();
+                        metrics_clone
+                            .ebpf_blocked_ips
+                            .set(stats.active_blocked_ips as f64);
+
+                        let packets = stats.packets_dropped_total;
+                        let bytes = stats.bytes_dropped_total;
+                        let packet_delta = packets.saturating_sub(last_packets);
+                        let byte_delta = bytes.saturating_sub(last_bytes);
+                        if packets < last_packets || bytes < last_bytes {
+                            debug!("eBPF kernel counters reset; rebasing Prometheus counters");
+                            last_packets = packets;
+                            last_bytes = bytes;
+                        } else {
+                            if packet_delta > 0 {
+                                metrics_clone
+                                    .ebpf_packets_dropped_total
+                                    .inc_by(packet_delta as f64);
+                            }
+                            if byte_delta > 0 {
+                                metrics_clone.ebpf_bytes_dropped_total.inc_by(byte_delta as f64);
+                            }
+                            last_packets = packets;
+                            last_bytes = bytes;
+                        }
+
+                        if !stats.attached {
+                            warn!(
+                                interface = %stats.interface,
+                                "eBPF XDP is enabled but no program is attached — traffic is not being filtered"
+                            );
+                        }
+                    }
+                    changed = ebpf_shutdown_rx.changed() => {
+                        if changed.is_ok() && *ebpf_shutdown_rx.borrow() {
+                            debug!("eBPF metrics reporter stopped");
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+    }
 
     if let Some(auth_manager) = service.auth() {
         let mut auth_shutdown_rx = shutdown_rx.clone();

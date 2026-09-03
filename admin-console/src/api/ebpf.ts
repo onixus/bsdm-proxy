@@ -21,12 +21,15 @@ export interface EbpfBlockedIp {
 
 export interface EbpfStats {
   enabled: boolean
+  /** Whether the XDP program is actually loaded on the interface right now. */
+  attached: boolean
   interface: string
   mode: XdpMode
   activeBlockedIps: number
   packetsDroppedTotal: number
   bytesDroppedTotal: number
-  kernelLatencyUs: number
+  /** null when the proxy has no latency measurement available. */
+  kernelLatencyUs: number | null
   cpuUsageUserPercent: number
 }
 
@@ -127,12 +130,13 @@ export async function fetchEbpfStats(): Promise<EbpfStats> {
 
     return {
       enabled: memoryConfig?.enabled ?? true,
+      attached: false,
       interface: memoryConfig?.interface ?? 'eth0',
       mode: memoryConfig?.mode ?? 'driver',
       activeBlockedIps: ips.length,
       packetsDroppedTotal: packets || 184250,
       bytesDroppedTotal: bytes || 117920000,
-      kernelLatencyUs: 0.45,
+      kernelLatencyUs: null,
       cpuUsageUserPercent: 0.0,
     }
   }

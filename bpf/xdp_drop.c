@@ -9,12 +9,21 @@
 #include <linux/in.h>
 #include <bpf/bpf_helpers.h>
 
+// Per-address drop counters. Presence of an entry means "block this source";
+// the value accumulates what was actually dropped for it. Userspace
+// (proxy/src/ebpf.rs) inserts entries with both counters zeroed and reads them
+// back via `bpftool map dump`.
+struct ip_drop_stats {
+    __u64 packets;
+    __u64 bytes;
+};
+
 // IPv4 blocked addresses: key is 32-bit IPv4 in network byte order
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 65536);
     __type(key, __u32);
-    __type(value, __u8);  // 1 = block
+    __type(value, struct ip_drop_stats);
 } bsdm_blocked_ips SEC(".maps");
 
 // IPv6 blocked addresses: key is 128-bit IPv6 address
@@ -22,7 +31,7 @@ struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 65536);
     __type(key, struct in6_addr);
-    __type(value, __u8);  // 1 = block
+    __type(value, struct ip_drop_stats);
 } bsdm_blocked_ips_v6 SEC(".maps");
 
 // Drop statistics array:
@@ -67,9 +76,11 @@ int xdp_drop_blocked_ips(struct xdp_md *ctx) {
             return XDP_PASS;
 
         __u32 src_ip = iph->saddr;
-        __u8 *blocked = bpf_map_lookup_elem(&bsdm_blocked_ips, &src_ip);
-        if (blocked && *blocked == 1) {
+        struct ip_drop_stats *blocked = bpf_map_lookup_elem(&bsdm_blocked_ips, &src_ip);
+        if (blocked) {
             __u64 pkt_len = (long)data_end - (long)data;
+            __sync_fetch_and_add(&blocked->packets, 1);
+            __sync_fetch_and_add(&blocked->bytes, pkt_len);
             record_drop(pkt_len);
             return XDP_DROP;
         }
@@ -80,9 +91,12 @@ int xdp_drop_blocked_ips(struct xdp_md *ctx) {
         if ((void *)(ip6h + 1) > data_end)
             return XDP_PASS;
 
-        __u8 *blocked = bpf_map_lookup_elem(&bsdm_blocked_ips_v6, &ip6h->saddr);
-        if (blocked && *blocked == 1) {
+        struct in6_addr src_ip6 = ip6h->saddr;
+        struct ip_drop_stats *blocked = bpf_map_lookup_elem(&bsdm_blocked_ips_v6, &src_ip6);
+        if (blocked) {
             __u64 pkt_len = (long)data_end - (long)data;
+            __sync_fetch_and_add(&blocked->packets, 1);
+            __sync_fetch_and_add(&blocked->bytes, pkt_len);
             record_drop(pkt_len);
             return XDP_DROP;
         }
