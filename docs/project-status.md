@@ -36,7 +36,7 @@
 | Inspection | ICAP REQMOD/RESPMOD | Experimental (Frozen) | Заморожено. RESPMOD требует buffered MISS (`STREAMING_MISS_ENABLED=false`). |
 | DLP/CASB | Сигнатурное сканирование request body | Experimental (Frozen) | Заморожено. Сигнатурный сканер. |
 | ZTNA/IAP | Reverse proxy + OIDC | Experimental (Frozen) | Описан в Agent Contract v0.1 (ADR 0005). |
-| Network | eBPF/XDP manager | Experimental (Frozen) | Заморожено. `EBPF_XDP_ENABLED` интерфейс. |
+| Network | eBPF/XDP manager | Beta (lab) | Lab-компонент (Day-1 пилота: OFF). Dual-stack IPv4/IPv6 XDP-фильтр, учет дропов ядра через BPF-карту `bsdm_drop_stats`, полный Control API (`/api/ebpf/*`) и Prometheus-метрики. |
 | Remote access | AmneziaWG sidecar/config API | Beta (lab) | **Lab-only, не для продакшена** (Day-1 пилота: OFF, issue #331). Curve25519 криптография, PSK, авто-провижининг пиров, экспорт .conf, метрики и интеграция с Agent Contract (`tunnel` capability). [bsdm-connect-client.md](getting-started/bsdm-connect-client.md). |
 | Cluster | Global sessions, distributed rate limit, threat sync | Experimental (Frozen) | Scaffolding gRPC mesh. |
 | Admin UI | Admin Console (Hybrid core) | Основной | Primary nav: Dashboard, Logs, Analytics, Policies, RPZ (Live Status/Rollback), **Devices** (Drift/OS Proxy badges), **AmneziaWG**, Users, Settings (разделы Devices и AmneziaWG помечены в навигации как lab-only, не для продакшена). SPA baked into proxy image (`/admin/`). Live/demo provenance, error/empty states, mutation token gate, Threat Investigation Modal, ML Domain Inspector. Search CORS for localhost split. |
