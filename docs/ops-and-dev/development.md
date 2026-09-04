@@ -32,7 +32,7 @@ bsdm-proxy/
 │       └── lib.rs
 ├── cache-indexer/      # Kafka|HTTP → ClickHouse|SQLite + Search API
 ├── ml-worker/          # M5 features/scores + threat-score API
-├── dns-sinkhole/       # Optional DNS RPZ-lite sidecar (P3)
+├── dns-sinkhole/       # Core DNS RPZ-lite компонент (Hybrid Policy, первый рубеж)
 ├── threat-intel/       # Фоновый сбор фидов угроз (Shadow Mode)
 ├── alert-worker/       # M4 webhook alerts
 ├── bsdm-events/        # Shared CacheEvent types

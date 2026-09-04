@@ -52,8 +52,8 @@
 | [Semantic cache](features/semantic-cache.md) | beta |
 | [DNS sinkhole, DoH, DoT](features/dns-sinkhole.md) | основной |
 | [Threat intel collector](features/threat-intel-collector.md) | beta — мониторинг в Shadow Mode, без блокировки |
-| [WASM plugins](features/wasm-plugins.md) | experimental |
-| [ICAP](features/icap-inspection.md) | experimental |
+| [WASM plugins](features/wasm-plugins.md) | experimental (frozen) — Scope Freeze, не security boundary |
+| [ICAP](features/icap-inspection.md) | experimental (frozen) — Scope Freeze, не security boundary |
 | [eBPF / XDP kernel filter](features/ebpf-xdp.md) | beta (lab) — Day-1 пилота: OFF, не security boundary |
 
 ## Аналитика и detection

@@ -1,8 +1,16 @@
-# Wasm plugins (Strategic Phase 3)
+# Wasm plugins
+
+> **ЗАМОРОЖЕНО (Scope Freeze). Experimental — не security boundary.**
+>
+> Модуль заморожен в текущем виде для исключения фичер-крипа
+> ([roadmap.md § Замороженные модули](../roadmap.md#замороженные-модули-scope-freeze)):
+> в Day-1 скоуп пилота не входит, фича-флаг `wasm` выключен по умолчанию,
+> развитие не ведётся. Страница описывает PoC «как есть» и годится только
+> для lab-оценки. Зрелость — [project-status.md](../project-status.md).
 
 Optional **Wasmtime** request hooks so policy/transform logic can ship as `.wasm` / `.wat` modules without rebuilding the proxy.
 
-Issue: [#188](https://github.com/onixus/bsdm-proxy/issues/188) · Roadmap: [roadmap.md](../roadmap.md) (WASM Phase).
+Issue: [#188](https://github.com/onixus/bsdm-proxy/issues/188) · Статус: [roadmap.md § Замороженные модули](../roadmap.md#замороженные-модули-scope-freeze).
 
 ## Status (PoC)
 

@@ -1,8 +1,17 @@
-# ICAP adapter (P3)
+# ICAP adapter
+
+> **ЗАМОРОЖЕНО (Scope Freeze). Experimental — не security boundary.**
+>
+> Модуль заморожен в текущем виде
+> ([roadmap.md § Замороженные модули](../roadmap.md#замороженные-модули-scope-freeze)):
+> в Day-1 скоуп пилота не входит (профиль `--profile icap` не активируется),
+> развитие не ведётся. Отдельное эксплуатационное ограничение: RESPMOD не
+> выполняется на streaming MISS — требуется `STREAMING_MISS_ENABLED=false`.
+> Зрелость — [project-status.md](../project-status.md).
 
 Optional **ICAP** (RFC 3507) client for enterprise AV / URL filtering sidecars — Squid `adaptation_access` equivalent. Async sidecar pattern; not inline DLP.
 
-Issue: [#99](https://github.com/onixus/bsdm-proxy/issues/99) · Roadmap: [roadmap.md](../roadmap.md).
+Issue: [#99](https://github.com/onixus/bsdm-proxy/issues/99) · Статус: [roadmap.md § Замороженные модули](../roadmap.md#замороженные-модули-scope-freeze).
 
 ## Status (PoC)
 
