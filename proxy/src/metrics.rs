@@ -134,6 +134,10 @@ pub struct Metrics {
     pub ebpf_packets_dropped_total: Counter,
     /// Total bytes dropped by eBPF/XDP filter at kernel layer.
     pub ebpf_bytes_dropped_total: Counter,
+    /// 1 when the eBPF/XDP subsystem is armed by the process environment
+    /// (`EBPF_XDP_ENABLED` / `EBPF_XDP_ALLOW_RUNTIME_ENABLE`), 0 otherwise.
+    /// Pilot invariant: this must stay 0.
+    pub ebpf_armed: Gauge,
 }
 
 impl Metrics {
@@ -612,6 +616,13 @@ impl Metrics {
         )?;
         registry.register(Box::new(ebpf_bytes_dropped_total.clone()))?;
 
+        let ebpf_armed = Gauge::new(
+            "bsdm_proxy_ebpf_armed",
+            "1 when eBPF/XDP is armed by the process environment (EBPF_XDP_ENABLED or \
+             EBPF_XDP_ALLOW_RUNTIME_ENABLE), 0 when no control-plane call can load an XDP program",
+        )?;
+        registry.register(Box::new(ebpf_armed.clone()))?;
+
         Ok(Metrics {
             registry,
             requests_total,
@@ -679,6 +690,7 @@ impl Metrics {
             ebpf_blocked_ips,
             ebpf_packets_dropped_total,
             ebpf_bytes_dropped_total,
+            ebpf_armed,
         })
     }
 

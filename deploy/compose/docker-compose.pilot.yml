@@ -140,6 +140,12 @@ services:
       METRICS_AUTH_TOKEN: "${METRICS_AUTH_TOKEN:-}"
       # Experimental DLP off for pilot day-1 (persistent kill-switch; no control-API wipe needed).
       DLP_ENABLED: "false"
+      # eBPF/XDP is lab-only and out of the Day-1 pilot scope. Both switches off
+      # means /api/ebpf/config answers 403 for any enable attempt — no kernel
+      # packet filter can be loaded without editing this file and restarting.
+      # See docs/features/ebpf-xdp.md.
+      EBPF_XDP_ENABLED: "false"
+      EBPF_XDP_ALLOW_RUNTIME_ENABLE: "false"
     depends_on:
       redis:
         condition: service_healthy

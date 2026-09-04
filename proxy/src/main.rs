@@ -374,6 +374,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let ebpf_manager = Arc::new(EbpfXdpManager::new(EbpfXdpConfig::from_env()));
     let ebpf_for_metrics = ebpf_manager.clone();
+    // Pilot invariant (docs/features/ebpf-xdp.md): unarmed means no XDP program
+    // can be loaded at all, not even through /api/ebpf/config.
+    metrics
+        .ebpf_armed
+        .set(if ebpf_manager.runtime_enable_allowed() {
+            1.0
+        } else {
+            0.0
+        });
+    if ebpf_manager.runtime_enable_allowed() {
+        warn!(
+            enabled = ebpf_manager.is_enabled(),
+            "eBPF/XDP is armed (lab-only feature, not a security boundary) — \
+             the control plane can load a kernel packet filter"
+        );
+    }
 
     control_builder = control_builder
         .with_mitm_circuit_breaker(service.mitm_circuit_breaker())
@@ -676,7 +692,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    if ebpf_for_metrics.is_enabled() {
+    // Armed (not just enabled): the filter can be switched on later through
+    // /api/ebpf/config, and the reporter has to be running by then.
+    if ebpf_for_metrics.runtime_enable_allowed() {
         let metrics_clone = metrics.clone();
         let mut ebpf_shutdown_rx = shutdown_rx.clone();
         tokio::spawn(async move {
@@ -714,7 +732,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             last_bytes = bytes;
                         }
 
-                        if !stats.attached {
+                        if stats.enabled && !stats.attached {
                             warn!(
                                 interface = %stats.interface,
                                 "eBPF XDP is enabled but no program is attached — traffic is not being filtered"

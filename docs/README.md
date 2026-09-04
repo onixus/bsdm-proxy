@@ -54,6 +54,7 @@
 | [Threat intel collector](features/threat-intel-collector.md) | beta — мониторинг в Shadow Mode, без блокировки |
 | [WASM plugins](features/wasm-plugins.md) | experimental |
 | [ICAP](features/icap-inspection.md) | experimental |
+| [eBPF / XDP kernel filter](features/ebpf-xdp.md) | beta (lab) — Day-1 пилота: OFF, не security boundary |
 
 ## Аналитика и detection
 

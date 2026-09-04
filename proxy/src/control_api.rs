@@ -120,6 +120,12 @@ impl ControlApiState {
             return ebpf_error(StatusCode::BAD_REQUEST, &e);
         }
 
+        // The control plane may toggle an armed subsystem, never arm one: that
+        // stays an explicit operator decision in the process environment.
+        if new_cfg.enabled && !self.ebpf_manager.runtime_enable_allowed() {
+            return ebpf_error(StatusCode::FORBIDDEN, crate::ebpf::NOT_ARMED_ERROR);
+        }
+
         match self.ebpf_manager.update_config(new_cfg) {
             Ok(()) => self.ebpf_get_config(),
             Err(err) => ebpf_error(StatusCode::INTERNAL_SERVER_ERROR, &err),
@@ -3265,5 +3271,89 @@ mod tests {
             )
             .await;
         assert_eq!(unauth_resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    /// Day-1 pilot invariant: an authenticated control-plane call cannot load a
+    /// kernel packet filter unless the operator armed eBPF in the environment.
+    #[tokio::test]
+    async fn test_ebpf_control_api_cannot_enable_unarmed_filter() {
+        let metrics = Arc::new(Metrics::new().unwrap());
+        let cache = Arc::new(HttpL1Cache::new(100, 4));
+        let mut state = state_plain(metrics, cache);
+        state.api_token = Some("secret-token".to_string());
+        state.fail_closed = true;
+
+        let mut auth_headers = HeaderMap::new();
+        auth_headers.insert(
+            AUTHORIZATION,
+            "Bearer secret-token".parse().expect("valid header"),
+        );
+
+        // Baseline: the shipped default is disabled and un-armed.
+        let cfg_resp = state
+            .dispatch(
+                &Method::GET,
+                "/api/ebpf/config",
+                Bytes::new(),
+                &auth_headers,
+            )
+            .await;
+        let body = BodyExt::collect(cfg_resp.into_body())
+            .await
+            .unwrap()
+            .to_bytes();
+        let cfg_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(cfg_json["enabled"], false);
+        assert_eq!(cfg_json["runtimeEnableAllowed"], false);
+
+        // Even a body that claims the gate is open must be refused with 403.
+        let enable = serde_json::json!({
+            "enabled": true,
+            "interface": "eth0",
+            "mode": "skb",
+            "mapName": "bsdm_blocked_ips",
+            "maxEntries": 1024,
+            "runtimeEnableAllowed": true
+        });
+        let resp = state
+            .dispatch(
+                &Method::PUT,
+                "/api/ebpf/config",
+                Bytes::from(enable.to_string()),
+                &auth_headers,
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        let body = BodyExt::collect(resp.into_body()).await.unwrap().to_bytes();
+        let err_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(err_json["error"]
+            .as_str()
+            .unwrap()
+            .contains("EBPF_XDP_ENABLED"));
+
+        // Nothing was applied: still disabled, still detached.
+        assert!(!state.ebpf_manager.is_enabled());
+        assert!(!state.ebpf_manager.is_attached());
+        assert_eq!(state.ebpf_manager.config().interface, "eth0");
+
+        // Disable-only updates keep working while un-armed.
+        let disable = serde_json::json!({
+            "enabled": false,
+            "interface": "eth1",
+            "mode": "skb",
+            "mapName": "bsdm_blocked_ips",
+            "maxEntries": 1024
+        });
+        let resp = state
+            .dispatch(
+                &Method::PUT,
+                "/api/ebpf/config",
+                Bytes::from(disable.to_string()),
+                &auth_headers,
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(state.ebpf_manager.config().interface, "eth1");
+        assert!(!state.ebpf_manager.is_enabled());
     }
 }

@@ -41,7 +41,7 @@ Issue tracking: **#270** (этот документ + compose), **#269** (load-t
 | **AmneziaWG / bsdm-connect** | ❌ **OFF** | Исключены из production-пути (статус: Lab / Phase C) |
 | **WASM Plugins** | ❌ **OFF** | Не используются как security boundary |
 | **ICAP / ClamAV** | ❌ **OFF** | Выключены (`--profile icap` не поднимается) |
-| **eBPF / XDP / Cluster Mesh** | ❌ **OFF** | Не входят в одноузловой пилот |
+| **eBPF / XDP / Cluster Mesh** | ❌ **OFF** | Не входят в одноузловой пилот. eBPF: `EBPF_XDP_ENABLED=false` + `EBPF_XDP_ALLOW_RUNTIME_ENABLE=false` в `deploy/compose/docker-compose.pilot.yml`; без них `/api/ebpf/config` отвечает 403 ([ebpf-xdp.md](../features/ebpf-xdp.md)) |
 | **DLP Enforcement** | ❌ **OFF** | `DLP_ENABLED=false` |
 
 ---
@@ -125,6 +125,10 @@ curl -X POST http://127.0.0.1:9090/api/security/dlp \
 ### E. Out of scope explicit
 
 - [ ] ICAP / AWG / eBPF / WASM **не** включены
+- [ ] **eBPF/XDP не взведён**: `EBPF_XDP_ENABLED` и `EBPF_XDP_ALLOW_RUNTIME_ENABLE`
+      не заданы или `false`; проверка — `GET /api/ebpf/config` возвращает
+      `"runtimeEnableAllowed": false`, а `bsdm_proxy_ebpf_armed == 0` в `/metrics`
+      ([ebpf-xdp.md](../features/ebpf-xdp.md))
 - [ ] Agent UI / production multi-OS agent **не** требуется для pass (lab spike optional — [pilot-agent.md](pilot-agent.md))
 
 ---

@@ -510,8 +510,15 @@ ICAP-эндпоинта. `ICAP_FAIL_OPEN=true` возвращает прежне
 
 ### eBPF/XDP
 
-`EBPF_XDP_ENABLED`, `EBPF_XDP_IFACE`, `EBPF_XDP_MODE`,
-`EBPF_XDP_MAX_ENTRIES`.
+`EBPF_XDP_ENABLED`, `EBPF_XDP_ALLOW_RUNTIME_ENABLE`, `EBPF_XDP_IFACE`,
+`EBPF_XDP_MODE`, `EBPF_XDP_MAX_ENTRIES`.
+
+**Lab-only, Day-1 пилота: OFF, не security boundary.** Подсистема выключена по
+умолчанию и требует явного arming в окружении процесса: `EBPF_XDP_ENABLED=true`
+подключает XDP-программу при старте, `EBPF_XDP_ALLOW_RUNTIME_ENABLE=true` только
+разрешает включение из control plane. Пока ни одна из переменных не выставлена,
+`PUT /api/ebpf/config` с `enabled: true` отвечает `403` и ничего не применяет.
+Полный lab-путь: [features/ebpf-xdp.md](../features/ebpf-xdp.md).
 
 `EBPF_XDP_ENABLED` по умолчанию `false` (и в коде, и в поставляемом
 `bsdm-proxy.env`). Компонент lab-only и не входит в Day-1 скоуп одноузлового

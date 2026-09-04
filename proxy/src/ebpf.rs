@@ -33,6 +33,35 @@ pub const MAP_NAME_STATS: &str = "bsdm_drop_stats";
 /// control-plane requests cannot turn into a burst of subprocesses.
 const STATS_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 
+/// Boot-time opt-in that attaches the XDP program immediately.
+pub const ENV_ENABLED: &str = "EBPF_XDP_ENABLED";
+/// Boot-time opt-in that only *arms* the subsystem: nothing is attached at
+/// startup, but the control plane is allowed to enable it later.
+pub const ENV_ALLOW_RUNTIME_ENABLE: &str = "EBPF_XDP_ALLOW_RUNTIME_ENABLE";
+
+/// Error returned whenever something tries to enable XDP filtering without the
+/// operator having armed the subsystem through the process environment.
+///
+/// Same fail-safe shape as the TI enforcement gate (`ti_enforce.rs`): a
+/// control-plane call can never be the *only* thing standing between a pilot
+/// deployment and a kernel-level packet filter.
+pub const NOT_ARMED_ERROR: &str = "eBPF XDP is not armed: set EBPF_XDP_ENABLED=true (attach at boot) \
+     or EBPF_XDP_ALLOW_RUNTIME_ENABLE=true (allow control-plane activation) in the proxy environment \
+     and restart before enabling the filter";
+
+/// Parses a boolean opt-in environment variable. Absent or unparsable means
+/// "off": every eBPF switch is opt-in, never opt-out.
+fn env_opt_in(name: &str) -> bool {
+    std::env::var(name)
+        .map(|v| {
+            matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
 /// Runtime mode for eBPF XDP program attachment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -87,6 +116,12 @@ pub struct EbpfXdpConfig {
     pub map_name: String,
     #[serde(alias = "max_entries")]
     pub max_entries: u32,
+    /// Whether the process environment armed the subsystem at startup.
+    ///
+    /// Read-only over the wire (`skip_deserializing`): `PUT /api/ebpf/config`
+    /// can never grant itself the right to load a kernel program.
+    #[serde(default, skip_deserializing)]
+    pub runtime_enable_allowed: bool,
 }
 
 impl Default for EbpfXdpConfig {
@@ -97,15 +132,21 @@ impl Default for EbpfXdpConfig {
             mode: XdpMode::Skb,
             map_name: MAP_NAME_V4.to_string(),
             max_entries: COMPILED_MAX_ENTRIES,
+            runtime_enable_allowed: false,
         }
     }
 }
 
 impl EbpfXdpConfig {
+    /// Builds the boot configuration from the environment.
+    ///
+    /// Both gates default to off, so a deployment that says nothing about eBPF
+    /// (pilot profile, Helm chart, packaged env file) gets no XDP program and
+    /// no way to obtain one without a restart.
     pub fn from_env() -> Self {
-        let enabled = std::env::var("EBPF_XDP_ENABLED")
-            .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
-            .unwrap_or(false);
+        let enabled = env_opt_in(ENV_ENABLED);
+        // Enabling at boot implies permission to toggle at runtime.
+        let runtime_enable_allowed = enabled || env_opt_in(ENV_ALLOW_RUNTIME_ENABLE);
         let interface = std::env::var("EBPF_XDP_IFACE").unwrap_or_else(|_| "eth0".to_string());
         let mode_str = std::env::var("EBPF_XDP_MODE").unwrap_or_else(|_| "skb".to_string());
         let max_entries = std::env::var("EBPF_XDP_MAX_ENTRIES")
@@ -119,6 +160,7 @@ impl EbpfXdpConfig {
             mode: XdpMode::parse(&mode_str),
             map_name: MAP_NAME_V4.to_string(),
             max_entries,
+            runtime_enable_allowed,
         }
     }
 
@@ -186,6 +228,9 @@ pub struct EbpfStats {
     /// `None` when no measurement is available (never a synthetic value).
     pub kernel_latency_us: Option<f64>,
     pub cpu_usage_user_percent: f64,
+    /// Whether the process environment armed the subsystem (see
+    /// [`NOT_ARMED_ERROR`]). `false` means the control plane cannot enable it.
+    pub runtime_enable_allowed: bool,
 }
 
 struct ManagerInner {
@@ -239,6 +284,14 @@ pub struct EbpfXdpManager {
 
 impl EbpfXdpManager {
     pub fn new(config: EbpfXdpConfig) -> Self {
+        // Fail-safe: a configuration that asks for a kernel program without the
+        // environment gate is downgraded to "disabled" instead of attaching.
+        let mut config = config;
+        if config.enabled && !config.runtime_enable_allowed {
+            warn!("{}", NOT_ARMED_ERROR);
+            config.enabled = false;
+        }
+
         let manager = Self {
             inner: Arc::new(ManagerInner {
                 config: RwLock::new(config.clone()),
@@ -373,6 +426,17 @@ impl EbpfXdpManager {
         self.inner.config.read().map(|c| c.enabled).unwrap_or(false)
     }
 
+    /// Whether the operator armed the subsystem through the process
+    /// environment. When `false`, no control-plane call can load an XDP
+    /// program — see [`NOT_ARMED_ERROR`].
+    pub fn runtime_enable_allowed(&self) -> bool {
+        self.inner
+            .config
+            .read()
+            .map(|c| c.runtime_enable_allowed)
+            .unwrap_or(false)
+    }
+
     /// Whether the XDP program is currently loaded on the interface.
     pub fn is_attached(&self) -> bool {
         self.inner.attached.load(Ordering::SeqCst)
@@ -393,6 +457,15 @@ impl EbpfXdpManager {
     /// edits no longer tear down a working filter.
     pub fn update_config(&self, new_cfg: EbpfXdpConfig) -> Result<(), String> {
         new_cfg.validate()?;
+
+        // The arming gate is owned by the process environment, never by the
+        // request body: carry it over and refuse enablement without it.
+        let mut new_cfg = new_cfg;
+        new_cfg.runtime_enable_allowed = self.runtime_enable_allowed();
+        if new_cfg.enabled && !new_cfg.runtime_enable_allowed {
+            warn!("Rejected control-plane eBPF enable request: subsystem not armed");
+            return Err(NOT_ARMED_ERROR.to_string());
+        }
 
         // Snapshot the transition under the lock, then release it before any
         // kernel interaction.
@@ -712,6 +785,7 @@ impl EbpfXdpManager {
             // No latency probe exists yet; report absence instead of a constant.
             kernel_latency_us: None,
             cpu_usage_user_percent: 0.0,
+            runtime_enable_allowed: config.runtime_enable_allowed,
         }
     }
 
@@ -840,6 +914,152 @@ fn bytes_to_ip(bytes: &[u8], is_v6: bool) -> Option<IpAddr> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Serializes the tests that mutate process-wide eBPF environment vars.
+    static ENV_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn armed_config() -> EbpfXdpConfig {
+        EbpfXdpConfig {
+            runtime_enable_allowed: true,
+            ..Default::default()
+        }
+    }
+
+    /// Pilot invariant: a deployment that says nothing about eBPF gets no XDP
+    /// program and no way to obtain one without a restart.
+    /// See docs/features/ebpf-xdp.md and docs/getting-started/pilot-deployment.md.
+    #[test]
+    fn test_default_config_is_disabled_and_unarmed() {
+        let cfg = EbpfXdpConfig::default();
+        assert!(!cfg.enabled, "eBPF must default to disabled");
+        assert!(
+            !cfg.runtime_enable_allowed,
+            "eBPF must default to un-armed (control plane cannot enable it)"
+        );
+
+        let manager = EbpfXdpManager::new(cfg);
+        assert!(!manager.is_enabled());
+        assert!(!manager.is_attached());
+        assert!(!manager.runtime_enable_allowed());
+        assert!(!manager.stats().enabled);
+        assert!(!manager.stats().runtime_enable_allowed);
+    }
+
+    #[test]
+    fn test_from_env_defaults_to_disabled_and_unarmed() {
+        let _guard = ENV_GUARD.lock().expect("env guard");
+        std::env::remove_var(ENV_ENABLED);
+        std::env::remove_var(ENV_ALLOW_RUNTIME_ENABLE);
+
+        let cfg = EbpfXdpConfig::from_env();
+        assert!(!cfg.enabled);
+        assert!(!cfg.runtime_enable_allowed);
+    }
+
+    #[test]
+    fn test_from_env_arming_gates() {
+        let _guard = ENV_GUARD.lock().expect("env guard");
+
+        // Non-truthy values never arm anything.
+        std::env::set_var(ENV_ENABLED, "maybe");
+        std::env::remove_var(ENV_ALLOW_RUNTIME_ENABLE);
+        let cfg = EbpfXdpConfig::from_env();
+        assert!(!cfg.enabled);
+        assert!(!cfg.runtime_enable_allowed);
+
+        // Runtime arming without boot attachment.
+        std::env::remove_var(ENV_ENABLED);
+        std::env::set_var(ENV_ALLOW_RUNTIME_ENABLE, "true");
+        let cfg = EbpfXdpConfig::from_env();
+        assert!(!cfg.enabled, "arming alone must not attach at boot");
+        assert!(cfg.runtime_enable_allowed);
+
+        // Boot attachment implies runtime arming.
+        std::env::set_var(ENV_ENABLED, "1");
+        std::env::remove_var(ENV_ALLOW_RUNTIME_ENABLE);
+        let cfg = EbpfXdpConfig::from_env();
+        assert!(cfg.enabled);
+        assert!(cfg.runtime_enable_allowed);
+
+        std::env::remove_var(ENV_ENABLED);
+        std::env::remove_var(ENV_ALLOW_RUNTIME_ENABLE);
+    }
+
+    /// The arming gate is not settable over the wire: a `PUT /api/ebpf/config`
+    /// body claiming `runtimeEnableAllowed: true` must be ignored.
+    #[test]
+    fn test_runtime_enable_allowed_is_not_deserialized() {
+        let cfg: EbpfXdpConfig = serde_json::from_str(
+            r#"{"enabled":true,"interface":"eth0","mode":"skb",
+                "mapName":"bsdm_blocked_ips","maxEntries":1024,
+                "runtimeEnableAllowed":true}"#,
+        )
+        .expect("parse config");
+        assert!(cfg.enabled);
+        assert!(
+            !cfg.runtime_enable_allowed,
+            "request bodies must never arm the subsystem"
+        );
+    }
+
+    #[test]
+    fn test_update_config_refuses_to_enable_when_unarmed() {
+        let manager = EbpfXdpManager::new(EbpfXdpConfig::default());
+        let cfg = EbpfXdpConfig {
+            enabled: true,
+            ..Default::default()
+        };
+        let err = manager
+            .update_config(cfg)
+            .expect_err("unarmed enable must be rejected");
+        assert_eq!(err, NOT_ARMED_ERROR);
+        // The rejected update must not have been applied at all.
+        assert!(!manager.is_enabled());
+        assert!(!manager.is_attached());
+    }
+
+    /// Disabling is always allowed, armed or not — the gate is one-directional.
+    #[test]
+    fn test_update_config_allows_disabling_when_unarmed() {
+        let manager = EbpfXdpManager::new(EbpfXdpConfig::default());
+        let cfg = EbpfXdpConfig {
+            enabled: false,
+            interface: "eth1".to_string(),
+            ..Default::default()
+        };
+        manager.update_config(cfg).expect("disable-only update");
+        assert_eq!(manager.config().interface, "eth1");
+        assert!(!manager.is_enabled());
+    }
+
+    /// A manager built with `enabled: true` but no arming is downgraded rather
+    /// than attaching a kernel program.
+    #[test]
+    fn test_new_downgrades_enabled_without_arming() {
+        let manager = EbpfXdpManager::new(EbpfXdpConfig {
+            enabled: true,
+            ..Default::default()
+        });
+        assert!(!manager.is_enabled());
+        assert!(!manager.is_attached());
+    }
+
+    #[test]
+    fn test_armed_manager_passes_the_gate() {
+        let manager = EbpfXdpManager::new(armed_config());
+        assert!(manager.runtime_enable_allowed());
+
+        let cfg = EbpfXdpConfig {
+            enabled: true,
+            ..armed_config()
+        };
+        // Off Linux the attach itself fails, but it must fail on the kernel
+        // side, never on the arming gate.
+        match manager.update_config(cfg) {
+            Ok(()) => assert!(manager.is_enabled()),
+            Err(e) => assert_ne!(e, NOT_ARMED_ERROR, "arming gate must not trigger"),
+        }
+    }
 
     #[test]
     fn test_ebpf_config_defaults() {
