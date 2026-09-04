@@ -92,7 +92,7 @@ Roadmap определяет порядок работ в рамках стра�
 - **Mock OIDC Reverse Proxy**: Заморожен.
 - **Global Session / Threat Sync Scaffolding**: Заморожен до подтверждения однокластерной модели.
 
-Отдельно от заморозки: **eBPF/XDP** модернизирован в lab-режиме (dual-stack IPv4/IPv6, Control API `/api/ebpf/*`, учет дропов ядра через BPF-карту `bsdm_drop_stats`) и в Scope Freeze больше не входит. Компонент остаётся lab-only и не входит в Day-1 скоуп одноузлового пилота — см. [project-status.md](project-status.md).
+Отдельно от заморозки: **eBPF/XDP** модернизирован в lab-режиме (dual-stack IPv4/IPv6, Control API `/api/ebpf/*`, учет дропов ядра через BPF-карту `bsdm_drop_stats`) и в Scope Freeze больше не входит. Компонент остаётся lab-only и не входит в Day-1 скоуп одноузлового пилота — см. [project-status.md](project-status.md). Выключен по умолчанию и требует явного arming в окружении процесса (`EBPF_XDP_ENABLED` / `EBPF_XDP_ALLOW_RUNTIME_ENABLE`): control plane не может включить фильтр сам и отвечает 403. Lab-путь запуска — [features/ebpf-xdp.md](features/ebpf-xdp.md), смоук `scripts/run-ebpf-lab-smoke.sh`.
 
 ---
 

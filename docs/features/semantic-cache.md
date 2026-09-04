@@ -1,8 +1,8 @@
-# Semantic / LLM cache (Phase 4)
+# Semantic / LLM cache
 
 Content-addressable caching for LLM-style `POST` APIs, plus optional near-hit via a pluggable similarity index (local memory or **Qdrant**).
 
-See [roadmap.md](../roadmap.md) (AI Traffic Phase) · issue [#189](https://github.com/onixus/bsdm-proxy/issues/189).
+Зрелость: **Beta** — см. [project-status.md](../project-status.md) · issue [#189](https://github.com/onixus/bsdm-proxy/issues/189).
 
 ## Enable
 

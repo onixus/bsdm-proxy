@@ -1,8 +1,14 @@
-# DNS sinkhole / DNS security (P3)
+# DNS sinkhole / DNS security
 
-Optional **DNS-layer** filtering (Cisco Umbrella–style first hop). Separate on-ramp from the explicit forward proxy.
+**DNS-layer** filtering (Cisco Umbrella–style first hop) — первичный рубеж
+Hybrid Policy (DNS -> SNI -> Selective MITM). Отдельный on-ramp относительно
+explicit forward proxy.
 
-Issue: [#108](https://github.com/onixus/bsdm-proxy/issues/108) · Roadmap: [roadmap.md](../roadmap.md) · ADR: [adr/0004-dns-sinkhole-sidecar.md](../adr/0004-dns-sinkhole-sidecar.md)
+Зрелость: **Основной**. С Фазы A входит в базовый `docker-compose.yml` как
+Core-компонент поставки, а не опциональный sidecar
+([project-status.md](../project-status.md), [roadmap.md](../roadmap.md)).
+
+Issue: [#108](https://github.com/onixus/bsdm-proxy/issues/108) · ADR: [adr/0004-dns-sinkhole-sidecar.md](../adr/0004-dns-sinkhole-sidecar.md)
 
 ## Scope decision
 

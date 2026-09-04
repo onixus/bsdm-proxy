@@ -36,7 +36,7 @@
 | Inspection | ICAP REQMOD/RESPMOD | Experimental (Frozen) | Заморожено. RESPMOD требует buffered MISS (`STREAMING_MISS_ENABLED=false`). |
 | DLP/CASB | Сигнатурное сканирование request body | Experimental (Frozen) | Заморожено. Сигнатурный сканер. |
 | ZTNA/IAP | Reverse proxy + OIDC | Experimental (Frozen) | Описан в Agent Contract v0.1 (ADR 0005). |
-| Network | eBPF/XDP manager | Beta (lab) | Lab-компонент (Day-1 пилота: OFF). Dual-stack IPv4/IPv6 XDP-фильтр, учет дропов ядра через BPF-карту `bsdm_drop_stats`, полный Control API (`/api/ebpf/*`) и Prometheus-метрики. |
+| Network | eBPF/XDP manager | Beta (lab) | **Lab-only, не security boundary** (Day-1 пилота: OFF). Выключен по умолчанию и требует явного arming в окружении (`EBPF_XDP_ENABLED` / `EBPF_XDP_ALLOW_RUNTIME_ENABLE`): без него `PUT /api/ebpf/config` с `enabled: true` отвечает 403. Dual-stack IPv4/IPv6 XDP-фильтр, учет дропов ядра через BPF-карту `bsdm_drop_stats`, полный Control API (`/api/ebpf/*`), метрики `bsdm_proxy_ebpf_*` (включая `bsdm_proxy_ebpf_armed`) и lab-смоук `scripts/run-ebpf-lab-smoke.sh`. [ebpf-xdp.md](features/ebpf-xdp.md). |
 | Remote access | AmneziaWG sidecar/config API | Beta (lab) | **Lab-only, не для продакшена** (Day-1 пилота: OFF, issue #331). Curve25519 криптография, PSK, авто-провижининг пиров, экспорт .conf, метрики и интеграция с Agent Contract (`tunnel` capability). [bsdm-connect-client.md](getting-started/bsdm-connect-client.md). |
 | Cluster | Global sessions, distributed rate limit, threat sync | Experimental (Frozen) | Scaffolding gRPC mesh. |
 | Admin UI | Admin Console (Hybrid core) | Основной | Primary nav: Dashboard, Logs, Analytics, Policies, RPZ (Live Status/Rollback), **Devices** (Drift/OS Proxy badges), **AmneziaWG**, Users, Settings (разделы Devices и AmneziaWG помечены в навигации как lab-only, не для продакшена). SPA baked into proxy image (`/admin/`). Live/demo provenance, error/empty states, mutation token gate, Threat Investigation Modal, ML Domain Inspector. Search CORS for localhost split. |
@@ -56,6 +56,11 @@
    требуется `STREAMING_MISS_ENABLED=false`.
 5. Reverse proxy/OIDC, eBPF control path и AmneziaWG control integration считаются
    experimental независимо от отметок в исторических release notes.
+   eBPF/XDP дополнительно закрыт двойным барьером: подсистема не взводится без
+   явного `EBPF_XDP_ENABLED=true` или `EBPF_XDP_ALLOW_RUNTIME_ENABLE=true` в
+   окружении процесса, а control plane может только переключать уже взведённую
+   подсистему ([ebpf-xdp.md](features/ebpf-xdp.md)). Пилотный инвариант —
+   `bsdm_proxy_ebpf_armed == 0`.
 6. Native DLP выключен по умолчанию (`DLP_ENABLED=false` / unset). Для lab-оценки
    сигнатур: `DLP_ENABLED=true`. Runtime: `POST /api/security/dlp` с `[]` очищает
    паттерны (требует Bearer); состояние не персистится между рестартами.
