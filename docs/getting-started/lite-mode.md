@@ -1,8 +1,8 @@
-# Lite mode (Strategic Phase 1)
+# Lite mode
 
 Standalone caching HTTPS proxy with optional SQLite Search API — **no Kafka or ClickHouse**.
 
-See [roadmap.md](../roadmap.md) (Lite Mode).
+Зрелость профиля — [project-status.md](../project-status.md).
 
 ## One-command start
 
