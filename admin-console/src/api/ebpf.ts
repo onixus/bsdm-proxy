@@ -1,4 +1,5 @@
 import { apiFetch, aclClient } from './client'
+import { isDemoMode, sourced, type Sourced } from './source'
 
 export type XdpMode = 'skb' | 'driver' | 'offload'
 
@@ -33,52 +34,40 @@ export interface EbpfStats {
   cpuUsageUserPercent: number
 }
 
+/**
+ * Demo-mode scratch state. Only ever touched when demo mode is explicitly on —
+ * a failed request in normal operation surfaces as an error, never as a
+ * fabricated view of the kernel packet filter.
+ */
 let memoryIps: EbpfBlockedIp[] | null = null
-let memoryConfig: EbpfXdpConfig | null = null
 
-export async function fetchEbpfConfig(): Promise<EbpfXdpConfig> {
+export async function fetchEbpfConfig(): Promise<Sourced<EbpfXdpConfig>> {
   const { baseUrl, token } = aclClient()
-  try {
-    return await apiFetch<EbpfXdpConfig>('/api/ebpf/config', { baseUrl, token })
-  } catch {
-    if (!memoryConfig) {
-      memoryConfig = {
-        enabled: true,
-        interface: 'eth0',
-        mode: 'driver',
-        mapName: 'bsdm_blocked_ips',
-        maxEntries: 65536,
-      }
-    }
-    return memoryConfig
-  }
+  return sourced(
+    () => apiFetch<EbpfXdpConfig>('/api/ebpf/config', { baseUrl, token }),
+    getMockConfig,
+  )
 }
 
 export async function updateEbpfConfig(config: EbpfXdpConfig): Promise<EbpfXdpConfig> {
   const { baseUrl, token } = aclClient()
-  try {
-    return await apiFetch<EbpfXdpConfig>('/api/ebpf/config', {
-      baseUrl,
-      token,
-      method: 'PUT',
-      body: config,
-    })
-  } catch {
-    memoryConfig = { ...config }
-    return memoryConfig
-  }
+  return apiFetch<EbpfXdpConfig>('/api/ebpf/config', {
+    baseUrl,
+    token,
+    method: 'PUT',
+    body: config,
+  })
 }
 
-export async function fetchEbpfBlockedIps(): Promise<EbpfBlockedIp[]> {
+export async function fetchEbpfBlockedIps(): Promise<Sourced<EbpfBlockedIp[]>> {
   const { baseUrl, token } = aclClient()
-  try {
-    return await apiFetch<EbpfBlockedIp[]>('/api/ebpf/ips', { baseUrl, token })
-  } catch {
-    if (!memoryIps) {
-      memoryIps = getMockBlockedIps()
-    }
-    return memoryIps
-  }
+  return sourced(
+    () => apiFetch<EbpfBlockedIp[]>('/api/ebpf/ips', { baseUrl, token }),
+    () => {
+      if (!memoryIps) memoryIps = getMockBlockedIps()
+      return memoryIps
+    },
+  )
 }
 
 export async function addEbpfBlockedIp(ip: string, reason: string): Promise<EbpfBlockedIp> {
@@ -90,7 +79,8 @@ export async function addEbpfBlockedIp(ip: string, reason: string): Promise<Ebpf
       method: 'POST',
       body: { ip, reason },
     })
-  } catch {
+  } catch (error) {
+    if (!isDemoMode()) throw error
     const newItem: EbpfBlockedIp = {
       id: `ebpf-${Date.now()}`,
       ip,
@@ -113,32 +103,44 @@ export async function removeEbpfBlockedIp(id: string): Promise<void> {
       token,
       method: 'DELETE',
     })
-  } catch {
+  } catch (error) {
+    if (!isDemoMode()) throw error
     if (!memoryIps) memoryIps = getMockBlockedIps()
     memoryIps = memoryIps.filter((item) => item.id !== id)
   }
 }
 
-export async function fetchEbpfStats(): Promise<EbpfStats> {
+export async function fetchEbpfStats(): Promise<Sourced<EbpfStats>> {
   const { baseUrl, token } = aclClient()
-  try {
-    return await apiFetch<EbpfStats>('/api/ebpf/stats', { baseUrl, token })
-  } catch {
-    const ips = await fetchEbpfBlockedIps()
-    const packets = ips.reduce((acc, item) => acc + item.packetsDropped, 0)
-    const bytes = ips.reduce((acc, item) => acc + item.bytesDropped, 0)
+  return sourced(
+    () => apiFetch<EbpfStats>('/api/ebpf/stats', { baseUrl, token }),
+    getMockStats,
+  )
+}
 
-    return {
-      enabled: memoryConfig?.enabled ?? true,
-      attached: false,
-      interface: memoryConfig?.interface ?? 'eth0',
-      mode: memoryConfig?.mode ?? 'driver',
-      activeBlockedIps: ips.length,
-      packetsDroppedTotal: packets || 184250,
-      bytesDroppedTotal: bytes || 117920000,
-      kernelLatencyUs: null,
-      cpuUsageUserPercent: 0.0,
-    }
+function getMockConfig(): EbpfXdpConfig {
+  return {
+    enabled: false,
+    interface: 'eth0',
+    mode: 'driver',
+    mapName: 'bsdm_blocked_ips',
+    maxEntries: 65536,
+  }
+}
+
+function getMockStats(): EbpfStats {
+  if (!memoryIps) memoryIps = getMockBlockedIps()
+  const config = getMockConfig()
+  return {
+    enabled: config.enabled,
+    attached: false,
+    interface: config.interface,
+    mode: config.mode,
+    activeBlockedIps: memoryIps.length,
+    packetsDroppedTotal: memoryIps.reduce((acc, item) => acc + item.packetsDropped, 0),
+    bytesDroppedTotal: memoryIps.reduce((acc, item) => acc + item.bytesDropped, 0),
+    kernelLatencyUs: null,
+    cpuUsageUserPercent: 0.0,
   }
 }
 
