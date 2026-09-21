@@ -1225,6 +1225,9 @@ impl ProxyService {
             return response;
         }
 
+        let categories = policy.categories;
+        let threat_sources = policy.threat_sources;
+
         let cache_lookup_start = Instant::now();
         let mut early_body = None::<(hyper::http::request::Parts, Bytes)>;
         let mut llm_normalized: Option<Bytes> = None;
