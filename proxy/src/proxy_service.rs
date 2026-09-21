@@ -39,7 +39,7 @@ use crate::pipeline::{dispatch_cache_event, new_event_id, CacheEvent, HttpEventP
 #[cfg(feature = "kafka")]
 use crate::pipeline::{flush_kafka, KafkaEventPipeline};
 use crate::policy_cache::PolicyDecisionCache;
-use crate::policy_engine::PolicyEngine;
+use crate::policy_engine::{PolicyEngine, PolicyEvaluation};
 use crate::rate_limit::{extract_api_key_ref, RateLimitViolation, RateLimiter};
 use crate::semantic_cache::{
     content_cache_key, evaluate_llm_store, extract_embed_text, normalize_llm_body,
@@ -914,15 +914,9 @@ impl ProxyService {
         username: Option<&str>,
         groups: &[&str],
         client_ip: &str,
-    ) -> (Option<AclDecision>, Vec<String>, Vec<String>) {
-        let evaluation = self
-            .policy_engine
-            .evaluate(url, domain, username, groups, client_ip);
-        (
-            evaluation.blocking,
-            evaluation.categories,
-            evaluation.threat_sources,
-        )
+    ) -> PolicyEvaluation {
+        self.policy_engine
+            .evaluate(url, domain, username, groups, client_ip)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2093,9 +2087,14 @@ impl ProxyService {
             }
             return response;
         }
-        let (policy_decision, categories, threat_sources) = self
-            .check_policy(&url, &domain, username.as_deref(), &user_groups, client_ip);
-        if let Some(decision) = policy_decision {
+        let policy = self.check_policy(
+            &url,
+            &domain,
+            username.as_deref(),
+            &user_groups,
+            client_ip,
+        );
+        if let Some(decision) = policy.blocking {
             self.emit_policy_event(
                 &url,
                 method,
@@ -2106,8 +2105,8 @@ impl ProxyService {
                 user_agent.as_deref(),
                 client_ip,
                 &domain,
-                &categories,
-                &threat_sources,
+                &policy.categories,
+                &policy.threat_sources,
                 request_start,
                 request_decision_source(&url),
             );
