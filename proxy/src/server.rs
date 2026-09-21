@@ -810,15 +810,14 @@ pub async fn handle_connection(
                     return Ok::<_, Infallible>(resp);
                 }
 
-                let (policy_decision, categories, threat_sources) = service
-                    .check_policy(
-                        &connect_url,
-                        &connect_domain,
-                        policy_username,
-                        &policy_groups,
-                        &client_ip,
-                    );
-                if let Some(decision) = policy_decision {
+                let policy = service.check_policy(
+                    &connect_url,
+                    &connect_domain,
+                    policy_username,
+                    &policy_groups,
+                    &client_ip,
+                );
+                if let Some(decision) = policy.blocking {
                     let (user_id, username) = ProxyService::user_fields(proxy_user.as_deref());
                     service.emit_policy_event(
                         &connect_url,
@@ -830,8 +829,8 @@ pub async fn handle_connection(
                         user_agent.as_deref(),
                         &client_ip,
                         &connect_domain,
-                        &categories,
-                        &threat_sources,
+                        &policy.categories,
+                        &policy.threat_sources,
                         request_start,
                         "sni",
                     );
