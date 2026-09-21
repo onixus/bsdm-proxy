@@ -22,6 +22,7 @@ use crate::cache_freshness::{
 };
 use crate::categorization::CategorizationEngine;
 use crate::hierarchy::{HierarchyManager, HierarchyResult};
+use crate::hop_headers::strip_hop_by_hop_request_headers;
 use crate::http_types::{empty, full, Body};
 use crate::icap::{IcapClient, IcapOutcome};
 use crate::l2_cache::RedisL2Cache;
@@ -1568,7 +1569,7 @@ impl ProxyService {
         debug!("Cache MISS: {} {}", method, url);
         self.metrics.cache_misses_total.inc();
 
-        let (parts, body_bytes) = if let Some(early) = early_body.take() {
+        let (mut parts, body_bytes) = if let Some(early) = early_body.take() {
             early
         } else {
             let (parts, body) = req.take().expect("request present").into_parts();
@@ -1680,6 +1681,12 @@ impl ProxyService {
             Self::finish_request_metrics(&mut guard, &mut fast_scope, code, request_body_size, 0);
             return resp;
         }
+
+        // The body has been buffered, and the client's `Proxy-Authorization`
+        // addresses *this* proxy, so neither the peer nor the origin may see
+        // the connection-specific headers the client sent us. Stripped after
+        // ICAP so an adaptation service still inspects the request as received.
+        strip_hop_by_hop_request_headers(&mut parts.headers);
 
         // Cloning the parts deep-copies every request header. Only a hierarchy
         // peer fetch needs that second copy, so skip it when no hierarchy is

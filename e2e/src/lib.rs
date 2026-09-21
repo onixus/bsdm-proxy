@@ -351,6 +351,45 @@ pub async fn spawn_mock_upstream() -> Result<UpstreamServer> {
     Ok(UpstreamServer { port, handle })
 }
 
+/// Mock origin that reports the request headers it actually received, one
+/// `name: value` per line. Lets a test assert on what crossed the proxy hop
+/// rather than on what the proxy says it sent.
+pub async fn spawn_header_echo_upstream() -> Result<UpstreamServer> {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .context("bind header echo upstream")?;
+    let port = listener.local_addr()?.port();
+
+    let handle = tokio::spawn(async move {
+        loop {
+            let Ok((stream, _)) = listener.accept().await else {
+                break;
+            };
+            tokio::spawn(async move {
+                let io = TokioIo::new(stream);
+                let service = service_fn(|req: Request<Incoming>| async move {
+                    let mut seen: Vec<String> = req
+                        .headers()
+                        .iter()
+                        .map(|(name, value)| {
+                            format!(
+                                "{}: {}",
+                                name.as_str(),
+                                value.to_str().unwrap_or("<binary>")
+                            )
+                        })
+                        .collect();
+                    seen.sort();
+                    Ok::<_, hyper::Error>(Response::new(Full::new(Bytes::from(seen.join("\n")))))
+                });
+                let _ = http1::Builder::new().serve_connection(io, service).await;
+            });
+        }
+    });
+
+    Ok(UpstreamServer { port, handle })
+}
+
 pub async fn spawn_httparchive_upstream(device: &str) -> Result<UpstreamServer> {
     use httparchive::{body_for, expand_device, load_profile, HttpArchiveResource};
 

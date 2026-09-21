@@ -30,6 +30,7 @@ pub mod ebpf;
 pub mod hashing;
 pub mod hierarchy;
 pub mod hierarchy_config;
+pub(crate) mod hop_headers;
 pub mod htcp;
 pub mod http_types;
 pub mod icap;

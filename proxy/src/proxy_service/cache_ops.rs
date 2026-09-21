@@ -86,10 +86,14 @@ impl ProxyService {
         req: &Request<Incoming>,
         cached: &CachedResponse,
     ) -> Option<Request<Body>> {
+        // Revalidation goes to the origin, so it is subject to the same
+        // hop-by-hop rule as the plain forward path above.
+        let mut headers = req.headers().clone();
+        strip_hop_by_hop_request_headers(&mut headers);
         let mut builder = Request::builder()
             .method(req.method())
             .uri(req.uri().clone());
-        for (name, value) in req.headers() {
+        for (name, value) in &headers {
             builder = builder.header(name, value);
         }
         if let Some(etag) = &cached.etag {
