@@ -817,8 +817,7 @@ pub async fn handle_connection(
                         policy_username,
                         &policy_groups,
                         &client_ip,
-                    )
-                    .await;
+                    );
                 if let Some(decision) = policy_decision {
                     let (user_id, username) = ProxyService::user_fields(proxy_user.as_deref());
                     service.emit_policy_event(
