@@ -2,6 +2,7 @@ use super::*;
 use base64::engine::general_purpose;
 use base64::Engine;
 use hyper::header::AUTHORIZATION;
+use crate::cache_key::http_cache_key;
 
 impl ProxyService {
     #[inline]
