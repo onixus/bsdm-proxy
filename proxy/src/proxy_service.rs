@@ -2094,12 +2094,12 @@ impl ProxyService {
             &user_groups,
             client_ip,
         );
-        if let Some(decision) = policy.blocking {
+        if let Some(decision) = policy.blocking.as_ref() {
             self.emit_policy_event(
                 &url,
                 method,
                 &cache_key,
-                &decision,
+                decision,
                 &user_id,
                 &username,
                 user_agent.as_deref(),
@@ -2110,7 +2110,7 @@ impl ProxyService {
                 request_start,
                 request_decision_source(&url),
             );
-            let response = Self::policy_response(&decision);
+            let response = Self::policy_response(decision);
             if let Some(g) = guard.take() {
                 g.finish(response.status().as_u16(), 0, 0);
             } else if let Some(scope) = fast_scope.take() {
@@ -2118,6 +2118,9 @@ impl ProxyService {
             }
             return response;
         }
+
+        let categories = policy.categories;
+        let threat_sources = policy.threat_sources;
 
         let cache_lookup_start = Instant::now();
         let mut early_body = None::<(hyper::http::request::Parts, Bytes)>;
