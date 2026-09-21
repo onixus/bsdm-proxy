@@ -120,8 +120,7 @@ async fn test_ti_enforce_blocks_matching_domain() {
             None,
             &[],
             "10.0.0.1",
-        )
-        .await;
+        );
 
     assert!(
         blocking.is_some(),
@@ -141,8 +140,7 @@ async fn test_ti_enforce_blocks_matching_domain() {
             None,
             &[],
             "10.0.0.1",
-        )
-        .await;
+        );
     assert!(
         sub_blocking.is_some(),
         "subdomain of malware domain should be blocked"
@@ -200,8 +198,7 @@ async fn test_allowlist_precedence_over_ti_feed() {
             None,
             &[],
             "10.0.0.1",
-        )
-        .await;
+        );
 
     // Corporate explicit allowlist MUST win over TI block
     assert!(
@@ -254,8 +251,7 @@ async fn test_shadow_mode_does_not_block() {
             None,
             &[],
             "10.0.0.1",
-        )
-        .await;
+        );
 
     // Shadow mode must NOT block traffic
     assert!(
