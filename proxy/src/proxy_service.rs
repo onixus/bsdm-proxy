@@ -40,6 +40,7 @@ use crate::pipeline::{dispatch_cache_event, new_event_id, CacheEvent, HttpEventP
 use crate::pipeline::{flush_kafka, KafkaEventPipeline};
 use crate::policy_cache::PolicyDecisionCache;
 use crate::policy_engine::{PolicyEngine, PolicyEvaluation};
+use crate::policy_event::{build_policy_event, effective_decision_source, PolicyEventContext};
 use crate::rate_limit::{extract_api_key_ref, RateLimitViolation, RateLimiter};
 use crate::semantic_cache::{
     content_cache_key, evaluate_llm_store, extract_embed_text, normalize_llm_body,
@@ -796,90 +797,24 @@ impl ProxyService {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn emit_policy_event(
         &self,
-        url: &str,
-        method: &str,
-        cache_key: &str,
         decision: &AclDecision,
-        user_id: &Option<String>,
-        username: &Option<String>,
-        user_agent: Option<&str>,
-        client_ip: &str,
-        domain: &str,
-        categories: &[String],
-        threat_sources: &[String],
-        request_start: Instant,
-        decision_source: &str,
+        policy: &PolicyEvaluation,
+        context: PolicyEventContext<'_>,
     ) {
-        let is_ti_block = decision
-            .rule_id
-            .as_ref()
-            .is_some_and(|r| r.starts_with("ti:"));
-        let eff_decision_source = if is_ti_block {
-            "threat_intel"
-        } else {
-            decision_source
-        };
-        self.metrics
-            .record_policy_decision_source(eff_decision_source);
+        let decision_source = effective_decision_source(decision, context.decision_source);
+        self.metrics.record_policy_decision_source(decision_source);
         info!(
-            domain = %domain,
-            decision_source = eff_decision_source,
+            domain = %context.domain,
+            decision_source,
             action = %decision.action,
             "ACL policy decision"
         );
         if !self.has_event_sink() {
             return;
         }
-        if let Ok(timestamp) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
-            let status = match decision.action {
-                AclAction::Deny => 403,
-                AclAction::Redirect => 302,
-                AclAction::Allow => 200,
-            };
-            let event_id = new_event_id();
-            let redirect_url = decision
-                .redirect_url
-                .as_deref()
-                .map(|loc| resolve_location(url, loc));
-            let corr = self
-                .sessions
-                .begin_request(client_ip, username.as_deref(), user_agent, url);
-            self.sessions
-                .note_redirect(client_ip, &event_id, status, url, redirect_url.as_deref());
-            let event = CacheEvent {
-                url: url.to_string(),
-                method: method.to_string(),
-                status,
-                cache_key: cache_key.to_string(),
-                cache_status: "BLOCKED".to_string(),
-                timestamp: timestamp.as_secs(),
-                headers: HashMap::new(),
-                user_id: user_id.clone(),
-                username: username.clone(),
-                client_ip: client_ip.to_string(),
-                domain: domain.to_string(),
-                response_size: 0,
-                request_duration_ms: request_start.elapsed().as_millis() as u64,
-                content_type: None,
-                user_agent: user_agent.map(str::to_string),
-                categories: categories.to_vec(),
-                threat_sources: threat_sources.to_vec(),
-                acl_action: Some(decision.action.to_string()),
-                acl_rule_id: decision.rule_id.clone(),
-                acl_reason: Some(decision.reason.clone()),
-                session_id: corr.session_id,
-                parent_event_id: corr.parent_event_id,
-                redirect_url,
-                dlp_violation: None,
-                casb_alert: None,
-                decision_source: Some(eff_decision_source.to_string()),
-                bypass_reason: None,
-                threat_shadow_match: None,
-                event_id,
-            };
+        if let Some(event) = build_policy_event(&self.sessions, decision, policy, &context) {
             self.send_cache_event(event);
         }
     }
@@ -2094,23 +2029,24 @@ impl ProxyService {
             &user_groups,
             client_ip,
         );
-        if let Some(decision) = policy.blocking {
+        if let Some(decision) = policy.blocking.as_ref() {
             self.emit_policy_event(
-                &url,
-                method,
-                &cache_key,
-                &decision,
-                &user_id,
-                &username,
-                user_agent.as_deref(),
-                client_ip,
-                &domain,
-                &policy.categories,
-                &policy.threat_sources,
-                request_start,
-                request_decision_source(&url),
+                decision,
+                &policy,
+                PolicyEventContext {
+                    url: &url,
+                    method,
+                    cache_key: cache_key.as_ref(),
+                    user_id: &user_id,
+                    username: &username,
+                    user_agent: user_agent.as_deref(),
+                    client_ip,
+                    domain: &domain,
+                    request_start,
+                    decision_source: request_decision_source(&url),
+                },
             );
-            let response = Self::policy_response(&decision);
+            let response = Self::policy_response(decision);
             if let Some(g) = guard.take() {
                 g.finish(response.status().as_u16(), 0, 0);
             } else if let Some(scope) = fast_scope.take() {
