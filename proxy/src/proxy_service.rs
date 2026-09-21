@@ -666,7 +666,7 @@ impl ProxyService {
             kafka_pipeline,
             http_pipeline,
             http_client,
-            metrics,
+            metrics: metrics.clone(),
             policy_mode: policy.policy_mode,
             mitm_categories: policy.mitm_categories.iter().cloned().collect(),
             pinning_registry: policy.pinning_registry.clone(),
