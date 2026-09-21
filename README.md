@@ -9,21 +9,50 @@
 [![Version](https://img.shields.io/badge/version-0.9.14-blue.svg)](https://github.com/onixus/bsdm-proxy/releases)
 [![Rust](https://img.shields.io/badge/Rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 
-**Высокопроизводительный корпоративный кеширующий HTTP/HTTPS Forward Proxy & Secure Web Gateway (SWG) на Rust.**
+**High-performance HTTP/HTTPS Forward Proxy & Secure Web Gateway written in Rust.**
 
-[Возможности](#основные-возможности) • [Архитектура](#архитектура) • [Быстрый старт](#быстрый-старт) • [Сборка](#сборка-и-feature-flags) • [Документация](#документация)
+[Features](#-основные-возможности) • [Architecture](#-архитектура) • [Quick Start](#quick-start) • [Project Status](docs/project-status.md) • [Docs](docs/)
 
 </div>
 
----
+BSDM-Proxy combines a Rust proxy data plane with selective TLS inspection, tiered caching, access policy, authentication and asynchronous security analytics. It can run in a lightweight local mode with SQLite or as a broader analytics stack with Kafka and ClickHouse.
 
-**BSDM-Proxy** — это модульный корпоративный прокси-сервер нового поколения, спроектированный для обеспечения высокой пропускной способности, глубокого анализа трафика (MITM TLS-инспекция), многоуровневого кеширования, гранулярных политик доступа (ACL), гибкой аутентификации и непрерывной аналитики безопасности (Kafka → ClickHouse → ML-детекция).
+## Why BSDM
+
+- **Rust data plane** for HTTP forwarding, `CONNECT` tunnelling and selective TLS inspection.
+- **Tiered caching** with in-memory L1, disk spillover and optional Redis L2.
+- **Policy and identity** through ACLs plus Basic, LDAP/AD, NTLM, Kerberos and OIDC integrations.
+- **Analytics outside the core proxy flow** through asynchronous event export to Kafka/ClickHouse; Lite Mode uses SQLite and does not require those services.
+- **Operational surface included**: metrics, Admin Console, deployment manifests and documented feature maturity.
+
+## Quick start
+
+The smallest documented stack is **Lite Mode**:
+
+```bash
+git clone https://github.com/onixus/bsdm-proxy.git
+cd bsdm-proxy
+
+./scripts/gen-ca.sh
+docker compose -f deploy/compose/docker-compose.lite.yml up -d --build
+
+curl http://127.0.0.1:9090/health
+curl --cacert certs/ca.crt -x http://127.0.0.1:3128 https://httpbin.org/get
+```
+
+See [Lite Mode](docs/getting-started/lite-mode.md) for the full walkthrough.
+
+## Performance / reproducible benchmarks
+
+This README intentionally does **not** publish headline throughput or latency numbers without a reproducible benchmark report. Performance results should include the exact commit, hardware, OS/kernel, proxy configuration, TLS mode, cache state, load-generator settings, concurrency, throughput, p50/p95/p99 latency, CPU and memory usage.
+
+The benchmark harness and reports can then be compared across architectural changes without turning an unqualified number into a product claim.
 
 > [!IMPORTANT]
-> **Зрелость функционала:** Проект содержит компоненты различного уровня готовности. Перед внедрением обязательно ознакомьтесь с [матрицей статуса проекта](docs/project-status.md) (наличие кода или UI не означает автоматический статус production-ready).
+> **Feature maturity varies by component.** Before deployment, check the [project status matrix](docs/project-status.md). Presence of code or UI does not automatically mean production-ready.
 
 > [!WARNING]
-> **Правовые требования к MITM:** TLS MITM-инспекция допустима исключительно в контролируемой корпоративной инфраструктуре, при надлежащем информировании пользователей, защищённом хранении приватного ключа CA и полном соблюдении применимого законодательства.
+> **TLS interception has legal and operational requirements.** Use MITM inspection only in controlled environments with appropriate user notice, protected CA private keys and compliance with applicable law.
 
 ---
 
