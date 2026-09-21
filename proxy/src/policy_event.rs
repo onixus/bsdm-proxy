@@ -11,24 +11,21 @@ use crate::session::{resolve_location, SessionCorrelator};
 use std::collections::HashMap;
 use std::time::{Instant, SystemTime};
 
-pub struct PolicyEventContext<'a> {
-    pub url: &'a str,
-    pub method: &'a str,
-    pub cache_key: &'a str,
-    pub user_id: &'a Option<String>,
-    pub username: &'a Option<String>,
-    pub user_agent: Option<&'a str>,
-    pub client_ip: &'a str,
-    pub domain: &'a str,
-    pub request_start: Instant,
-    pub decision_source: &'a str,
+pub(crate) struct PolicyEventContext<'a> {
+    pub(crate) url: &'a str,
+    pub(crate) method: &'a str,
+    pub(crate) cache_key: &'a str,
+    pub(crate) user_id: &'a Option<String>,
+    pub(crate) username: &'a Option<String>,
+    pub(crate) user_agent: Option<&'a str>,
+    pub(crate) client_ip: &'a str,
+    pub(crate) domain: &'a str,
+    pub(crate) request_start: Instant,
+    pub(crate) decision_source: &'a str,
 }
 
 #[inline]
-pub fn effective_decision_source<'a>(
-    decision: &AclDecision,
-    fallback: &'a str,
-) -> &'a str {
+pub(crate) fn effective_decision_source<'a>(decision: &AclDecision, fallback: &'a str) -> &'a str {
     if decision
         .rule_id
         .as_ref()
@@ -40,7 +37,7 @@ pub fn effective_decision_source<'a>(
     }
 }
 
-pub fn build_policy_event(
+pub(crate) fn build_policy_event(
     sessions: &SessionCorrelator,
     decision: &AclDecision,
     policy: &PolicyEvaluation,
@@ -105,4 +102,145 @@ pub fn build_policy_event(
         threat_shadow_match: None,
         event_id,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::acl::AclDecision;
+    use std::time::Duration;
+
+    fn correlator() -> SessionCorrelator {
+        SessionCorrelator::new(Duration::from_secs(60), Duration::from_secs(30), 1000, 1000)
+    }
+
+    fn evaluation(decision: AclDecision) -> PolicyEvaluation {
+        PolicyEvaluation {
+            blocking: Some(decision),
+            categories: vec!["malware".to_string()],
+            threat_sources: vec!["urlhaus".to_string()],
+        }
+    }
+
+    fn context<'a>(url: &'a str, user_id: &'a Option<String>) -> PolicyEventContext<'a> {
+        PolicyEventContext {
+            url,
+            method: "GET",
+            cache_key: "GET:example",
+            user_id,
+            username: user_id,
+            user_agent: Some("curl/8"),
+            client_ip: "10.0.0.1",
+            domain: "malware-c2.com",
+            request_start: Instant::now(),
+            decision_source: "url",
+        }
+    }
+
+    #[test]
+    fn ti_rule_id_overrides_the_fallback_source() {
+        let decision = AclDecision::deny("ti:urlhaus".to_string(), "feed match");
+        assert_eq!(effective_decision_source(&decision, "url"), "threat_intel");
+        assert_eq!(effective_decision_source(&decision, "sni"), "threat_intel");
+    }
+
+    #[test]
+    fn non_ti_rule_id_keeps_the_fallback_source() {
+        let decision = AclDecision::deny("rule-42".to_string(), "blocked by policy");
+        assert_eq!(effective_decision_source(&decision, "url"), "url");
+        assert_eq!(effective_decision_source(&decision, "sni"), "sni");
+    }
+
+    #[test]
+    fn missing_rule_id_keeps_the_fallback_source() {
+        let decision = AclDecision::allow("default allow");
+        assert_eq!(effective_decision_source(&decision, "url"), "url");
+    }
+
+    /// Only a `ti:` *prefix* marks a threat-intel block. A rule id that merely
+    /// contains the marker must not be relabelled, or an operator-authored rule
+    /// would be misattributed to a feed in the analytics pipeline.
+    #[test]
+    fn ti_marker_must_be_a_prefix_not_a_substring() {
+        let decision = AclDecision::deny("corp:anti:urlhaus".to_string(), "local rule");
+        assert_eq!(effective_decision_source(&decision, "url"), "url");
+    }
+
+    #[test]
+    fn deny_builds_a_blocked_event_carrying_policy_metadata() {
+        let sessions = correlator();
+        let decision = AclDecision::deny("ti:urlhaus".to_string(), "feed match");
+        let policy = evaluation(decision.clone());
+        let user = Some("alice".to_string());
+        let event = build_policy_event(
+            &sessions,
+            &decision,
+            &policy,
+            &context("http://malware-c2.com/payload", &user),
+        )
+        .expect("event is built");
+
+        assert_eq!(event.status, 403);
+        assert_eq!(event.cache_status, "BLOCKED");
+        assert_eq!(event.response_size, 0);
+        assert_eq!(event.acl_action.as_deref(), Some("deny"));
+        assert_eq!(event.acl_rule_id.as_deref(), Some("ti:urlhaus"));
+        assert_eq!(event.acl_reason.as_deref(), Some("feed match"));
+        // The TI prefix must win over the "url" fallback in the context.
+        assert_eq!(event.decision_source.as_deref(), Some("threat_intel"));
+        // Categories and threat sources come from the evaluation, not the decision.
+        assert_eq!(event.categories, vec!["malware".to_string()]);
+        assert_eq!(event.threat_sources, vec!["urlhaus".to_string()]);
+        assert_eq!(event.username.as_deref(), Some("alice"));
+        assert_eq!(event.client_ip, "10.0.0.1");
+        assert_eq!(event.domain, "malware-c2.com");
+        assert!(event.redirect_url.is_none());
+        assert!(!event.event_id.is_empty());
+    }
+
+    #[test]
+    fn redirect_builds_a_302_with_an_absolute_location() {
+        let sessions = correlator();
+        let decision = AclDecision::redirect(
+            "rule-7".to_string(),
+            "/blocked.html".to_string(),
+            "coaching page",
+        );
+        let policy = evaluation(decision.clone());
+        let no_user: Option<String> = None;
+        let event = build_policy_event(
+            &sessions,
+            &decision,
+            &policy,
+            &context("http://malware-c2.com/payload", &no_user),
+        )
+        .expect("event is built");
+
+        assert_eq!(event.status, 302);
+        // A relative Location is resolved against the request URL.
+        assert_eq!(
+            event.redirect_url.as_deref(),
+            Some("http://malware-c2.com/blocked.html")
+        );
+        assert_eq!(event.decision_source.as_deref(), Some("url"));
+    }
+
+    #[test]
+    fn allow_builds_a_200_event() {
+        let sessions = correlator();
+        let decision = AclDecision::allow("explicit allowlist");
+        let policy = evaluation(decision.clone());
+        let no_user: Option<String> = None;
+        let event = build_policy_event(
+            &sessions,
+            &decision,
+            &policy,
+            &context("http://malware-c2.com/payload", &no_user),
+        )
+        .expect("event is built");
+
+        assert_eq!(event.status, 200);
+        assert_eq!(event.acl_action.as_deref(), Some("allow"));
+        assert!(event.redirect_url.is_none());
+    }
 }

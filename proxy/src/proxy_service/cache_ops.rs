@@ -1,19 +1,12 @@
 use super::*;
 
 impl ProxyService {
-    pub(super) async fn try_l2_cache_get(
-        &self,
-        cache_key: &Arc<str>,
-    ) -> Option<CachedResponse> {
+    pub(super) async fn try_l2_cache_get(&self, cache_key: &Arc<str>) -> Option<CachedResponse> {
         let l2 = self.l2_cache.as_ref()?;
         l2.get(cache_key.as_ref()).await
     }
 
-    pub(super) fn store_in_l1_and_l2(
-        &self,
-        cache_key: Arc<str>,
-        cached_response: CachedResponse,
-    ) {
+    pub(super) fn store_in_l1_and_l2(&self, cache_key: Arc<str>, cached_response: CachedResponse) {
         self.http_cache
             .insert(cache_key.clone(), cached_response.clone());
         if let Some(registry) = &self.digest_registry {
@@ -179,6 +172,7 @@ impl ProxyService {
             ));
         }
 
+        // Changed response: consume body and fall through to normal miss handling upstream.
         let _ = http_body_util::BodyExt::collect(response.into_body()).await;
         None
     }
@@ -199,6 +193,8 @@ impl ProxyService {
         let no_user: Option<String> = None;
         let no_cats: Vec<String> = Vec::new();
         let no_threats: Vec<String> = Vec::new();
+        // Borrowed: `req` outlives every use below, so the fast path does not
+        // copy the User-Agent just to hand it to an event builder.
         let user_agent = Self::request_header(req, "user-agent");
         let cache_lookup_start = Instant::now();
 

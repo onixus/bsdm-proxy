@@ -47,6 +47,8 @@ impl ProxyService {
         username: Option<&str>,
         headers: &hyper::HeaderMap,
     ) -> Option<Response<Body>> {
+        // Disabled is the default: bail before touching headers or metrics so a
+        // deployment that does not rate limit pays nothing per request.
         if !self.rate_limiter.is_enabled() {
             return None;
         }
