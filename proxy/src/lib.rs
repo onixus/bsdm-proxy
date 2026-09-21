@@ -46,6 +46,7 @@ pub mod pinning;
 pub mod pipeline;
 pub mod policy_cache;
 pub mod policy_config;
+pub mod policy_engine;
 pub mod proxy_service;
 pub mod rate_limit;
 pub mod reverse_proxy;
@@ -118,6 +119,7 @@ pub use policy_cache::{PolicyCacheConfig, PolicyDecisionCache};
 pub use policy_config::{
     load_policy_config, validate_mitm_policy, DeploymentProfile, PolicyConfig, PolicyMode,
 };
+pub use policy_engine::{PolicyEngine, PolicyEvaluation};
 pub use proxy_service::{ProxyPolicy, ProxyService};
 pub use rate_limit::{
     extract_api_key, extract_api_key_ref, RateLimitConfig, RateLimitViolation, RateLimiter,
