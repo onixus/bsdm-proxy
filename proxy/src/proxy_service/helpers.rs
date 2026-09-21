@@ -21,7 +21,7 @@ impl ProxyService {
             .unwrap_or_else(|| "unknown".to_string())
     }
 
-    fn extract_domain_fast(url_str: &str) -> Option<String> {
+    pub(super) fn extract_domain_fast(url_str: &str) -> Option<String> {
         let after_scheme = url_str.split_once("://")?.1;
         let authority = after_scheme
             .split(['/', '?', '#'])
