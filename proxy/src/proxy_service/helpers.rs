@@ -5,7 +5,7 @@ use hyper::header::AUTHORIZATION;
 
 impl ProxyService {
     #[inline]
-    pub(super) fn generate_cache_key(&self, method: &str, url: &str) -> Arc<str> {
+    pub(crate) fn generate_cache_key(&self, method: &str, url: &str) -> Arc<str> {
         http_cache_key(method, url)
     }
 
