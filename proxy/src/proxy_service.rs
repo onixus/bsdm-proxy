@@ -10,7 +10,6 @@ use hyper::header::{
 };
 use hyper::{Request, Response, StatusCode};
 use std::collections::HashMap;
-use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 use tracing::{debug, error, info, warn};
@@ -40,6 +39,7 @@ use crate::pipeline::{dispatch_cache_event, new_event_id, CacheEvent, HttpEventP
 #[cfg(feature = "kafka")]
 use crate::pipeline::{flush_kafka, KafkaEventPipeline};
 use crate::policy_cache::PolicyDecisionCache;
+use crate::policy_engine::PolicyEngine;
 use crate::rate_limit::{extract_api_key_ref, RateLimitViolation, RateLimiter};
 use crate::semantic_cache::{
     content_cache_key, evaluate_llm_store, extract_embed_text, normalize_llm_body,
@@ -425,19 +425,14 @@ pub struct ProxyService {
     pub(crate) mitm_circuit_breaker: Arc<MitmCircuitBreaker>,
     pub(crate) mitm_enabled: bool,
     auth: Option<Arc<AuthManager>>,
-    acl_engine: Option<Arc<AclEngineHandle>>,
-    categorization: Option<Arc<CategorizationEngine>>,
+    policy_engine: PolicyEngine,
     hierarchy: Option<Arc<HierarchyManager>>,
     digest_registry: Option<Arc<DigestRegistry>>,
     rate_limiter: Arc<RateLimiter>,
     perf: PerfConfig,
-    policy_cache: Arc<PolicyDecisionCache>,
     sessions: Arc<SessionCorrelator>,
-    threat_score_cache: Arc<ThreatScoreCache>,
     /// Observe-only threat-intel matcher (issue #330); never blocks.
     ti_shadow: Arc<TiShadowMatcher>,
-    /// Threat-intel enforcement matcher (Phase 2 / ADR-0008).
-    ti_enforce: Arc<TiEnforceMatcher>,
     miss_flights: MissFlightMap,
     semantic_config: SemanticCacheConfig,
     semantic_index: SemanticIndex,
@@ -488,7 +483,7 @@ impl ProxyService {
             && self.policy_mode == crate::policy_config::PolicyMode::SelectiveMitm
         {
             let url = format!("https://{}", domain);
-            let (categories, _) = self.categorize_url(&url);
+            let (categories, _) = self.policy_engine.categorize_url(&url);
             categories
                 .iter()
                 .any(|cat| self.mitm_categories.contains(&cat.to_ascii_lowercase()))
@@ -545,7 +540,7 @@ impl ProxyService {
     }
 
     pub fn policy_cache(&self) -> Arc<PolicyDecisionCache> {
-        self.policy_cache.clone()
+        self.policy_engine.policy_cache()
     }
 
     pub fn upstream_client(&self) -> UpstreamClientHandle {
@@ -559,7 +554,7 @@ impl ProxyService {
 
     /// Threat-intel enforcement matcher (Phase 2 / ADR-0008).
     pub fn ti_enforce(&self) -> &Arc<TiEnforceMatcher> {
-        &self.ti_enforce
+        self.policy_engine.ti_enforce()
     }
 
     pub fn pinning_registry(&self) -> Arc<PinningRegistry> {
@@ -678,17 +673,20 @@ impl ProxyService {
             mitm_circuit_breaker: policy.mitm_circuit_breaker.clone(),
             mitm_enabled,
             auth,
-            acl_engine: policy.acl_engine.clone(),
-            categorization: policy.categorization.clone(),
+            policy_engine: PolicyEngine::new(
+                policy.acl_engine.clone(),
+                policy.categorization.clone(),
+                policy_cache,
+                threat_score_cache,
+                ti_enforce,
+                metrics.clone(),
+            ),
             hierarchy,
             digest_registry,
             rate_limiter: Arc::new(RateLimiter::new(rate_limit_config)),
             perf,
-            policy_cache,
             sessions: Arc::new(SessionCorrelator::from_env()),
-            threat_score_cache,
             ti_shadow: Arc::new(TiShadowMatcher::from_env()),
-            ti_enforce,
             miss_flights: MissFlightMap::new(),
             semantic_config,
             semantic_index,
@@ -721,10 +719,6 @@ impl ProxyService {
 
     pub(crate) fn sessions(&self) -> Arc<SessionCorrelator> {
         self.sessions.clone()
-    }
-
-    fn parse_client_ip(client_ip: &str) -> Option<IpAddr> {
-        client_ip.parse().ok()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -913,86 +907,6 @@ impl ProxyService {
         }
     }
 
-    fn categorize_url(&self, url: &str) -> (Vec<String>, Vec<String>) {
-        let Some(engine) = &self.categorization else {
-            return (Vec::new(), Vec::new());
-        };
-        let start = Instant::now();
-        let result = engine.categorize_local(url);
-        if result.categories.is_empty() && engine.online_enrichment_enabled() {
-            engine.schedule_online_enrichment(url);
-            self.metrics.record_categorization_online_enrich_scheduled();
-        }
-        let categories: Vec<String> = result
-            .categories
-            .iter()
-            .map(crate::categorization::Category::acl_name)
-            .filter(|name| !name.is_empty())
-            .collect();
-        let threat_sources = if result.source != "unknown" && !categories.is_empty() {
-            vec![result.source.clone()]
-        } else {
-            Vec::new()
-        };
-        self.metrics.record_categorization_lookup(
-            &result.source,
-            result.cached,
-            &categories,
-            start.elapsed().as_secs_f64(),
-        );
-        (categories, threat_sources)
-    }
-
-    fn check_acl(
-        &self,
-        url: &str,
-        domain: &str,
-        category_names: &[String],
-        username: Option<&str>,
-        groups: &[&str],
-        client_ip: &str,
-    ) -> (Option<AclDecision>, bool) {
-        let Some(acl_engine) = &self.acl_engine else {
-            return (None, false);
-        };
-
-        let eval_start = Instant::now();
-        let category_refs: Vec<&str> = category_names.iter().map(String::as_str).collect();
-        let decision = acl_engine.check_access(
-            url,
-            domain,
-            &category_refs,
-            username,
-            groups,
-            Self::parse_client_ip(client_ip),
-        );
-
-        self.metrics
-            .acl_eval_duration_seconds
-            .observe(eval_start.elapsed().as_secs_f64());
-        let action_label = decision.action.to_string();
-        self.metrics
-            .acl_decisions_total
-            .with_label_values(&[&action_label])
-            .inc();
-        if let Some(rule_id) = &decision.rule_id {
-            self.metrics
-                .acl_rules_matched_total
-                .with_label_values(&[rule_id])
-                .inc();
-        }
-
-        let explicit_allow = decision.action == AclAction::Allow && decision.rule_id.is_some();
-        if decision.action == AclAction::Allow {
-            (None, explicit_allow)
-        } else {
-            info!("ACL {} for {}: {}", decision.action, url, decision.reason);
-            self.metrics
-                .record_categorization_blocked(category_names, &action_label);
-            (Some(decision), false)
-        }
-    }
-
     pub fn check_policy(
         &self,
         url: &str,
@@ -1001,74 +915,14 @@ impl ProxyService {
         groups: &[&str],
         client_ip: &str,
     ) -> (Option<AclDecision>, Vec<String>, Vec<String>) {
-        let policy_active =
-            self.acl_engine.is_some() || self.categorization.is_some() || self.ti_enforce.enabled();
-        let mut from_cache = false;
-        let (mut blocking, category_names, mut threat_sources) =
-            if policy_active && self.policy_cache.enabled() {
-                if let Some(hit) = self.policy_cache.lookup(username, domain, groups) {
-                    from_cache = true;
-                    self.metrics.policy_cache_hit_total.inc();
-                    debug!("Policy cache hit for {:?} @ {}", username, domain);
-                    (hit.blocking, hit.categories, hit.threat_sources)
-                } else {
-                    let (category_names, mut threat_sources) = self.categorize_url(url);
-                    let (mut blocking, explicit_allow) = self
-                        .check_acl(url, domain, &category_names, username, groups, client_ip);
-                    if !explicit_allow && blocking.is_none() {
-                        if let Some(hit) = self.ti_enforce.match_domain(domain) {
-                            blocking = Some(AclDecision::deny(
-                                format!("ti:{}", hit.feed),
-                                format!(
-                                    "Threat intelligence feed match ({}): {}",
-                                    hit.feed, hit.indicator
-                                ),
-                            ));
-                            threat_sources.push(hit.feed.clone());
-                            self.metrics.record_ti_enforce_blocked(&hit.feed);
-                        }
-                    }
-                    (blocking, category_names, threat_sources)
-                }
-            } else {
-                let (category_names, mut threat_sources) = self.categorize_url(url);
-                let (mut blocking, explicit_allow) = self
-                    .check_acl(url, domain, &category_names, username, groups, client_ip);
-                if !explicit_allow && blocking.is_none() {
-                    if let Some(hit) = self.ti_enforce.match_domain(domain) {
-                        blocking = Some(AclDecision::deny(
-                            format!("ti:{}", hit.feed),
-                            format!(
-                                "Threat intelligence feed match ({}): {}",
-                                hit.feed, hit.indicator
-                            ),
-                        ));
-                        threat_sources.push(hit.feed.clone());
-                        self.metrics.record_ti_enforce_blocked(&hit.feed);
-                    }
-                }
-                (blocking, category_names, threat_sources)
-            };
-
-        self.threat_score_cache.apply_to_policy(
-            domain,
-            client_ip,
-            &mut threat_sources,
-            &mut blocking,
-        );
-
-        if policy_active && self.policy_cache.enabled() && !from_cache {
-            self.policy_cache.store(
-                username,
-                domain,
-                groups,
-                category_names.clone(),
-                threat_sources.clone(),
-                blocking.clone(),
-            );
-        }
-
-        (blocking, category_names, threat_sources)
+        let evaluation = self
+            .policy_engine
+            .evaluate(url, domain, username, groups, client_ip);
+        (
+            evaluation.blocking,
+            evaluation.categories,
+            evaluation.threat_sources,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
