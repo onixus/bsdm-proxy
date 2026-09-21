@@ -113,36 +113,34 @@ async fn test_ti_enforce_blocks_matching_domain() {
 
     let service = make_test_service(vec![], ti_matcher, metrics.clone());
 
-    let (blocking, _categories, threat_sources) = service
-        .check_policy(
-            "http://malware-c2.com/payload",
-            "malware-c2.com",
-            None,
-            &[],
-            "10.0.0.1",
-        );
+    let policy = service.check_policy(
+        "http://malware-c2.com/payload",
+        "malware-c2.com",
+        None,
+        &[],
+        "10.0.0.1",
+    );
 
     assert!(
-        blocking.is_some(),
+        policy.blocking.is_some(),
         "request to malware domain should be blocked"
     );
-    let decision = blocking.unwrap();
+    let decision = policy.blocking.unwrap();
     assert_eq!(decision.action, AclAction::Deny);
     assert_eq!(decision.rule_id.as_deref(), Some("ti:urlhaus"));
     assert!(decision.reason.contains("urlhaus"));
-    assert!(threat_sources.contains(&"urlhaus".to_string()));
+    assert!(policy.threat_sources.contains(&"urlhaus".to_string()));
 
     // Verify subdomains are also blocked
-    let (sub_blocking, _categories, _threats) = service
-        .check_policy(
-            "http://botnet.malware-c2.com/c2",
-            "botnet.malware-c2.com",
-            None,
-            &[],
-            "10.0.0.1",
-        );
+    let sub_policy = service.check_policy(
+        "http://botnet.malware-c2.com/c2",
+        "botnet.malware-c2.com",
+        None,
+        &[],
+        "10.0.0.1",
+    );
     assert!(
-        sub_blocking.is_some(),
+        sub_policy.blocking.is_some(),
         "subdomain of malware domain should be blocked"
     );
 
@@ -191,18 +189,17 @@ async fn test_allowlist_precedence_over_ti_feed() {
 
     let service = make_test_service(vec![allow_rule], ti_matcher, metrics.clone());
 
-    let (blocking, _categories, _threat_sources) = service
-        .check_policy(
-            "http://internal-tool.phish.com/dashboard",
-            "internal-tool.phish.com",
-            None,
-            &[],
-            "10.0.0.1",
-        );
+    let policy = service.check_policy(
+        "http://internal-tool.phish.com/dashboard",
+        "internal-tool.phish.com",
+        None,
+        &[],
+        "10.0.0.1",
+    );
 
     // Corporate explicit allowlist MUST win over TI block
     assert!(
-        blocking.is_none(),
+        policy.blocking.is_none(),
         "explicit ACL allow rule must take precedence over TI feed"
     );
 
@@ -244,18 +241,17 @@ async fn test_shadow_mode_does_not_block() {
 
     let service = make_test_service(vec![], ti_matcher, metrics.clone());
 
-    let (blocking, _categories, _threat_sources) = service
-        .check_policy(
-            "http://malware-c2.com/payload",
-            "malware-c2.com",
-            None,
-            &[],
-            "10.0.0.1",
-        );
+    let policy = service.check_policy(
+        "http://malware-c2.com/payload",
+        "malware-c2.com",
+        None,
+        &[],
+        "10.0.0.1",
+    );
 
     // Shadow mode must NOT block traffic
     assert!(
-        blocking.is_none(),
+        policy.blocking.is_none(),
         "shadow mode must never block traffic on the data plane"
     );
 

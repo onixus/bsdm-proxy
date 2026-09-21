@@ -1,12 +1,10 @@
 //! Core HTTP proxy service: caching, policy, upstream fetch, and Kafka events.
 
-use base64::engine::general_purpose;
-use base64::Engine;
 use bytes::Bytes;
 use http_body_util::BodyExt;
 use hyper::body::Incoming;
 use hyper::header::{
-    HeaderName, HeaderValue, AUTHORIZATION, IF_MODIFIED_SINCE, IF_NONE_MATCH, LOCATION,
+    HeaderName, HeaderValue, IF_MODIFIED_SINCE, IF_NONE_MATCH, LOCATION,
 };
 use hyper::{Request, Response, StatusCode};
 use std::collections::HashMap;
@@ -22,7 +20,6 @@ use crate::cache_freshness::{
     cache_status_metric_label, evaluate_store, evaluate_store_precheck, miss_x_cache_status_header,
     refresh_ttl_from_headers,
 };
-use crate::cache_key::http_cache_key;
 use crate::categorization::CategorizationEngine;
 use crate::hierarchy::{HierarchyManager, HierarchyResult};
 use crate::http_types::{empty, full, Body};
@@ -39,7 +36,8 @@ use crate::pipeline::{dispatch_cache_event, new_event_id, CacheEvent, HttpEventP
 #[cfg(feature = "kafka")]
 use crate::pipeline::{flush_kafka, KafkaEventPipeline};
 use crate::policy_cache::PolicyDecisionCache;
-use crate::policy_engine::PolicyEngine;
+use crate::policy_engine::{PolicyEngine, PolicyEvaluation};
+use crate::policy_event::{build_policy_event, effective_decision_source, PolicyEventContext};
 use crate::rate_limit::{extract_api_key_ref, RateLimitViolation, RateLimiter};
 use crate::semantic_cache::{
     content_cache_key, evaluate_llm_store, extract_embed_text, normalize_llm_body,
@@ -55,6 +53,11 @@ use crate::tls::CertCache;
 use crate::upstream::{UpstreamClientHandle, UpstreamTlsConfig};
 #[cfg(feature = "wasm")]
 use crate::wasm_host::{try_load_from_env, WasmHookDecision, WasmHookRequest};
+
+mod access;
+mod cache_ops;
+mod helpers;
+mod types;
 
 pub struct ProxyPolicy {
     pub policy_mode: crate::policy_config::PolicyMode,
@@ -164,248 +167,6 @@ fn request_decision_source(url: &str) -> &'static str {
         "mitm"
     } else {
         "sni"
-    }
-}
-
-/// Cloneable handles for streaming MISS completion (runs after body drained).
-#[derive(Clone)]
-struct MissCompletionHandle {
-    http_cache: Arc<HttpL1Cache>,
-    cache_config: CacheConfig,
-    l2_cache: Option<RedisL2Cache>,
-    hierarchy: Option<Arc<HierarchyManager>>,
-    metrics: Arc<Metrics>,
-    #[cfg(feature = "kafka")]
-    kafka_pipeline: Option<Arc<KafkaEventPipeline>>,
-    http_pipeline: Option<Arc<HttpEventPipeline>>,
-    perf: PerfConfig,
-    digest_registry: Option<Arc<DigestRegistry>>,
-    sessions: Arc<SessionCorrelator>,
-    ti_shadow: Arc<TiShadowMatcher>,
-    miss_flights: MissFlightMap,
-    semantic_config: SemanticCacheConfig,
-    semantic_index: SemanticIndex,
-    /// When set, this completion is an LLM/semantic POST fill.
-    llm_mode: bool,
-    llm_normalized_body: Option<Bytes>,
-}
-
-impl MissCompletionHandle {
-    fn store_in_l1_and_l2(&self, cache_key: Arc<str>, cached_response: CachedResponse) {
-        self.http_cache
-            .insert(cache_key.clone(), cached_response.clone());
-        if let Some(registry) = &self.digest_registry {
-            let key = cache_key.to_string();
-            let reg = registry.clone();
-            tokio::spawn(async move {
-                reg.insert_cache_key(&key).await;
-            });
-        }
-        if let Some(l2) = &self.l2_cache {
-            let l2 = l2.clone();
-            tokio::spawn(async move {
-                l2.set(cache_key.as_ref(), &cached_response).await;
-            });
-        }
-    }
-
-    /// See [`ProxyService::has_event_sink`].
-    #[inline]
-    fn has_event_sink(&self) -> bool {
-        #[cfg(feature = "kafka")]
-        if self.kafka_pipeline.is_some() {
-            return true;
-        }
-        self.http_pipeline.is_some()
-    }
-
-    fn send_cache_event(&self, mut event: CacheEvent) {
-        crate::ti_shadow::annotate_shadow_match(&self.ti_shadow, &self.metrics, &mut event);
-        if !self.perf.should_emit_kafka_event() {
-            return;
-        }
-        dispatch_cache_event(
-            #[cfg(feature = "kafka")]
-            self.kafka_pipeline.as_deref(),
-            self.http_pipeline.as_deref(),
-            event,
-            &self.metrics,
-        );
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn complete_cache_miss(
-        &self,
-        cache_key: Arc<str>,
-        url: &str,
-        method: &str,
-        domain: &str,
-        status: u16,
-        headers_map: &HashMap<String, String>,
-        body_bytes: Bytes,
-        store_decision: &crate::cache_freshness::CacheStoreDecision,
-        stored: bool,
-        user_id: Option<String>,
-        username: Option<String>,
-        user_agent: Option<String>,
-        client_ip: &str,
-        categories: &[String],
-        threat_sources: &[String],
-        request_start: Instant,
-        request_body_size: usize,
-        hierarchy_peer: Option<Arc<CachePeer>>,
-        mut guard: Option<RequestMetricsGuard>,
-        mut fast_scope: Option<FastRequestScope>,
-    ) {
-        let body_size = body_bytes.len();
-
-        if let (Some(hierarchy), Some(peer)) = (self.hierarchy.clone(), hierarchy_peer) {
-            let bytes = body_size as u64;
-            tokio::spawn(async move {
-                hierarchy.record_peer_hit(&peer, bytes).await;
-            });
-        }
-
-        if stored && store_decision.store {
-            let headers_arc: Arc<[(Arc<str>, Arc<str>)]> = headers_map
-                .iter()
-                .map(|(k, v)| (Arc::from(k.as_str()), Arc::from(v.as_str())))
-                .collect();
-
-            let cached_response = CachedResponse::from_upstream(
-                status,
-                headers_arc,
-                body_bytes,
-                store_decision.ttl,
-                &self.cache_config.compression,
-                self.cache_config.spill_threshold_bytes,
-                &self.cache_config.spill_dir,
-                store_decision.etag.clone(),
-                store_decision.last_modified.clone(),
-                store_decision.is_negative,
-                store_decision.must_revalidate,
-            );
-            self.store_in_l1_and_l2(cache_key.clone(), cached_response.clone());
-            if self.llm_mode {
-                if let Some(norm) = &self.llm_normalized_body {
-                    let index = self.semantic_index.clone();
-                    let cfg = self.semantic_config.clone();
-                    let metrics = self.metrics.clone();
-                    let key = cache_key.clone();
-                    let text = extract_embed_text(norm);
-                    tokio::spawn(async move {
-                        match cfg.embed(&text).await {
-                            Ok(emb) => {
-                                if let Err(e) = index.insert(emb, key).await {
-                                    metrics.semantic_cache_vector_errors_total.inc();
-                                    warn!("semantic index insert failed: {e}");
-                                }
-                            }
-                            Err(e) => {
-                                metrics.semantic_cache_vector_errors_total.inc();
-                                warn!("semantic embed failed: {e}");
-                            }
-                        }
-                    });
-                }
-            }
-            self.miss_flights
-                .complete(&cache_key, Some(cached_response));
-            if let Some(g) = guard.as_mut() {
-                g.set_cache_status(if store_decision.is_negative {
-                    "NEGATIVE_MISS"
-                } else if self.llm_mode {
-                    "LLM_MISS"
-                } else {
-                    "MISS"
-                });
-            }
-        } else {
-            self.miss_flights.complete(&cache_key, None);
-            self.metrics.cache_bypasses_total.inc();
-            if let Some(g) = guard.as_mut() {
-                g.set_cache_status("BYPASS");
-            }
-        }
-
-        let cache_status = if stored && store_decision.store {
-            if store_decision.is_negative {
-                "NEGATIVE_MISS"
-            } else if self.llm_mode {
-                "LLM_MISS"
-            } else {
-                "MISS"
-            }
-        } else {
-            "BYPASS"
-        };
-
-        // Sink presence only: `send_cache_event` applies KAFKA_SAMPLE_RATE. Testing
-        // the sampler here as well drew it twice per event, which made the
-        // effective emit rate 1-in-N² instead of the configured 1-in-N.
-        if self.has_event_sink() {
-            if let Ok(timestamp) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
-                let event_id = new_event_id();
-                let redirect_url =
-                    header_ci(headers_map, "location").map(|loc| resolve_location(url, loc));
-                let corr = self.sessions.begin_request(
-                    client_ip,
-                    username.as_deref(),
-                    user_agent.as_deref(),
-                    url,
-                );
-                self.sessions.note_redirect(
-                    client_ip,
-                    &event_id,
-                    status,
-                    url,
-                    redirect_url.as_deref(),
-                );
-                let event = CacheEvent {
-                    url: url.to_string(),
-                    method: method.to_string(),
-                    status,
-                    cache_key: cache_key.to_string(),
-                    cache_status: cache_status.to_string(),
-                    timestamp: timestamp.as_secs(),
-                    headers: headers_map.clone(),
-                    user_id,
-                    username,
-                    client_ip: client_ip.to_string(),
-                    domain: domain.to_string(),
-                    response_size: body_size as u64,
-                    request_duration_ms: request_start.elapsed().as_millis() as u64,
-                    content_type: headers_map
-                        .iter()
-                        .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
-                        .map(|(_, v)| v.clone()),
-                    user_agent,
-                    categories: categories.to_vec(),
-                    threat_sources: threat_sources.to_vec(),
-                    acl_action: None,
-                    acl_rule_id: None,
-                    acl_reason: None,
-                    session_id: corr.session_id,
-                    parent_event_id: corr.parent_event_id,
-                    redirect_url,
-                    dlp_violation: None,
-                    casb_alert: None,
-                    decision_source: Some(request_decision_source(url).to_string()),
-                    bypass_reason: None,
-                    threat_shadow_match: None,
-                    event_id,
-                };
-                self.send_cache_event(event);
-            }
-        }
-
-        ProxyService::finish_request_metrics(
-            &mut guard,
-            &mut fast_scope,
-            status,
-            request_body_size,
-            body_size,
-        );
     }
 }
 
@@ -563,40 +324,6 @@ impl ProxyService {
 
     pub fn mitm_circuit_breaker(&self) -> Arc<MitmCircuitBreaker> {
         self.mitm_circuit_breaker.clone()
-    }
-
-    fn miss_completion_handle(&self) -> MissCompletionHandle {
-        self.miss_completion_handle_inner(false, None)
-    }
-
-    fn miss_completion_handle_llm(&self, normalized_body: Bytes) -> MissCompletionHandle {
-        self.miss_completion_handle_inner(true, Some(normalized_body))
-    }
-
-    fn miss_completion_handle_inner(
-        &self,
-        llm_mode: bool,
-        llm_normalized_body: Option<Bytes>,
-    ) -> MissCompletionHandle {
-        MissCompletionHandle {
-            http_cache: self.http_cache.clone(),
-            cache_config: self.cache_config.clone(),
-            l2_cache: self.l2_cache.clone(),
-            hierarchy: self.hierarchy.clone(),
-            metrics: self.metrics.clone(),
-            #[cfg(feature = "kafka")]
-            kafka_pipeline: self.kafka_pipeline.clone(),
-            http_pipeline: self.http_pipeline.clone(),
-            perf: self.perf.clone(),
-            digest_registry: self.digest_registry.clone(),
-            sessions: self.sessions.clone(),
-            ti_shadow: self.ti_shadow.clone(),
-            miss_flights: self.miss_flights.clone(),
-            semantic_config: self.semantic_config.clone(),
-            semantic_index: self.semantic_index.clone(),
-            llm_mode,
-            llm_normalized_body,
-        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -796,114 +523,25 @@ impl ProxyService {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn emit_policy_event(
         &self,
-        url: &str,
-        method: &str,
-        cache_key: &str,
         decision: &AclDecision,
-        user_id: &Option<String>,
-        username: &Option<String>,
-        user_agent: Option<&str>,
-        client_ip: &str,
-        domain: &str,
-        categories: &[String],
-        threat_sources: &[String],
-        request_start: Instant,
-        decision_source: &str,
+        policy: &PolicyEvaluation,
+        context: PolicyEventContext<'_>,
     ) {
-        let is_ti_block = decision
-            .rule_id
-            .as_ref()
-            .is_some_and(|r| r.starts_with("ti:"));
-        let eff_decision_source = if is_ti_block {
-            "threat_intel"
-        } else {
-            decision_source
-        };
-        self.metrics
-            .record_policy_decision_source(eff_decision_source);
+        let decision_source = effective_decision_source(decision, context.decision_source);
+        self.metrics.record_policy_decision_source(decision_source);
         info!(
-            domain = %domain,
-            decision_source = eff_decision_source,
+            domain = %context.domain,
+            decision_source,
             action = %decision.action,
             "ACL policy decision"
         );
         if !self.has_event_sink() {
             return;
         }
-        if let Ok(timestamp) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
-            let status = match decision.action {
-                AclAction::Deny => 403,
-                AclAction::Redirect => 302,
-                AclAction::Allow => 200,
-            };
-            let event_id = new_event_id();
-            let redirect_url = decision
-                .redirect_url
-                .as_deref()
-                .map(|loc| resolve_location(url, loc));
-            let corr = self
-                .sessions
-                .begin_request(client_ip, username.as_deref(), user_agent, url);
-            self.sessions
-                .note_redirect(client_ip, &event_id, status, url, redirect_url.as_deref());
-            let event = CacheEvent {
-                url: url.to_string(),
-                method: method.to_string(),
-                status,
-                cache_key: cache_key.to_string(),
-                cache_status: "BLOCKED".to_string(),
-                timestamp: timestamp.as_secs(),
-                headers: HashMap::new(),
-                user_id: user_id.clone(),
-                username: username.clone(),
-                client_ip: client_ip.to_string(),
-                domain: domain.to_string(),
-                response_size: 0,
-                request_duration_ms: request_start.elapsed().as_millis() as u64,
-                content_type: None,
-                user_agent: user_agent.map(str::to_string),
-                categories: categories.to_vec(),
-                threat_sources: threat_sources.to_vec(),
-                acl_action: Some(decision.action.to_string()),
-                acl_rule_id: decision.rule_id.clone(),
-                acl_reason: Some(decision.reason.clone()),
-                session_id: corr.session_id,
-                parent_event_id: corr.parent_event_id,
-                redirect_url,
-                dlp_violation: None,
-                casb_alert: None,
-                decision_source: Some(eff_decision_source.to_string()),
-                bypass_reason: None,
-                threat_shadow_match: None,
-                event_id,
-            };
+        if let Some(event) = build_policy_event(&self.sessions, decision, policy, &context) {
             self.send_cache_event(event);
-        }
-    }
-
-    async fn try_l2_cache_get(&self, cache_key: &Arc<str>) -> Option<CachedResponse> {
-        let l2 = self.l2_cache.as_ref()?;
-        l2.get(cache_key.as_ref()).await
-    }
-
-    fn store_in_l1_and_l2(&self, cache_key: Arc<str>, cached_response: CachedResponse) {
-        self.http_cache
-            .insert(cache_key.clone(), cached_response.clone());
-        if let Some(registry) = &self.digest_registry {
-            let key = cache_key.to_string();
-            let reg = registry.clone();
-            tokio::spawn(async move {
-                reg.insert_cache_key(&key).await;
-            });
-        }
-        if let Some(l2) = &self.l2_cache {
-            let l2 = l2.clone();
-            tokio::spawn(async move {
-                l2.set(cache_key.as_ref(), &cached_response).await;
-            });
         }
     }
 
@@ -914,168 +552,9 @@ impl ProxyService {
         username: Option<&str>,
         groups: &[&str],
         client_ip: &str,
-    ) -> (Option<AclDecision>, Vec<String>, Vec<String>) {
-        let evaluation = self
-            .policy_engine
-            .evaluate(url, domain, username, groups, client_ip);
-        (
-            evaluation.blocking,
-            evaluation.categories,
-            evaluation.threat_sources,
-        )
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn serve_l1_hit(
-        &self,
-        cached: &CachedResponse,
-        cache_key: &Arc<str>,
-        url: &str,
-        method: &str,
-        user_id: &Option<String>,
-        username: &Option<String>,
-        user_agent: Option<&str>,
-        client_ip: &str,
-        categories: &[String],
-        threat_sources: &[String],
-        request_start: Instant,
-        detailed_metrics: bool,
-        guard: &mut Option<RequestMetricsGuard>,
-        fast_scope: &mut Option<FastRequestScope>,
-        cache_status_label: &'static str,
-        x_cache_status: &str,
-    ) -> Response<Body> {
-        if detailed_metrics {
-            if let Some(g) = guard.as_mut() {
-                g.set_cache_status(cache_status_label);
-            }
-            self.metrics.cache_hits_total.inc();
-            self.emit_cache_hit_event(
-                url,
-                method,
-                cache_key,
-                cache_status_label,
-                cached,
-                user_id,
-                username,
-                user_agent,
-                client_ip,
-                categories,
-                threat_sources,
-                request_start,
-            );
-        } else if let Some(scope) = fast_scope.take() {
-            scope.finish_cache_hit();
-        }
-
-        let response = cached.to_response_with_cache_status(x_cache_status);
-        let body_size = cached.response_body_len();
-        if let Some(g) = guard.take() {
-            g.finish(cached.status, 0, body_size);
-        }
-        response
-    }
-
-    fn build_conditional_request(
-        req: &Request<Incoming>,
-        cached: &CachedResponse,
-    ) -> Option<Request<Body>> {
-        let mut builder = Request::builder()
-            .method(req.method())
-            .uri(req.uri().clone());
-        for (name, value) in req.headers() {
-            builder = builder.header(name, value);
-        }
-        if let Some(etag) = &cached.etag {
-            builder = builder.header(IF_NONE_MATCH, etag.as_ref());
-        }
-        if let Some(lm) = &cached.last_modified {
-            builder = builder.header(IF_MODIFIED_SINCE, lm.as_ref());
-        }
-        builder.body(empty()).ok()
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn try_revalidate_stale(
-        &self,
-        cached: &CachedResponse,
-        req: &Request<Incoming>,
-        cache_key: &Arc<str>,
-        url: &str,
-        method: &str,
-        user_id: &Option<String>,
-        username: &Option<String>,
-        client_ip: &str,
-        categories: &[String],
-        threat_sources: &[String],
-        request_start: Instant,
-        detailed_metrics: bool,
-        guard: &mut Option<RequestMetricsGuard>,
-        fast_scope: &mut Option<FastRequestScope>,
-    ) -> Option<Response<Body>> {
-        if !self.cache_config.honor_cache_control || !cached.has_validators() {
-            return None;
-        }
-
-        let cond_req = Self::build_conditional_request(req, cached)?;
-        let domain = Self::extract_domain(url);
-        let upstream_start = Instant::now();
-
-        let response = match self.http_client.load().request(cond_req).await {
-            Ok(resp) => resp,
-            Err(e) => {
-                warn!("Revalidation upstream error for {}: {}", url, e);
-                self.metrics
-                    .record_upstream_error(domain.as_str(), "revalidate");
-                return None;
-            }
-        };
-
-        let upstream_duration = upstream_start.elapsed().as_secs_f64();
-        let status = response.status();
-        self.metrics
-            .record_upstream_request(domain.as_str(), StatusLabel::new(status.as_u16()).as_str());
-        self.metrics
-            .record_upstream_duration(&domain, upstream_duration);
-
-        if status == StatusCode::NOT_MODIFIED {
-            let headers_map: HashMap<String, String> = response
-                .headers()
-                .iter()
-                .filter_map(|(k, v)| {
-                    v.to_str()
-                        .ok()
-                        .map(|v| (k.as_str().to_string(), v.to_string()))
-                })
-                .collect();
-            let ttl = refresh_ttl_from_headers(&headers_map, self.cache_config.default_ttl);
-            let refreshed = cached.refreshed_after_not_modified(ttl);
-            self.store_in_l1_and_l2(cache_key.clone(), refreshed.clone());
-            debug!("Cache REVALIDATED (304): {} {}", method, url);
-            let user_agent = Self::request_header(req, "user-agent");
-            return Some(self.serve_l1_hit(
-                &refreshed,
-                cache_key,
-                url,
-                method,
-                user_id,
-                username,
-                user_agent,
-                client_ip,
-                categories,
-                threat_sources,
-                request_start,
-                detailed_metrics,
-                guard,
-                fast_scope,
-                "REVALIDATED",
-                "REVALIDATED",
-            ));
-        }
-
-        // Changed response: consume body and fall through to normal miss handling upstream.
-        let _ = http_body_util::BodyExt::collect(response.into_body()).await;
-        None
+    ) -> PolicyEvaluation {
+        self.policy_engine
+            .evaluate(url, domain, username, groups, client_ip)
     }
 
     pub(crate) fn policy_response(decision: &AclDecision) -> Response<Body> {
@@ -1368,118 +847,6 @@ impl ProxyService {
         }
     }
 
-    #[allow(clippy::result_large_err)]
-    pub(crate) async fn authenticate_proxy(
-        &self,
-        req: &Request<Incoming>,
-        client_ip: &str,
-        conn_auth: Option<&crate::auth::ConnAuthCache>,
-    ) -> Result<Option<Arc<UserInfo>>, Response<Body>> {
-        let Some(auth) = &self.auth else {
-            return Ok(None);
-        };
-        if !auth.is_enabled() {
-            return Ok(None);
-        }
-
-        match auth
-            .handle_proxy_auth(client_ip, req, conn_auth, false)
-            .await
-        {
-            ProxyAuthOutcome::Anonymous => Ok(None),
-            ProxyAuthOutcome::Authenticated(user) => Ok(Some(Arc::new(user))),
-            ProxyAuthOutcome::Challenge {
-                authenticate_header,
-            } => {
-                if let Some(cache) = conn_auth {
-                    cache.invalidate().await;
-                }
-                tracing::debug!("Proxy authentication challenge issued");
-                Err(auth.create_auth_challenge_response(authenticate_header, false))
-            }
-        }
-    }
-
-    pub(crate) fn user_fields(user: Option<&UserInfo>) -> (Option<String>, Option<String>) {
-        user.map(|u| {
-            let name = u.username.clone();
-            (Some(name.clone()), Some(name))
-        })
-        .unwrap_or((None, None))
-    }
-
-    pub(crate) fn check_rate_limit(
-        &self,
-        client_ip: &str,
-        username: Option<&str>,
-        headers: &hyper::HeaderMap,
-    ) -> Option<Response<Body>> {
-        // Disabled is the default: bail before touching headers or metrics so a
-        // deployment that does not rate limit pays nothing per request.
-        if !self.rate_limiter.is_enabled() {
-            return None;
-        }
-        let api_key = extract_api_key_ref(headers, self.rate_limiter.config());
-        if self.rate_limiter.is_distributed() {
-            self.metrics.distributed_rate_limit_hits_total.inc();
-        }
-        let violation = self.rate_limiter.check(client_ip, username, api_key)?;
-        let (limit_type, status, body) = match violation {
-            RateLimitViolation::Ip => (
-                "ip",
-                StatusCode::TOO_MANY_REQUESTS,
-                &b"429 Too Many Requests: rate limit exceeded"[..],
-            ),
-            RateLimitViolation::User => (
-                "user",
-                StatusCode::TOO_MANY_REQUESTS,
-                &b"429 Too Many Requests: rate limit exceeded"[..],
-            ),
-            RateLimitViolation::ApiKey => (
-                "api_key",
-                StatusCode::TOO_MANY_REQUESTS,
-                &b"429 Too Many Requests: API key rate limit exceeded"[..],
-            ),
-            RateLimitViolation::ApiKeyMissing => (
-                "api_key_missing",
-                StatusCode::UNAUTHORIZED,
-                &b"401 Unauthorized: API key required"[..],
-            ),
-        };
-        self.metrics
-            .rate_limit_rejected_total
-            .with_label_values(&[limit_type])
-            .inc();
-        let key_prefix = api_key.map(|k| &k[..k.len().min(4)]).unwrap_or("-");
-        warn!(
-            "Rate limit ({}) for client_ip={} user={} api_key_prefix={}",
-            limit_type,
-            client_ip,
-            username.unwrap_or("-"),
-            key_prefix
-        );
-        Some(Self::rate_limit_response(status, body))
-    }
-
-    fn rate_limit_response(status: StatusCode, body: &'static [u8]) -> Response<Body> {
-        let mut builder = Response::builder()
-            .status(status)
-            .header("Content-Type", "text/plain; charset=utf-8")
-            .header("X-Content-Type-Options", "nosniff")
-            .header("X-Frame-Options", "DENY");
-        if status == StatusCode::TOO_MANY_REQUESTS {
-            builder = builder.header("Retry-After", "1");
-        }
-        builder
-            .body(full(Bytes::from_static(body)))
-            .unwrap_or_else(|_| Response::new(full(Bytes::from_static(b"429 Too Many Requests"))))
-    }
-
-    #[inline]
-    pub(crate) fn generate_cache_key(&self, method: &str, url: &str) -> Arc<str> {
-        http_cache_key(method, url)
-    }
-
     /// Try fetching via hierarchy peer (sibling ICP HIT or parent selection).
     async fn try_fetch_via_hierarchy(
         &self,
@@ -1515,88 +882,6 @@ impl ProxyService {
                 None
             }
         }
-    }
-
-    /// Host of an absolute URL, or `"unknown"` when it has none.
-    ///
-    /// Runs on every request (metrics labels, ACL matching, policy-cache keys,
-    /// analytics events). A full `Url::parse` for that is an outsized cost, so
-    /// plain ASCII authorities — effectively all real traffic — are sliced out
-    /// directly and anything else falls back to the real parser, which keeps
-    /// IDNA/punycode, percent escapes and IPv6 literals byte-identical.
-    #[inline]
-    fn extract_domain(url_str: &str) -> String {
-        if let Some(domain) = Self::extract_domain_fast(url_str) {
-            return domain;
-        }
-        url::Url::parse(url_str)
-            .ok()
-            .and_then(|u| u.host().map(|h| h.to_string()))
-            .unwrap_or_else(|| "unknown".to_string())
-    }
-
-    /// Slice the host out of `scheme://[userinfo@]host[:port]/...`.
-    ///
-    /// Returns `None` — deferring to `Url::parse` — for any authority that is
-    /// not a straightforward ASCII `[a-zA-Z0-9.-]` hostname, which is exactly
-    /// the set where the URL spec's host parser does more than lowercase.
-    fn extract_domain_fast(url_str: &str) -> Option<String> {
-        let after_scheme = url_str.split_once("://")?.1;
-        let authority = after_scheme
-            .split(['/', '?', '#'])
-            .next()
-            .filter(|a| !a.is_empty())?;
-        // Strip userinfo; the last '@' wins, as in the URL spec.
-        let host_port = match authority.rsplit_once('@') {
-            Some((_, host_port)) => host_port,
-            None => authority,
-        };
-        // IPv6 literals ("[::1]") keep their brackets and normalization rules.
-        if host_port.starts_with('[') {
-            return None;
-        }
-        let host = host_port.split(':').next().filter(|h| !h.is_empty())?;
-
-        let plain = host
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.')
-            && !host.starts_with('.')
-            && !host.ends_with('.')
-            && !host.contains("..");
-        if !plain {
-            return None;
-        }
-
-        Some(host.to_ascii_lowercase())
-    }
-
-    /// Borrowed header value — no copy. Use this whenever the value is only read
-    /// while `req` is still alive.
-    #[inline]
-    fn request_header<'a>(req: &'a Request<Incoming>, name: &str) -> Option<&'a str> {
-        req.headers().get(name).and_then(|v| v.to_str().ok())
-    }
-
-    /// Owned header value, for callers that outlive the borrow of `req`.
-    fn request_header_str(req: &Request<Incoming>, name: &str) -> Option<String> {
-        Self::request_header(req, name).map(str::to_string)
-    }
-
-    fn extract_user_info(req: &Request<Incoming>) -> (Option<String>, Option<String>) {
-        if let Some(auth_header) = req.headers().get(AUTHORIZATION) {
-            if let Ok(auth_str) = auth_header.to_str() {
-                if let Some(encoded) = auth_str.strip_prefix("Basic ") {
-                    if let Ok(decoded_bytes) = general_purpose::STANDARD.decode(encoded) {
-                        if let Ok(credentials) = String::from_utf8(decoded_bytes) {
-                            if let Some((username, _)) = credentials.split_once(':') {
-                                return (Some(username.to_string()), Some(username.to_string()));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        (None, None)
     }
 
     /// Whether any analytics sink is configured.
@@ -1640,61 +925,12 @@ impl ProxyService {
         let _ = timeout;
     }
 
-    fn finish_request_metrics(
-        guard: &mut Option<RequestMetricsGuard>,
-        fast_scope: &mut Option<FastRequestScope>,
-        status: u16,
-        request_size: usize,
-        response_size: usize,
-    ) {
-        if let Some(g) = guard.take() {
-            g.finish(status, request_size, response_size);
-        } else if let Some(scope) = fast_scope.take() {
-            scope.finish(status);
-        }
-    }
-
-    fn headers_map_from_response(response: &Response<Incoming>) -> HashMap<String, String> {
-        Self::headers_map(response.headers())
-    }
-
-    fn headers_map_from_parts(parts: &hyper::http::request::Parts) -> HashMap<String, String> {
-        Self::headers_map(&parts.headers)
-    }
-
-    fn headers_map(headers: &hyper::HeaderMap) -> HashMap<String, String> {
-        let mut map = HashMap::with_capacity(headers.len());
-        for (name, value) in headers.iter() {
-            if let Ok(value) = value.to_str() {
-                map.insert(name.as_str().to_string(), value.to_string());
-            }
-        }
-        map
-    }
-
     /// Whether an ICAP stage will read the request headers on this request.
     #[inline]
     fn icap_wants_request_headers(&self) -> bool {
         self.icap
             .as_ref()
             .is_some_and(|client| client.reqmod_enabled() || client.respmod_enabled())
-    }
-
-    fn apply_response_headers(headers_map: &HashMap<String, String>, resp: &mut Response<Body>) {
-        for (key, value) in headers_map {
-            if let (Ok(name), Ok(val)) = (
-                HeaderName::from_bytes(key.as_bytes()),
-                HeaderValue::from_str(value),
-            ) {
-                resp.headers_mut().insert(name, val);
-            }
-        }
-    }
-
-    fn attach_x_cache_status(resp: &mut Response<Body>, label: &str) {
-        if let Ok(val) = HeaderValue::from_str(label) {
-            resp.headers_mut().insert("x-cache-status", val);
-        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1753,131 +989,6 @@ impl ProxyService {
         } else {
             "BYPASS"
         }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn try_serve_cache_before_policy(
-        &self,
-        req: &Request<Incoming>,
-        cache_key: &Arc<str>,
-        url: &str,
-        method: &str,
-        client_ip: &str,
-        request_start: Instant,
-        detailed_metrics: bool,
-        guard: &mut Option<RequestMetricsGuard>,
-        fast_scope: &mut Option<FastRequestScope>,
-    ) -> Option<Response<Body>> {
-        let no_user: Option<String> = None;
-        let no_cats: Vec<String> = Vec::new();
-        let no_threats: Vec<String> = Vec::new();
-        // Borrowed: `req` outlives every use below, so the fast path does not
-        // copy the User-Agent just to hand it to an event builder.
-        let user_agent = Self::request_header(req, "user-agent");
-        let cache_lookup_start = Instant::now();
-
-        if let Some(cached) = self.http_cache.get(cache_key) {
-            if detailed_metrics {
-                self.metrics
-                    .cache_lookup_duration_seconds
-                    .observe(cache_lookup_start.elapsed().as_secs_f64());
-            }
-            if cached.can_serve_fresh() {
-                let (label, x_status) = if cached.is_negative {
-                    ("NEGATIVE_HIT", "NEGATIVE-HIT")
-                } else {
-                    ("HIT", "HIT")
-                };
-                debug!(
-                    "Cache {} (fast path, skip policy): {} {}",
-                    label, method, url
-                );
-                return Some(self.serve_l1_hit(
-                    &cached,
-                    cache_key,
-                    url,
-                    method,
-                    &no_user,
-                    &no_user,
-                    user_agent,
-                    client_ip,
-                    &no_cats,
-                    &no_threats,
-                    request_start,
-                    detailed_metrics,
-                    guard,
-                    fast_scope,
-                    label,
-                    x_status,
-                ));
-            }
-            if let Some(resp) = self
-                .try_revalidate_stale(
-                    &cached,
-                    req,
-                    cache_key,
-                    url,
-                    method,
-                    &no_user,
-                    &no_user,
-                    client_ip,
-                    &no_cats,
-                    &no_threats,
-                    request_start,
-                    detailed_metrics,
-                    guard,
-                    fast_scope,
-                )
-                .await
-            {
-                return Some(resp);
-            }
-        }
-
-        if let Some(cached) = self.try_l2_cache_get(cache_key).await {
-            debug!("Cache L2 HIT (fast path, skip policy): {} {}", method, url);
-            self.http_cache.insert(cache_key.clone(), cached.clone());
-            let hit_label = if cached.is_negative {
-                "NEGATIVE_HIT"
-            } else {
-                "L2_HIT"
-            };
-            let x_status = if cached.is_negative {
-                "NEGATIVE-HIT"
-            } else {
-                "L2-HIT"
-            };
-            if let Some(g) = guard.as_mut() {
-                g.set_cache_status(hit_label);
-                self.metrics.cache_hits_total.inc();
-            }
-            if detailed_metrics {
-                self.emit_cache_hit_event(
-                    url,
-                    method,
-                    cache_key,
-                    hit_label,
-                    &cached,
-                    &no_user,
-                    &no_user,
-                    user_agent,
-                    client_ip,
-                    &no_cats,
-                    &no_threats,
-                    request_start,
-                );
-            }
-            let response = cached.to_response_with_cache_status(x_status);
-            let body_size = cached.response_body_len();
-            if let Some(g) = guard.take() {
-                g.finish(cached.status, 0, body_size);
-            } else if let Some(scope) = fast_scope.take() {
-                scope.finish_cache_hit();
-            }
-            return Some(response);
-        }
-
-        None
     }
 
     pub(crate) async fn handle_request(
@@ -2093,25 +1204,31 @@ impl ProxyService {
             }
             return response;
         }
-        let (policy_decision, categories, threat_sources) = self
-            .check_policy(&url, &domain, username.as_deref(), &user_groups, client_ip);
-        if let Some(decision) = policy_decision {
+        let policy = self.check_policy(
+            &url,
+            &domain,
+            username.as_deref(),
+            &user_groups,
+            client_ip,
+        );
+        if let Some(decision) = policy.blocking.as_ref() {
             self.emit_policy_event(
-                &url,
-                method,
-                &cache_key,
-                &decision,
-                &user_id,
-                &username,
-                user_agent.as_deref(),
-                client_ip,
-                &domain,
-                &categories,
-                &threat_sources,
-                request_start,
-                request_decision_source(&url),
+                decision,
+                &policy,
+                PolicyEventContext {
+                    url: &url,
+                    method,
+                    cache_key: cache_key.as_ref(),
+                    user_id: &user_id,
+                    username: &username,
+                    user_agent: user_agent.as_deref(),
+                    client_ip,
+                    domain: &domain,
+                    request_start,
+                    decision_source: request_decision_source(&url),
+                },
             );
-            let response = Self::policy_response(&decision);
+            let response = Self::policy_response(decision);
             if let Some(g) = guard.take() {
                 g.finish(response.status().as_u16(), 0, 0);
             } else if let Some(scope) = fast_scope.take() {
@@ -2119,6 +1236,9 @@ impl ProxyService {
             }
             return response;
         }
+
+        let categories = policy.categories;
+        let threat_sources = policy.threat_sources;
 
         let cache_lookup_start = Instant::now();
         let mut early_body = None::<(hyper::http::request::Parts, Bytes)>;

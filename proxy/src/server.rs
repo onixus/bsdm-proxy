@@ -29,6 +29,7 @@ use crate::control_api::ControlApiState;
 use crate::http_types::{empty, full};
 use crate::metrics::Metrics;
 use crate::pipeline::{new_event_id, CacheEvent};
+use crate::policy_event::PolicyEventContext;
 use crate::proxy_service::{ProxyService, TlsPolicyDecision};
 use crate::tls::{parse_authority, rewrite_mitm_request, should_mitm_port};
 
@@ -810,32 +811,33 @@ pub async fn handle_connection(
                     return Ok::<_, Infallible>(resp);
                 }
 
-                let (policy_decision, categories, threat_sources) = service
-                    .check_policy(
-                        &connect_url,
-                        &connect_domain,
-                        policy_username,
-                        &policy_groups,
-                        &client_ip,
-                    );
-                if let Some(decision) = policy_decision {
+                let policy = service.check_policy(
+                    &connect_url,
+                    &connect_domain,
+                    policy_username,
+                    &policy_groups,
+                    &client_ip,
+                );
+                if let Some(decision) = policy.blocking.as_ref() {
                     let (user_id, username) = ProxyService::user_fields(proxy_user.as_deref());
+                    let cache_key = service.generate_cache_key("CONNECT", &authority);
                     service.emit_policy_event(
-                        &connect_url,
-                        "CONNECT",
-                        service.generate_cache_key("CONNECT", &authority).as_ref(),
-                        &decision,
-                        &user_id,
-                        &username,
-                        user_agent.as_deref(),
-                        &client_ip,
-                        &connect_domain,
-                        &categories,
-                        &threat_sources,
-                        request_start,
-                        "sni",
+                        decision,
+                        &policy,
+                        PolicyEventContext {
+                            url: &connect_url,
+                            method: "CONNECT",
+                            cache_key: cache_key.as_ref(),
+                            user_id: &user_id,
+                            username: &username,
+                            user_agent: user_agent.as_deref(),
+                            client_ip: &client_ip,
+                            domain: &connect_domain,
+                            request_start,
+                            decision_source: "sni",
+                        },
                     );
-                    return Ok::<_, Infallible>(ProxyService::policy_response(&decision));
+                    return Ok::<_, Infallible>(ProxyService::policy_response(decision));
                 }
 
                 tasks.spawn({
