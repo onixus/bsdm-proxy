@@ -19,16 +19,12 @@
     "clickhouse_is_transactional_source": false
   },
   "identity": {
-    "accepts_apex_identity": true,
-    "production_trusts_unsigned_role_header": false,
+    "mode": "owning-service",
+    "trust_unsigned_role_header": false,
     "owning_service_authorizes_mutations": true
   },
   "resources": {
-    "owns": [
-      "event",
-      "evidence",
-      "policy"
-    ],
+    "owns": ["event", "evidence", "policy"],
     "mappings": [
       {
         "kind": "event",
@@ -45,42 +41,53 @@
         "local_id_field": "rule_id",
         "urn_prefix": "urn:apex:policy:bsdm-proxy:"
       }
-    ]
+    ],
+    "references": ["asset"]
   },
   "boundaries": [
     {
-      "name": "apex.bsdm-proxy.gateway.v1",
-      "kind": "event",
-      "event_type": "apex.bsdm-proxy.gateway.v1"
+      "name": "cache-event-v1",
+      "kind": "native-adapter",
+      "event_type": "apex.bsdm-proxy.cache_event.v1",
+      "payload_contract": "bsdm-events/src/lib.rs"
+    },
+    {
+      "name": "agent-api-v1",
+      "kind": "http",
+      "paths": [
+        "POST /api/v1/agent/enroll",
+        "GET /api/v1/agent/policy",
+        "POST /api/v1/agent/heartbeat",
+        "POST /api/v1/agent/events"
+      ]
     }
   ],
-  "integration": {
-    "event_types": [
-      "apex.bsdm-proxy.gateway.v1"
-    ],
-    "produces": [
-      "gateway-flow",
-      "policy-decision",
-      "security-alert"
-    ]
-  },
-  "observability": {
-    "w3c_trace_context": true,
-    "otel_resource_attribute": "apex.system",
-    "apex_system_value": "bsdm-proxy"
-  },
-  "supply_chain": {
-    "sbom_required": true,
-    "sha256_required": true,
-    "signature_required_for_production_promotion": true,
-    "provenance_required_for_production_promotion": true
-  },
+  "native_contracts": [
+    {
+      "path": "bsdm-events/src/lib.rs",
+      "kind": "wire-model"
+    },
+    {
+      "path": "docs/architecture/agent-contract.md",
+      "kind": "http-contract"
+    }
+  ],
+  "source_guards": [
+    {
+      "path": "bsdm-events/src/lib.rs",
+      "contains": ["pub event_id: String", "pub struct CacheEvent"]
+    },
+    {
+      "path": "docs/architecture/agent-contract.md",
+      "contains": ["/api/v1/agent/*"]
+    }
+  ],
   "coverage": {
-    "identity": "declared",
-    "api_versioning": "declared",
+    "identity": "native",
+    "api_versioning": "enforced",
     "canonical_refs": "enforced",
     "event_envelope": "adapter",
-    "observability": "declared",
-    "supply_chain": "declared"
+    "observability": "partial",
+    "supply_chain": "partial"
   }
 }
