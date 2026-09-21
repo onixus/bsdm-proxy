@@ -943,7 +943,7 @@ impl ProxyService {
         (categories, threat_sources)
     }
 
-    async fn check_acl(
+    fn check_acl(
         &self,
         url: &str,
         domain: &str,
@@ -993,7 +993,7 @@ impl ProxyService {
         }
     }
 
-    pub async fn check_policy(
+    pub fn check_policy(
         &self,
         url: &str,
         domain: &str,
@@ -1014,8 +1014,7 @@ impl ProxyService {
                 } else {
                     let (category_names, mut threat_sources) = self.categorize_url(url);
                     let (mut blocking, explicit_allow) = self
-                        .check_acl(url, domain, &category_names, username, groups, client_ip)
-                        .await;
+                        .check_acl(url, domain, &category_names, username, groups, client_ip);
                     if !explicit_allow && blocking.is_none() {
                         if let Some(hit) = self.ti_enforce.match_domain(domain) {
                             blocking = Some(AclDecision::deny(
@@ -1034,8 +1033,7 @@ impl ProxyService {
             } else {
                 let (category_names, mut threat_sources) = self.categorize_url(url);
                 let (mut blocking, explicit_allow) = self
-                    .check_acl(url, domain, &category_names, username, groups, client_ip)
-                    .await;
+                    .check_acl(url, domain, &category_names, username, groups, client_ip);
                 if !explicit_allow && blocking.is_none() {
                     if let Some(hit) = self.ti_enforce.match_domain(domain) {
                         blocking = Some(AclDecision::deny(
@@ -2242,8 +2240,7 @@ impl ProxyService {
             return response;
         }
         let (policy_decision, categories, threat_sources) = self
-            .check_policy(&url, &domain, username.as_deref(), &user_groups, client_ip)
-            .await;
+            .check_policy(&url, &domain, username.as_deref(), &user_groups, client_ip);
         if let Some(decision) = policy_decision {
             self.emit_policy_event(
                 &url,
