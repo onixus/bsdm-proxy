@@ -545,6 +545,18 @@ impl ProxyService {
         }
     }
 
+    pub fn check_policy(
+        &self,
+        url: &str,
+        domain: &str,
+        username: Option<&str>,
+        groups: &[&str],
+        client_ip: &str,
+    ) -> PolicyEvaluation {
+        self.policy_engine
+            .evaluate(url, domain, username, groups, client_ip)
+    }
+
     pub(crate) fn policy_response(decision: &AclDecision) -> Response<Body> {
         match decision.action {
             AclAction::Deny => {
