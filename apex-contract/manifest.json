@@ -1,0 +1,93 @@
+{
+  "apex_contract_version": "1.0",
+  "canonical": {
+    "repo": "onixus/unified-platform",
+    "commit": "878d138c560cd4106ab0d6cccde804ddc3e5ae1d",
+    "path": "contracts/v1/CONTRACT.md"
+  },
+  "system": "bsdm-proxy",
+  "namespace": "bsdm-proxy",
+  "role": "secure-web-gateway",
+  "ownership": {
+    "authoritative_domains": [
+      "swg-policy",
+      "proxy-decision",
+      "gateway-security-telemetry",
+      "dns-sinkhole-policy"
+    ],
+    "gateway_is_source_of_truth": false,
+    "clickhouse_is_transactional_source": false
+  },
+  "identity": {
+    "mode": "owning-service",
+    "trust_unsigned_role_header": false,
+    "owning_service_authorizes_mutations": true
+  },
+  "resources": {
+    "owns": ["event", "evidence", "policy"],
+    "mappings": [
+      {
+        "kind": "event",
+        "local_id_field": "event_id",
+        "urn_prefix": "urn:apex:event:bsdm-proxy:"
+      },
+      {
+        "kind": "evidence",
+        "local_id_field": "flow_id",
+        "urn_prefix": "urn:apex:evidence:bsdm-proxy:"
+      },
+      {
+        "kind": "policy",
+        "local_id_field": "rule_id",
+        "urn_prefix": "urn:apex:policy:bsdm-proxy:"
+      }
+    ],
+    "references": ["asset"]
+  },
+  "boundaries": [
+    {
+      "name": "cache-event-v1",
+      "kind": "native-adapter",
+      "event_type": "apex.bsdm-proxy.cache_event.v1",
+      "payload_contract": "bsdm-events/src/lib.rs"
+    },
+    {
+      "name": "agent-api-v1",
+      "kind": "http",
+      "paths": [
+        "POST /api/v1/agent/enroll",
+        "GET /api/v1/agent/policy",
+        "POST /api/v1/agent/heartbeat",
+        "POST /api/v1/agent/events"
+      ]
+    }
+  ],
+  "native_contracts": [
+    {
+      "path": "bsdm-events/src/lib.rs",
+      "kind": "wire-model"
+    },
+    {
+      "path": "docs/architecture/agent-contract.md",
+      "kind": "http-contract"
+    }
+  ],
+  "source_guards": [
+    {
+      "path": "bsdm-events/src/lib.rs",
+      "contains": ["pub event_id: String", "pub struct CacheEvent"]
+    },
+    {
+      "path": "docs/architecture/agent-contract.md",
+      "contains": ["/api/v1/agent/*"]
+    }
+  ],
+  "coverage": {
+    "identity": "native",
+    "api_versioning": "enforced",
+    "canonical_refs": "enforced",
+    "event_envelope": "adapter",
+    "observability": "partial",
+    "supply_chain": "partial"
+  }
+}
