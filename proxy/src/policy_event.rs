@@ -25,10 +25,7 @@ pub struct PolicyEventContext<'a> {
 }
 
 #[inline]
-pub fn effective_decision_source<'a>(
-    decision: &AclDecision,
-    fallback: &'a str,
-) -> &'a str {
+pub fn effective_decision_source<'a>(decision: &AclDecision, fallback: &'a str) -> &'a str {
     if decision
         .rule_id
         .as_ref()

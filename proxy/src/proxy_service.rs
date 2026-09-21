@@ -3,9 +3,7 @@
 use bytes::Bytes;
 use http_body_util::BodyExt;
 use hyper::body::Incoming;
-use hyper::header::{
-    HeaderName, HeaderValue, IF_MODIFIED_SINCE, IF_NONE_MATCH, LOCATION,
-};
+use hyper::header::{HeaderName, HeaderValue, IF_MODIFIED_SINCE, IF_NONE_MATCH, LOCATION};
 use hyper::{Request, Response, StatusCode};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -1205,13 +1203,7 @@ impl ProxyService {
             }
             return response;
         }
-        let policy = self.check_policy(
-            &url,
-            &domain,
-            username.as_deref(),
-            &user_groups,
-            client_ip,
-        );
+        let policy = self.check_policy(&url, &domain, username.as_deref(), &user_groups, client_ip);
         if let Some(decision) = policy.blocking.as_ref() {
             self.emit_policy_event(
                 decision,

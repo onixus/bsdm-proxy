@@ -1,8 +1,8 @@
 use super::*;
+use crate::cache_key::http_cache_key;
 use base64::engine::general_purpose;
 use base64::Engine;
 use hyper::header::AUTHORIZATION;
-use crate::cache_key::http_cache_key;
 
 impl ProxyService {
     #[inline]
@@ -51,10 +51,7 @@ impl ProxyService {
     }
 
     #[inline]
-    pub(super) fn request_header<'a>(
-        req: &'a Request<Incoming>,
-        name: &str,
-    ) -> Option<&'a str> {
+    pub(super) fn request_header<'a>(req: &'a Request<Incoming>, name: &str) -> Option<&'a str> {
         req.headers().get(name).and_then(|v| v.to_str().ok())
     }
 
@@ -62,9 +59,7 @@ impl ProxyService {
         Self::request_header(req, name).map(str::to_string)
     }
 
-    pub(super) fn extract_user_info(
-        req: &Request<Incoming>,
-    ) -> (Option<String>, Option<String>) {
+    pub(super) fn extract_user_info(req: &Request<Incoming>) -> (Option<String>, Option<String>) {
         if let Some(auth_header) = req.headers().get(AUTHORIZATION) {
             if let Ok(auth_str) = auth_header.to_str() {
                 if let Some(encoded) = auth_str.strip_prefix("Basic ") {

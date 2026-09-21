@@ -1,19 +1,12 @@
 use super::*;
 
 impl ProxyService {
-    pub(super) async fn try_l2_cache_get(
-        &self,
-        cache_key: &Arc<str>,
-    ) -> Option<CachedResponse> {
+    pub(super) async fn try_l2_cache_get(&self, cache_key: &Arc<str>) -> Option<CachedResponse> {
         let l2 = self.l2_cache.as_ref()?;
         l2.get(cache_key.as_ref()).await
     }
 
-    pub(super) fn store_in_l1_and_l2(
-        &self,
-        cache_key: Arc<str>,
-        cached_response: CachedResponse,
-    ) {
+    pub(super) fn store_in_l1_and_l2(&self, cache_key: Arc<str>, cached_response: CachedResponse) {
         self.http_cache
             .insert(cache_key.clone(), cached_response.clone());
         if let Some(registry) = &self.digest_registry {
