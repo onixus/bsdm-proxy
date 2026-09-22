@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Install without a toolchain** — `scripts/install-release.sh` downloads the GitHub Release tarball for the host architecture, verifies its `.sha256`, unpacks it and runs the packaged `install.sh`; it is self-contained so it also works as `curl … | sudo bash -s -- --version X.Y.Z` and offline via `--archive`. The interactive `./install.sh` gained a "prebuilt release" mode built on it (no `cargo`, `npm` or `docker` on the host); building from the checkout is now mode 3.
+- **Static release binaries** — `scripts/build-package.sh --docker` (what `release.yml` and `scripts/ci/run.sh package` now use) exports the new `artifacts` stage of the `Dockerfile`: musl `crt-static` binaries stripped at link time, identical to the container images. Packages built this way run on any Linux x86_64 / aarch64; the previous packages were linked against the CI runner's glibc 2.39 and failed on Debian 12, Ubuntu 22.04 and RHEL 9. The workflow asserts static linkage and runs the packaged binary before publishing.
+- **Admin Console in the native package** — the tarball ships `share/admin-console/`; `packaging/install.sh` installs it under `<prefix>/share/admin-console` and records `ADMIN_CONSOLE_DIR` in `bsdm-proxy.env`, so `/admin/` works on a systemd install (it was empty before: the console only existed in the Docker image).
+- **All six images published** — `Jenkinsfile.publish` and the manual `docker-publish.yml` now push `ghcr.io/onixus/bsdm-{proxy,cache-indexer,alert-worker,ml-worker,dns-sinkhole,threat-intel}` for every tag, the names `charts/bsdm/values.yaml` has referenced all along. Only `bsdm-proxy` existed in the registry, and the chart could not pull the rest.
+- **Compose from published images** — every in-repo service in `docker-compose.yml` carries an `image:` (`BSDM_IMAGE_TAG`, default = this release) next to its `build:`, so `docker compose pull && docker compose up -d` deploys without building; `up -d --build` still rebuilds from the checkout. README, INSTALL and the deployment guide now show the pull path first.
+
+### Fixed
+
+- **Interactive installer did nothing in Docker and Native modes** — `scripts/installer/docker.sh` and `native.sh` only defined their function; the wizard executed them as scripts, which returned without installing anything. Both now run their entry point when executed directly.
+
 ## [0.9.15] - 2026-09-22
 
 Release following **0.9.14**: reverse-proxy OIDC finished with signature verification and Google/Apple providers, eBPF/XDP modernization behind an explicit arming gate, hop-by-hop header stripping on every outbound request, alert-worker ClickHouse latency control, a synchronous policy engine carved out of the `ProxyService` monolith, and an APEX Architecture Contract gate.

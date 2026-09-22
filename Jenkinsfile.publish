@@ -38,7 +38,11 @@ pipeline {
 
   environment {
     REGISTRY = 'ghcr.io'
-    IMAGE    = 'ghcr.io/onixus/bsdm-proxy'
+    // Один образ на стадию Dockerfile. Имена совпадают с тем, что ждут
+    // charts/bsdm/values.yaml и docker-compose.yml: без них helm/compose
+    // могут только собирать из исходников.
+    IMAGE_PREFIX = 'ghcr.io/onixus/bsdm'
+    TARGETS      = 'proxy cache-indexer alert-worker ml-worker dns-sinkhole threat-intel'
   }
 
   stages {
@@ -88,7 +92,6 @@ pipeline {
         script {
           // Теги как в docker-publish.yml: semver и latest.
           def version = params.TAG.replaceFirst(/^v/, '')
-          def tags = ["-t ${env.IMAGE}:${version}", "-t ${env.IMAGE}:latest"].join(' ')
           def platforms = params.MULTIARCH ? 'linux/amd64,linux/arm64' : 'linux/arm64'
           // Мультиарх требует драйвера docker-container: штатный docker
           // собирать под несколько платформ не умеет.
@@ -98,19 +101,27 @@ pipeline {
             set -eu
             docker buildx inspect bsdm-publisher >/dev/null 2>&1 \
               || docker buildx create --name bsdm-publisher --driver docker-container --bootstrap
-
-            docker buildx build --builder bsdm-publisher \
-              --platform ${platforms} \
-              --target proxy \
-              --provenance mode=max --sbom true \
-              ${tags} ${output} \
-              -f Dockerfile .
           """
 
-          if (params.DRY_RUN) {
-            echo "DRY_RUN: образ собран, публикации не было. Теги были бы: ${version}, latest"
-          } else {
-            echo "Опубликовано: ${env.IMAGE}:${version} и :latest"
+          // Стадии делят один builder-слой: после первого target остальные
+          // только копируют уже собранные бинарники из кэша buildx.
+          for (target in env.TARGETS.split(' ')) {
+            def image = "${env.IMAGE_PREFIX}-${target}"
+            def tags = ["-t ${image}:${version}", "-t ${image}:latest"].join(' ')
+            sh """
+              set -eu
+              docker buildx build --builder bsdm-publisher \
+                --platform ${platforms} \
+                --target ${target} \
+                --provenance mode=max --sbom true \
+                ${tags} ${output} \
+                -f Dockerfile .
+            """
+            if (params.DRY_RUN) {
+              echo "DRY_RUN: ${image} собран, публикации не было. Теги были бы: ${version}, latest"
+            } else {
+              echo "Опубликовано: ${image}:${version} и :latest"
+            }
           }
         }
       }

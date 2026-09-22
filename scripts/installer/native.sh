@@ -45,6 +45,20 @@ install_native() {
     --create-user \
     --systemd
 
+  finalize_native_install "$root" "$http_port" "$metrics_port" "$enable_acl" "$certs_dir"
+}
+
+# Shared by the source build (above) and the prebuilt-release path
+# (release.sh): the package's install.sh has laid down binaries, units and
+# config templates; this applies the operator's answers, makes sure a CA
+# exists and starts the service.
+finalize_native_install() {
+  local root="$1"
+  local http_port="$2"
+  local metrics_port="$3"
+  local enable_acl="$4"
+  local certs_dir="$5"
+
   configure_native_proxy "$root" /etc/bsdm-proxy "$http_port" "$metrics_port" "$enable_acl"
   ensure_ca "$certs_dir"
 
@@ -59,3 +73,7 @@ install_native() {
   systemctl enable --now bsdm-proxy
   info "Native proxy service started"
 }
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  install_native "$@"
+fi

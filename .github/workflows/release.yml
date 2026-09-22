@@ -82,10 +82,21 @@ jobs:
             arch: aarch64
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-rust
+      # The package is exported from the Dockerfile (static musl binaries +
+      # Admin Console), so the runner needs Buildx, not a Rust toolchain.
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - run: ./scripts/ci/run.sh package
         env:
           EXPECTED_ARCH: ${{ matrix.arch }}
+          PACKAGE_VIA_DOCKER: "1"
+      - name: Check the package is static and runs on this runner
+        run: |
+          set -eux
+          pkg="$(find dist -mindepth 1 -maxdepth 1 -type d -name 'bsdm-proxy-*')"
+          file "${pkg}/bin/proxy"
+          ! ldd "${pkg}/bin/proxy" 2>/dev/null | grep -q '=>'
+          printf 'probe' | "${pkg}/bin/proxy" hash-password >/dev/null
+          test -f "${pkg}/share/admin-console/index.html"
       - uses: actions/upload-artifact@v4
         with:
           name: bsdm-proxy-package-${{ matrix.arch }}

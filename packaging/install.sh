@@ -142,6 +142,18 @@ if [[ -x "${SCRIPT_DIR}/bin/threat-intel" ]]; then
   install -m 0755 "${SCRIPT_DIR}/bin/threat-intel" "${PREFIX}/bin/threat-intel"
 fi
 
+# Admin Console SPA, served by the proxy at /admin/ (ADMIN_CONSOLE_DIR below).
+# Packages built before 0.9.16 did not ship it; keep working without it.
+ADMIN_CONSOLE_DIR=""
+if [[ -f "${SCRIPT_DIR}/share/admin-console/index.html" ]]; then
+  ADMIN_CONSOLE_DIR="${PREFIX}/share/admin-console"
+  rm -rf "${ADMIN_CONSOLE_DIR}"
+  install -d -m 0755 "${PREFIX}/share"
+  cp -R "${SCRIPT_DIR}/share/admin-console" "${ADMIN_CONSOLE_DIR}"
+  find "${ADMIN_CONSOLE_DIR}" -type d -exec chmod 0755 {} +
+  find "${ADMIN_CONSOLE_DIR}" -type f -exec chmod 0644 {} +
+fi
+
 install -d -m 0755 "${ETC_DIR}"
 if [[ ! -f "${ETC_DIR}/bsdm-proxy.env" ]]; then
   install -m 0640 "${SCRIPT_DIR}/config/bsdm-proxy.env.example" "${ETC_DIR}/bsdm-proxy.env"
@@ -203,11 +215,16 @@ fi
 # gives every member of the group the ability to mint certificates for any site.
 install -d -m 0700 "$CERTS_DIR"
 
-# Point the proxy at the directory this install actually uses, whichever it is.
+# Point the proxy at the directories this install actually uses, whichever
+# they are: the MITM CA and, when the package ships it, the Admin Console.
 if [[ -f "${ETC_DIR}/bsdm-proxy.env" ]]; then
   env_tmp="$(mktemp)"
-  grep -v '^[[:space:]]*MITM_CA_DIR=' "${ETC_DIR}/bsdm-proxy.env" >"${env_tmp}" || true
+  grep -v -e '^[[:space:]]*MITM_CA_DIR=' -e '^[[:space:]]*ADMIN_CONSOLE_DIR=' \
+    "${ETC_DIR}/bsdm-proxy.env" >"${env_tmp}" || true
   echo "MITM_CA_DIR=${CERTS_DIR}" >>"${env_tmp}"
+  if [[ -n "$ADMIN_CONSOLE_DIR" ]]; then
+    echo "ADMIN_CONSOLE_DIR=${ADMIN_CONSOLE_DIR}" >>"${env_tmp}"
+  fi
   install -m 0640 "${env_tmp}" "${ETC_DIR}/bsdm-proxy.env"
   rm -f "${env_tmp}"
 fi
@@ -254,7 +271,8 @@ MITM requires CA certificates (0600 ca.key, owned by bsdm-proxy):
 
 The directory is recorded as MITM_CA_DIR in ${ETC_DIR}/bsdm-proxy.env.
 
-Health check: curl http://127.0.0.1:9090/health
-Metrics:      http://127.0.0.1:9090/metrics
+Health check:  curl http://127.0.0.1:9090/health
+Metrics:       http://127.0.0.1:9090/metrics
+Admin Console: http://127.0.0.1:9090/admin/${ADMIN_CONSOLE_DIR:+ (from ${ADMIN_CONSOLE_DIR})}
 
 EOF

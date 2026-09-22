@@ -66,7 +66,11 @@ export SEARCH_API_TOKEN="$(openssl rand -hex 32)"
 # (scripts/gen-basic-auth-user.sh), иначе смонтируется пример с публичными хешами.
 export BASIC_AUTH_USERS_HOST=./config/basic-auth-users.json
 ./scripts/gen-ca.sh
-docker compose up -d --build
+# Готовые образы ghcr.io/onixus/bsdm-*:<версия> — на хосте нужен только
+# Docker. BSDM_IMAGE_TAG переключает релиз; `up -d --build` пересобирает
+# из этого checkout вместо pull.
+docker compose pull
+docker compose up -d
 docker compose ps
 ```
 
@@ -86,13 +90,13 @@ Alertmanager и Grafana.
 
 ```bash
 # Threat Intelligence коллектор
-docker compose --profile threat-intel up -d --build
+docker compose --profile threat-intel pull && docker compose --profile threat-intel up -d
 
 # Детекция алертов и ML-скоринг
-docker compose --profile alerts --profile ml up -d --build
+docker compose --profile alerts --profile ml pull && docker compose --profile alerts --profile ml up -d
 
 # DNS Sinkhole
-docker compose --profile dns-sinkhole up -d --build
+docker compose --profile dns-sinkhole pull && docker compose --profile dns-sinkhole up -d
 
 # ICAP антивирусная проверка (ClamAV)
 docker compose --profile icap up -d
@@ -121,11 +125,28 @@ environment каждого файла.
 
 ## Native package
 
-Сборка:
+Готовый пакет из GitHub Releases: статические musl-бинарники плюс Admin
+Console, на сервере не нужны компилятор, Node и Docker.
 
 ```bash
-./scripts/build-package.sh
+curl -fsSL https://raw.githubusercontent.com/onixus/bsdm-proxy/main/scripts/install-release.sh \
+  | sudo bash -s -- --version 0.9.15
 ```
+
+Тот же путь без сети: скачайте тарболл и `.sha256`, затем
+`sudo ./scripts/install-release.sh --archive <tarball>`. Интерактивный
+`./install.sh` (режим 2) делает то же самое и дополнительно генерирует CA,
+настраивает порты и запускает сервис.
+
+Собственная сборка пакета (нужен Docker Buildx; так собирает CI):
+
+```bash
+./scripts/build-package.sh --docker
+```
+
+Без `--docker` скрипт собирает `cargo build --release` на этом хосте: такой
+пакет слинкован с локальной glibc и переносим только на такие же или более
+новые дистрибутивы.
 
 Имя архива зависит от версии workspace и архитектуры. Не копируйте историческое
 имя из release notes; проверьте `dist/`:

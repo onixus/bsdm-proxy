@@ -4,6 +4,24 @@
 точка входа; подробные инструкции поддерживаются в
 [руководстве по развёртыванию](docs/getting-started/deployment.md).
 
+## Готовый пакет без сборки (Linux, systemd)
+
+На целевом сервере не нужны ни Rust, ни Node, ни Docker. Бинарники в релизе
+статические (musl) и запускаются на любом Linux x86_64 / aarch64:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/onixus/bsdm-proxy/main/scripts/install-release.sh \
+  | sudo bash -s -- --version 0.9.15
+```
+
+Скрипт скачивает тарболл релиза с GitHub, сверяет `.sha256`, ставит бинарники
+в `/opt/bsdm-proxy`, Admin Console в `/opt/bsdm-proxy/share/admin-console`,
+конфиги в `/etc/bsdm-proxy` и systemd-юниты. Сервис не запускается: положите
+CA в `/etc/bsdm-proxy/certs`, проверьте `bsdm-proxy.env` и выполните
+`systemctl enable --now bsdm-proxy`. Офлайн-установка: скачайте тарболл и
+`.sha256` заранее и передайте `--archive /path/to/bsdm-proxy-<ver>-linux-<arch>.tar.gz`.
+Подробнее: [packaging/README.md](packaging/README.md).
+
 ## Интерактивный установщик
 
 Для быстрого развёртывания в Linux/macOS доступен интерактивный мастер:
@@ -15,7 +33,12 @@ cd bsdm-proxy
 ```
 
 Мастер проверит пререквизиты, сгенерирует CA-сертификаты, поможет выбрать
-профиль развёртывания (Docker Compose, Native systemd, Lite) и подготовит `.env`.
+профиль развёртывания и подготовит `.env`. Режимы:
+
+1. **Docker Compose** — опубликованные образы из ghcr.io, сборка не нужна.
+2. **Native из готового релиза** — тот же `scripts/install-release.sh`, плюс
+   генерация CA, настройка портов и запуск сервиса. Компилятор не нужен.
+3. **Native из исходников** — сборка `cargo` + `npm` на этом хосте.
 
 ## Пилот на 100 пользователей
 
@@ -44,7 +67,10 @@ export BASIC_AUTH_USERS_HOST=./config/basic-auth-users.json
 # keyUsage=keyCertSign,cRLSign. Срок переопределяется: --days N.
 # Ротация раз в два года: docs/ops-and-dev/ca-lifecycle.md (scripts/rotate-ca.sh).
 ./scripts/gen-ca.sh
-docker compose up -d --build
+# Готовые образы из ghcr.io (сборка на хосте не нужна). BSDM_IMAGE_TAG
+# выбирает релиз; `up -d --build` вместо pull пересобирает из исходников.
+docker compose pull
+docker compose up -d
 docker compose ps
 ```
 
@@ -53,13 +79,13 @@ Grafana. Дополнительные сервисы запускаются че
 
 ```bash
 # Threat Intelligence коллектор (OpenPhish, PhishStats, Phishing.Database, URLhaus)
-docker compose --profile threat-intel up -d --build
+docker compose --profile threat-intel pull && docker compose --profile threat-intel up -d
 
 # SIEM вебхуки и ML-скоринг
-docker compose --profile alerts --profile ml up -d --build
+docker compose --profile alerts --profile ml pull && docker compose --profile alerts --profile ml up -d
 
 # DNS Sinkhole / RPZ сайдкар
-docker compose --profile dns-sinkhole up -d --build
+docker compose --profile dns-sinkhole pull && docker compose --profile dns-sinkhole up -d
 ```
 
 Проверка:
@@ -89,7 +115,8 @@ cargo build -p bsdm-proxy --bin proxy
 
 ## Native package и Kubernetes
 
-- Native package: `./scripts/build-package.sh`, затем инструкции из
+- Native package: готовый тарболл из GitHub Releases (см. выше) или сборка
+  `./scripts/build-package.sh --docker`, затем инструкции из
   [packaging/README.md](packaging/README.md).
 - Kubernetes: Helm chart и ограничения описаны в
   [charts/bsdm/README.md](charts/bsdm/README.md).

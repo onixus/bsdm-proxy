@@ -242,8 +242,10 @@ export BASIC_AUTH_USERS_HOST=./config/basic-auth-users.json
 # 1. Генерация CA сертификатов
 ./scripts/gen-ca.sh
 
-# 2. Запуск основного аналитического стека
-docker compose up -d --build
+# 2. Запуск основного аналитического стека из готовых образов ghcr.io
+#    (`up -d --build` вместо pull пересобирает из исходников)
+docker compose pull
+docker compose up -d
 
 # 3. Просмотр статуса сервисов
 docker compose ps
@@ -253,13 +255,13 @@ docker compose ps
 
 ```bash
 # Threat Intelligence коллектор
-docker compose --profile threat-intel up -d --build
+docker compose --profile threat-intel pull && docker compose --profile threat-intel up -d
 
 # Детекция алертов и ML-скоринг
-docker compose --profile alerts --profile ml up -d --build
+docker compose --profile alerts --profile ml pull && docker compose --profile alerts --profile ml up -d
 
 # DNS Sinkhole
-docker compose --profile dns-sinkhole up -d --build
+docker compose --profile dns-sinkhole pull && docker compose --profile dns-sinkhole up -d
 
 # ICAP антивирусная проверка (ClamAV)
 docker compose --profile icap up -d
