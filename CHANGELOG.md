@@ -7,8 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.15] - 2026-09-22
+
+Release following **0.9.14**: reverse-proxy OIDC finished with signature verification and Google/Apple providers, eBPF/XDP modernization behind an explicit arming gate, hop-by-hop header stripping on every outbound request, alert-worker ClickHouse latency control, a synchronous policy engine carved out of the `ProxyService` monolith, and an APEX Architecture Contract gate.
+
 ### Added
 
+- **APEX Architecture Contract v1 boundary** (`apex-contract/manifest.json`, `apex-contract/validate.py`, `bsdm-events/tests/apex_contract_gate.rs`) — the repository declares its external boundaries (the `apex.bsdm-proxy.cache_event.v1` event and the `/api/v1/agent/*` HTTP surface), its ownership rules (the APEX Gateway is not the source of truth for policy, ClickHouse stays an analytics projection, unsigned role headers are never trusted) in a local manifest pinned to the canonical contract commit, and a test in `bsdm-events` fails the build on drift.
+- **Measured per-module resource profile** ([`docs/architecture/module-resource-profile.md`](docs/architecture/module-resource-profile.md)) — CPU, RAM and disk per proxy subsystem and per sidecar, measured on a release build and folded into capacity planning, configuration, performance and threat-intel pages. Documents that spill files do not survive SIGKILL, that `gen-ca.sh` issues an RSA-4096 CA (1.86 ms per new SNI against 24 µs for ECDSA P-256), and that `threat-intel` exceeds its 512M compose limit with four live feeds.
+- **Docker image build on every CI commit** (`Jenkinsfile.local`) — the local pipeline now builds `--target proxy` after the fast checks, so a broken `Dockerfile` surfaces on the commit that broke it instead of at release time.
 - **OIDC for Google and Apple in the reverse-proxy IAP** (`proxy::oidc`, `proxy::reverse_proxy`) — multi-provider sign-in configured through `OIDC_PROVIDERS` plus per-provider `OIDC_<ID>_*` variables, with a `/-/login` provider picker, per-provider callbacks `/-/callback/{id}`, and `/-/logout`. Endpoints now come from `{issuer}/.well-known/openid-configuration` (cached for an hour, with documented fallbacks for Google and Apple) instead of the hardcoded `{issuer}/authorize` and `{issuer}/token`, which matched neither provider. Apple support covers the ES256 `client_secret` JWT signed from a `.p8` key (`OIDC_APPLE_TEAM_ID`, `OIDC_APPLE_KEY_ID`, `OIDC_APPLE_PRIVATE_KEY_FILE`), the `response_mode=form_post` callback, and the `SameSite=None; Secure` state cookie that cross-site POST requires. Sign-in now carries `nonce` and PKCE (S256), sessions expire on `OIDC_SESSION_TTL_SECONDS`, and `OIDC_<ID>_ALLOWED_DOMAINS` restricts sign-in to named email domains. Legacy `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` / `OIDC_ISSUER_URL` / `OIDC_REDIRECT_URI` keep working as a single generic provider when `OIDC_PROVIDERS` is unset.
 
 - **eBPF/XDP Modernization & Control API** (`proxy::ebpf`, `proxy::control_api`, `bpf/xdp_drop.c`) — kernel XDP packet filter modernized with dual-stack IPv4 and IPv6 packet inspection, kernel drop accounting via `bsdm_drop_stats` BPF map, full `/api/ebpf/*` REST Control API suite (`GET/PUT /config`, `GET /stats`, `GET/POST/DELETE /ips`), thread-safe locking eliminating ABBA deadlocks between configuration updates and IP management, kernel drop counters ingestion via `bpftool -j map dump`, and Prometheus metrics `bsdm_proxy_ebpf_packets_dropped_total`, `bsdm_proxy_ebpf_bytes_dropped_total`, `bsdm_proxy_ebpf_blocked_ips`.
@@ -26,10 +33,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`ProxyService` decomposed and policy evaluation made synchronous** (`proxy::policy_engine`, `proxy::policy_event`, `proxy::proxy_service::{access, cache_ops, helpers, types}`) — the data-plane policy check moved into a `PolicyEngine` that returns a structured `PolicyEvaluation` without awaiting, so the CONNECT path no longer parks on a future to decide MITM/SNI/deny. Auth and rate-limit access checks, cache hit/revalidation/miss-completion and the policy event builder live in their own modules; behaviour is unchanged, the invariants are documented in place and covered by unit tests.
+- **Docs hygiene** — stale phase labels retired in favour of the maturity matrix, WASM and ICAP pages open with a Scope Freeze banner, `dns-sinkhole` is described as the core component it is, the August 2026 improvement proposal is stamped historical and its tracker rules moved to [`docs/maintenance.md`](docs/maintenance.md). The README is repositioned around the Rust data plane and reproducible performance numbers.
 - **`EBPF_XDP_ENABLED` defaults to `false` in the shipped `bsdm-proxy.env`** — the eBPF/XDP filter is a lab-only component excluded from the single-node Day-1 pilot scope (`docs/project-status.md`), while the shipped file enabled it on `eth0`. The file now matches the code default (`proxy/src/ebpf.rs`). Deployments that rely on XDP filtering must set `EBPF_XDP_ENABLED=true` explicitly.
 
 ### Security
 
+- **Hop-by-hop headers are no longer forwarded to origins and cache peers** (`proxy::hop_headers`) — the forward path rebuilt the upstream request from the client's headers without removing any of them, so `Proxy-Authorization` (with the Basic backend, `base64(user:password)`) reached every origin server, and the client's `Transfer-Encoding` was re-emitted next to the `Content-Length` hyper computes, the CL.TE request-smuggling desync. The RFC 9110 §7.6.1 set (`Connection`, `Keep-Alive`, `Proxy-Authorization`, `Proxy-Connection`, `TE`, `Trailer`, `Transfer-Encoding`, `Upgrade`, plus anything `Connection` nominates) is now stripped on the plain forward fetch and on conditional revalidation, after ICAP REQMOD so adaptation still sees the original request. `Authorization` is end-to-end and stays.
+- **`rustls` 0.23.43 → 0.23.45** — RUSTSEC-2026-0285 (TLS 1.3 handshake messages accepted across encryption-level boundaries); pulls `aws-lc-rs` 1.18.1, `aws-lc-sys` 0.45.0 and `rustls-webpki` 0.103.15.
+- **`nanoid` 3.3.16 → 3.3.19** (`admin-console`, dev-only via `vite` → `postcss`) — GHSA-2v37-7h3g-55p8.
 - **The reverse-proxy IAP now verifies `id_token` signatures** (`proxy::oidc`) — the previous implementation base64-decoded the JWT payload and trusted it: `iss`, `aud` and `exp` were compared against the configuration, but nothing tied the token to the identity provider's keys. Tokens are now verified against the provider's JWKS (RS256/RS384/RS512, ES256/ES384) with key rotation handled by a forced JWKS refetch on an unknown `kid`, `alg=none` rejected outright, and the token's `alg` required to match the key's. Added `nonce` binding and PKCE so an authorization code cannot be replayed, a one-shot `state` check made before the state is burned, `azp` validation, rejection of unverified emails, an open-redirect guard on `return_to`, a cap on in-flight sign-ins (`MAX_PENDING_STATES`) that previously let any anonymous request grow an unbounded map, session expiry, and generic callback errors so the endpoint is not an oracle for foreign tokens.
 
 - **`wasmtime` 46.0.2 → 46.0.3** — addresses RUSTSEC-2026-0268 and RUSTSEC-2026-0269 (`proxy`, optional feature `wasm`).
@@ -752,7 +764,8 @@ Beta — hierarchical caching Phase 3, optional MITM CA.
 
 [GitHub Releases](https://github.com/onixus/bsdm-proxy/releases/tag/v0.2.2b)
 
-[Unreleased]: https://github.com/onixus/bsdm-proxy/compare/v0.9.14...HEAD
+[Unreleased]: https://github.com/onixus/bsdm-proxy/compare/v0.9.15...HEAD
+[0.9.15]: https://github.com/onixus/bsdm-proxy/compare/v0.9.14...v0.9.15
 [0.9.14]: https://github.com/onixus/bsdm-proxy/compare/v0.9.13...v0.9.14
 [0.9.13]: https://github.com/onixus/bsdm-proxy/compare/v0.9.12...v0.9.13
 [0.9.12]: https://github.com/onixus/bsdm-proxy/compare/v0.9.11...v0.9.12

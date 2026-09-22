@@ -26,7 +26,8 @@ sudo apt-get install -y \
 bsdm-proxy/
 ├── proxy/              # Основной прокси (bin: proxy)
 │   └── src/
-│       ├── main.rs, proxy_service.rs, control_api.rs
+│       ├── main.rs, server.rs, proxy_service.rs (+ proxy_service/), control_api.rs
+│       ├── policy_engine.rs, policy_event.rs, hop_headers.rs
 │       ├── miss_coalesce.rs, semantic_cache.rs, threat_score_cache.rs
 │       ├── hierarchy*, peers, icp/htcp, rate_limit, upstream, tls, metrics
 │       └── lib.rs

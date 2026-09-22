@@ -3,7 +3,7 @@
 Этот документ — единая точка правды о текущем состоянии BSDM-Proxy. Он описывает
 реализованный код, а не целевые возможности из roadmap.
 
-Текущая версия Cargo workspace: **`0.9.14`**. Версию нужно сверять с
+Текущая версия Cargo workspace: **`0.9.15`**. Версию нужно сверять с
 `proxy/Cargo.toml` и остальными workspace-крейтами.
 
 ## Уровни зрелости
@@ -24,7 +24,7 @@
 | Кеш | L1, mmap spill, compression, revalidation, miss coalescing | Основной | `CACHE_CAPACITY` — общая ёмкость L1, которая делится между шардами. |
 | Кеш | Redis L2, ICP/HTCP hierarchy | Beta | Нужны отдельные Redis/peer deployment и failover-тесты. |
 | Политики | ACL, categorization, rate limiting, SNI filtering | Основной | Фильтрация по SNI выполняется до TLS расшифровки. |
-| Аутентификация | Basic, OIDC | Основной | OIDC включает строгую валидацию CSRF token, JWT issuer, aud и exp. |
+| Аутентификация | Basic, OIDC | Основной | OIDC (reverse proxy) проверяет подпись `id_token` по JWKS провайдера, `iss`/`aud`/`azp`/`exp`, `nonce` и PKCE; провайдеры Google, Apple и generic через `OIDC_PROVIDERS` ([authentication.md](features/authentication.md)). |
 | Аутентификация | LDAP, NTLM, Kerberos | Beta | Требуют соответствующей Cargo feature и интеграционного стенда. |
 | Аналитика | Kafka → cache-indexer → ClickHouse, Search API | Основной | Search also same-origin via control plane (`SEARCH_UPSTREAM_URL`). TTL ClickHouse; `dlp_violation` / `casb_alert` in schema. |
 | Detection | alert-worker | Beta | Запросы правил выполняются периодически. Latency ClickHouse ограничена: клиентский дедлайн (`ALERT_CLICKHOUSE_TIMEOUT_MS`), серверные `max_execution_time` / `max_result_rows` / `readonly=2`, обрыв деградировавшего цикла с экспоненциальным backoff и гистограммы `alert_worker_clickhouse_query_seconds` / `alert_worker_cycle_duration_seconds` ([alerting.md](analytics/alerting.md)). |

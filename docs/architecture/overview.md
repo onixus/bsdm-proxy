@@ -1,6 +1,6 @@
 # Архитектура BSDM-Proxy
 
-Этот документ описывает фактические компоненты и потоки версии `0.9.14`.
+Этот документ описывает фактические компоненты и потоки версии `0.9.15`.
 Зрелость функций указана отдельно в [Project status](../project-status.md).
 
 ## Системный контекст
@@ -73,15 +73,15 @@ CONNECT работает в двух режимах:
 
 | Область | Основные модули |
 |---|---|
-| Server / service | `main.rs`, `server.rs`, `proxy_service.rs` |
+| Server / service | `main.rs`, `server.rs`, `proxy_service.rs` + `proxy_service/{access,cache_ops,helpers,types}.rs`, `hop_headers.rs` |
 | TLS / upstream | `tls.rs`, `upstream.rs` |
 | Cache | `cache.rs`, `sharded_cache.rs`, `cache_body.rs`, `l2_cache.rs` |
-| Policy | `auth.rs`, `acl.rs`, `categorization.rs`, `rate_limit.rs` |
+| Policy | `policy_engine.rs` (синхронная оценка → `PolicyEvaluation`), `policy_event.rs`, `auth.rs`, `acl.rs`, `categorization.rs`, `rate_limit.rs` |
 | Hierarchy | `hierarchy.rs`, `peer_fetch.rs`, `icp.rs`, `htcp.rs` |
 | Events | `pipeline.rs`, `bsdm-events/` |
 | Control | `control_api.rs`, `acl_api.rs`, `control_grpc.rs` |
 | Optional | `semantic_cache.rs`, `wasm_host.rs`, `icap.rs`, `ebpf.rs` |
-| Experimental | `dlp.rs`, `casb.rs`, `reverse_proxy.rs`, `amneziawg.rs`, `session_store.rs`, `threat_sync.rs` |
+| Experimental | `dlp.rs`, `casb.rs`, `reverse_proxy.rs`, `oidc.rs`, `amneziawg.rs`, `session_store.rs`, `threat_sync.rs` |
 
 ## Cache architecture
 

@@ -106,12 +106,12 @@ curl --cacert certs/ca.crt -x http://127.0.0.1:3128 https://httpbin.org/uuid
 |---|---|---|
 | `auth-basic` | ✅ | Basic-аутентификация |
 | `kafka` | ✅ | Kafka event pipeline (`pipeline.rs`) |
-| `auth-ldap` | — | LDAP/AD backend (`auth/ldap.rs`) |
-| `auth-ntlm` | — | NTLM handshake (`auth/basic.rs`) |
-| `auth-kerberos` | — | Kerberos/SPNEGO (`auth/basic.rs`) |
+| `auth-ldap` | — | LDAP/AD backend (`auth.rs`) |
+| `auth-ntlm` | — | NTLM handshake (`auth.rs`, `auth_sspi.rs`) |
+| `auth-kerberos` | — | Kerberos/SPNEGO (`auth.rs`, `auth_sspi.rs`) |
 | `auth-all` | — | Все auth-бэкенды |
 | `grpc` | — | gRPC control plane (`control_grpc.rs`) |
-| `wasm` | — | WASM plugin hooks (`proxy_service/icap_wasm.rs`) |
+| `wasm` | — | WASM plugin hooks (`wasm_host.rs`) |
 | `acl` | — | ACL engine |
 | `categorization` | — | URL categorization (включает `acl`) |
 
