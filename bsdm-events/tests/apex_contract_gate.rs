@@ -43,17 +43,17 @@ fn apex_contract_versions_real_bsdm_boundaries_independently_of_kafka() {
         .as_array()
         .expect("agent paths")
         .iter()
-        .all(|entry| entry.as_str().is_some_and(|value| value.contains(" /api/v1/agent/"))));
+        .all(|entry| entry
+            .as_str()
+            .is_some_and(|value| value.contains(" /api/v1/agent/"))));
 
     let resources = m["resources"]["mappings"]
         .as_array()
         .expect("resources.mappings array");
     assert!(resources.iter().any(|item| {
-        item["kind"] == "event"
-            && item["urn_prefix"] == "urn:apex:event:bsdm-proxy:"
+        item["kind"] == "event" && item["urn_prefix"] == "urn:apex:event:bsdm-proxy:"
     }));
     assert!(resources.iter().any(|item| {
-        item["kind"] == "evidence"
-            && item["urn_prefix"] == "urn:apex:evidence:bsdm-proxy:"
+        item["kind"] == "evidence" && item["urn_prefix"] == "urn:apex:evidence:bsdm-proxy:"
     }));
 }

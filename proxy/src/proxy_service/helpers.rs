@@ -1,8 +1,8 @@
 use super::*;
+use crate::cache_key::http_cache_key;
 use base64::engine::general_purpose;
 use base64::Engine;
 use hyper::header::AUTHORIZATION;
-use crate::cache_key::http_cache_key;
 
 impl ProxyService {
     #[inline]
@@ -11,6 +11,12 @@ impl ProxyService {
     }
 
     /// Host of an absolute URL, or `"unknown"` when it has none.
+    ///
+    /// Runs on every request (metrics labels, ACL matching, policy-cache keys,
+    /// analytics events). A full `Url::parse` for that is an outsized cost, so
+    /// plain ASCII authorities — effectively all real traffic — are sliced out
+    /// directly and anything else falls back to the real parser, which keeps
+    /// IDNA/punycode, percent escapes and IPv6 literals byte-identical.
     #[inline]
     pub(super) fn extract_domain(url_str: &str) -> String {
         if let Some(domain) = Self::extract_domain_fast(url_str) {
@@ -22,16 +28,23 @@ impl ProxyService {
             .unwrap_or_else(|| "unknown".to_string())
     }
 
+    /// Slice the host out of `scheme://[userinfo@]host[:port]/...`.
+    ///
+    /// Returns `None` — deferring to `Url::parse` — for any authority that is
+    /// not a straightforward ASCII `[a-zA-Z0-9.-]` hostname, which is exactly
+    /// the set where the URL spec's host parser does more than lowercase.
     pub(super) fn extract_domain_fast(url_str: &str) -> Option<String> {
         let after_scheme = url_str.split_once("://")?.1;
         let authority = after_scheme
             .split(['/', '?', '#'])
             .next()
             .filter(|a| !a.is_empty())?;
+        // Strip userinfo; the last '@' wins, as in the URL spec.
         let host_port = match authority.rsplit_once('@') {
             Some((_, host_port)) => host_port,
             None => authority,
         };
+        // IPv6 literals ("[::1]") keep their brackets and normalization rules.
         if host_port.starts_with('[') {
             return None;
         }
@@ -50,21 +63,19 @@ impl ProxyService {
         Some(host.to_ascii_lowercase())
     }
 
+    /// Borrowed header value — no copy. Use this whenever the value is only read
+    /// while `req` is still alive.
     #[inline]
-    pub(super) fn request_header<'a>(
-        req: &'a Request<Incoming>,
-        name: &str,
-    ) -> Option<&'a str> {
+    pub(super) fn request_header<'a>(req: &'a Request<Incoming>, name: &str) -> Option<&'a str> {
         req.headers().get(name).and_then(|v| v.to_str().ok())
     }
 
+    /// Owned header value, for callers that outlive the borrow of `req`.
     pub(super) fn request_header_str(req: &Request<Incoming>, name: &str) -> Option<String> {
         Self::request_header(req, name).map(str::to_string)
     }
 
-    pub(super) fn extract_user_info(
-        req: &Request<Incoming>,
-    ) -> (Option<String>, Option<String>) {
+    pub(super) fn extract_user_info(req: &Request<Incoming>) -> (Option<String>, Option<String>) {
         if let Some(auth_header) = req.headers().get(AUTHORIZATION) {
             if let Ok(auth_str) = auth_header.to_str() {
                 if let Some(encoded) = auth_str.strip_prefix("Basic ") {
