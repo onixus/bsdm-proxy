@@ -307,5 +307,36 @@ pipeline {
       }
     }
 
+    // Сборка образа БЕЗ публикации. Ловит поломки Dockerfile на каждом
+    // коммите, а не на релизе.
+    //
+    // Повод — EvaCal 0.5.0: коммит опустошил public/, каталог исчез из git
+    // (пустые git не хранит), а Dockerfile его копирует. Публикация упала на
+    // "/app/public": not found, и поломка пролежала 11 часов — образ собирался
+    // только по тегу. Здесь та же расстановка: Jenkinsfile.publish собирает
+    // --target proxy при релизе, а обычный CI Dockerfile не трогал вовсе.
+    //
+    // Цель target совпадает с публикуемым: проверять надо то, что уезжает в
+    // реестр. Остальные таргеты (cache-indexer, alert-worker, ml-worker,
+    // dns-sinkhole, threat-intel) делят те же builder-стадии, так что их
+    // поломка всплывёт здесь же.
+    //
+    // Стадия последняя: Dockerfile пересобирает Rust с нуля, это долго, и
+    // быстрые проверки должны падать раньше.
+    stage('Docker image') {
+      agent any
+      steps {
+        sh '''
+          set -eu
+          docker build --target proxy -t bsdm-proxy:ci-${BUILD_NUMBER} .
+        '''
+      }
+      post {
+        always {
+          sh 'docker image rm -f bsdm-proxy:ci-${BUILD_NUMBER} || true'
+        }
+      }
+    }
+
   }
 }
