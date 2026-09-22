@@ -1,8 +1,9 @@
 //! End-to-end tests — auth, ACL, cache, CONNECT tunnel.
 
 use bsdm_proxy_e2e::{
-    connect_via_proxy, ensure_test_ca, proxy_test_guard, spawn_mock_https_upstream,
-    test_ca_cert_path, wait_for_tcp, workspace_path, HarnessConfig, ProxyHarness,
+    connect_via_proxy, ensure_test_ca, proxy_test_guard, spawn_header_echo_upstream,
+    spawn_mock_https_upstream, test_ca_cert_path, wait_for_tcp, workspace_path, HarnessConfig,
+    ProxyHarness,
 };
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -561,4 +562,64 @@ async fn e2e_mitm_circuit_breaker_and_pinning_control_api() {
         .await
         .expect("reset circuit breaker");
     assert_eq!(reset_resp.status(), reqwest::StatusCode::OK);
+}
+
+/// The client's `Proxy-Authorization` addresses this proxy and must be consumed
+/// here (RFC 9110 §11.2). Relaying it would hand the origin a working corporate
+/// login, so this asserts on what the origin actually received.
+#[tokio::test]
+async fn e2e_proxy_credentials_do_not_reach_the_origin() {
+    let _guard = proxy_test_guard().await;
+    let harness = ProxyHarness::start(HarnessConfig::default())
+        .await
+        .expect("start proxy");
+
+    let echo = spawn_header_echo_upstream()
+        .await
+        .expect("spawn header echo upstream");
+
+    let request = format!(
+        "GET http://127.0.0.1:{port}/echo HTTP/1.1\r\n\
+         Host: 127.0.0.1:{port}\r\n\
+         Proxy-Authorization: Basic dXNlcjpzdXBlcnNlY3JldA==\r\n\
+         Authorization: Bearer origin-token\r\n\
+         Proxy-Connection: keep-alive\r\n\
+         Connection: close\r\n\
+         \r\n",
+        port = echo.port
+    );
+
+    let mut stream = TcpStream::connect(("127.0.0.1", harness.proxy_port))
+        .await
+        .expect("connect to proxy");
+    stream
+        .write_all(request.as_bytes())
+        .await
+        .expect("write request");
+
+    let mut raw = Vec::new();
+    stream.read_to_end(&mut raw).await.expect("read response");
+    let response = String::from_utf8_lossy(&raw).to_lowercase();
+    let seen_by_origin = response
+        .split_once("\r\n\r\n")
+        .map(|(_, body)| body.to_string())
+        .unwrap_or_default();
+
+    assert!(
+        !seen_by_origin.contains("proxy-authorization"),
+        "origin received the client's proxy credentials:\n{seen_by_origin}"
+    );
+    assert!(
+        !seen_by_origin.contains("supersecret"),
+        "origin received the decoded credential material:\n{seen_by_origin}"
+    );
+    assert!(
+        !seen_by_origin.contains("proxy-connection"),
+        "origin received a hop-by-hop header:\n{seen_by_origin}"
+    );
+    // `Authorization` is end-to-end: it addresses the origin, so it must survive.
+    assert!(
+        seen_by_origin.contains("authorization: bearer origin-token"),
+        "origin lost its own Authorization header:\n{seen_by_origin}"
+    );
 }

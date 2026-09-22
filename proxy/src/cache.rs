@@ -15,19 +15,13 @@ use crate::http_types::{full, Body};
 pub const CACHEABLE_METHODS: &[&str] = &["GET", "HEAD"];
 pub const CACHEABLE_STATUS_CODES: &[u16] = &[200, 203, 204, 206, 300, 301, 404, 405, 410, 414, 501];
 
-/// Headers that must not be re-emitted on a fully-buffered cache HIT response.
+/// Headers that must not be re-emitted on a fully-buffered cache HIT response:
+/// the connection-specific set, plus the framing fields that describe the
+/// *stored* body rather than the one being served now.
 fn is_hop_by_hop_or_framing_header(name: &str) -> bool {
-    name.eq_ignore_ascii_case("transfer-encoding")
+    crate::hop_headers::is_hop_by_hop(name)
         || name.eq_ignore_ascii_case("content-length")
         || name.eq_ignore_ascii_case("content-encoding")
-        || name.eq_ignore_ascii_case("connection")
-        || name.eq_ignore_ascii_case("keep-alive")
-        || name.eq_ignore_ascii_case("proxy-connection")
-        || name.eq_ignore_ascii_case("proxy-authenticate")
-        || name.eq_ignore_ascii_case("proxy-authorization")
-        || name.eq_ignore_ascii_case("te")
-        || name.eq_ignore_ascii_case("trailers")
-        || name.eq_ignore_ascii_case("upgrade")
 }
 
 #[derive(Clone, Debug)]
