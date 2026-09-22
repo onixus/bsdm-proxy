@@ -48,7 +48,7 @@ pub mod pipeline;
 pub mod policy_cache;
 pub mod policy_config;
 pub mod policy_engine;
-pub mod policy_event;
+pub(crate) mod policy_event;
 pub mod proxy_service;
 pub mod rate_limit;
 pub mod reverse_proxy;

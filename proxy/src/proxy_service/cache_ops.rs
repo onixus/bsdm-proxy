@@ -176,6 +176,7 @@ impl ProxyService {
             ));
         }
 
+        // Changed response: consume body and fall through to normal miss handling upstream.
         let _ = http_body_util::BodyExt::collect(response.into_body()).await;
         None
     }
@@ -196,6 +197,8 @@ impl ProxyService {
         let no_user: Option<String> = None;
         let no_cats: Vec<String> = Vec::new();
         let no_threats: Vec<String> = Vec::new();
+        // Borrowed: `req` outlives every use below, so the fast path does not
+        // copy the User-Agent just to hand it to an event builder.
         let user_agent = Self::request_header(req, "user-agent");
         let cache_lookup_start = Instant::now();
 

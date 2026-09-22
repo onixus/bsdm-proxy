@@ -1,5 +1,6 @@
 use super::*;
 
+/// Cloneable handles for streaming MISS completion (runs after body drained).
 #[derive(Clone)]
 pub(super) struct MissCompletionHandle {
     pub(super) http_cache: Arc<HttpL1Cache>,
@@ -17,6 +18,7 @@ pub(super) struct MissCompletionHandle {
     pub(super) miss_flights: MissFlightMap,
     pub(super) semantic_config: SemanticCacheConfig,
     pub(super) semantic_index: SemanticIndex,
+    /// When set, this completion is an LLM/semantic POST fill.
     pub(super) llm_mode: bool,
     pub(super) llm_normalized_body: Option<Bytes>,
 }
@@ -40,6 +42,7 @@ impl MissCompletionHandle {
         }
     }
 
+    /// See [`ProxyService::has_event_sink`].
     #[inline]
     fn has_event_sink(&self) -> bool {
         #[cfg(feature = "kafka")]
@@ -170,6 +173,9 @@ impl MissCompletionHandle {
             "BYPASS"
         };
 
+        // Sink presence only: `send_cache_event` applies KAFKA_SAMPLE_RATE. Testing
+        // the sampler here as well drew it twice per event, which made the
+        // effective emit rate 1-in-N² instead of the configured 1-in-N.
         if self.has_event_sink() {
             if let Ok(timestamp) = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
                 let event_id = new_event_id();
