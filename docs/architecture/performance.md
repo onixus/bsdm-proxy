@@ -49,6 +49,26 @@ cargo install oha   # или бинарь с https://github.com/hatoo/oha
 
 > **Production ACL:** `PERF_FAST_CACHE_HIT=true` пропускает ACL и categorization на cache HIT. Используйте **только для bench/lab**, не в production с включённой политикой.
 
+## Стоимость MITM-сертификата
+
+Выпуск leaf-сертификата на промахе кэша SNI — самая дорогая операция на пути
+запроса, и её цена задаётся **алгоритмом ключа CA**. Лист всегда ECDSA P-256
+(rcgen `KeyPair::generate()`), но подписывается он ключом CA:
+
+| Ключ CA | Подпись | Сертификатов на ядро |
+|---|---|---|
+| ECDSA P-256 | ~24 µs | ~41 000 /с |
+| RSA-4096 (`scripts/gen-ca.sh` по умолчанию) | ~1.86 мс | ~537 /с |
+
+Для сравнения: весь остальной путь запроса на L1 HIT — около 26 µs. То есть с
+RSA-4096 CA один промах кэша сертификатов стоит примерно как 70 обслуженных
+запросов. При bench с широким множеством SNI и при холодном старте это
+доминирующая статья CPU.
+
+Если MITM-домены разнообразны, выпускайте CA на ECDSA P-256. Смена CA требует
+перераспространения корня на клиенты — см. [`scripts/rotate-ca.sh`](../../scripts/rotate-ca.sh)
+и [Ресурсный профиль модулей](module-resource-profile.md#mitm).
+
 ## HTTP Archive bench profiles (`BENCH_PROFILE`)
 
 Sites bench (70 sites × 20 warm repeats) is **warm-heavy**. Multi-worker accept (`WORKER_COUNT=4`) increases L1 lock contention on repeated HITs; a single worker often wins on warm goodput.

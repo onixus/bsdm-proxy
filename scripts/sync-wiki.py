@@ -53,6 +53,7 @@ PAGES: tuple[Page, ...] = (
     Page("docs/architecture/overview.md", "Architecture-Overview.md", "Architecture & design", "Архитектура", "Компоненты, request path и data flow."),
     Page("docs/architecture/agent-contract.md", "Agent-Contract.md", "Architecture & design", "Agent Contract", "Контракт взаимодействия локального агента."),
     Page("docs/architecture/capacity-planning.md", "Capacity-Planning.md", "Architecture & design", "Capacity planning", "Формулы, пилотный профиль и масштабирование."),
+    Page("docs/architecture/module-resource-profile.md", "Module-Resource-Profile.md", "Architecture & design", "Ресурсный профиль модулей", "CPU, RAM и диск по каждому модулю: измерения и расчёты."),
     Page("docs/architecture/performance.md", "Performance-Tuning.md", "Architecture & design", "Performance tuning", "Bench-профили и production tuning."),
     Page("docs/architecture/hierarchical-caching.md", "Hierarchical-Caching.md", "Architecture & design", "Hierarchical caching", "L1/L2, ICP/HTCP и peer selection."),
     Page("docs/architecture/structure.md", "Codebase-Structure.md", "Architecture & design", "Структура репозитория", "Cargo workspace и инфраструктурные каталоги."),
