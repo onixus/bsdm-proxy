@@ -160,6 +160,18 @@ COPY admin-console/ ./
 RUN npm run build
 
 # ============================================================
+# Artifacts export — static musl binaries + Admin Console bundle for the
+# native release package. Not a runnable image; export it with
+#   docker buildx build --target artifacts --output type=local,dest=dist/artifacts .
+# scripts/build-package.sh --docker does exactly that, so the tarball on GitHub
+# Releases ships the same crt-static binaries as the container images instead
+# of glibc-linked ones tied to the CI runner's distro.
+# ============================================================
+FROM scratch AS artifacts
+COPY --from=builder /dist /bin
+COPY --from=admin-console-builder /app/dist /admin-console
+
+# ============================================================
 # Proxy runtime
 # ============================================================
 FROM runtime-base AS proxy

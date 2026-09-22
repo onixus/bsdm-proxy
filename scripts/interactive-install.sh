@@ -10,6 +10,7 @@ source "${INSTALLER_DIR}/common.sh"
 source "${INSTALLER_DIR}/preflight.sh"
 
 MODE="docker"
+RELEASE_VERSION=""
 PREFIX="/opt/bsdm-proxy"
 HTTP_PORT="3128"
 METRICS_PORT="9090"
@@ -24,16 +25,21 @@ banner() {
 select_mode() {
   echo
   echo "1) Docker Compose pilot"
-  echo "2) Native proxy service"
-  read -r -p "Select mode [1-2]: " choice
+  echo "2) Native proxy service (prebuilt release, no compiler needed)"
+  echo "3) Native proxy service (build from this checkout, needs cargo + npm)"
+  read -r -p "Select mode [1-3]: " choice
 
   case "${choice:-1}" in
-    2) MODE=native ;;
+    2) MODE=release ;;
+    3) MODE=native ;;
     *) MODE=docker ;;
   esac
 }
 
 configure() {
+  if [[ "$MODE" == "release" ]]; then
+    prompt_input "Release version (empty = latest GitHub Release)" "" RELEASE_VERSION
+  fi
   prompt_input "Installation prefix" "$PREFIX" PREFIX
   prompt_port "HTTP proxy port" "$HTTP_PORT" HTTP_PORT
   prompt_port "Metrics port" "$METRICS_PORT" METRICS_PORT
@@ -42,6 +48,9 @@ configure() {
   echo
   echo "Installation plan"
   echo "Mode: ${MODE}"
+  if [[ "$MODE" == "release" ]]; then
+    echo "Release: ${RELEASE_VERSION:-latest}"
+  fi
   echo "Prefix: ${PREFIX}"
   echo "Proxy port: ${HTTP_PORT}"
   echo "Metrics port: ${METRICS_PORT}"
@@ -68,6 +77,9 @@ main() {
       ;;
     native)
       "${INSTALLER_DIR}/native.sh" "$root" "$PREFIX" "$HTTP_PORT" "$METRICS_PORT" "$ACL_ENABLED"
+      ;;
+    release)
+      "${INSTALLER_DIR}/release.sh" "$root" "$PREFIX" "$HTTP_PORT" "$METRICS_PORT" "$ACL_ENABLED" "$RELEASE_VERSION"
       ;;
   esac
 

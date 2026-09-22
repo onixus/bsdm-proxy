@@ -19,6 +19,10 @@ x-logging: &default-logging
     max-size: "10m"
     max-file: "3"
 
+# In-repo services carry both `image:` and `build:`. `docker compose pull`
+# followed by `up -d` runs the published ghcr.io images (no toolchain on the
+# host); `up -d --build` rebuilds them from this checkout. BSDM_IMAGE_TAG picks
+# the release (default: the version this checkout was released as).
 services:
   zookeeper:
     image: confluentinc/cp-zookeeper:7.9.8
@@ -129,7 +133,7 @@ services:
           memory: 1G
 
   proxy:
-    image: ghcr.io/onixus/bsdm-proxy:latest
+    image: ghcr.io/onixus/bsdm-proxy:${BSDM_IMAGE_TAG:-0.9.15}
     build:
       context: .
       dockerfile: Dockerfile
@@ -256,6 +260,7 @@ services:
           memory: 256M
 
   cache-indexer:
+    image: ghcr.io/onixus/bsdm-cache-indexer:${BSDM_IMAGE_TAG:-0.9.15}
     build:
       context: .
       dockerfile: Dockerfile
@@ -315,6 +320,7 @@ services:
 
   alert-worker:
     profiles: ["alerts"]
+    image: ghcr.io/onixus/bsdm-alert-worker:${BSDM_IMAGE_TAG:-0.9.15}
     build:
       context: .
       dockerfile: Dockerfile
@@ -367,6 +373,7 @@ services:
 
   ml-worker:
     profiles: ["ml"]
+    image: ghcr.io/onixus/bsdm-ml-worker:${BSDM_IMAGE_TAG:-0.9.15}
     build:
       context: .
       dockerfile: Dockerfile
@@ -575,6 +582,7 @@ services:
   # Hybrid first hop (Core). UDP :5353 on host → :53 in container.
   # Day-1 pilot: UDP only (DoH/DoT off unless TLS certs provided).
   dns-sinkhole:
+    image: ghcr.io/onixus/bsdm-dns-sinkhole:${BSDM_IMAGE_TAG:-0.9.15}
     build:
       context: .
       dockerfile: Dockerfile
@@ -637,6 +645,7 @@ services:
   # for the IOC store and the scoring engine.
   threat-intel:
     profiles: ["threat-intel"]
+    image: ghcr.io/onixus/bsdm-threat-intel:${BSDM_IMAGE_TAG:-0.9.15}
     build:
       context: .
       dockerfile: Dockerfile

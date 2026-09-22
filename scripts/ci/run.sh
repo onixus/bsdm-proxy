@@ -199,8 +199,20 @@ package() {
     echo "package agent architecture mismatch: expected ${EXPECTED_ARCH}, found ${actual_arch}" >&2
     return 1
   fi
-  log "Release package"
-  ./scripts/build-package.sh
+  # Release packages are built through the Dockerfile's `artifacts` stage so
+  # the binaries are static musl (portable across distros) and identical to
+  # the container images. A CI agent without Docker still gets a package, but
+  # a glibc-linked one; build-package.sh says so in its output.
+  local via_docker="${PACKAGE_VIA_DOCKER:-}"
+  if [[ -z "$via_docker" ]]; then
+    if command -v docker >/dev/null 2>&1 && docker buildx version >/dev/null 2>&1; then
+      via_docker=1
+    else
+      via_docker=0
+    fi
+  fi
+  log "Release package (via_docker=${via_docker})"
+  PACKAGE_VIA_DOCKER="$via_docker" ./scripts/build-package.sh
   (
     cd dist
     sha256sum -c ./*.tar.gz.sha256

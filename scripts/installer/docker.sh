@@ -27,3 +27,7 @@ install_docker() {
     docker compose up -d
   )
 }
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  install_docker "$@"
+fi

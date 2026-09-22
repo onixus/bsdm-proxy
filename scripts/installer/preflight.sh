@@ -33,6 +33,19 @@ preflight_native() {
   info "Native installation prerequisites passed"
 }
 
+# Prebuilt release: no toolchain at all, only what it takes to fetch, verify
+# and unpack the tarball and to run systemd units.
+preflight_release() {
+  preflight_common
+  require_root
+  [[ "$(uname -s)" == "Linux" ]] || die "Prebuilt packages are Linux only"
+  require_cmd tar
+  require_cmd systemctl
+  require_cmd sha256sum
+  systemctl --version >/dev/null 2>&1 || die "systemd is required for native installation"
+  info "Prebuilt release installation prerequisites passed"
+}
+
 preflight_docker() {
   preflight_common
   require_cmd docker
@@ -44,6 +57,7 @@ preflight() {
   local mode="${1:-}"
   case "$mode" in
     native) preflight_native ;;
+    release) preflight_release ;;
     docker) preflight_docker ;;
     *) die "Unknown preflight mode: ${mode:-<empty>}" ;;
   esac
