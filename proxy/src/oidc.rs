@@ -562,10 +562,13 @@ impl OidcRegistry {
             query.append_pair("response_mode", "form_post");
         }
         if provider.kind == ProviderKind::Google {
-            // Без этого Google не отдаёт refresh_token и молча переиспользует
-            // ранее выданное согласие; для IAP важнее предсказуемый экран
-            // выбора аккаунта.
+            // refresh_token нам не нужен: сессия живёт свой TTL и истекает.
+            // Явный online говорит Google не выдавать его и не спрашивать
+            // согласие на offline-доступ.
             query.append_pair("access_type", "online");
+            // hd — подсказка экрану входа, чтобы Google сразу показал нужный
+            // тенант. Проверкой она не является: домен всё равно сверяется по
+            // claim'у уже после верификации токена.
             if provider.allowed_domains.len() == 1 {
                 query.append_pair("hd", &provider.allowed_domains[0]);
             }
