@@ -189,6 +189,13 @@ impl ReverseProxyConfig {
         session_id
     }
 
+    /// Cookie сессии со всеми флагами, выведенными из конфигурации. Ветка
+    /// AD/LDAP выдаёт ту же сессию, что и OIDC, поэтому собирает cookie здесь
+    /// же, а не вручную.
+    pub fn session_cookie(&self, session_id: &str) -> String {
+        self.cookie(SESSION_COOKIE, session_id, Some(self.session_ttl), false)
+    }
+
     pub fn drop_session(&self, session_id: &str) {
         self.sessions.write().unwrap().remove(session_id);
     }
@@ -480,8 +487,7 @@ impl ReverseProxyConfig {
         };
 
         let session_id = self.create_session(claims.username());
-        let session_cookie =
-            self.cookie(SESSION_COOKIE, &session_id, Some(self.session_ttl), false);
+        let session_cookie = self.session_cookie(&session_id);
 
         Response::builder()
             .status(StatusCode::FOUND)

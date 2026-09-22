@@ -1033,10 +1033,7 @@ impl ProxyService {
                                         .header(hyper::header::LOCATION, path_query)
                                         .header(
                                             hyper::header::SET_COOKIE,
-                                            format!(
-                                                "bsdm_session={}; Path=/; HttpOnly",
-                                                session_id
-                                            ),
+                                            rp_config.session_cookie(&session_id),
                                         )
                                         .body(crate::http_types::empty())
                                         .unwrap();
