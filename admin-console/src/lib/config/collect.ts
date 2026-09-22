@@ -161,13 +161,55 @@ export function collectConfig(form: ConfigFormState): ProxyConfig {
   if (form.controlApiToken) config.CONTROL_API_TOKEN = form.controlApiToken
 
   if (form.reverseProxyEnabled) {
-    Object.assign(config, {
-      REVERSE_PROXY_UPSTREAM: form.reverseProxyUpstream,
-      OIDC_CLIENT_ID: form.oidcClientId,
-      OIDC_CLIENT_SECRET: form.oidcClientSecret,
-      OIDC_ISSUER_URL: form.oidcIssuerUrl,
-      OIDC_REDIRECT_URI: form.oidcRedirectUri,
-    })
+    config.REVERSE_PROXY_UPSTREAM = form.reverseProxyUpstream
+    if (form.oidcRedirectBase) config.OIDC_REDIRECT_BASE = form.oidcRedirectBase
+    if (form.oidcSessionTtlSeconds) config.OIDC_SESSION_TTL_SECONDS = form.oidcSessionTtlSeconds
+
+    const providers: string[] = []
+
+    if (form.oidcGoogleEnabled) {
+      providers.push('google')
+      Object.assign(config, {
+        OIDC_GOOGLE_CLIENT_ID: form.oidcGoogleClientId,
+        OIDC_GOOGLE_CLIENT_SECRET: form.oidcGoogleClientSecret,
+        OIDC_GOOGLE_ALLOWED_DOMAINS: form.oidcGoogleAllowedDomains,
+      })
+    }
+
+    if (form.oidcAppleEnabled) {
+      providers.push('apple')
+      // Apple has no static client secret: the proxy signs an ES256 JWT with
+      // the .p8 key on every token exchange.
+      Object.assign(config, {
+        OIDC_APPLE_CLIENT_ID: form.oidcAppleClientId,
+        OIDC_APPLE_TEAM_ID: form.oidcAppleTeamId,
+        OIDC_APPLE_KEY_ID: form.oidcAppleKeyId,
+        OIDC_APPLE_PRIVATE_KEY_FILE: form.oidcApplePrivateKeyFile,
+      })
+    }
+
+    if (form.oidcClientId) {
+      if (providers.length > 0) {
+        // OIDC_PROVIDERS switches the proxy off the legacy single-provider
+        // block, so the custom issuer has to be named too.
+        providers.push('corp')
+        Object.assign(config, {
+          OIDC_CORP_CLIENT_ID: form.oidcClientId,
+          OIDC_CORP_CLIENT_SECRET: form.oidcClientSecret,
+          OIDC_CORP_ISSUER_URL: form.oidcIssuerUrl,
+          OIDC_CORP_REDIRECT_URI: form.oidcRedirectUri,
+        })
+      } else {
+        Object.assign(config, {
+          OIDC_CLIENT_ID: form.oidcClientId,
+          OIDC_CLIENT_SECRET: form.oidcClientSecret,
+          OIDC_ISSUER_URL: form.oidcIssuerUrl,
+          OIDC_REDIRECT_URI: form.oidcRedirectUri,
+        })
+      }
+    }
+
+    if (providers.length > 0) config.OIDC_PROVIDERS = providers.join(',')
   }
 
   return config

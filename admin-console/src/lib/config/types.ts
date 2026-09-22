@@ -193,6 +193,19 @@ export interface ConfigFormState {
   // ZTNA / IAP Reverse Proxy
   reverseProxyEnabled: boolean
   reverseProxyUpstream: string
+  oidcRedirectBase: string
+  oidcSessionTtlSeconds: string
+  oidcGoogleEnabled: boolean
+  oidcGoogleClientId: string
+  oidcGoogleClientSecret: string
+  oidcGoogleAllowedDomains: string
+  oidcAppleEnabled: boolean
+  oidcAppleClientId: string
+  oidcAppleTeamId: string
+  oidcAppleKeyId: string
+  oidcApplePrivateKeyFile: string
+  // Custom issuer. Emitted as the legacy OIDC_* block when it is the only
+  // provider, and as OIDC_CORP_* alongside Google/Apple otherwise.
   oidcClientId: string
   oidcClientSecret: string
   oidcIssuerUrl: string
@@ -312,6 +325,17 @@ export const defaultFormState: ConfigFormState = {
   dotBind: '0.0.0.0:853',
   reverseProxyEnabled: false,
   reverseProxyUpstream: 'http://internal-app:8080',
+  oidcRedirectBase: '',
+  oidcSessionTtlSeconds: '3600',
+  oidcGoogleEnabled: false,
+  oidcGoogleClientId: '',
+  oidcGoogleClientSecret: '',
+  oidcGoogleAllowedDomains: '',
+  oidcAppleEnabled: false,
+  oidcAppleClientId: '',
+  oidcAppleTeamId: '',
+  oidcAppleKeyId: '',
+  oidcApplePrivateKeyFile: '/etc/bsdm-proxy/apple-signing-key.p8',
   oidcClientId: '',
   oidcClientSecret: '',
   oidcIssuerUrl: '',

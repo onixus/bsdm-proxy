@@ -12,7 +12,7 @@ BSDM-Proxy supports proxy authentication backends for access control.
 | **LDAP** | ✅ | `auth-ldap` | `Basic` (username/password) |
 | **NTLM** | ✅ Beta | `auth-ntlm` | `NTLM` (multi-round) |
 | **Kerberos** | ✅ Beta | `auth-kerberos` | `Negotiate` / SPNEGO (multi-round) |
-| **OIDC** | ⚠ Experimental reverse-proxy only | default image | Browser OIDC for IAP — **not** forward-proxy `AUTH_BACKEND` |
+| **OIDC** | ⚠ Experimental reverse-proxy only | default image | Browser OIDC for IAP (Google, Apple, any discovery-capable issuer) — **not** forward-proxy `AUTH_BACKEND` |
 
 Pilot runbook (users file, smoke, load-test): [pilot-auth.md](../getting-started/pilot-auth.md).
 
@@ -191,12 +191,120 @@ services:
 
 Build with `--features auth-all` (or `auth-ntlm,auth-ldap`).
 
-## OIDC note (reverse proxy)
+## OIDC (reverse proxy / IAP)
 
-`OIDC_CLIENT_ID` / `OIDC_ISSUER_URL` / … configure the **experimental reverse-proxy
-IAP** path, not `AUTH_BACKEND` for the forward SWG data plane. Frozen for pilot
-day-1; see [project-status.md](../project-status.md) and
+`OIDC_*` настраивает **браузерный вход в reverse-proxy**, а не `AUTH_BACKEND`
+для forward-SWG плоскости данных. Всё ниже относится только к
+`REVERSE_PROXY_UPSTREAM`-режиму и остаётся experimental вне Day-1 пилота: см.
+[project-status.md](../project-status.md) и
 [pilot-auth.md](../getting-started/pilot-auth.md).
+
+### Что делает прокси
+
+1. Неаутентифицированный запрос уводится на `/-/login`. Если провайдер один —
+   сразу к нему; если несколько — показывается страница выбора.
+2. На authorization endpoint уходят `state`, `nonce` и PKCE-challenge (S256).
+   Эндпоинты берутся из discovery-документа провайдера.
+3. Колбэк (`/-/callback/{provider}`, GET или form_post) сверяет `state` с
+   cookie, гасит его однократно и меняет код на токены.
+4. `id_token` проверяется по подписи ключом из JWKS провайдера, затем по
+   `iss`, `aud`, `azp`, `exp`, `nbf`, `iat` и `nonce`. Непроверенная почта
+   (`email_verified: false`) отклоняется.
+5. Выдаётся сессионная cookie `bsdm_session` со сроком
+   `OIDC_SESSION_TTL_SECONDS`. Выход — `/-/logout`.
+
+Имя пользователя выше по стеку выглядит как `{provider}:{email}` — почта
+уникальна только внутри одного провайдера.
+
+### Google
+
+```bash
+export REVERSE_PROXY_UPSTREAM=http://internal-app:8080
+export OIDC_REDIRECT_BASE=https://proxy.corp.local
+export OIDC_PROVIDERS=google
+
+export OIDC_GOOGLE_CLIENT_ID=1234567890-abc.apps.googleusercontent.com
+export OIDC_GOOGLE_CLIENT_SECRET=...
+# Ограничить вход своим тенантом; без этого пустит любой аккаунт Google.
+export OIDC_GOOGLE_ALLOWED_DOMAINS=corp.local
+```
+
+В Google Cloud Console нужен OAuth-клиент типа **Web application** с
+Authorized redirect URI `https://proxy.corp.local/-/callback/google`.
+
+`OIDC_GOOGLE_ALLOWED_DOMAINS` с ровно одним доменом дополнительно уходит в
+параметр `hd`, чтобы Google сам показывал нужный тенант. Это подсказка для
+экрана входа — сама проверка домена всё равно делается по claim'у после
+верификации токена.
+
+### Apple
+
+```bash
+export OIDC_PROVIDERS=apple
+export OIDC_REDIRECT_BASE=https://proxy.corp.local
+
+export OIDC_APPLE_CLIENT_ID=com.example.proxy          # Services ID, не App ID
+export OIDC_APPLE_TEAM_ID=ABCDE12345
+export OIDC_APPLE_KEY_ID=XYZ9876543
+export OIDC_APPLE_PRIVATE_KEY_FILE=/etc/bsdm-proxy/AuthKey_XYZ9876543.p8
+```
+
+Три отличия Apple от остальных провайдеров, из-за которых он не заводится
+«как обычный OIDC»:
+
+- **Нет статического `client_secret`.** Его роль играет ES256-JWT, подписанный
+  ключом из `.p8` (`iss` = Team ID, `sub` = Services ID). Прокси генерирует его
+  на каждый обмен кода, так что ротация ключа сводится к замене файла.
+- **Колбэк приходит POST-ом.** Запрос scope `name`/`email` переводит ответ в
+  `response_mode=form_post`, то есть cross-site POST. Cookie со `state` в таком
+  запросе доедет только с `SameSite=None; Secure` — **прокси обязан стоять за
+  HTTPS**, иначе вход не завершится. Флаг выводится из схемы
+  `OIDC_REDIRECT_BASE` и перекрывается `REVERSE_PROXY_SECURE_COOKIES`.
+- **Имя пользователя приходит один раз.** Apple отдаёт `name` только при первой
+  авторизации; `sub` и `email` стабильны, на них и стоит опираться.
+
+Файл ключа монтируется только на чтение и только сервисному пользователю:
+
+```yaml
+services:
+  proxy:
+    volumes:
+      - ./secrets/AuthKey_XYZ9876543.p8:/etc/bsdm-proxy/AuthKey_XYZ9876543.p8:ro
+```
+
+### Google и Apple одновременно
+
+```bash
+export OIDC_PROVIDERS=google,apple
+export OIDC_REDIRECT_BASE=https://proxy.corp.local
+# ... переменные обоих провайдеров из примеров выше
+```
+
+`/-/login` покажет обе кнопки. Redirect URI регистрируются свои для каждого:
+`/-/callback/google` и `/-/callback/apple`.
+
+### Произвольный issuer
+
+```bash
+export OIDC_PROVIDERS=corp
+export OIDC_CORP_KIND=generic
+export OIDC_CORP_ISSUER_URL=https://keycloak.corp.local/realms/main
+export OIDC_CORP_CLIENT_ID=bsdm-proxy
+export OIDC_CORP_CLIENT_SECRET=...
+export OIDC_CORP_DISPLAY_NAME="Corporate SSO"
+```
+
+Для generic-провайдера discovery обязателен: без
+`{issuer}/.well-known/openid-configuration` эндпоинты взять неоткуда.
+
+### Ограничения
+
+- Сессии живут в памяти процесса: рестарт разлогинивает всех, а в
+  многоэкземплярной схеме нужен sticky routing.
+- Группы из OIDC не читаются. `REVERSE_PROXY_ADMIN_GROUP` работает только на
+  ветке AD/LDAP.
+- `refresh_token` не запрашивается и не хранится: по истечении
+  `OIDC_SESSION_TTL_SECONDS` пользователь проходит вход заново.
 
 ## Roadmap
 

@@ -548,8 +548,35 @@ ICAP-эндпоинта. `ICAP_FAIL_OPEN=true` возвращает прежне
 ### Reverse proxy/OIDC
 
 Runtime включается наличием `REVERSE_PROXY_UPSTREAM`. Дополнительно:
-`OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_ISSUER_URL`,
-`OIDC_REDIRECT_URI`, `REVERSE_PROXY_ADMIN_GROUP`.
+`REVERSE_PROXY_ADMIN_GROUP`, `REVERSE_PROXY_SECURE_COOKIES`,
+`OIDC_SESSION_TTL_SECONDS` (по умолчанию `3600`).
+
+Провайдеры перечисляются в `OIDC_PROVIDERS` (через запятую), настройки каждого
+живут под префиксом `OIDC_<ID>_`. Для `google` и `apple` тип определяется по
+имени, для остальных задаётся через `OIDC_<ID>_KIND`. Общий базовый URL
+колбэков — `OIDC_REDIRECT_BASE`; конкретный адрес получается как
+`{base}/-/callback/{id}`.
+
+| Переменная | Назначение |
+|---|---|
+| `OIDC_<ID>_CLIENT_ID` | client_id (у Apple — Services ID) |
+| `OIDC_<ID>_CLIENT_SECRET` | client_secret; у Apple не используется |
+| `OIDC_<ID>_ISSUER_URL` | issuer; для google/apple подставляется сам |
+| `OIDC_<ID>_REDIRECT_URI` | перекрывает `OIDC_REDIRECT_BASE` |
+| `OIDC_<ID>_SCOPES` | по умолчанию `openid email profile` (Apple — `openid email name`) |
+| `OIDC_<ID>_ALLOWED_DOMAINS` | список доменов почты, кому разрешён вход |
+| `OIDC_<ID>_KIND` | `google` / `apple` / `generic` |
+| `OIDC_<ID>_DISPLAY_NAME` | подпись кнопки на `/-/login` |
+| `OIDC_<ID>_RESPONSE_MODE` | `form_post`, если провайдер отвечает POST-ом |
+| `OIDC_APPLE_TEAM_ID`, `OIDC_APPLE_KEY_ID`, `OIDC_APPLE_PRIVATE_KEY_FILE` | материал для ES256-client_secret Apple |
+
+Эндпоинты берутся из `{issuer}/.well-known/openid-configuration` и кэшируются
+на час; при недоступности discovery для google и apple применяются
+задокументированные адреса. Для `generic` без discovery вход не стартует.
+
+Старые `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` / `OIDC_ISSUER_URL` /
+`OIDC_REDIRECT_URI` продолжают работать: если `OIDC_PROVIDERS` не задан, из них
+собирается единственный generic-провайдер.
 
 Reverse/OIDC считается experimental и не является production security boundary.
 
