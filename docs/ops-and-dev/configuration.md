@@ -33,7 +33,7 @@ native install находятся в `packaging/config/*.env.example`; Compose �
 | `SHUTDOWN_TIMEOUT_SECONDS` | `30` | Graceful shutdown |
 | `WORKER_COUNT` | `1` | SO_REUSEPORT accept loops на Unix |
 | `RUST_LOG` | component-specific | tracing filter |
-| `TCP_SNDBUF_BYTES` | `524288` | Client socket send buffer; `0` не меняет |
+| `TCP_SNDBUF_BYTES` | `524288` | Client socket send buffer, ставится на **каждое** клиентское соединение; память ядра, в RSS не видна, но в cgroup учитывается. `0` не меняет |
 | `HTTP_PRESERVE_HEADER_CASE` | `true` | Preserve/title-case HTTP/1 headers |
 
 `full-mitm` предназначен только для локальной диагностики. Он отклоняется при
@@ -125,6 +125,18 @@ shadow-выгрузку коллектора и никогда не меняет
 | `MISS_COALESCE_ENABLED` | `true` | Singleflight одинаковых MISS |
 
 `CACHE_CAPACITY` не умножается на `CACHE_SHARDS`.
+
+Сайзинг памяти под L1: `l1_ram ≈ сумма inline-тел × 1.04`. Считайте по объёму
+тел, а не по `CACHE_CAPACITY` — предвыделения нет. Из-за перекоса по шардам
+эффективная ёмкость примерно на 8% ниже номинала.
+
+`CACHE_SPILL_DIR` ограничивает heap, но не RSS: тела отдаются через mmap, и при
+выдаче страницы файла попадают в RSS как page cache (вытесняемый, но учитываемый
+в cgroup). Отслеживайте рост heap по `RssAnon`, а не по `VmRSS`. Spill-файлы
+удаляются деструктором и не переживают `SIGKILL` — очистки каталога при старте
+нет, поэтому чистите `CACHE_SPILL_DIR` в процедуре рестарта.
+
+Замеры и методика: [Ресурсный профиль модулей](../architecture/module-resource-profile.md#l1-cache).
 
 Безопасная процедура управления pinning-исключениями описана в
 [Certificate Pinning Exceptions](../features/certificate-pinning.md).
@@ -426,6 +438,14 @@ fallback-зону — иначе неверный `DNS_SINKHOLE_ZONE_PATH` ти�
 (`threat-intel/src/rpz.rs`). Метрика SOAR-действий по режимам —
 `threat_intel_soar_blocks_total{mode}`; в shadow `POST /api/v1/soar/block`
 отвечает `202` с `"mode":"shadow"` и `"enforced":false`.
+
+**Ресурсы.** Коллектор держит индикаторы цикла в памяти. Замер на одном живом
+фиде (`phishing_database`, 386 397 индикаторов): пик 226 MB RSS, установившееся
+значение 112 MB, ~350 MB на диске с учётом WAL. При всех четырёх источниках из
+`TI_SOURCES` ожидается 250–400 MB steady и пик за 500 MB — то есть лимит
+`memory: 512M` из `docker-compose.yml` будет пробит. Поднимите лимит до 1 GB
+либо сократите `TI_SOURCES`; тому `threat-intel-data` выделите не менее 2 GB.
+Подробнее: [Ресурсный профиль модулей](../architecture/module-resource-profile.md#threat-intel-самый-тяжёлый-сайдкар).
 
 Полный пример: `packaging/config/threat-intel.env.example`. Подробнее:
 [Threat intel collector](../features/threat-intel-collector.md) ·

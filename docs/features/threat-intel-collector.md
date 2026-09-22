@@ -126,6 +126,28 @@ indicator count, attempts, duration and the last error, if any.
 
 Packaged example: `packaging/config/threat-intel.env.example`.
 
+## Resource footprint
+
+The collector holds a cycle's indicators in memory, so its footprint scales with
+the number of enabled sources and the size of each feed. Measured with one live
+source (`phishing_database`, 386 397 indicators):
+
+| Phase | RSS |
+|---|---|
+| Peak of the first collection cycle | 226 MB |
+| Steady state | 112 MB |
+
+Disk after that single cycle: `ioc.db` 131 MB, `ioc.db-wal` 132 MB, the source
+snapshot 73 MB and the shadow artifacts 17 MB — roughly 350 MB in total.
+
+With all four default sources live (≈600k–1M indicators) expect 250–400 MB
+steady and a peak above 500 MB, which exceeds the `memory: 512M` limit the
+`threat-intel` service carries in `docker-compose.yml`. Raise that limit to 1 GB
+or trim `TI_SOURCES`, and size the `threat-intel-data` volume at 2 GB or more.
+Note that the WAL is not checkpointed after a bulk insert, so it can be as large
+as the database itself.
+
+Full breakdown: [Ресурсный профиль модулей](../architecture/module-resource-profile.md).
 
 ## Error handling
 

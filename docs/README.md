@@ -34,6 +34,7 @@
 | [Overview](architecture/overview.md) | Компоненты, request path и data flow |
 | [Agent contract](architecture/agent-contract.md) | Спецификация взаимодействия локального агента v0.1 |
 | [Capacity planning](architecture/capacity-planning.md) | Формулы, пилотный профиль и масштабирование |
+| [Ресурсный профиль модулей](architecture/module-resource-profile.md) | CPU, RAM и диск по каждому модулю: измерения и расчёты |
 | [Performance](architecture/performance.md) | Benchmarks и production tuning |
 | [Hierarchy](architecture/hierarchical-caching.md) | L1/L2, ICP, HTCP и peer selection |
 | [Repository structure](architecture/structure.md) | Cargo workspace и инфраструктура |
