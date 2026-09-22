@@ -107,6 +107,95 @@ export function AuthTab({ form, update, tr }: FormTabProps) {
             />
             <FormGrid>
               <Input
+                label="OIDC_REDIRECT_BASE"
+                value={form.oidcRedirectBase}
+                onChange={(e) => update('oidcRedirectBase', e.target.value)}
+                hint="Public origin, e.g. https://proxy.corp.local — callbacks are {base}/-/callback/{provider}"
+              />
+              <Input
+                label="OIDC_SESSION_TTL_SECONDS"
+                value={form.oidcSessionTtlSeconds}
+                onChange={(e) => update('oidcSessionTtlSeconds', e.target.value)}
+              />
+            </FormGrid>
+
+            <Checkbox
+              label="Sign in with Google"
+              checked={form.oidcGoogleEnabled}
+              onChange={(v) => update('oidcGoogleEnabled', v)}
+              hint="OAuth client of type Web application in Google Cloud Console"
+            />
+            {form.oidcGoogleEnabled && (
+              <>
+                <FormGrid>
+                  <Input
+                    label="OIDC_GOOGLE_CLIENT_ID"
+                    value={form.oidcGoogleClientId}
+                    onChange={(e) => update('oidcGoogleClientId', e.target.value)}
+                  />
+                  <Input
+                    label="OIDC_GOOGLE_CLIENT_SECRET"
+                    type="password"
+                    value={form.oidcGoogleClientSecret}
+                    onChange={(e) => update('oidcGoogleClientSecret', e.target.value)}
+                  />
+                </FormGrid>
+                <Input
+                  label="OIDC_GOOGLE_ALLOWED_DOMAINS"
+                  value={form.oidcGoogleAllowedDomains}
+                  onChange={(e) => update('oidcGoogleAllowedDomains', e.target.value)}
+                  hint="Comma-separated email domains. Empty means any Google account may sign in."
+                />
+              </>
+            )}
+
+            <Checkbox
+              label="Sign in with Apple"
+              checked={form.oidcAppleEnabled}
+              onChange={(v) => update('oidcAppleEnabled', v)}
+              hint="Needs a Services ID and a .p8 signing key — Apple issues no static client secret"
+            />
+            {form.oidcAppleEnabled && (
+              <>
+                <FormGrid>
+                  <Input
+                    label="OIDC_APPLE_CLIENT_ID"
+                    value={form.oidcAppleClientId}
+                    onChange={(e) => update('oidcAppleClientId', e.target.value)}
+                    hint="Services ID, e.g. com.example.proxy"
+                  />
+                  <Input
+                    label="OIDC_APPLE_TEAM_ID"
+                    value={form.oidcAppleTeamId}
+                    onChange={(e) => update('oidcAppleTeamId', e.target.value)}
+                  />
+                </FormGrid>
+                <FormGrid>
+                  <Input
+                    label="OIDC_APPLE_KEY_ID"
+                    value={form.oidcAppleKeyId}
+                    onChange={(e) => update('oidcAppleKeyId', e.target.value)}
+                  />
+                  <Input
+                    label="OIDC_APPLE_PRIVATE_KEY_FILE"
+                    value={form.oidcApplePrivateKeyFile}
+                    onChange={(e) => update('oidcApplePrivateKeyFile', e.target.value)}
+                    hint="Path to the AuthKey_XXXXXXXXXX.p8 file inside the container"
+                  />
+                </FormGrid>
+                <p className="mb-2 text-xs text-text-secondary">
+                  Apple returns the callback as a cross-site POST, so the state cookie needs
+                  SameSite=None; Secure. Serve the proxy over HTTPS or Apple sign-in will not
+                  complete.
+                </p>
+              </>
+            )}
+
+            <p className="mb-2 mt-4 text-xs text-text-secondary">
+              Custom issuer (optional) — any OIDC provider with a discovery document.
+            </p>
+            <FormGrid>
+              <Input
                 label="OIDC_CLIENT_ID"
                 value={form.oidcClientId}
                 onChange={(e) => update('oidcClientId', e.target.value)}

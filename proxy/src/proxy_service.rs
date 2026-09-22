@@ -998,8 +998,10 @@ impl ProxyService {
     ) -> Response<Body> {
         let mut rp_username = None;
         if let Some(rp_config) = &self.reverse_proxy_config {
-            if req.uri().path() == "/-/callback" {
-                return rp_config.handle_oidc_callback(req).await;
+            // Маршруты входа (/-/login, /-/callback, /-/logout) обслуживает
+            // сам reverse-proxy и наверх не отдаёт.
+            if crate::reverse_proxy::ReverseProxyConfig::is_auth_path(req.uri().path()) {
+                return rp_config.handle_auth_route(req).await;
             }
 
             let session_id = crate::reverse_proxy::ReverseProxyConfig::extract_session_cookie(&req);
@@ -1058,7 +1060,7 @@ impl ProxyService {
                     }
                 }
 
-                return rp_config.handle_unauthenticated(&req);
+                return rp_config.handle_unauthenticated(&req).await;
             }
 
             let upstream_base = &rp_config.upstream_url;

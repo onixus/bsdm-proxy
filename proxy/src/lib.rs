@@ -39,6 +39,7 @@ pub mod l2_cache;
 pub mod metrics;
 pub mod miss_coalesce;
 pub mod mitm_breaker;
+pub mod oidc;
 pub mod peer_discovery;
 pub mod peer_fetch;
 pub mod peers;
@@ -109,6 +110,7 @@ pub use mitm_breaker::{
     BreakerResetReport, MitmCircuitBreaker, MitmCircuitBreakerConfig, MitmCircuitBreakerStatus,
     TrippedInfo,
 };
+pub use oidc::{IdentityClaims, OidcRegistry, Provider as OidcProvider, ProviderKind};
 pub use peer_discovery::{run_peer_discovery, PeerDiscoveryConfig};
 pub use peer_fetch::{fetch_via_peer, PeerFetchError, PeerTlsConfig};
 pub use peers::{CachePeer, PeerConfig, PeerRegistry, PeerType, ReplaceStaticStats};
@@ -126,7 +128,7 @@ pub use proxy_service::{ProxyPolicy, ProxyService};
 pub use rate_limit::{
     extract_api_key, extract_api_key_ref, RateLimitConfig, RateLimitViolation, RateLimiter,
 };
-pub use reverse_proxy::{OidcConfig, ReverseProxyConfig};
+pub use reverse_proxy::ReverseProxyConfig;
 pub use security_defaults::{
     control_api_fail_closed, control_api_token_from_env, metrics_auth_token, metrics_bind_addr,
     metrics_bind_host, validate_control_plane_security,
