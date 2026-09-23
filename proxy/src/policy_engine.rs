@@ -196,11 +196,7 @@ impl PolicyEngine {
         client_ip: &str,
         f: impl FnOnce(Option<&str>, &str, &[&str]) -> R,
     ) -> R {
-        let cache_username = if dimensions.principal {
-            username
-        } else {
-            None
-        };
+        let cache_username = if dimensions.principal { username } else { None };
         let cache_groups = if dimensions.principal { groups } else { &[] };
         let vary_url = self.categorization.is_some() || dimensions.url;
         if !vary_url && !dimensions.client_ip && !dimensions.time {
@@ -373,13 +369,7 @@ impl PolicyEngine {
                     }
 
                     let result = self.evaluate_static_policy(
-                        acl_engine,
-                        dimensions,
-                        url,
-                        domain,
-                        username,
-                        groups,
-                        client_ip,
+                        acl_engine, dimensions, url, domain, username, groups, client_ip,
                     );
                     // Cache only stable ACL/categorization/TI state. ML scores
                     // are client-specific and replaced asynchronously; storing
@@ -397,13 +387,7 @@ impl PolicyEngine {
             )
         } else {
             self.evaluate_static_policy(
-                acl_engine,
-                dimensions,
-                url,
-                domain,
-                username,
-                groups,
-                client_ip,
+                acl_engine, dimensions, url, domain, username, groups, client_ip,
             )
         };
 
