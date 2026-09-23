@@ -194,6 +194,10 @@ if [[ -f "${SCRIPT_DIR}/config/blocklist.rpz.example" && ! -f "${ETC_DIR}/blockl
   install -m 0644 "${SCRIPT_DIR}/config/blocklist.rpz.example" "${ETC_DIR}/blocklist.rpz"
   echo "Installed ${ETC_DIR}/blocklist.rpz"
 fi
+if [[ -f "${SCRIPT_DIR}/config/pac-bypass.txt.example" && ! -f "${ETC_DIR}/pac-bypass.txt" ]]; then
+  install -m 0644 "${SCRIPT_DIR}/config/pac-bypass.txt.example" "${ETC_DIR}/pac-bypass.txt"
+  echo "Installed ${ETC_DIR}/pac-bypass.txt"
+fi
 
 # MITM CA directory.
 #
