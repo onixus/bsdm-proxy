@@ -1,12 +1,14 @@
-//! M5.5 async threat score cache — O(1) lookup on proxy hot path.
+//! M5.5 async threat score cache — O(1) lock-free lookup on proxy hot path.
 //!
-//! Background task polls ml-worker `GET /api/threat-scores`; request path only reads memory.
+//! Background task polls ml-worker `GET /api/threat-scores`; request handling
+//! reads an immutable ArcSwap snapshot and does not allocate lookup keys.
 
 use crate::acl::AclDecision;
+use arc_swap::ArcSwap;
 use reqwest::Client;
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{debug, warn};
 
@@ -90,10 +92,66 @@ struct CacheEntry {
     cached_at: Instant,
 }
 
+/// Immutable lookup snapshot.
+///
+/// Splitting entity types avoids constructing `type:value` strings on every
+/// request. The composite client/domain score uses nested maps so both probes
+/// borrow the existing `&str` inputs and allocate nothing.
+#[derive(Debug, Default)]
+struct ThreatScoreTable {
+    domains: HashMap<String, CacheEntry>,
+    client_ips: HashMap<String, CacheEntry>,
+    client_domains: HashMap<String, HashMap<String, CacheEntry>>,
+}
+
+impl ThreatScoreTable {
+    fn insert(&mut self, row: PollScoreRow, cached_at: Instant) {
+        let PollScoreRow {
+            entity_type,
+            entity_id,
+            score,
+            severity,
+            model,
+        } = row;
+        let entry = CacheEntry {
+            hit: ThreatScoreHit {
+                score,
+                severity,
+                model,
+                entity_type: entity_type.clone(),
+                entity_id: entity_id.clone(),
+            },
+            cached_at,
+        };
+
+        match entity_type.as_str() {
+            "domain" => {
+                self.domains.insert(entity_id, entry);
+            }
+            "client_ip" => {
+                self.client_ips.insert(entity_id, entry);
+            }
+            "client_domain" => {
+                if let Some((client_ip, domain)) = entity_id.split_once('|') {
+                    self.client_domains
+                        .entry(client_ip.to_string())
+                        .or_default()
+                        .insert(domain.to_string(), entry);
+                }
+            }
+            _ => {
+                // Unknown entity types were never reachable from lookup in the
+                // previous flat map either. Ignore them instead of growing a
+                // table that cannot affect a request decision.
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct ThreatScoreCache {
     config: ThreatScoreConfig,
-    entries: Arc<Mutex<HashMap<String, CacheEntry>>>,
+    entries: ArcSwap<ThreatScoreTable>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -115,7 +173,7 @@ impl ThreatScoreCache {
     pub fn new(config: ThreatScoreConfig) -> Self {
         Self {
             config,
-            entries: Arc::new(Mutex::new(HashMap::new())),
+            entries: ArcSwap::from_pointee(ThreatScoreTable::default()),
         }
     }
 
@@ -127,32 +185,32 @@ impl ThreatScoreCache {
         &self.config
     }
 
-    fn cache_key(entity_type: &str, entity_id: &str) -> String {
-        format!("{entity_type}:{entity_id}")
-    }
-
     pub fn lookup(&self, domain: &str, client_ip: &str) -> Option<ThreatScoreHit> {
         if !self.enabled() {
             return None;
         }
-        let guard = self.entries.lock().unwrap();
-        let candidates = [
-            Self::cache_key("domain", domain),
-            Self::cache_key("client_ip", client_ip),
-            Self::cache_key("client_domain", &format!("{client_ip}|{domain}")),
-        ];
+        let table = self.entries.load();
         let mut best: Option<&CacheEntry> = None;
-        for key in candidates {
-            if let Some(entry) = guard.get(&key) {
-                if entry.cached_at.elapsed() > self.config.cache_ttl {
-                    continue;
-                }
-                if best.as_ref().is_none_or(|b| entry.hit.score > b.hit.score) {
-                    best = Some(entry);
-                }
+        let candidates = [
+            table.domains.get(domain),
+            table.client_ips.get(client_ip),
+            table
+                .client_domains
+                .get(client_ip)
+                .and_then(|domains| domains.get(domain)),
+        ];
+        for entry in candidates.into_iter().flatten() {
+            if entry.cached_at.elapsed() > self.config.cache_ttl {
+                continue;
+            }
+            if best
+                .as_ref()
+                .is_none_or(|current| entry.hit.score > current.hit.score)
+            {
+                best = Some(entry);
             }
         }
-        best.map(|e| e.hit.clone())
+        best.map(|entry| entry.hit.clone())
     }
 
     pub fn apply_to_policy(
@@ -186,25 +244,27 @@ impl ThreatScoreCache {
     }
 
     fn replace_all(&self, rows: Vec<PollScoreRow>) {
-        let mut map = HashMap::new();
+        let mut table = ThreatScoreTable::default();
         let now = Instant::now();
         for row in rows {
-            let key = Self::cache_key(&row.entity_type, &row.entity_id);
-            map.insert(
-                key,
-                CacheEntry {
-                    hit: ThreatScoreHit {
-                        score: row.score,
-                        severity: row.severity,
-                        model: row.model,
-                        entity_type: row.entity_type,
-                        entity_id: row.entity_id,
-                    },
-                    cached_at: now,
-                },
-            );
+            table.insert(row, now);
         }
-        *self.entries.lock().unwrap() = map;
+        self.entries.store(Arc::new(table));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn replace_hits_for_test(&self, hits: Vec<ThreatScoreHit>) {
+        self.replace_all(
+            hits.into_iter()
+                .map(|hit| PollScoreRow {
+                    entity_type: hit.entity_type,
+                    entity_id: hit.entity_id,
+                    score: hit.score,
+                    severity: hit.severity,
+                    model: hit.model,
+                })
+                .collect(),
+        );
     }
 
     pub async fn poll_once(client: &Client, cache: &ThreatScoreCache) -> Result<usize, String> {
@@ -251,16 +311,20 @@ mod tests {
     use super::*;
     use crate::acl::AclAction;
 
-    #[test]
-    fn lookup_picks_highest_score() {
-        let cache = ThreatScoreCache::new(ThreatScoreConfig {
+    fn enabled_config(block_threshold: f64) -> ThreatScoreConfig {
+        ThreatScoreConfig {
             enabled: true,
             poll_url: String::new(),
             poll_interval: Duration::from_secs(60),
             cache_ttl: Duration::from_secs(300),
             warn_threshold: 0.7,
-            block_threshold: 0.0,
-        });
+            block_threshold,
+        }
+    }
+
+    #[test]
+    fn lookup_picks_highest_score() {
+        let cache = ThreatScoreCache::new(enabled_config(0.0));
         cache.replace_all(vec![
             PollScoreRow {
                 entity_type: "domain".into(),
@@ -282,15 +346,38 @@ mod tests {
     }
 
     #[test]
+    fn client_domain_lookup_is_exact() {
+        let cache = ThreatScoreCache::new(enabled_config(0.0));
+        cache.replace_all(vec![PollScoreRow {
+            entity_type: "client_domain".into(),
+            entity_id: "10.0.0.1|evil.com".into(),
+            score: 0.88,
+            severity: "high".into(),
+            model: "client_domain_v0".into(),
+        }]);
+        assert!(cache.lookup("evil.com", "10.0.0.1").is_some());
+        assert!(cache.lookup("evil.com", "10.0.0.2").is_none());
+        assert!(cache.lookup("good.com", "10.0.0.1").is_none());
+    }
+
+    #[test]
+    fn replacing_snapshot_removes_old_scores() {
+        let cache = ThreatScoreCache::new(enabled_config(0.0));
+        cache.replace_all(vec![PollScoreRow {
+            entity_type: "domain".into(),
+            entity_id: "old.test".into(),
+            score: 0.9,
+            severity: "high".into(),
+            model: "old".into(),
+        }]);
+        assert!(cache.lookup("old.test", "10.0.0.1").is_some());
+        cache.replace_all(Vec::new());
+        assert!(cache.lookup("old.test", "10.0.0.1").is_none());
+    }
+
+    #[test]
     fn apply_adds_ml_score_source() {
-        let cache = ThreatScoreCache::new(ThreatScoreConfig {
-            enabled: true,
-            poll_url: String::new(),
-            poll_interval: Duration::from_secs(60),
-            cache_ttl: Duration::from_secs(300),
-            warn_threshold: 0.7,
-            block_threshold: 0.0,
-        });
+        let cache = ThreatScoreCache::new(enabled_config(0.0));
         cache.replace_all(vec![PollScoreRow {
             entity_type: "domain".into(),
             entity_id: "bad.test".into(),
@@ -307,14 +394,7 @@ mod tests {
 
     #[test]
     fn block_when_threshold_set() {
-        let cache = ThreatScoreCache::new(ThreatScoreConfig {
-            enabled: true,
-            poll_url: String::new(),
-            poll_interval: Duration::from_secs(60),
-            cache_ttl: Duration::from_secs(300),
-            warn_threshold: 0.7,
-            block_threshold: 0.9,
-        });
+        let cache = ThreatScoreCache::new(enabled_config(0.9));
         cache.replace_all(vec![PollScoreRow {
             entity_type: "domain".into(),
             entity_id: "c2.test".into(),
@@ -333,11 +413,7 @@ mod tests {
     fn disabled_returns_none() {
         let cache = ThreatScoreCache::new(ThreatScoreConfig {
             enabled: false,
-            poll_url: String::new(),
-            poll_interval: Duration::from_secs(60),
-            cache_ttl: Duration::from_secs(300),
-            warn_threshold: 0.7,
-            block_threshold: 0.0,
+            ..enabled_config(0.0)
         });
         assert!(cache.lookup("a.com", "1.1.1.1").is_none());
     }
