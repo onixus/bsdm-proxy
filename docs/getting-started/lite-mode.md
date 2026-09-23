@@ -74,7 +74,7 @@ Watch these Prometheus metrics on the indexer `/metrics` endpoint:
 - `cache_indexer_sqlite_writer_batch_requests`
 - `cache_indexer_sqlite_writer_commit_duration_seconds`
 
-A rising saturation counter with sustained queue depth means SQLite cannot keep up. Increase `SQLITE_BATCH_MAX_EVENTS` only while commit latency remains acceptable; increasing queue capacity merely stores overload in RAM, a traditional human technique for postponing bad news.
+A rising saturation counter with sustained queue depth means SQLite cannot keep up. Increase `SQLITE_BATCH_MAX_EVENTS` only while commit latency remains acceptable. Increasing queue capacity only extends the bounded burst buffer and does not fix sustained downstream overload.
 
 ## Full analytics stack
 
