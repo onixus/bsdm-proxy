@@ -37,6 +37,8 @@ pub struct CollectorMetrics {
     pub rpz_rollbacks: prometheus::IntCounter,
     /// ML reputation and anomaly evaluation requests.
     pub ml_evaluations: IntCounterVec,
+    /// SIEM events by `action` and `outcome` (`sent`, `failed`, `dropped`).
+    pub siem_events: IntCounterVec,
 }
 
 impl CollectorMetrics {
@@ -146,6 +148,13 @@ impl CollectorMetrics {
             ),
             &["endpoint"],
         )?;
+        let siem_events = IntCounterVec::new(
+            Opts::new(
+                "threat_intel_siem_events_total",
+                "SIEM events by action and delivery outcome (sent, failed, dropped)",
+            ),
+            &["action", "outcome"],
+        )?;
 
         registry.register(Box::new(fetches.clone()))?;
         registry.register(Box::new(retries.clone()))?;
@@ -163,6 +172,7 @@ impl CollectorMetrics {
         registry.register(Box::new(rpz_rollbacks.clone()))?;
         registry.register(Box::new(ml_evaluations.clone()))?;
         registry.register(Box::new(enforcement_mode.clone()))?;
+        registry.register(Box::new(siem_events.clone()))?;
 
         Ok(Arc::new(Self {
             registry,
@@ -182,6 +192,7 @@ impl CollectorMetrics {
             soar_unblocks,
             rpz_rollbacks,
             ml_evaluations,
+            siem_events,
         }))
     }
 

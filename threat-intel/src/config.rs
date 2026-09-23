@@ -8,6 +8,8 @@ use tracing::warn;
 /// Suffix appended to enforcement artifacts while running in shadow mode, so
 /// neither `dns-sinkhole` nor the proxy can pick them up by accident.
 pub const SHADOW_SUFFIX: &str = ".shadow";
+/// Default hostname in syslog/CEF headers.
+pub const DEFAULT_SIEM_HOSTNAME: &str = "bsdm-threat-intel";
 
 /// How threat intelligence results are allowed to affect traffic (issue #330).
 ///
@@ -99,6 +101,12 @@ pub struct Config {
     pub siem_file_path: Option<PathBuf>,
     /// SIEM payload format: "cef", "ecs", or "syslog".
     pub siem_format: String,
+    /// Hostname stamped into syslog/CEF headers (`TI_SIEM_HOSTNAME`).
+    pub siem_hostname: String,
+    /// Event classes delivered to the SIEM (`TI_SIEM_EVENTS`, default all).
+    pub siem_events: crate::siem::SiemEventFilter,
+    /// Bound of the in-memory delivery queue; overflow is dropped and counted.
+    pub siem_queue_capacity: usize,
     /// Optional webhook/reload URL to trigger sinkhole zone reload.
     pub sinkhole_reload_url: Option<String>,
 }
@@ -158,6 +166,15 @@ impl Config {
             .filter(|s| !s.is_empty())
             .map(PathBuf::from);
         let siem_format = std::env::var("TI_SIEM_FORMAT").unwrap_or_else(|_| "cef".into());
+        let siem_hostname = std::env::var("TI_SIEM_HOSTNAME")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| DEFAULT_SIEM_HOSTNAME.to_string());
+        let siem_events = crate::siem::SiemEventFilter::parse(
+            &std::env::var("TI_SIEM_EVENTS").unwrap_or_default(),
+        )
+        .map_err(|e| format!("TI_SIEM_EVENTS: {e}"))?;
         let sinkhole_reload_url = std::env::var("TI_SINKHOLE_RELOAD_URL")
             .ok()
             .map(|s| s.trim().to_string())
@@ -190,6 +207,9 @@ impl Config {
             siem_syslog_protocol,
             siem_file_path,
             siem_format,
+            siem_hostname,
+            siem_events,
+            siem_queue_capacity: env_u64("TI_SIEM_QUEUE_CAPACITY", 10_000).max(1) as usize,
             sinkhole_reload_url,
         })
     }
@@ -292,6 +312,9 @@ mod tests {
             siem_syslog_protocol: "udp".into(),
             siem_file_path: None,
             siem_format: "cef".into(),
+            siem_hostname: DEFAULT_SIEM_HOSTNAME.into(),
+            siem_events: crate::siem::SiemEventFilter::all(),
+            siem_queue_capacity: 10_000,
             sinkhole_reload_url: None,
         }
     }

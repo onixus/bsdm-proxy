@@ -56,6 +56,11 @@ pub struct StorageStats {
     pub dropped_bogon: usize,
 }
 
+/// Column order expected by `SqliteStorage::row_to_indicator`.
+const ROW_COLUMNS: &str = "id, value, normalized_value, domain, kind, source, source_weight, \
+     confidence_score, collected_at, reported_at, expires_at, reference, tags, is_bogon, \
+     first_seen, last_seen, hit_count";
+
 #[derive(Clone)]
 pub struct SqliteStorage {
     conn: Arc<Mutex<Connection>>,
@@ -155,6 +160,19 @@ impl SqliteStorage {
         indicators: &[NormalizedIndicator],
         ttl_secs: i64,
     ) -> Result<StorageStats, StorageError> {
+        self.upsert_batch_tracking(indicators, ttl_secs)
+            .map(|(stats, _)| stats)
+    }
+
+    /// Like [`Self::upsert_batch`], and also reports which rows were new:
+    /// `(index into indicators, computed confidence)` for every indicator not
+    /// previously stored for its source.
+    pub fn upsert_batch_tracking(
+        &self,
+        indicators: &[NormalizedIndicator],
+        ttl_secs: i64,
+    ) -> Result<(StorageStats, Vec<(usize, u8)>), StorageError> {
+        let mut inserted = Vec::new();
         let mut conn = self.conn.lock().map_err(|_| StorageError::Poisoned)?;
         let tx = conn.transaction()?;
         let mut stats = StorageStats::default();
@@ -163,7 +181,7 @@ impl SqliteStorage {
         let now_ts = now.timestamp();
         let expires_ts = now_ts.saturating_add(ttl_secs);
 
-        for ind in indicators {
+        for (index, ind) in indicators.iter().enumerate() {
             if ind.is_private_or_bogon {
                 stats.dropped_bogon += 1;
                 continue;
@@ -242,11 +260,12 @@ impl SqliteStorage {
                 stats.updated += 1;
             } else {
                 stats.inserted += 1;
+                inserted.push((index, confidence));
             }
         }
 
         tx.commit()?;
-        Ok(stats)
+        Ok((stats, inserted))
     }
 
     /// Query an exact indicator from storage.
@@ -371,20 +390,45 @@ impl SqliteStorage {
         Ok(purged)
     }
 
+    /// Like [`Self::purge_expired`], returning the deleted rows.
+    pub fn purge_expired_returning(
+        &self,
+        now_timestamp: i64,
+    ) -> Result<Vec<StoredIndicator>, StorageError> {
+        let conn = self.conn.lock().map_err(|_| StorageError::Poisoned)?;
+        let sql = format!("DELETE FROM indicators WHERE expires_at <= ?1 RETURNING {ROW_COLUMNS}");
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params![now_timestamp], Self::row_to_indicator)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     /// Delete a specific indicator by value and optional kind (for SOAR unblock actions).
     pub fn purge_indicator(
         &self,
         value: &str,
         kind: Option<IndicatorKind>,
     ) -> Result<usize, StorageError> {
+        self.purge_indicator_returning(value, kind)
+            .map(|rows| rows.len())
+    }
+
+    /// Like [`Self::purge_indicator`], returning the deleted rows (one per
+    /// source that reported the indicator).
+    pub fn purge_indicator_returning(
+        &self,
+        value: &str,
+        kind: Option<IndicatorKind>,
+    ) -> Result<Vec<StoredIndicator>, StorageError> {
         let conn = self.conn.lock().map_err(|_| StorageError::Poisoned)?;
         let mut sql =
             String::from("DELETE FROM indicators WHERE (normalized_value = ?1 OR value = ?1)");
         if let Some(k) = kind {
             sql.push_str(&format!(" AND kind = '{}'", k.as_str()));
         }
-        let purged = conn.execute(&sql, params![value])?;
-        Ok(purged)
+        sql.push_str(&format!(" RETURNING {ROW_COLUMNS}"));
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params![value], Self::row_to_indicator)?;
+        Ok(rows.collect::<Result<_, _>>()?)
     }
 
     /// Count total active indicators.
@@ -606,6 +650,70 @@ mod tests {
         let purged = storage.purge_expired(Utc::now().timestamp()).unwrap();
         assert_eq!(purged, 1);
 
+        assert_eq!(storage.count_active().unwrap(), 0);
+    }
+
+    #[test]
+    fn tracking_upsert_reports_only_new_rows() {
+        let storage = SqliteStorage::in_memory().unwrap();
+        let known = NormalizedIndicator::from_raw(
+            &RawIndicator::new("known-threat.com", IndicatorKind::Domain, &TestFeed),
+            85,
+        )
+        .unwrap();
+        storage
+            .upsert_batch(std::slice::from_ref(&known), 3600)
+            .unwrap();
+
+        let bogon = NormalizedIndicator::from_raw(
+            &RawIndicator::new("10.0.0.1", IndicatorKind::Ip, &TestFeed),
+            85,
+        )
+        .unwrap();
+        let fresh = NormalizedIndicator::from_raw(
+            &RawIndicator::new("fresh-threat.com", IndicatorKind::Domain, &TestFeed),
+            85,
+        )
+        .unwrap();
+
+        let (stats, inserted) = storage
+            .upsert_batch_tracking(&[known, bogon, fresh], 3600)
+            .unwrap();
+        assert_eq!(
+            (stats.inserted, stats.updated, stats.dropped_bogon),
+            (1, 1, 1)
+        );
+        assert_eq!(inserted, vec![(2, 85)]);
+    }
+
+    #[test]
+    fn returning_purges_hand_back_the_deleted_rows() {
+        let storage = SqliteStorage::in_memory().unwrap();
+        let stale = NormalizedIndicator::from_raw(
+            &RawIndicator::new("stale-threat.com", IndicatorKind::Domain, &TestFeed),
+            80,
+        )
+        .unwrap();
+        let live = NormalizedIndicator::from_raw(
+            &RawIndicator::new("live-threat.com", IndicatorKind::Domain, &TestFeed),
+            80,
+        )
+        .unwrap();
+        storage.upsert_batch(&[stale], -10).unwrap();
+        storage.upsert_batch(&[live], 3600).unwrap();
+
+        let expired = storage
+            .purge_expired_returning(Utc::now().timestamp())
+            .unwrap();
+        assert_eq!(expired.len(), 1);
+        assert_eq!(expired[0].normalized_value, "stale-threat.com");
+        assert_eq!(expired[0].source, "openphish");
+
+        let removed = storage
+            .purge_indicator_returning("live-threat.com", Some(IndicatorKind::Domain))
+            .unwrap();
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].confidence_score, 85);
         assert_eq!(storage.count_active().unwrap(), 0);
     }
 }

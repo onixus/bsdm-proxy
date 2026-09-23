@@ -110,6 +110,7 @@ fn test_soar_full_lifecycle() {
             operator: Some("tier2_analyst".into()),
         },
         EnforcementMode::Enforce,
+        &threat_intel::siem::SiemEmitter::disabled(),
     )
     .unwrap();
     assert!(unblock_res.success);
