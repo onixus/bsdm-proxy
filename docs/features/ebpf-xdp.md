@@ -57,7 +57,15 @@ TI-enforcement (`TI_ENFORCEMENT_MODE=enforce`, `proxy/src/ti_enforce.rs`).
 - `CAP_BPF` + `CAP_NET_ADMIN` (или root). В Docker: `cap_add: [BPF, NET_ADMIN]`,
   `network_mode: host` — XDP цепляется к netdev хоста, а не к veth в bridge-сети.
 - Утилиты в PATH контейнера/хоста: `bpftool` (linux-tools), `clang` (сборка
-  `bpf/xdp_drop.o`), `ip` (iproute2).
+  `bpf/xdp_drop.o`), `ip` (iproute2, собранный с libbpf — `ip -V` показывает
+  `libbpf …`).
+- Заголовки ядра для сборки объекта: `libbpf-dev` (`bpf/bpf_helpers.h`) и
+  `linux-libc-dev`. Прокси собирает объект с `-O2 -g -target bpf` и на
+  Debian/Ubuntu добавляет `-I/usr/include/<arch>-linux-gnu`. `-g` обязателен:
+  карты объявлены в BTF-стиле, и libbpf без BTF отказывается грузить объект
+  (`BTF is required, but is missing or corrupted`).
+- Если `bpf/xdp_drop.o` остался от 0.9.15 или раньше (собран без `-g`),
+  удалите его: прокси компилирует объект, только когда файла нет.
 - Смонтированный `/sys/fs/bpf`.
 - Существующий интерфейс в `EBPF_XDP_IFACE`. Driver-режим требует поддержки
   XDP в драйвере; при сомнениях используйте `skb`.
@@ -95,6 +103,21 @@ sudo EBPF_IFACE=eth0 CONTROL_API_TOKEN=... ./scripts/run-ebpf-lab-smoke.sh
 `scripts/run-ebpf-lab-smoke.sh` явно скипается (exit 0) на не-Linux хостах и
 при отсутствии `bpftool`/`clang`/capabilities; на невзведённом прокси он
 проверяет ровно один факт — что `enabled: true` отвергается с 403.
+
+С `EBPF_PROBE_NETNS` смоук проверяет и сам datapath: пингует из этого
+network namespace (его адреса должны совпадать с `EBPF_TEST_IP[_V6]`) и
+требует, чтобы при блокировке трафик реально отбрасывался ядром, счётчики
+`packetsDroppedTotal` и per-IP `packetsDropped` росли, дельта доезжала до
+`bsdm_proxy_ebpf_packets_dropped_total`, а после разблокировки трафик шёл снова.
+
+### Прогон на реальном ядре (Jenkins)
+
+`ci/ebpf-lab/Jenkinsfile` (джоба `bsdm-ebpf-lab` локального Jenkins) собирает
+прокси на Linux-агенте с меткой `linux && docker` и запускает
+`ci/ebpf-lab/run.sh` в контейнере `--privileged --network none`. XDP
+вешается на пару veth внутри сетевого namespace контейнера, сетевые карты
+агента не затрагиваются. Агенту нужен только docker; clang, bpftool и iproute2
+приезжают в образе `ci/ebpf-lab/Dockerfile`.
 
 ## Control API `/api/ebpf/*`
 
@@ -183,7 +206,7 @@ curl -sS -X PUT -H "Authorization: Bearer $CONTROL_API_TOKEN" \
   http://127.0.0.1:9090/api/ebpf/config
 
 # Проверить, что на netdev ничего не висит
-ip link show dev eth0 | grep -i xdp   # пусто = отцеплено
+ip -d link show dev eth0 | grep 'prog/xdp'   # пусто = отцеплено
 
 # Аварийная ручная выгрузка (например, после kill -9 прокси)
 sudo ip link set dev eth0 xdpgeneric off
@@ -202,7 +225,11 @@ EBPF_XDP_ENABLED=false EBPF_XDP_ALLOW_RUNTIME_ENABLE=false
 1. **Не security boundary.** Блоклист по IP: смена адреса обходит фильтр,
    NAT/CDN дают ложные срабатывания на весь пул.
 2. Attach выполняется через shell-out в `ip link` / `bpftool`, а не через
-   libbpf: нет BTF, CO-RE и pinned links. Утилиты обязаны быть в PATH.
+   libbpf из процесса: нет CO-RE и pinned links. Утилиты обязаны быть в PATH.
+   Карты адресуются по id, а не по имени: ядро хранит 15 символов имени, и
+   оба блоклиста видны как `bsdm_blocked_ip`. После attach прокси берёт id
+   программы из `bpftool net show`, её `map_ids` и узнаёт карты по типу и
+   размерам ключа/значения; не нашёл — отцепляет программу и отвечает 500.
 3. Блоклист хранится в памяти и **не персистится**: после рестарта прокси
    карты ядра пусты, записи из `POST /api/ebpf/ips` теряются.
 4. Пока фильтр выключен, `POST /api/ebpf/ips` пишет только в in-memory реестр;
