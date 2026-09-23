@@ -43,7 +43,6 @@ impl Collector {
         &self.config
     }
 
-    #[allow(dead_code)]
     pub fn storage(&self) -> Option<&crate::storage::SqliteStorage> {
         self.storage.as_ref()
     }

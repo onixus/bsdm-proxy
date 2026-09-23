@@ -237,20 +237,23 @@ pub fn load_certs(cert_path: &str, key_path: &str) -> Result<ServerConfig, Strin
     let cert_file = File::open(cert_path).map_err(|e| format!("cert open: {e}"))?;
     let mut cert_reader = BufReader::new(cert_file);
     let certs: Vec<CertificateDer<'static>> = rustls_pemfile::certs(&mut cert_reader)
-        .map(|r| r.unwrap().into_owned())
-        .collect();
+        .map(|r| r.map(|c| c.into_owned()))
+        .collect::<Result<_, _>>()
+        .map_err(|e| format!("cert parse: {e}"))?;
 
     let key_file = File::open(key_path).map_err(|e| format!("key open: {e}"))?;
     let mut key_reader = BufReader::new(key_file);
     let mut keys = rustls_pemfile::pkcs8_private_keys(&mut key_reader)
-        .map(|r| PrivateKeyDer::Pkcs8(r.unwrap().clone_key()))
-        .collect::<Vec<_>>();
+        .map(|r| r.map(|k| PrivateKeyDer::Pkcs8(k.clone_key())))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("key parse: {e}"))?;
     if keys.is_empty() {
         let key_file = File::open(key_path).map_err(|e| format!("key open: {e}"))?;
         let mut key_reader = BufReader::new(key_file);
         keys = rustls_pemfile::rsa_private_keys(&mut key_reader)
-            .map(|r| PrivateKeyDer::Pkcs1(r.unwrap().clone_key()))
-            .collect::<Vec<_>>();
+            .map(|r| r.map(|k| PrivateKeyDer::Pkcs1(k.clone_key())))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("key parse: {e}"))?;
     }
     if keys.is_empty() {
         return Err("No private keys found".into());
@@ -545,5 +548,18 @@ mod tests {
                 .get(),
             1
         );
+    }
+
+    #[test]
+    fn load_certs_rejects_malformed_pem_without_panicking() {
+        let dir = tempfile::tempdir().unwrap();
+        let bad = "-----BEGIN CERTIFICATE-----\n!!! not base64 !!!\n-----END CERTIFICATE-----\n";
+        let cert = dir.path().join("tls.crt");
+        let key = dir.path().join("tls.key");
+        std::fs::write(&cert, bad).unwrap();
+        std::fs::write(&key, bad.replace("CERTIFICATE", "PRIVATE KEY")).unwrap();
+
+        let err = load_certs(cert.to_str().unwrap(), key.to_str().unwrap()).unwrap_err();
+        assert!(err.contains("parse"), "unexpected error: {err}");
     }
 }

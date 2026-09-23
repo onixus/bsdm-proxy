@@ -59,7 +59,6 @@ impl JsonlFileSink {
         Ok(Self { dir })
     }
 
-    #[allow(dead_code)]
     pub fn dir(&self) -> &Path {
         &self.dir
     }
@@ -106,7 +105,6 @@ impl SqliteSink {
         Self { storage, ttl_secs }
     }
 
-    #[allow(dead_code)]
     pub fn storage(&self) -> &crate::storage::SqliteStorage {
         &self.storage
     }

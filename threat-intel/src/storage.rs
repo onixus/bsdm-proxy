@@ -73,7 +73,6 @@ impl SqliteStorage {
     }
 
     /// Creates an in-memory SQLite database (ideal for tests and ephemeral runs).
-    #[allow(dead_code)]
     pub fn in_memory() -> Result<Self, StorageError> {
         let conn = Connection::open_in_memory()?;
         let storage = Self {
@@ -251,7 +250,6 @@ impl SqliteStorage {
     }
 
     /// Query an exact indicator from storage.
-    #[allow(dead_code)]
     pub fn query_indicator(
         &self,
         value: &str,
@@ -390,7 +388,6 @@ impl SqliteStorage {
     }
 
     /// Count total active indicators.
-    #[allow(dead_code)]
     pub fn count_active(&self) -> Result<usize, StorageError> {
         let conn = self.conn.lock().map_err(|_| StorageError::Poisoned)?;
         let now_ts = Utc::now().timestamp();
