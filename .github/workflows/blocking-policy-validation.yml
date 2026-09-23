@@ -1,0 +1,49 @@
+name: Blocking Policy Validation
+
+on:
+  push:
+    branches:
+      - perf/blocking-policy-hot-path
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    name: Fix, format and policy tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: ./.github/actions/setup-rust
+        with:
+          components: rustfmt
+
+      - name: Apply final Clippy fix
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("proxy/src/policy_engine.rs")
+          source = path.read_text()
+          old = "let engine: &Arc<AclEngine> = &*snapshot;"
+          new = "let engine: &Arc<AclEngine> = &snapshot;"
+          if old in source:
+              path.write_text(source.replace(old, new, 1))
+          PY
+          cargo fmt --all
+          git add proxy/src/policy_engine.rs proxy/src/threat_score_cache.rs
+          if ! git diff --cached --quiet; then
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git commit -m "fix(policy): rely on ArcSwap guard auto-deref"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+
+      - name: Run blocking policy tests
+        run: |
+          cargo test -p bsdm-proxy --lib policy_engine
+          cargo test -p bsdm-proxy --lib threat_score_cache
