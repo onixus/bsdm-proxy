@@ -1,24 +1,98 @@
 //! HTTP and Kafka cache-event pipelines with bounded in-memory queue (#106).
 
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
+use tokio::task::JoinSet;
 use tracing::{error, info, warn};
 
 use crate::metrics::Metrics;
 
 pub use bsdm_events::CacheEvent;
 
+const DEFAULT_KAFKA_MAX_IN_FLIGHT: usize = 256;
+const DEFAULT_HTTP_MAX_IN_FLIGHT: usize = 16;
+
 pub fn new_event_id() -> String {
     hex::encode(rand::random::<u128>().to_be_bytes())
 }
 
-fn queue_capacity_from_env() -> usize {
-    std::env::var("KAFKA_QUEUE_CAPACITY")
+fn positive_usize_from_env(name: &str, default: usize) -> usize {
+    std::env::var(name)
         .ok()
         .and_then(|s| s.parse().ok())
         .filter(|&n| n > 0)
-        .unwrap_or(8_192)
+        .unwrap_or(default)
+}
+
+fn queue_capacity_from_env() -> usize {
+    positive_usize_from_env("KAFKA_QUEUE_CAPACITY", 8_192)
+}
+
+/// Drain a bounded input channel with at most `max_in_flight` asynchronous
+/// deliveries. The channel still provides the request-path backpressure bound;
+/// this second bound prevents slow sinks from creating an unbounded task set.
+async fn run_bounded_workers<T, F, Fut>(
+    mut receiver: mpsc::Receiver<T>,
+    max_in_flight: usize,
+    pipeline_name: &'static str,
+    handler: F,
+) where
+    T: Send + 'static,
+    F: Fn(T) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = ()> + Send + 'static,
+{
+    let max_in_flight = max_in_flight.max(1);
+    let handler = Arc::new(handler);
+    let mut tasks = JoinSet::new();
+
+    loop {
+        if tasks.len() >= max_in_flight {
+            if let Some(Err(join_error)) = tasks.join_next().await {
+                error!(
+                    pipeline = pipeline_name,
+                    error = %join_error,
+                    "Event delivery worker failed"
+                );
+            }
+            continue;
+        }
+
+        tokio::select! {
+            biased;
+            completed = tasks.join_next(), if !tasks.is_empty() => {
+                if let Some(Err(join_error)) = completed {
+                    error!(
+                        pipeline = pipeline_name,
+                        error = %join_error,
+                        "Event delivery worker failed"
+                    );
+                }
+            }
+            event = receiver.recv() => {
+                let Some(event) = event else {
+                    break;
+                };
+                let handler = Arc::clone(&handler);
+                tasks.spawn(async move {
+                    handler(event).await;
+                });
+            }
+        }
+    }
+
+    // Preserve the previous graceful-drain behavior when all senders are
+    // dropped: queued deliveries finish before the pipeline task exits.
+    while let Some(result) = tasks.join_next().await {
+        if let Err(join_error) = result {
+            error!(
+                pipeline = pipeline_name,
+                error = %join_error,
+                "Event delivery worker failed while draining"
+            );
+        }
+    }
 }
 
 /// Enqueue cache events to Kafka (if enabled) or HTTP sink.
@@ -65,7 +139,8 @@ mod kafka_pipeline {
             .map(Arc::new)
     }
 
-    /// Non-blocking Kafka enqueue: bounded channel + background sender (no await on hot path).
+    /// Non-blocking Kafka enqueue: bounded channel + bounded concurrent sender
+    /// set (no network await on the request hot path).
     pub struct KafkaEventPipeline {
         sender: mpsc::Sender<CacheEvent>,
         producer: Arc<FutureProducer>,
@@ -75,36 +150,49 @@ mod kafka_pipeline {
         pub fn spawn(brokers: &str, topic: String, metrics: Arc<Metrics>) -> Option<Arc<Self>> {
             let producer = create_kafka_producer(brokers)?;
             let capacity = queue_capacity_from_env();
-            let (sender, mut receiver) = mpsc::channel::<CacheEvent>(capacity);
+            let max_in_flight = positive_usize_from_env(
+                "KAFKA_MAX_IN_FLIGHT",
+                DEFAULT_KAFKA_MAX_IN_FLIGHT,
+            );
+            let (sender, receiver) = mpsc::channel::<CacheEvent>(capacity);
             let producer_worker = producer.clone();
             let metrics_worker = metrics.clone();
+            let topic_worker: Arc<str> = Arc::from(topic);
 
-            tokio::spawn(async move {
-                while let Some(event) = receiver.recv().await {
-                    match serde_json::to_string(&event) {
-                        Ok(payload) => {
-                            let record = FutureRecord::to(&topic)
-                                .payload(&payload)
-                                .key(&event.event_id);
-                            match producer_worker.send(record, Duration::ZERO).await {
-                                Ok(_) => metrics_worker.kafka_events_sent.inc(),
-                                Err((e, _)) => {
-                                    warn!("Kafka send failed: {}", e);
-                                    metrics_worker.kafka_send_errors.inc();
+            tokio::spawn(run_bounded_workers(
+                receiver,
+                max_in_flight,
+                "kafka",
+                move |event| {
+                    let producer = producer_worker.clone();
+                    let metrics = metrics_worker.clone();
+                    let topic = Arc::clone(&topic_worker);
+                    async move {
+                        match serde_json::to_string(&event) {
+                            Ok(payload) => {
+                                let record = FutureRecord::to(topic.as_ref())
+                                    .payload(&payload)
+                                    .key(&event.event_id);
+                                match producer.send(record, Duration::ZERO).await {
+                                    Ok(_) => metrics.kafka_events_sent.inc(),
+                                    Err((e, _)) => {
+                                        warn!("Kafka send failed: {}", e);
+                                        metrics.kafka_send_errors.inc();
+                                    }
                                 }
                             }
-                        }
-                        Err(e) => {
-                            error!("Event serialization failed: {}", e);
-                            metrics_worker.kafka_send_errors.inc();
+                            Err(e) => {
+                                error!("Event serialization failed: {}", e);
+                                metrics.kafka_send_errors.inc();
+                            }
                         }
                     }
-                }
-            });
+                },
+            ));
 
             info!(
-                "Kafka event pipeline started (queue capacity={}, drop=policy:drop_new)",
-                capacity
+                "Kafka event pipeline started (queue capacity={}, max in-flight={}, drop=policy:drop_new)",
+                capacity, max_in_flight
             );
 
             Some(Arc::new(Self { sender, producer }))
@@ -153,47 +241,62 @@ impl HttpEventPipeline {
             .build()
             .ok()?;
         let capacity = queue_capacity_from_env();
-        let (sender, mut receiver) = mpsc::channel::<CacheEvent>(capacity);
+        let max_in_flight = positive_usize_from_env(
+            "EVENT_SINK_MAX_IN_FLIGHT",
+            DEFAULT_HTTP_MAX_IN_FLIGHT,
+        );
+        let (sender, receiver) = mpsc::channel::<CacheEvent>(capacity);
         let metrics_worker = metrics.clone();
+        let url_worker: Arc<str> = Arc::from(url.clone());
+        let token_worker = token.map(Arc::<str>::from);
 
-        let url_log = url.clone();
-        tokio::spawn(async move {
-            while let Some(event) = receiver.recv().await {
-                match serde_json::to_vec(&event) {
-                    Ok(payload) => {
-                        let mut req = client
-                            .post(&url)
-                            .header("Content-Type", "application/json")
-                            .body(payload);
-                        if let Some(t) = &token {
-                            req = req.bearer_auth(t);
+        tokio::spawn(run_bounded_workers(
+            receiver,
+            max_in_flight,
+            "http",
+            move |event| {
+                let client = client.clone();
+                let metrics = metrics_worker.clone();
+                let url = Arc::clone(&url_worker);
+                let token = token_worker.clone();
+                async move {
+                    match serde_json::to_vec(&event) {
+                        Ok(payload) => {
+                            let mut req = client
+                                .post(url.as_ref())
+                                .header("Content-Type", "application/json")
+                                .body(payload);
+                            if let Some(token) = token.as_deref() {
+                                req = req.bearer_auth(token);
+                            }
+                            match req.send().await {
+                                Ok(resp)
+                                    if resp.status().is_success()
+                                        || resp.status().as_u16() == 202 =>
+                                {
+                                    metrics.kafka_events_sent.inc();
+                                }
+                                Ok(resp) => {
+                                    warn!("EVENT_SINK_URL HTTP {}", resp.status());
+                                    metrics.kafka_send_errors.inc();
+                                }
+                                Err(e) => {
+                                    warn!("EVENT_SINK_URL send failed: {e}");
+                                    metrics.kafka_send_errors.inc();
+                                }
+                            }
                         }
-                        match req.send().await {
-                            Ok(resp)
-                                if resp.status().is_success() || resp.status().as_u16() == 202 =>
-                            {
-                                metrics_worker.kafka_events_sent.inc();
-                            }
-                            Ok(resp) => {
-                                warn!("EVENT_SINK_URL HTTP {}", resp.status());
-                                metrics_worker.kafka_send_errors.inc();
-                            }
-                            Err(e) => {
-                                warn!("EVENT_SINK_URL send failed: {e}");
-                                metrics_worker.kafka_send_errors.inc();
-                            }
+                        Err(e) => {
+                            error!("Event serialization failed: {}", e);
+                            metrics.kafka_send_errors.inc();
                         }
-                    }
-                    Err(e) => {
-                        error!("Event serialization failed: {}", e);
-                        metrics_worker.kafka_send_errors.inc();
                     }
                 }
-            }
-        });
+            },
+        ));
 
         info!(
-            "HTTP event sink started (url={url_log}, queue capacity={capacity}, drop=policy:drop_new)"
+            "HTTP event sink started (url={url}, queue capacity={capacity}, max in-flight={max_in_flight}, drop=policy:drop_new)"
         );
         Some(Arc::new(Self { sender }))
     }
@@ -208,5 +311,45 @@ impl HttpEventPipeline {
                 metrics.kafka_send_errors.inc();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[tokio::test]
+    async fn bounded_workers_cap_concurrency_and_drain() {
+        let (sender, receiver) = mpsc::channel(32);
+        for value in 0..12 {
+            sender.send(value).await.expect("queue test value");
+        }
+        drop(sender);
+
+        let active = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let completed = Arc::new(AtomicUsize::new(0));
+
+        let active_worker = Arc::clone(&active);
+        let peak_worker = Arc::clone(&peak);
+        let completed_worker = Arc::clone(&completed);
+        run_bounded_workers(receiver, 3, "test", move |_| {
+            let active = Arc::clone(&active_worker);
+            let peak = Arc::clone(&peak_worker);
+            let completed = Arc::clone(&completed_worker);
+            async move {
+                let now = active.fetch_add(1, Ordering::SeqCst) + 1;
+                peak.fetch_max(now, Ordering::SeqCst);
+                tokio::time::sleep(Duration::from_millis(5)).await;
+                active.fetch_sub(1, Ordering::SeqCst);
+                completed.fetch_add(1, Ordering::SeqCst);
+            }
+        })
+        .await;
+
+        assert_eq!(peak.load(Ordering::SeqCst), 3);
+        assert_eq!(completed.load(Ordering::SeqCst), 12);
+        assert_eq!(active.load(Ordering::SeqCst), 0);
     }
 }
