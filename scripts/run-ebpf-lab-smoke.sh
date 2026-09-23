@@ -37,6 +37,10 @@ PROBE_NS="${EBPF_PROBE_NETNS:-}"
 PROBE_TARGET="${EBPF_PROBE_TARGET:-}"
 PROBE_TARGET_V6="${EBPF_PROBE_TARGET_V6:-}"
 
+xdp_attached() { # grepping `ip link` for "xdp" also matches interface names like xdp0
+  ip -d link show dev "$IFACE" | grep -q 'prog/xdp id'
+}
+
 probe() { # probe <target> → 0 if at least one echo reply came back
   local target="$1" v6=()
   [[ "$target" == *:* ]] && v6=(-6)
@@ -175,7 +179,7 @@ echo "✅ PUT /api/ebpf/config (enabled) → $(cat "$TMP_BODY")"
 
 # --- 3. Kernel-side attachment -------------------------------------------
 if [[ "$SKIP_KERNEL" != "1" ]]; then
-  if ip link show dev "$IFACE" | grep -qi 'xdp'; then
+  if xdp_attached; then
     echo "✅ XDP program attached to ${IFACE}"
   else
     fail "no XDP program on ${IFACE} after enabling (check proxy logs)"
@@ -263,6 +267,21 @@ for series in bsdm_proxy_ebpf_armed \
   echo "✅ ${series} = $(printf '%s\n' "$metrics" | grep "^${series} " | awk '{print $2}')"
 done
 
+# The reporter exports kernel drop deltas every 15 s; after real drops the
+# Prometheus counter must catch up with the kernel total.
+if [[ -n "$PROBE_NS" && "$SKIP_KERNEL" != "1" ]]; then
+  exported=0
+  for _ in $(seq 1 25); do
+    exported="$(curl -fsS --max-time "$TIMEOUT" "${auth[@]}" "${METRICS_URL}/metrics" \
+      | awk '$1 == "bsdm_proxy_ebpf_packets_dropped_total" {print int($2)}')"
+    [[ "${exported:-0}" -gt 0 ]] && break
+    sleep 1
+  done
+  [[ "${exported:-0}" -gt 0 ]] \
+    || fail "bsdm_proxy_ebpf_packets_dropped_total still ${exported:-?} 25 s after kernel drops"
+  echo "✅ Kernel drops reached Prometheus: bsdm_proxy_ebpf_packets_dropped_total=${exported}"
+fi
+
 # --- 7. DELETE /api/ebpf/ips ---------------------------------------------
 code="$(api DELETE "/api/ebpf/ips/${TEST_IP}")"
 [[ "$code" == "200" ]] || fail "DELETE /api/ebpf/ips/${TEST_IP} → HTTP ${code}"
@@ -284,7 +303,7 @@ code="$(api PUT /api/ebpf/config \
   "{\"enabled\":false,\"interface\":\"${IFACE}\",\"mode\":\"${MODE}\",\"mapName\":\"bsdm_blocked_ips\",\"maxEntries\":65536}")"
 [[ "$code" == "200" ]] || fail "PUT /api/ebpf/config (disable) → HTTP ${code}"
 if [[ "$SKIP_KERNEL" != "1" ]]; then
-  if ip link show dev "$IFACE" | grep -qi 'xdp'; then
+  if xdp_attached; then
     fail "XDP still attached to ${IFACE} after disable"
   fi
   echo "✅ XDP detached from ${IFACE}"
