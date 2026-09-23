@@ -4,24 +4,9 @@
 //! per-source plugins, and writes normalized snapshots plus a run report for the
 //! downstream IOC store (TASK-TI-002) and scoring engine (TASK-TI-010).
 
-#![allow(dead_code)]
-
-mod api_auth;
-mod collector;
-mod config;
-mod http;
-mod indicator;
-mod metrics;
-mod ml_reputation;
-mod normalizer;
-mod rpz;
-mod scorer;
-mod siem;
-mod sink;
-mod soar;
-mod source;
-mod sources;
-mod storage;
+use threat_intel::{
+    api_auth, collector, config, http, metrics, ml_reputation, rpz, sink, soar, sources, storage,
+};
 
 use api_auth::AdminApiSecurity;
 use collector::Collector;

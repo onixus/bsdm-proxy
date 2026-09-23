@@ -61,7 +61,6 @@ fn shadow_mode_label() -> String {
 }
 
 /// Executes an automated SOAR block action using default confidence score bounds (90, max 100).
-#[allow(dead_code)]
 pub fn execute_soar_block(
     storage: &SqliteStorage,
     req: SoarBlockRequest,

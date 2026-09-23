@@ -36,7 +36,6 @@ pub struct Metrics {
     pub cache_bypasses_total: Counter,
     pub cache_entries: Gauge,
     pub cache_size_bytes: Gauge,
-    #[allow(dead_code)]
     pub cache_evictions_total: Counter,
     pub cache_lookup_duration_seconds: Histogram,
 

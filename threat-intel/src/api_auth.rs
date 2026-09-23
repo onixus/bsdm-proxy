@@ -136,13 +136,13 @@ impl AdminApiSecurity {
     }
 
     /// Test constructor.
-    #[cfg(test)]
+    #[doc(hidden)]
     pub fn for_test(token: Option<&str>, fail_closed: bool, audit_path: PathBuf) -> Self {
         Self::for_test_with_max_bytes(token, fail_closed, audit_path, DEFAULT_SOAR_AUDIT_MAX_BYTES)
     }
 
     /// Test constructor with explicit audit max bytes.
-    #[cfg(test)]
+    #[doc(hidden)]
     pub fn for_test_with_max_bytes(
         token: Option<&str>,
         fail_closed: bool,
