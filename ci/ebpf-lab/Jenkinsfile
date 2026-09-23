@@ -10,7 +10,8 @@
 // ci/ebpf-lab/Dockerfile.
 
 def IMAGE = 'bsdm-ebpf-lab:latest'
-def CACHE_ARGS = '-v bsdm-ebpf-cargo:/usr/local/cargo/registry -v bsdm-ebpf-target:/target'
+// Volumes are created by the unprivileged `lab` user of the image (see Dockerfile).
+def CACHE_ARGS = '-v bsdm-ebpf-lab-cargo:/usr/local/cargo/registry -v bsdm-ebpf-lab-target:/target'
 
 pipeline {
     agent none
@@ -67,7 +68,7 @@ pipeline {
                 stage('Kernel smoke') {
                     steps {
                         sh """
-                            docker run --rm --privileged --network none ${CACHE_ARGS} \
+                            docker run --rm --user 0 --privileged --network none ${CACHE_ARGS} \
                               -v "\$PWD":/src -w /src ${IMAGE} bash ci/ebpf-lab/run.sh
                         """
                     }
@@ -82,7 +83,7 @@ pipeline {
                 always {
                     // The containers run as root; hand the workspace back to the
                     // agent user so the next deleteDir() does not trip on it.
-                    sh "docker run --rm -v \"\$PWD\":/src ${IMAGE} chown -R \$(id -u):\$(id -g) /src || true"
+                    sh "docker run --rm --user 0 -v \"\$PWD\":/src ${IMAGE} chown -R \$(id -u):\$(id -g) /src || true"
                 }
             }
         }
