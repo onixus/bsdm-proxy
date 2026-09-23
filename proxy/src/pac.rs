@@ -55,11 +55,17 @@ impl PacConfig {
         };
         let proxy = validate_proxy_authority(&proxy)?;
 
-        let port = parse_env_u16("PAC_PORT", DEFAULT_PAC_PORT)?;
-        let bind = std::env::var("PAC_BIND")
-            .unwrap_or_else(|_| format!("0.0.0.0:{port}"))
-            .parse::<SocketAddr>()
-            .map_err(|error| format!("PAC_BIND must be an IP:port socket address: {error}"))?;
+        let bind = match std::env::var("PAC_BIND") {
+            Ok(value) => value
+                .parse::<SocketAddr>()
+                .map_err(|error| format!("PAC_BIND must be an IP:port socket address: {error}"))?,
+            Err(_) => {
+                let port = parse_env_u16("PAC_PORT", DEFAULT_PAC_PORT)?;
+                format!("0.0.0.0:{port}")
+                    .parse::<SocketAddr>()
+                    .map_err(|error| format!("failed to build default PAC bind address: {error}"))?
+            }
+        };
         if bind.port() == 0 {
             return Err("PAC_BIND port must be greater than zero".to_string());
         }
@@ -515,11 +521,11 @@ fn normalize_domain(candidate: &str) -> Option<String> {
             && label
                 .as_bytes()
                 .first()
-                .is_some_and(u8::is_ascii_alphanumeric)
+                .is_some_and(|byte| byte.is_ascii_alphanumeric())
             && label
                 .as_bytes()
                 .last()
-                .is_some_and(u8::is_ascii_alphanumeric)
+                .is_some_and(|byte| byte.is_ascii_alphanumeric())
     });
     valid.then_some(domain)
 }
@@ -549,7 +555,7 @@ function FindProxyForURL(url, host) {{
     if (literalHost.charAt(0) === "[" && literalHost.charAt(literalHost.length - 1) === "]") {{
         literalHost = literalHost.substring(1, literalHost.length - 1);
     }}
-    if (literalHost === "::1" || shExpMatch(literalHost, "fc*:*  ") ||
+    if (literalHost === "::1" || shExpMatch(literalHost, "fc*:*") ||
         shExpMatch(literalHost, "fd*:*") || shExpMatch(literalHost, "fe8*:*") ||
         shExpMatch(literalHost, "fe9*:*") || shExpMatch(literalHost, "fea*:*") ||
         shExpMatch(literalHost, "feb*:*") ) {{
@@ -647,6 +653,7 @@ mod tests {
         assert!(pac.contains("return \"PROXY \" + \"proxy.example:3128\""));
         assert!(!pac.contains("PROXY proxy.example:3128; DIRECT"));
         assert!(pac.contains("192.168.0.0"));
+        assert!(pac.contains("shExpMatch(literalHost, \"fc*:*\")"));
         assert!(pac.contains("dnsDomainIs(host, \".local\")"));
     }
 
