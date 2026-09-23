@@ -27,7 +27,16 @@ pipeline {
             agent { label 'built-in' }
             steps {
                 checkout scm
-                stash name: 'src', excludes: '.git/**,target/**,admin-console/**'
+                // One archive built from git objects, not a stash of the
+                // working tree: stashing ~500 files off the VirtioFS-backed
+                // workspace produced a tar the agent could not parse
+                // ("Invalid byte 99 at offset 0" in unstash). The checksum
+                // makes any transfer corruption fail loudly.
+                sh '''
+                    git archive --format=tar.gz -o src.tgz HEAD -- . ':(exclude)admin-console'
+                    sha256sum src.tgz > src.tgz.sha256 || shasum -a 256 src.tgz > src.tgz.sha256
+                '''
+                stash name: 'src', includes: 'src.tgz,src.tgz.sha256'
             }
         }
         stage('eBPF lab') {
@@ -37,6 +46,7 @@ pipeline {
                     steps {
                         deleteDir()
                         unstash 'src'
+                        sh 'sha256sum -c src.tgz.sha256 && tar xzf src.tgz && rm src.tgz src.tgz.sha256'
                         sh "docker build -t ${IMAGE} ci/ebpf-lab"
                     }
                 }
