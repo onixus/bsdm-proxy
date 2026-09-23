@@ -180,9 +180,18 @@ if [[ "$SKIP_KERNEL" != "1" ]]; then
   else
     fail "no XDP program on ${IFACE} after enabling (check proxy logs)"
   fi
-  bpftool map show name bsdm_blocked_ips >/dev/null 2>&1 \
-    || fail "BPF map bsdm_blocked_ips not visible to bpftool"
-  echo "✅ BPF maps visible (bsdm_blocked_ips)"
+  # Maps are found through the attached program, not by name: the kernel keeps
+  # 15 characters, so both blocklists show up as "bsdm_blocked_ip".
+  prog_id="$(ip -d link show dev "$IFACE" | grep -o 'prog/xdp id [0-9]*' | awk '{print $NF}' | head -1)"
+  [[ -n "$prog_id" ]] || fail "cannot read the XDP program id of ${IFACE}: $(ip -d link show dev "$IFACE")"
+  map_ids="$(bpftool prog show id "$prog_id" | grep -o 'map_ids [0-9,]*' | awk '{print $2}')"
+  [[ -n "$map_ids" ]] || fail "XDP program ${prog_id} reports no maps"
+  for map_id in ${map_ids//,/ }; do
+    bpftool map show id "$map_id" | head -1
+  done
+  n_maps="$(tr ',' '\n' <<<"$map_ids" | grep -c .)"
+  [[ "$n_maps" -ge 3 ]] || fail "XDP program ${prog_id} has ${n_maps} maps, expected 3"
+  echo "✅ XDP program ${prog_id} owns maps ${map_ids}"
 fi
 
 # --- 3b. Datapath baseline: peer reachable before anything is blocked ----
