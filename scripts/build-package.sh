@@ -119,6 +119,7 @@ done
 cp -R "${CONSOLE_SRC}" "$STAGING/share/admin-console"
 cp packaging/config/*.example "$STAGING/config/"
 cp config/acl-rules.example.json "$STAGING/config/"
+cp examples/dns/blocklist.rpz "$STAGING/config/blocklist.rpz.example"
 cp packaging/systemd/*.service "$STAGING/systemd/"
 cp packaging/install.sh "$STAGING/"
 cp packaging/README.md "$STAGING/"
