@@ -40,6 +40,8 @@ pub mod metrics;
 pub mod miss_coalesce;
 pub mod mitm_breaker;
 pub mod oidc;
+pub mod pac;
+pub mod pac_bootstrap;
 pub mod peer_discovery;
 pub mod peer_fetch;
 pub mod peers;
@@ -111,6 +113,8 @@ pub use mitm_breaker::{
     TrippedInfo,
 };
 pub use oidc::{IdentityClaims, OidcRegistry, Provider as OidcProvider, ProviderKind};
+pub use pac::start_pac_server;
+pub use pac_bootstrap::metrics_server;
 pub use peer_discovery::{run_peer_discovery, PeerDiscoveryConfig};
 pub use peer_fetch::{fetch_via_peer, PeerFetchError, PeerTlsConfig};
 pub use peers::{CachePeer, PeerConfig, PeerRegistry, PeerType, ReplaceStaticStats};
@@ -137,9 +141,7 @@ pub use selection::{parse_strategy, SelectionStrategy};
 pub use semantic_cache::{
     content_cache_key, normalize_llm_body, SemanticCacheConfig, SemanticIndex,
 };
-pub use server::{
-    agent_control_mtls_server, handle_connection, metrics_server, wait_shutdown_signal,
-};
+pub use server::{agent_control_mtls_server, handle_connection, wait_shutdown_signal};
 pub use session::{SessionCorrelation, SessionCorrelator};
 pub use session_store::GlobalSessionStore;
 pub use sharded_cache::HttpL1Cache;

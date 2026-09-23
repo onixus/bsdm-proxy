@@ -50,6 +50,7 @@
 | [Control plane](features/control-plane.md) | REST — основной; gRPC — beta |
 | [Certificate Pinning exceptions](features/certificate-pinning.md) | Управляемый bypass-реестр, reload и аудит |
 | [Admin Console security](features/admin-console-security.md) | Trust boundaries и mutation token gate |
+| [PAC / WPAD server](features/pac-server.md) | beta — отдельный listener и hot reload bypass-файла |
 | [Semantic cache](features/semantic-cache.md) | beta |
 | [DNS sinkhole, DoH, DoT](features/dns-sinkhole.md) | основной |
 | [Threat intel collector](features/threat-intel-collector.md) | beta — мониторинг в Shadow Mode, без блокировки |

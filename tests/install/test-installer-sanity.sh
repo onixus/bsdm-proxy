@@ -44,4 +44,13 @@ grep -Fq 'examples/dns/blocklist.rpz' "${ROOT}/scripts/build-package.sh"
 test -f "${ROOT}/packaging/config/dns-sinkhole.env.example"
 test -f "${ROOT}/examples/dns/blocklist.rpz"
 
+# PAC is built into the proxy but its optional hot-reload file must still be
+# present in the release package and installed to the configured etc directory.
+test -f "${ROOT}/packaging/config/pac-bypass.txt.example"
+grep -Fq 'pac-bypass.txt.example' "${ROOT}/packaging/install.sh"
+grep -Fq 'PAC_BYPASS_FILE=/etc/bsdm-proxy/pac-bypass.txt' \
+  "${ROOT}/packaging/config/bsdm-proxy.env.example"
+grep -Fq 'PAC_PROXY=proxy.corp.example:3128' \
+  "${ROOT}/packaging/config/bsdm-proxy.env.example"
+
 echo "Installer sanity checks passed"
