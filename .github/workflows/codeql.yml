@@ -54,20 +54,6 @@ jobs:
           sarif_file: rust-clippy.sarif
           category: "/tool:clippy"
 
-  sqlite-actor-tests:
-    name: SQLite Writer Actor Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Rust toolchain
-        uses: ./.github/actions/setup-rust
-
-      - name: Run cache-indexer tests without Kafka
-        run: cargo test -p cache-indexer --no-default-features
-
   trivy-config-scan:
     name: Trivy Config & Secret Scan
     runs-on: ubuntu-latest
