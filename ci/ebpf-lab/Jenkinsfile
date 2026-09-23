@@ -51,6 +51,13 @@ pipeline {
                 stage('Image') {
                     steps {
                         deleteDir()
+                        // Cache volumes of the root-owned image generation;
+                        // superseded by bsdm-ebpf-lab-* and only eat disk.
+                        sh '''
+                            docker volume rm bsdm-ebpf-cargo bsdm-ebpf-target 2>/dev/null || true
+                            df -h / "$WORKSPACE" "$(docker info -f '{{.DockerRootDir}}')" || true
+                            docker system df || true
+                        '''
                         unstash 'src'
                         sh 'sha256sum -c src.tgz.sha256 && tar xzf src.tgz && rm src.tgz src.tgz.sha256'
                         sh "docker build -t ${IMAGE} ci/ebpf-lab"
