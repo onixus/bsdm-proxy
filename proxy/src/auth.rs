@@ -695,7 +695,12 @@ impl AuthManager {
                 if let Some(cache) = conn_auth {
                     cache.invalidate().await;
                 }
-                warn!("Proxy authentication failed for {}: {}", username, e);
+                warn!(
+                    client_ip = %client_key,
+                    "Proxy authentication failed for {}: {}",
+                    username,
+                    e
+                );
                 ProxyAuthOutcome::Challenge {
                     authenticate_header: self.initial_auth_header(reverse_proxy),
                 }
