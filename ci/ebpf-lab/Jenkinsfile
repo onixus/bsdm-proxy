@@ -1,0 +1,72 @@
+// eBPF/XDP lab run on a real Linux kernel (docs/features/ebpf-xdp.md).
+//
+// The macOS controller has no BPF, so the sources are stashed there and the
+// run happens on a Linux agent. Everything kernel-facing stays inside one
+// container started with --privileged --network none: the XDP program is
+// attached to a veth pair in the container's own network namespace, never to
+// the agent's NICs (the gaming node carries a VPN with a kill-switch).
+//
+// The agent needs only docker; toolchain and BPF tools come from
+// ci/ebpf-lab/Dockerfile.
+
+def IMAGE = 'bsdm-ebpf-lab:latest'
+def CACHE_ARGS = '-v bsdm-ebpf-cargo:/usr/local/cargo/registry -v bsdm-ebpf-target:/target'
+
+pipeline {
+    agent none
+    options {
+        timeout(time: 60, unit: 'MINUTES')
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '20'))
+    }
+    stages {
+        stage('Checkout') {
+            agent { label 'built-in' }
+            steps {
+                checkout scm
+                stash name: 'src', excludes: '.git/**,target/**,admin-console/**'
+            }
+        }
+        stage('eBPF lab') {
+            agent { label 'linux && docker' }
+            stages {
+                stage('Image') {
+                    steps {
+                        deleteDir()
+                        unstash 'src'
+                        sh "docker build -t ${IMAGE} ci/ebpf-lab"
+                    }
+                }
+                stage('Build proxy') {
+                    steps {
+                        sh """
+                            docker run --rm ${CACHE_ARGS} -e CARGO_TARGET_DIR=/target \
+                              -v "\$PWD":/src -w /src ${IMAGE} \
+                              cargo build -p bsdm-proxy --bin proxy --no-default-features --features auth-basic
+                        """
+                    }
+                }
+                stage('Kernel smoke') {
+                    steps {
+                        sh """
+                            docker run --rm --privileged --network none ${CACHE_ARGS} \
+                              -v "\$PWD":/src -w /src ${IMAGE} bash ci/ebpf-lab/run.sh
+                        """
+                    }
+                    post {
+                        always {
+                            archiveArtifacts artifacts: 'ci-logs/**', allowEmptyArchive: true
+                        }
+                    }
+                }
+            }
+            post {
+                always {
+                    // The containers run as root; hand the workspace back to the
+                    // agent user so the next deleteDir() does not trip on it.
+                    sh "docker run --rm -v \"\$PWD\":/src ${IMAGE} chown -R \$(id -u):\$(id -g) /src || true"
+                }
+            }
+        }
+    }
+}

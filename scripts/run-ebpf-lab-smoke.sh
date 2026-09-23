@@ -15,6 +15,11 @@
 # Usage:
 #   sudo EBPF_IFACE=eth0 CONTROL_API_TOKEN=... ./scripts/run-ebpf-lab-smoke.sh
 #   EBPF_SKIP_KERNEL=1 CONTROL_API_TOKEN=... ./scripts/run-ebpf-lab-smoke.sh  # API-only
+#
+# Datapath check (optional): with EBPF_PROBE_NETNS set, the script pings
+# EBPF_PROBE_TARGET[_V6] from that network namespace, whose addresses must be
+# EBPF_TEST_IP[_V6], and asserts that the XDP program really drops the traffic
+# while the addresses are blocked. ci/ebpf-lab/run.sh builds such a topology.
 set -euo pipefail
 
 API_URL="${EBPF_API_URL:-http://127.0.0.1:9090}"
@@ -28,6 +33,15 @@ TIMEOUT="${TIMEOUT:-10}"
 SKIP_KERNEL="${EBPF_SKIP_KERNEL:-0}"
 BPF_OBJ="${EBPF_OBJ:-bpf/xdp_drop.o}"
 BPF_SRC="${EBPF_SRC:-bpf/xdp_drop.c}"
+PROBE_NS="${EBPF_PROBE_NETNS:-}"
+PROBE_TARGET="${EBPF_PROBE_TARGET:-}"
+PROBE_TARGET_V6="${EBPF_PROBE_TARGET_V6:-}"
+
+probe() { # probe <target> → 0 if at least one echo reply came back
+  local target="$1" v6=()
+  [[ "$target" == *:* ]] && v6=(-6)
+  ip netns exec "$PROBE_NS" ping ${v6[@]+"${v6[@]}"} -c 3 -i 0.2 -W 1 "$target" >/dev/null 2>&1
+}
 
 skip() {
   echo "⏭  SKIP: $*"
@@ -166,6 +180,14 @@ if [[ "$SKIP_KERNEL" != "1" ]]; then
   echo "✅ BPF maps visible (bsdm_blocked_ips)"
 fi
 
+# --- 3b. Datapath baseline: peer reachable before anything is blocked ----
+if [[ -n "$PROBE_NS" && "$SKIP_KERNEL" != "1" ]]; then
+  for target in $PROBE_TARGET $PROBE_TARGET_V6; do
+    probe "$target" || fail "${target} unreachable from netns ${PROBE_NS} before blocking"
+  done
+  echo "✅ Datapath baseline: ${PROBE_TARGET} ${PROBE_TARGET_V6} reachable with XDP attached"
+fi
+
 # --- 4. POST /api/ebpf/ips (IPv4 + IPv6) ---------------------------------
 for ip in "$TEST_IP" "$TEST_IP_V6"; do
   code="$(api POST /api/ebpf/ips "{\"ip\":\"${ip}\",\"reason\":\"lab smoke\"}")"
@@ -182,6 +204,29 @@ echo "✅ GET /api/ebpf/ips lists both test addresses"
 code="$(api POST /api/ebpf/ips "{\"ip\":\"${TEST_IP}\"}")"
 [[ "$code" == "409" ]] || fail "duplicate block → HTTP ${code}, expected 409"
 echo "✅ Duplicate block rejected with 409"
+
+# --- 4b. Datapath: the kernel really drops the blocked sources ----------
+if [[ -n "$PROBE_NS" && "$SKIP_KERNEL" != "1" ]]; then
+  for target in $PROBE_TARGET $PROBE_TARGET_V6; do
+    if probe "$target"; then
+      fail "${target} still answers while the source is blocked — XDP is not dropping"
+    fi
+  done
+  echo "✅ Datapath: traffic from blocked sources is dropped"
+  sleep 1.1 # stats sweep is rate-limited to once per second
+  code="$(api GET /api/ebpf/stats)"
+  [[ "$code" == "200" ]] || fail "GET /api/ebpf/stats → HTTP ${code}"
+  dropped="$(grep -o '"packetsDroppedTotal":[0-9]*' "$TMP_BODY" | cut -d: -f2)"
+  [[ "${dropped:-0}" -gt 0 ]] || fail "packetsDroppedTotal=${dropped:-?} after dropped probes: $(cat "$TMP_BODY")"
+  echo "✅ Kernel drop counter: packetsDroppedTotal=${dropped}"
+  code="$(api GET /api/ebpf/ips)"
+  [[ "$code" == "200" ]] || fail "GET /api/ebpf/ips → HTTP ${code}"
+  if grep -q '"packetsDropped":[1-9]' "$TMP_BODY"; then
+    echo "✅ Per-address drop counters populated"
+  else
+    fail "per-address packetsDropped stayed 0: $(cat "$TMP_BODY")"
+  fi
+fi
 
 # --- 5. GET /api/ebpf/stats ----------------------------------------------
 code="$(api GET /api/ebpf/stats)"
@@ -210,6 +255,11 @@ code="$(api DELETE "/api/ebpf/ips/${TEST_IP}")"
 code="$(api DELETE "/api/ebpf/ips/${TEST_IP}")"
 [[ "$code" == "404" ]] || fail "second DELETE → HTTP ${code}, expected 404"
 echo "✅ DELETE by IP works and is idempotent-safe (404 on repeat)"
+
+if [[ -n "$PROBE_NS" && -n "$PROBE_TARGET" && "$SKIP_KERNEL" != "1" ]]; then
+  probe "$PROBE_TARGET" || fail "${PROBE_TARGET} still dropped after unblocking ${TEST_IP}"
+  echo "✅ Datapath: ${TEST_IP} passes again after unblock"
+fi
 
 code="$(api DELETE /api/ebpf/ips)"
 [[ "$code" == "200" ]] || fail "DELETE /api/ebpf/ips (clear) → HTTP ${code}"
