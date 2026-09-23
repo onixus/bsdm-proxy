@@ -181,7 +181,7 @@ fn run_writer(
     mut receiver: mpsc::Receiver<WriteRequest>,
     max_rows: usize,
     max_batch_events: usize,
-    mut approximate_rows: usize,
+    mut tracked_rows: usize,
     metrics: Arc<IndexerMetrics>,
 ) {
     while let Some(first) = receiver.blocking_recv() {
@@ -201,13 +201,8 @@ fn run_writer(
         metrics.set_sqlite_writer_queue_depth(receiver.len());
 
         let started = Instant::now();
-        let result = write_requests(
-            &mut connection,
-            &requests,
-            max_rows,
-            &mut approximate_rows,
-        )
-        .map_err(|e| e.to_string());
+        let result = write_requests(&mut connection, &requests, max_rows, &mut tracked_rows)
+            .map_err(|e| e.to_string());
         metrics.record_sqlite_writer_batch(
             requests.len(),
             event_count,
@@ -236,37 +231,41 @@ fn write_requests(
     connection: &mut Connection,
     requests: &[WriteRequest],
     max_rows: usize,
-    approximate_rows: &mut usize,
+    tracked_rows: &mut usize,
 ) -> StoreResult<()> {
     let transaction = connection.transaction()?;
-    let event_count = requests.iter().fold(0usize, |count, request| {
-        count.saturating_add(request.events.len())
-    });
+    let mut inserted_rows = 0usize;
     {
-        let mut statement = transaction.prepare(
+        let mut insert_statement = transaction.prepare(
             r#"
             INSERT INTO events (
               event_id, ts, domain, username, client_ip, url, method, status,
               cache_status, session_id, parent_event_id, redirect_url, decision_source,
               acl_action, acl_rule_id, acl_reason, payload
             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
-            ON CONFLICT(event_id) DO UPDATE SET
-              ts=excluded.ts,
-              domain=excluded.domain,
-              username=excluded.username,
-              client_ip=excluded.client_ip,
-              url=excluded.url,
-              method=excluded.method,
-              status=excluded.status,
-              cache_status=excluded.cache_status,
-              session_id=excluded.session_id,
-              parent_event_id=excluded.parent_event_id,
-              redirect_url=excluded.redirect_url,
-              decision_source=excluded.decision_source,
-              acl_action=excluded.acl_action,
-              acl_rule_id=excluded.acl_rule_id,
-              acl_reason=excluded.acl_reason,
-              payload=excluded.payload
+            ON CONFLICT(event_id) DO NOTHING
+            "#,
+        )?;
+        let mut update_statement = transaction.prepare(
+            r#"
+            UPDATE events SET
+              ts=?2,
+              domain=?3,
+              username=?4,
+              client_ip=?5,
+              url=?6,
+              method=?7,
+              status=?8,
+              cache_status=?9,
+              session_id=?10,
+              parent_event_id=?11,
+              redirect_url=?12,
+              decision_source=?13,
+              acl_action=?14,
+              acl_rule_id=?15,
+              acl_reason=?16,
+              payload=?17
+            WHERE event_id=?1
             "#,
         )?;
 
@@ -282,7 +281,7 @@ fn write_requests(
                     event
                 };
                 let payload = serde_json::to_string(event)?;
-                statement.execute(params![
+                let inserted = insert_statement.execute(params![
                     event.event_id.as_str(),
                     event.timestamp as i64,
                     event.domain.as_str(),
@@ -299,36 +298,55 @@ fn write_requests(
                     event.acl_action.as_deref(),
                     event.acl_rule_id.as_deref(),
                     event.acl_reason.as_deref(),
-                    payload,
+                    payload.as_str(),
                 ])?;
+                if inserted == 0 {
+                    update_statement.execute(params![
+                        event.event_id.as_str(),
+                        event.timestamp as i64,
+                        event.domain.as_str(),
+                        event.username.as_deref(),
+                        event.client_ip.as_str(),
+                        event.url.as_str(),
+                        event.method.as_str(),
+                        event.status as i64,
+                        event.cache_status.as_str(),
+                        event.session_id.as_str(),
+                        event.parent_event_id.as_deref(),
+                        event.redirect_url.as_deref(),
+                        event.decision_source.as_deref(),
+                        event.acl_action.as_deref(),
+                        event.acl_rule_id.as_deref(),
+                        event.acl_reason.as_deref(),
+                        payload.as_str(),
+                    ])?;
+                } else {
+                    inserted_rows = inserted_rows.saturating_add(inserted);
+                }
             }
         }
     }
 
-    // `approximate_rows` is an upper bound because an UPSERT may update an
-    // existing event instead of inserting a new row. Most commits therefore
-    // avoid a full-table COUNT. We pay for an exact count only when the upper
-    // bound crosses the configured retention limit, then reset the estimate.
-    let upper_bound = approximate_rows.saturating_add(event_count);
-    let mut rows_after_commit = upper_bound;
-    if upper_bound > max_rows {
-        let exact_rows = row_count(&transaction)?;
-        if exact_rows > max_rows {
-            let excess = exact_rows - max_rows;
-            transaction.execute(
-                "DELETE FROM events WHERE event_id IN (
-                   SELECT event_id FROM events ORDER BY ts ASC LIMIT ?1
-                 )",
-                params![i64::try_from(excess).unwrap_or(i64::MAX)],
-            )?;
-            rows_after_commit = max_rows;
-        } else {
-            rows_after_commit = exact_rows;
-        }
-    }
+    // The actor is the only writer, so an exact startup COUNT plus the number
+    // of successful INSERTs is enough to maintain the row count without a
+    // full-table scan after every transaction. Conflicting event IDs take the
+    // UPDATE path and do not change the tracked count.
+    let rows_after_upsert = tracked_rows.saturating_add(inserted_rows);
+    let rows_after_commit = if rows_after_upsert > max_rows {
+        let excess = rows_after_upsert - max_rows;
+        transaction.execute(
+            "DELETE FROM events WHERE event_id IN (
+               SELECT event_id FROM events ORDER BY ts ASC LIMIT ?1
+             )",
+            params![i64::try_from(excess).unwrap_or(i64::MAX)],
+        )?;
+        max_rows
+    } else {
+        rows_after_upsert
+    };
 
     transaction.commit()?;
-    *approximate_rows = rows_after_commit;
+    *tracked_rows = rows_after_commit;
     Ok(())
 }
 
@@ -620,7 +638,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn upserts_reset_the_row_upper_bound_without_pruning_live_rows() {
+    async fn upserts_do_not_prune_other_live_rows_at_capacity() {
         let store = SqliteStore::open(":memory:", 2, metrics()).await.unwrap();
         store
             .insert_batch(&[
