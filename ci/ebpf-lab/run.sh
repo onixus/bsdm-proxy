@@ -49,6 +49,7 @@ rm -f bpf/xdp_drop.o
 
 echo "== proxy"
 MITM_ENABLED=false \
+POLICY_MODE=sni \
 HTTP_PORT=3128 \
 METRICS_PORT=9090 \
 CONTROL_API_ALLOW_INSECURE=true \
