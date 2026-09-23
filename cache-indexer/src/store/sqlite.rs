@@ -40,10 +40,8 @@ impl SqliteStore {
     ) -> StoreResult<Self> {
         let queue_capacity = env_usize("SQLITE_WRITE_QUEUE_CAPACITY", DEFAULT_WRITE_QUEUE_CAPACITY);
         let max_batch_events = env_usize("SQLITE_BATCH_MAX_EVENTS", DEFAULT_BATCH_MAX_EVENTS);
-        let busy_timeout = Duration::from_millis(env_u64(
-            "SQLITE_BUSY_TIMEOUT_MS",
-            DEFAULT_BUSY_TIMEOUT_MS,
-        ));
+        let busy_timeout =
+            Duration::from_millis(env_u64("SQLITE_BUSY_TIMEOUT_MS", DEFAULT_BUSY_TIMEOUT_MS));
         let max_rows = max_rows.max(1);
         let path = path.to_string();
 
@@ -69,10 +67,7 @@ impl SqliteStore {
 
         info!(
             queue_capacity,
-            max_batch_events,
-            max_rows,
-            initial_rows,
-            "SQLite writer actor started"
+            max_batch_events, max_rows, initial_rows, "SQLite writer actor started"
         );
 
         Ok(Self {
@@ -203,12 +198,7 @@ fn run_writer(
         let started = Instant::now();
         let result = write_requests(&mut connection, &requests, max_rows, &mut tracked_rows)
             .map_err(|e| e.to_string());
-        metrics.record_sqlite_writer_batch(
-            requests.len(),
-            event_count,
-            started,
-            result.is_ok(),
-        );
+        metrics.record_sqlite_writer_batch(requests.len(), event_count, started, result.is_ok());
 
         if let Err(ref e) = result {
             error!(
@@ -459,11 +449,7 @@ fn initialize_schema(connection: &Connection) -> StoreResult<()> {
     Ok(())
 }
 
-fn has_column(
-    connection: &Connection,
-    table: &str,
-    column: &str,
-) -> Result<bool, rusqlite::Error> {
+fn has_column(connection: &Connection, table: &str, column: &str) -> Result<bool, rusqlite::Error> {
     let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
     let names = statement.query_map([], |row| row.get::<_, String>(1))?;
     for name in names {
@@ -570,9 +556,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn sqlite_roundtrip() {
-        let store = SqliteStore::open(":memory:", 100, metrics())
-            .await
-            .unwrap();
+        let store = SqliteStore::open(":memory:", 100, metrics()).await.unwrap();
         store
             .insert_batch(&[
                 sample("ex.com", 50, "e1", Some("mitm")),
@@ -690,12 +674,7 @@ mod tests {
             .await
             .unwrap();
         store
-            .insert_batch(&[sample(
-                "ex.com",
-                50,
-                "e1",
-                Some("pinning-bypass"),
-            )])
+            .insert_batch(&[sample("ex.com", 50, "e1", Some("pinning-bypass"))])
             .await
             .unwrap();
         let mut search = query();

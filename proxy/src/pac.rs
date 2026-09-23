@@ -9,8 +9,7 @@ use crate::Metrics;
 use bytes::Bytes;
 use hyper::body::Incoming;
 use hyper::header::{
-    ALLOW, CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, EXPIRES, PRAGMA,
-    X_CONTENT_TYPE_OPTIONS,
+    ALLOW, CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, EXPIRES, PRAGMA, X_CONTENT_TYPE_OPTIONS,
 };
 use hyper::http::uri::Authority;
 use hyper::server::conn::http1;
@@ -75,11 +74,8 @@ impl PacConfig {
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
             .map(PathBuf::from);
-        let reload_secs = parse_env_u64(
-            "PAC_RELOAD_INTERVAL_SECONDS",
-            DEFAULT_RELOAD_INTERVAL_SECS,
-        )?
-        .max(1);
+        let reload_secs =
+            parse_env_u64("PAC_RELOAD_INTERVAL_SECONDS", DEFAULT_RELOAD_INTERVAL_SECS)?.max(1);
 
         Ok(Some(Self {
             bind,
@@ -237,10 +233,7 @@ impl PacState {
         digest.copy_from_slice(&Sha256::digest(content.as_bytes()));
         if self.document.read().await.source_digest == Some(digest) {
             self.clear_reload_error().await;
-            self.metrics
-                .reloads
-                .with_label_values(&["unchanged"])
-                .inc();
+            self.metrics.reloads.with_label_values(&["unchanged"]).inc();
             return;
         }
 
@@ -270,10 +263,7 @@ impl PacState {
             };
         }
         self.metrics.bypass_domains.set(domain_count as i64);
-        self.metrics
-            .reloads
-            .with_label_values(&["changed"])
-            .inc();
+        self.metrics.reloads.with_label_values(&["changed"]).inc();
         self.clear_reload_error().await;
         info!(
             path = %path.display(),
@@ -480,10 +470,7 @@ fn parse_bypass_domains(content: &str) -> Result<Vec<String>, usize> {
         if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
             continue;
         }
-        let candidate = line
-            .split_once('#')
-            .map_or(line, |(value, _)| value)
-            .trim();
+        let candidate = line.split_once('#').map_or(line, |(value, _)| value).trim();
         if candidate.is_empty() {
             continue;
         }
@@ -638,8 +625,8 @@ mod tests {
         .expect_err("invalid entries must reject the whole reload");
         assert_eq!(invalid, 4);
 
-        let punycode = parse_bypass_domains("xn--e1afmkfd.xn--p1ai\n")
-            .expect("punycode must be accepted");
+        let punycode =
+            parse_bypass_domains("xn--e1afmkfd.xn--p1ai\n").expect("punycode must be accepted");
         assert_eq!(punycode, vec!["xn--e1afmkfd.xn--p1ai"]);
     }
 
