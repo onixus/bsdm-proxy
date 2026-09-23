@@ -27,16 +27,21 @@ pipeline {
             agent { label 'built-in' }
             steps {
                 checkout scm
-                // One archive built from git objects, not a stash of the
-                // working tree: stashing ~500 files off the VirtioFS-backed
-                // workspace produced a tar the agent could not parse
-                // ("Invalid byte 99 at offset 0" in unstash). The checksum
-                // makes any transfer corruption fail loudly.
-                sh '''
-                    git archive --format=tar.gz -o src.tgz HEAD -- . ':(exclude)admin-console'
-                    sha256sum src.tgz > src.tgz.sha256 || shasum -a 256 src.tgz > src.tgz.sha256
-                '''
-                stash name: 'src', includes: 'src.tgz,src.tgz.sha256'
+                // The workspace is a VirtioFS bind mount that loses writes
+                // (see Jenkinsfile.local). Stashing the working tree gave the
+                // agent an unparseable tar, and a git archive written into the
+                // workspace came out as corrupt gzip with a matching checksum.
+                // So the archive is built from git objects into the
+                // container's own /tmp, verified there, and stashed from there.
+                dir("/tmp/bsdm-ebpf-lab-${env.BUILD_NUMBER}") {
+                    sh '''
+                        git -C "$WORKSPACE" archive --format=tar.gz -o "$PWD/src.tgz" HEAD -- . ':(exclude)admin-console'
+                        gzip -t src.tgz
+                        sha256sum src.tgz > src.tgz.sha256
+                    '''
+                    stash name: 'src', includes: 'src.tgz,src.tgz.sha256'
+                    deleteDir()
+                }
             }
         }
         stage('eBPF lab') {
