@@ -1,0 +1,31 @@
+name: Blocking Policy Validation
+
+on:
+  push:
+    branches:
+      - perf/blocking-policy-hot-path
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Format and policy tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: ./.github/actions/setup-rust
+        with:
+          components: rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run blocking policy tests
+        run: |
+          cargo test -p bsdm-proxy --lib policy_engine
+          cargo test -p bsdm-proxy --lib threat_score_cache
