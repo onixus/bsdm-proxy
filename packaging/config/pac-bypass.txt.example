@@ -1,0 +1,11 @@
+# BSDM-Proxy PAC bypass list
+#
+# One domain per line. A domain matches itself and every subdomain.
+# Use ASCII/punycode for internationalized names; raw Unicode is rejected.
+# Leading "." or "*." and a trailing dot are normalized away.
+# The file is reloaded without restarting the proxy.
+#
+# Examples:
+# ozon.ru
+# vseinstrumenti.ru
+# xn--e1afmkfd.xn--p1ai
