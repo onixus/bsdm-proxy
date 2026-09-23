@@ -1,0 +1,30 @@
+name: SQLite Actor Validation
+
+on:
+  push:
+    branches:
+      - perf/sqlite-writer-actor
+
+permissions:
+  contents: read
+
+jobs:
+  sqlite-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+
+      - name: Run cache-indexer tests without Kafka
+        run: cargo test -p cache-indexer --no-default-features
