@@ -38,13 +38,17 @@ fn index_store_kind() -> String {
         .to_ascii_lowercase()
 }
 
-async fn bootstrap_store() -> Result<Arc<EventStore>, Box<dyn std::error::Error>> {
+async fn bootstrap_store(
+    metrics: Arc<IndexerMetrics>,
+) -> Result<Arc<EventStore>, Box<dyn std::error::Error>> {
     match index_store_kind().as_str() {
         "clickhouse" => {
             let writer = Arc::new(ClickHouseWriter::bootstrap(load_config_from_env()).await?);
             Ok(Arc::new(EventStore::ClickHouse(writer)))
         }
-        "memory" | "sqlite" => store::open_from_env().map_err(|e| e.to_string().into()),
+        "memory" | "sqlite" => store::open_from_env(metrics)
+            .await
+            .map_err(|e| e.to_string().into()),
         other => Err(format!("unknown INDEX_STORE={other}").into()),
     }
 }
@@ -73,7 +77,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let kafka_group =
         std::env::var("KAFKA_GROUP_ID").unwrap_or_else(|_| "cache-indexer-group".to_string());
     let metrics = Arc::new(IndexerMetrics::new()?);
-    let store = bootstrap_store().await?;
+    let store = bootstrap_store(Arc::clone(&metrics)).await?;
     let backend = store.backend_name();
 
     let search_cfg = SearchApiConfig::from_env();
