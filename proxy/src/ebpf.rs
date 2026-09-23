@@ -597,27 +597,19 @@ impl EbpfXdpManager {
             IpAddr::V6(_) => maps.v6,
         }
         .to_string();
-        let hex = Self::ip_to_hex(ip);
-        // Value layout must match `struct ip_drop_stats` in bpf/xdp_drop.c
-        // (two u64 counters, zero-initialised on insert).
-        let zero_value = vec!["00"; 16].join(" ");
+        let key = Self::ip_to_hex(ip);
+        let action = if block { "update" } else { "delete" };
 
-        let args: Vec<&str> = if block {
-            vec![
-                "map",
-                "update",
-                "id",
-                &map_id,
-                "key",
-                "hex",
-                &hex,
-                "value",
-                "hex",
-                &zero_value,
-            ]
-        } else {
-            vec!["map", "delete", "id", &map_id, "key", "hex", &hex]
-        };
+        // bpftool takes every byte of a hex key/value as its own argument;
+        // "0a 63 00 02" passed as one string fails with "error parsing byte".
+        let mut args: Vec<&str> = vec!["map", action, "id", &map_id, "key", "hex"];
+        args.extend(key.split(' '));
+        if block {
+            // Value layout must match `struct ip_drop_stats` in bpf/xdp_drop.c
+            // (two u64 counters, zero-initialised on insert).
+            args.extend(["value", "hex"]);
+            args.extend(["00"; 16]);
+        }
 
         let out = Command::new("bpftool")
             .args(&args)
@@ -626,7 +618,6 @@ impl EbpfXdpManager {
 
         if !out.status.success() {
             let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
-            let action = if block { "update" } else { "delete" };
             error!(
                 "Failed to {} BPF map id {} for {}: {}",
                 action, map_id, ip, stderr
