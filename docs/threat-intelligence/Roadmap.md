@@ -10,15 +10,15 @@
 - [x] Integrate public threat feeds (`threat-intel` collector: OpenPhish, PhishStats, Phishing.Database, URLhaus — TASK-TI-001)
 - [x] Store IOC (structured SQLite persistence with WAL, migrations, indexes, and TTL expiration — TASK-TI-002)
 - [x] Normalize domains, URLs and IP addresses (canonicalization, Punycode, bogon filter — TASK-TI-003)
-- [x] Generate ACL lists (`threat_domains.json` JSON feed — TASK-TI-021). Consumed only by the proxy shadow matcher for observation; no ACL engine reads it in any mode
+- [x] Generate ACL lists (`threat_domains.json` JSON feed — TASK-TI-020). In the default shadow mode the proxy reads only the `.shadow` copy, for observation (`ti_shadow.rs`); the data-plane loads it for blocking only under `TI_ENFORCEMENT_MODE=enforce` (see Phase 2)
 
 ## Phase 2 - Scoring & RPZ artifact generation (enforcement gated by ADR 0008)
 
 - [x] Weighted confidence scoring & multi-source correlation bonus with freshness decay (TASK-TI-010)
-- [x] Automated DNS RPZ zone compilation (`threats.rpz`) with atomic rotation for `dns-sinkhole` (TASK-TI-020)
-- [x] RPZ syntax validation and zone serial management (TASK-TI-020)
+- [x] Automated DNS RPZ zone compilation (`threats.rpz`) with atomic rotation for `dns-sinkhole` (TASK-TI-021)
+- [x] RPZ syntax validation and zone serial management (TASK-TI-021)
 - [x] Compilation of RPZ/ACL artifacts to disk (TASK-TI-020 & 021)
-- [x] Consumption of `threat_domains.json` by proxy policy / ACL data-plane engine under `TI_ENFORCEMENT_MODE=enforce` with Triple-Gate protection and Allowlist precedence (TASK-TI-021 / Phase 2)
+- [x] Consumption of `threat_domains.json` by proxy policy / ACL data-plane engine under `TI_ENFORCEMENT_MODE=enforce` with Triple-Gate protection and Allowlist precedence (TASK-TI-020 / Phase 2)
 - [x] Shadow Mode observation & false-positive evaluation (`threat_shadow_match`, `bsdm_proxy_ti_shadow_matches_total{feed}`) (ADR 0008)
 
 ## Phase 3 - Enterprise SIEM & SOAR
