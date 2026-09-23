@@ -1,10 +1,10 @@
 //! HTTP and Kafka cache-event pipelines with bounded in-memory queue (#106).
 
+use futures_util::stream::{FuturesUnordered, StreamExt};
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
-use tokio::task::JoinSet;
 use tracing::{error, info, warn};
 
 use crate::metrics::Metrics;
@@ -32,67 +32,42 @@ fn queue_capacity_from_env() -> usize {
 
 /// Drain a bounded input channel with at most `max_in_flight` asynchronous
 /// deliveries. The channel still provides the request-path backpressure bound;
-/// this second bound prevents slow sinks from creating an unbounded task set.
+/// this second bound prevents slow sinks from creating an unbounded future set.
+/// All delivery futures are polled by one pipeline task, avoiding one Tokio task
+/// allocation and scheduler hop per event.
 async fn run_bounded_workers<T, F, Fut>(
     mut receiver: mpsc::Receiver<T>,
     max_in_flight: usize,
-    pipeline_name: &'static str,
     handler: F,
 ) where
     T: Send + 'static,
-    F: Fn(T) -> Fut + Send + Sync + 'static,
+    F: Fn(T) -> Fut + Send + 'static,
     Fut: Future<Output = ()> + Send + 'static,
 {
     let max_in_flight = max_in_flight.max(1);
-    let handler = Arc::new(handler);
-    let mut tasks = JoinSet::new();
+    let mut in_flight = FuturesUnordered::new();
 
     loop {
-        if tasks.len() >= max_in_flight {
-            if let Some(Err(join_error)) = tasks.join_next().await {
-                error!(
-                    pipeline = pipeline_name,
-                    error = %join_error,
-                    "Event delivery worker failed"
-                );
-            }
+        if in_flight.len() >= max_in_flight {
+            let _ = in_flight.next().await;
             continue;
         }
 
         tokio::select! {
             biased;
-            completed = tasks.join_next(), if !tasks.is_empty() => {
-                if let Some(Err(join_error)) = completed {
-                    error!(
-                        pipeline = pipeline_name,
-                        error = %join_error,
-                        "Event delivery worker failed"
-                    );
-                }
-            }
+            _ = in_flight.next(), if !in_flight.is_empty() => {}
             event = receiver.recv() => {
                 let Some(event) = event else {
                     break;
                 };
-                let handler = Arc::clone(&handler);
-                tasks.spawn(async move {
-                    handler(event).await;
-                });
+                in_flight.push(handler(event));
             }
         }
     }
 
     // Preserve the previous graceful-drain behavior when all senders are
     // dropped: queued deliveries finish before the pipeline task exits.
-    while let Some(result) = tasks.join_next().await {
-        if let Err(join_error) = result {
-            error!(
-                pipeline = pipeline_name,
-                error = %join_error,
-                "Event delivery worker failed while draining"
-            );
-        }
-    }
+    while in_flight.next().await.is_some() {}
 }
 
 /// Enqueue cache events to Kafka (if enabled) or HTTP sink.
@@ -162,7 +137,6 @@ mod kafka_pipeline {
             tokio::spawn(run_bounded_workers(
                 receiver,
                 max_in_flight,
-                "kafka",
                 move |event| {
                     let producer = producer_worker.clone();
                     let metrics = metrics_worker.clone();
@@ -253,7 +227,6 @@ impl HttpEventPipeline {
         tokio::spawn(run_bounded_workers(
             receiver,
             max_in_flight,
-            "http",
             move |event| {
                 let client = client.clone();
                 let metrics = metrics_worker.clone();
@@ -334,7 +307,7 @@ mod tests {
         let active_worker = Arc::clone(&active);
         let peak_worker = Arc::clone(&peak);
         let completed_worker = Arc::clone(&completed);
-        run_bounded_workers(receiver, 3, "test", move |_| {
+        run_bounded_workers(receiver, 3, move |_| {
             let active = Arc::clone(&active_worker);
             let peak = Arc::clone(&peak_worker);
             let completed = Arc::clone(&completed_worker);
