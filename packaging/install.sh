@@ -178,6 +178,10 @@ if [[ -f "${SCRIPT_DIR}/config/ml-worker.env.example" && ! -f "${ETC_DIR}/ml-wor
   install -m 0640 "${SCRIPT_DIR}/config/ml-worker.env.example" "${ETC_DIR}/ml-worker.env"
   echo "Installed ${ETC_DIR}/ml-worker.env"
 fi
+if [[ -f "${SCRIPT_DIR}/config/dns-sinkhole.env.example" && ! -f "${ETC_DIR}/dns-sinkhole.env" ]]; then
+  install -m 0640 "${SCRIPT_DIR}/config/dns-sinkhole.env.example" "${ETC_DIR}/dns-sinkhole.env"
+  echo "Installed ${ETC_DIR}/dns-sinkhole.env"
+fi
 if [[ -f "${SCRIPT_DIR}/config/threat-intel.env.example" && ! -f "${ETC_DIR}/threat-intel.env" ]]; then
   install -m 0640 "${SCRIPT_DIR}/config/threat-intel.env.example" "${ETC_DIR}/threat-intel.env"
   echo "Installed ${ETC_DIR}/threat-intel.env"
@@ -185,6 +189,10 @@ fi
 if [[ ! -f "${ETC_DIR}/acl-rules.json" ]]; then
   install -m 0644 "${SCRIPT_DIR}/config/acl-rules.example.json" "${ETC_DIR}/acl-rules.json"
   echo "Installed ${ETC_DIR}/acl-rules.json"
+fi
+if [[ -f "${SCRIPT_DIR}/config/blocklist.rpz.example" && ! -f "${ETC_DIR}/blocklist.rpz" ]]; then
+  install -m 0644 "${SCRIPT_DIR}/config/blocklist.rpz.example" "${ETC_DIR}/blocklist.rpz"
+  echo "Installed ${ETC_DIR}/blocklist.rpz"
 fi
 
 # MITM CA directory.
@@ -257,7 +265,7 @@ if $INSTALL_SYSTEMD; then
   echo "  systemctl enable --now bsdm-cache-indexer  # optional"
   echo "  systemctl enable --now bsdm-alert-worker   # optional; set ALERT_WEBHOOK_URL first"
   echo "  systemctl enable --now bsdm-ml-worker      # optional; M5 feature store"
-  echo "  systemctl enable --now bsdm-dns-sinkhole   # optional; DoH/DoT DNS gateway"
+  echo "  systemctl enable --now bsdm-dns-sinkhole   # optional; review dns-sinkhole.env first"
   echo "  systemctl enable --now bsdm-threat-intel   # optional; IOC feed collector"
 fi
 
