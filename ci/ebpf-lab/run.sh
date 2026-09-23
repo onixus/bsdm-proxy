@@ -48,6 +48,11 @@ echo "veth pair up, v4/v6 reachable"
 rm -f bpf/xdp_drop.o
 
 echo "== proxy"
+# The proxy applies ./bsdm-proxy.env on top of its environment (Admin Console
+# persistence), and the repo copy is a kill-switch: MITM on, eBPF unarmed.
+# Point it at an empty file so the variables below are what the run sees.
+: >"$LOG_DIR/lab.env"
+CONFIG_ENV_PATH="$LOG_DIR/lab.env" \
 MITM_ENABLED=false \
 POLICY_MODE=sni \
 HTTP_PORT=3128 \
