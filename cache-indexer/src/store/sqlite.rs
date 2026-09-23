@@ -47,11 +47,12 @@ impl SqliteStore {
         let max_rows = max_rows.max(1);
         let path = path.to_string();
 
-        let (writer_connection, reader_connection) = tokio::task::spawn_blocking(move || {
-            initialize_connections(&path, busy_timeout)
-        })
-        .await
-        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() })??;
+        let (writer_connection, reader_connection, initial_rows) =
+            tokio::task::spawn_blocking(move || initialize_connections(&path, busy_timeout))
+                .await
+                .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+                    e.to_string().into()
+                })??;
 
         let (writer, receiver) = mpsc::channel(queue_capacity);
         let writer_metrics = Arc::clone(&metrics);
@@ -61,13 +62,17 @@ impl SqliteStore {
                 receiver,
                 max_rows,
                 max_batch_events,
+                initial_rows,
                 writer_metrics,
             );
         });
 
         info!(
             queue_capacity,
-            max_batch_events, max_rows, "SQLite writer actor started"
+            max_batch_events,
+            max_rows,
+            initial_rows,
+            "SQLite writer actor started"
         );
 
         Ok(Self {
@@ -127,7 +132,7 @@ impl SqliteStore {
 fn initialize_connections(
     path: &str,
     busy_timeout: Duration,
-) -> StoreResult<(Connection, Connection)> {
+) -> StoreResult<(Connection, Connection, usize)> {
     if path != ":memory:" && !path.starts_with("file:") {
         if let Some(parent) = Path::new(path).parent() {
             if !parent.as_os_str().is_empty() {
@@ -149,12 +154,13 @@ fn initialize_connections(
     let writer = open_connection(&target)?;
     writer.busy_timeout(busy_timeout)?;
     initialize_schema(&writer)?;
+    let initial_rows = row_count(&writer)?;
 
     let reader = open_connection(&target)?;
     reader.busy_timeout(busy_timeout)?;
     reader.execute_batch("PRAGMA query_only=ON;")?;
 
-    Ok((writer, reader))
+    Ok((writer, reader, initial_rows))
 }
 
 fn open_connection(target: &str) -> Result<Connection, rusqlite::Error> {
@@ -175,6 +181,7 @@ fn run_writer(
     mut receiver: mpsc::Receiver<WriteRequest>,
     max_rows: usize,
     max_batch_events: usize,
+    mut approximate_rows: usize,
     metrics: Arc<IndexerMetrics>,
 ) {
     while let Some(first) = receiver.blocking_recv() {
@@ -194,7 +201,13 @@ fn run_writer(
         metrics.set_sqlite_writer_queue_depth(receiver.len());
 
         let started = Instant::now();
-        let result = write_requests(&mut connection, &requests, max_rows).map_err(|e| e.to_string());
+        let result = write_requests(
+            &mut connection,
+            &requests,
+            max_rows,
+            &mut approximate_rows,
+        )
+        .map_err(|e| e.to_string());
         metrics.record_sqlite_writer_batch(
             requests.len(),
             event_count,
@@ -223,8 +236,12 @@ fn write_requests(
     connection: &mut Connection,
     requests: &[WriteRequest],
     max_rows: usize,
+    approximate_rows: &mut usize,
 ) -> StoreResult<()> {
     let transaction = connection.transaction()?;
+    let event_count = requests.iter().fold(0usize, |count, request| {
+        count.saturating_add(request.events.len())
+    });
     {
         let mut statement = transaction.prepare(
             r#"
@@ -288,19 +305,36 @@ fn write_requests(
         }
     }
 
-    let count: i64 =
-        transaction.query_row("SELECT count(*) FROM events", [], |row| row.get(0))?;
-    let max_rows = i64::try_from(max_rows).unwrap_or(i64::MAX);
-    if count > max_rows {
-        transaction.execute(
-            "DELETE FROM events WHERE event_id IN (
-               SELECT event_id FROM events ORDER BY ts ASC LIMIT ?1
-             )",
-            params![count - max_rows],
-        )?;
+    // `approximate_rows` is an upper bound because an UPSERT may update an
+    // existing event instead of inserting a new row. Most commits therefore
+    // avoid a full-table COUNT. We pay for an exact count only when the upper
+    // bound crosses the configured retention limit, then reset the estimate.
+    let upper_bound = approximate_rows.saturating_add(event_count);
+    let mut rows_after_commit = upper_bound;
+    if upper_bound > max_rows {
+        let exact_rows = row_count(&transaction)?;
+        if exact_rows > max_rows {
+            let excess = exact_rows - max_rows;
+            transaction.execute(
+                "DELETE FROM events WHERE event_id IN (
+                   SELECT event_id FROM events ORDER BY ts ASC LIMIT ?1
+                 )",
+                params![i64::try_from(excess).unwrap_or(i64::MAX)],
+            )?;
+            rows_after_commit = max_rows;
+        } else {
+            rows_after_commit = exact_rows;
+        }
     }
+
     transaction.commit()?;
+    *approximate_rows = rows_after_commit;
     Ok(())
+}
+
+fn row_count(connection: &Connection) -> Result<usize, rusqlite::Error> {
+    let count: i64 = connection.query_row("SELECT count(*) FROM events", [], |row| row.get(0))?;
+    Ok(usize::try_from(count).unwrap_or(usize::MAX))
 }
 
 fn search_connection(connection: &Connection, query: &SearchQuery) -> StoreResult<Vec<SearchHit>> {
@@ -583,6 +617,30 @@ mod tests {
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[0].event_id, "e2");
         assert_eq!(hits[1].event_id, "e3");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn upserts_reset_the_row_upper_bound_without_pruning_live_rows() {
+        let store = SqliteStore::open(":memory:", 2, metrics()).await.unwrap();
+        store
+            .insert_batch(&[
+                sample("one.example", 1, "e1", None),
+                sample("two.example", 2, "e2", None),
+            ])
+            .await
+            .unwrap();
+
+        for timestamp in 3..20 {
+            store
+                .insert_batch(&[sample("one.example", timestamp, "e1", None)])
+                .await
+                .unwrap();
+        }
+
+        let hits = store.search(&query()).await.unwrap();
+        assert_eq!(hits.len(), 2);
+        assert!(hits.iter().any(|hit| hit.event_id == "e1"));
+        assert!(hits.iter().any(|hit| hit.event_id == "e2"));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
