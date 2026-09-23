@@ -5,7 +5,8 @@
 //! downstream IOC store (TASK-TI-002) and scoring engine (TASK-TI-010).
 
 use threat_intel::{
-    api_auth, collector, config, http, metrics, ml_reputation, rpz, sink, soar, sources, storage,
+    api_auth, collector, config, http, metrics, ml_reputation, rpz, siem, sink, soar, sources,
+    storage,
 };
 
 use api_auth::AdminApiSecurity;
@@ -14,6 +15,7 @@ use config::{Config, EnforcementMode};
 use http::FeedHttpClient;
 use metrics::CollectorMetrics;
 use prometheus::{Encoder, TextEncoder};
+use siem::{SiemDispatcher, SiemEmitter};
 use sink::{CompositeSink, IndicatorSink, JsonlFileSink, SqliteSink};
 use std::sync::Arc;
 use storage::SqliteStorage;
@@ -61,10 +63,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
+    let siem = Arc::new(SiemEmitter::start(
+        SiemDispatcher::from_config(&config)?,
+        config.siem_events,
+        config.siem_queue_capacity,
+        Some(metrics.siem_events.clone()),
+    )?);
+    if siem.is_enabled() {
+        info!(
+            syslog = config.siem_syslog_addr.as_deref().unwrap_or("-"),
+            file = %config
+                .siem_file_path
+                .as_deref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "-".into()),
+            format = %config.siem_format,
+            events = ?config.siem_events.names(),
+            "SIEM delivery enabled"
+        );
+    }
+
     let file_sink = Box::new(JsonlFileSink::new(&config.output_dir)?);
     let sink: Arc<dyn IndicatorSink> = match &storage {
         Some(st) => {
-            let sqlite_sink = Box::new(SqliteSink::new(st.clone(), config.ioc_ttl_secs));
+            let sqlite_sink = Box::new(
+                SqliteSink::new(st.clone(), config.ioc_ttl_secs).with_siem(Arc::clone(&siem)),
+            );
             Arc::new(CompositeSink::new(vec![file_sink, sqlite_sink]))
         }
         None => Arc::new(JsonlFileSink::new(&config.output_dir)?),
@@ -97,13 +121,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let max_confidence = config.soar_max_confidence;
     let rpz_path = config.rpz_artifact_path();
     let api_security = Arc::new(AdminApiSecurity::from_env(&config.output_dir));
-    let collector = Arc::new(Collector::new(
-        config,
-        http,
-        sink,
-        storage.clone(),
-        metrics.clone(),
-    ));
+    let collector = Arc::new(
+        Collector::new(config, http, sink, storage.clone(), metrics.clone())
+            .with_siem(Arc::clone(&siem)),
+    );
 
     if run_once {
         return collector::run_once(collector, feeds)
@@ -122,6 +143,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             default_confidence,
             max_confidence,
             rpz_path,
+            siem,
         )
         .await;
     });
@@ -146,6 +168,7 @@ async fn run_admin_server(
     default_confidence: u8,
     max_confidence: u8,
     rpz_path: std::path::PathBuf,
+    siem: Arc<SiemEmitter>,
 ) {
     // Loopback unless TI_ADMIN_BIND says otherwise: the SOAR API must not be
     // reachable from the network by default.
@@ -167,6 +190,7 @@ async fn run_admin_server(
         let storage = storage.clone();
         let security = security.clone();
         let rpz_path = rpz_path.clone();
+        let siem = Arc::clone(&siem);
         tokio::spawn(async move {
             match read_http_request(&mut socket, MAX_ADMIN_REQUEST_BYTES).await {
                 Ok(req) => {
@@ -180,6 +204,7 @@ async fn run_admin_server(
                         default_confidence,
                         max_confidence,
                         &rpz_path,
+                        &siem,
                     );
                     let _ = socket.write_all(&response).await;
                 }
@@ -296,6 +321,7 @@ fn handle_admin(
     default_confidence: u8,
     max_confidence: u8,
     rpz_path: &std::path::Path,
+    siem: &SiemEmitter,
 ) -> Vec<u8> {
     let mut lines = req.lines();
     let request_line = lines.next().unwrap_or("");
@@ -434,6 +460,7 @@ fn handle_admin(
                 mode,
                 default_confidence,
                 max_confidence,
+                siem,
             ) {
                 Ok(resp) => {
                     metrics
@@ -467,7 +494,7 @@ fn handle_admin(
         let body_str = extract_http_body(req);
         let req_payload: Result<soar::SoarUnblockRequest, _> = serde_json::from_str(body_str);
         return match req_payload {
-            Ok(payload) => match soar::execute_soar_unblock(storage, payload, mode) {
+            Ok(payload) => match soar::execute_soar_unblock(storage, payload, mode, siem) {
                 Ok(resp) => {
                     metrics
                         .soar_unblocks
@@ -680,6 +707,7 @@ mod tests {
             default_confidence,
             max_confidence,
             dummy,
+            &SiemEmitter::disabled(),
         )
     }
 
@@ -1090,6 +1118,69 @@ mod tests {
     }
 
     #[test]
+    fn soar_block_and_unblock_are_reported_to_the_siem() {
+        let metrics = CollectorMetrics::new().unwrap();
+        let storage = SqliteStorage::in_memory().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let security = test_security(&dir);
+        let log = dir.path().join("siem.log");
+        let siem = SiemEmitter::start(
+            SiemDispatcher::new(vec![Box::new(
+                siem::FileSiemTransport::new(&log, siem::SiemFormat::EcsJson, "gw").unwrap(),
+            )]),
+            siem::SiemEventFilter::all(),
+            16,
+            None,
+        )
+        .unwrap();
+        let rpz = dir.path().join("threats.rpz");
+        let call = |req: &str| {
+            handle_admin(
+                req,
+                &metrics,
+                Some(&storage),
+                EnforcementMode::Shadow,
+                &security,
+                PEER,
+                90,
+                100,
+                &rpz,
+                &siem,
+            )
+        };
+
+        let body = r#"{"indicator":"soar-target.test","kind":"domain","reason":"IR-7"}"#;
+        let resp = call(&format!(
+            "POST /api/v1/soar/block HTTP/1.1\r\nAuthorization: Bearer test-token\r\n\r\n{body}"
+        ));
+        assert!(String::from_utf8_lossy(&resp).starts_with("HTTP/1.1 202"));
+        let body = r#"{"indicator":"soar-target.test","kind":"domain","reason":"FP"}"#;
+        let resp = call(&format!(
+            "POST /api/v1/soar/unblock HTTP/1.1\r\nAuthorization: Bearer test-token\r\n\r\n{body}"
+        ));
+        assert!(String::from_utf8_lossy(&resp).starts_with("HTTP/1.1 200"));
+        siem.close();
+
+        let events: Vec<serde_json::Value> = std::fs::read_to_string(&log)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0]["event"]["action"], "ioc_blocked");
+        assert_eq!(
+            events[0]["threat"]["indicator"]["value"],
+            "soar-target.test"
+        );
+        // Shadow mode blocks nothing; the tag lets the SIEM tell that apart.
+        assert!(events[0]["tags"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("shadow")));
+        assert_eq!(events[1]["event"]["action"], "ioc_unblocked");
+    }
+
+    #[test]
     fn accepted_block_is_recorded_in_the_audit_trail() {
         let metrics = CollectorMetrics::new().unwrap();
         let storage = SqliteStorage::in_memory().unwrap();
@@ -1204,6 +1295,7 @@ mod tests {
             90,
             100,
             &rpz_file,
+            &SiemEmitter::disabled(),
         ))
         .unwrap();
         assert!(resp1.starts_with("HTTP/1.1 200 OK"));
@@ -1225,6 +1317,7 @@ mod tests {
             90,
             100,
             &rpz_file,
+            &SiemEmitter::disabled(),
         ))
         .unwrap();
         assert!(resp2.starts_with("HTTP/1.1 200 OK"));
@@ -1243,6 +1336,7 @@ mod tests {
             90,
             100,
             &rpz_file,
+            &SiemEmitter::disabled(),
         ))
         .unwrap();
         assert!(resp3.starts_with("HTTP/1.1 401 Unauthorized"));
@@ -1260,6 +1354,7 @@ mod tests {
             90,
             100,
             &rpz_file,
+            &SiemEmitter::disabled(),
         ))
         .unwrap();
         assert!(resp4.starts_with("HTTP/1.1 200 OK"));

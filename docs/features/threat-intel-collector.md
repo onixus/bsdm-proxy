@@ -123,8 +123,36 @@ indicator count, attempts, duration and the last error, if any.
 | `TI_SIEM_SYSLOG_PROTOCOL` | `udp` | Syslog transport protocol (`udp` or `tcp`) |
 | `TI_SIEM_FILE_PATH` | unset | Local file path for formatted SIEM event append log |
 | `TI_SIEM_FORMAT` | `cef` | SIEM serialization format (`cef`, `ecs`, or `syslog`) |
+| `TI_SIEM_EVENTS` | all | Comma-separated event classes to deliver: `detected`, `blocked`, `unblocked`, `expired` (or `all`). An unknown name stops startup |
+| `TI_SIEM_HOSTNAME` | `bsdm-threat-intel` | Hostname in syslog / CEF headers |
+| `TI_SIEM_QUEUE_CAPACITY` | `10000` | In-memory delivery queue; overflow is dropped and counted, never blocks collection |
 
 Packaged example: `packaging/config/threat-intel.env.example`.
+
+### SIEM delivery
+
+SIEM delivery is on as soon as `TI_SIEM_SYSLOG_ADDR` or `TI_SIEM_FILE_PATH` is
+set (both may be set at once). Four event classes are produced, all selected by
+default and narrowed with `TI_SIEM_EVENTS`:
+
+| Event | Wire action | When |
+|---|---|---|
+| `detected` | `ioc_detected` | A feed reports an indicator not yet stored for that source. Re-reports of a known indicator and bogon/private IPs are not sent |
+| `blocked` | `ioc_blocked` | `POST /api/v1/soar/block` succeeds. In shadow mode it is still sent, tagged `shadow`, because nothing is actually blocked |
+| `unblocked` | `ioc_unblocked` | `POST /api/v1/soar/unblock` removes an indicator; one event per source row removed |
+| `expired` | `ioc_expired` | The post-collection purge removes an indicator whose TTL (`TI_IOC_TTL_SECS`) has passed |
+
+Delivery runs on its own thread behind a bounded queue, so a slow or
+unreachable SIEM never delays collection or a SOAR response. The TCP syslog
+connection is reused and redialled once after a failure. Outcomes are counted
+in `threat_intel_siem_events_total{action,outcome}` with `outcome` =
+`sent` / `failed` / `dropped`.
+
+> **First collection on an empty database.** Every indicator is new, so a large
+> feed (Phishing.Database alone is ~400k entries) produces that many `detected`
+> events; whatever does not fit in `TI_SIEM_QUEUE_CAPACITY` is dropped and shows
+> up as `outcome="dropped"`. If the SIEM only needs operator actions, set
+> `TI_SIEM_EVENTS=blocked,unblocked`.
 
 ## Resource footprint
 

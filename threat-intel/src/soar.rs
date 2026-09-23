@@ -8,6 +8,7 @@
 use crate::config::EnforcementMode;
 use crate::indicator::IndicatorKind;
 use crate::normalizer::NormalizedIndicator;
+use crate::siem::{SiemEmitter, SiemEvent, SiemEventAction};
 use crate::storage::{SqliteStorage, StorageError, StoredIndicator};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -66,7 +67,7 @@ pub fn execute_soar_block(
     req: SoarBlockRequest,
     mode: EnforcementMode,
 ) -> Result<SoarActionResponse, StorageError> {
-    execute_soar_block_with_limits(storage, req, mode, 90, 100)
+    execute_soar_block_with_limits(storage, req, mode, 90, 100, &SiemEmitter::disabled())
 }
 
 /// Executes an automated SOAR block action with configurable default confidence and ceiling.
@@ -76,6 +77,7 @@ pub fn execute_soar_block_with_limits(
     mode: EnforcementMode,
     default_confidence: u8,
     max_confidence: u8,
+    siem: &SiemEmitter,
 ) -> Result<SoarActionResponse, StorageError> {
     // Default 30 days; clamped so a client-supplied TTL cannot overflow the
     // expiry timestamp or expire the indicator on insert.
@@ -117,7 +119,14 @@ pub fn execute_soar_block_with_limits(
         }
     };
 
-    let stats = storage.upsert_batch(&[norm], ttl_secs)?;
+    let stats = storage.upsert_batch(std::slice::from_ref(&norm), ttl_secs)?;
+    // Emitted in shadow mode too: the event carries the `shadow` tag, and a
+    // SOC wants to see an operator's containment request either way.
+    siem.emit(SiemEvent::from_normalized(
+        &norm,
+        confidence,
+        SiemEventAction::Blocked,
+    ));
 
     let message = if mode.is_enforce() {
         format!(
@@ -149,9 +158,13 @@ pub fn execute_soar_unblock(
     storage: &SqliteStorage,
     req: SoarUnblockRequest,
     mode: EnforcementMode,
+    siem: &SiemEmitter,
 ) -> Result<SoarActionResponse, StorageError> {
-    // Delete indicator or mark as expired
-    let purged = storage.purge_indicator(&req.indicator, req.kind)?;
+    let removed = storage.purge_indicator_returning(&req.indicator, req.kind)?;
+    for row in &removed {
+        siem.emit(SiemEvent::from_stored(row, SiemEventAction::Unblocked));
+    }
+    let purged = removed.len();
 
     Ok(SoarActionResponse {
         success: purged > 0,
@@ -235,6 +248,7 @@ mod tests {
                 operator: Some("soc_analyst_1".into()),
             },
             EnforcementMode::Enforce,
+            &SiemEmitter::disabled(),
         )
         .unwrap();
         assert!(unblock_res.success);
@@ -262,6 +276,7 @@ mod tests {
             EnforcementMode::Enforce,
             90,
             100,
+            &SiemEmitter::disabled(),
         )
         .unwrap();
 
@@ -285,6 +300,7 @@ mod tests {
             EnforcementMode::Enforce,
             80,
             85, // max ceiling is 85
+            &SiemEmitter::disabled(),
         )
         .unwrap();
 

@@ -91,6 +91,9 @@ fn pipeline_config(output_dir: &std::path::Path, mode: EnforcementMode) -> Confi
         siem_syslog_protocol: "udp".into(),
         siem_file_path: None,
         siem_format: "cef".into(),
+        siem_hostname: "bsdm-threat-intel".into(),
+        siem_events: threat_intel::siem::SiemEventFilter::all(),
+        siem_queue_capacity: 10_000,
         sinkhole_reload_url: None,
     }
 }
@@ -283,4 +286,84 @@ async fn shadow_mode_writes_only_shadow_artifacts() {
     assert!(domains.contains(&"soar-shadow.test"));
     assert_eq!(acl["feeds"]["evil-phish.com"], "test_phish_feed");
     assert_eq!(acl["feeds"]["soar-shadow.test"], "soar:soc1");
+}
+
+#[tokio::test]
+async fn siem_receives_detected_and_expired_events_from_a_collection_run() {
+    use threat_intel::normalizer::NormalizedIndicator;
+    use threat_intel::siem::{SiemDispatcher, SiemEmitter};
+
+    let temp_dir = tempfile::tempdir().unwrap();
+    let output_dir = temp_dir.path().to_path_buf();
+    let siem_log = output_dir.join("siem.log");
+    let feed_url =
+        mock_http_server("https://evil-phish.com/login.php\n10.0.0.1\nphish.target-bank.net\n")
+            .await;
+
+    let mut config = pipeline_config(&output_dir, EnforcementMode::Shadow);
+    config.siem_file_path = Some(siem_log.clone());
+    let metrics = CollectorMetrics::new().unwrap();
+    let siem = Arc::new(
+        SiemEmitter::start(
+            SiemDispatcher::from_config(&config).unwrap(),
+            config.siem_events,
+            config.siem_queue_capacity,
+            Some(metrics.siem_events.clone()),
+        )
+        .unwrap(),
+    );
+
+    let storage = SqliteStorage::new(output_dir.join("ioc.db")).unwrap();
+    // Already past its TTL: the post-collection purge reports it as expired.
+    let stale = threat_intel::indicator::RawIndicator::new(
+        "stale-phish.org",
+        IndicatorKind::Domain,
+        &TestFeedSource { url: String::new() },
+    );
+    storage
+        .upsert_batch(&[NormalizedIndicator::from_raw(&stale, 85).unwrap()], -10)
+        .unwrap();
+
+    let sqlite_sink = SqliteSink::new(storage.clone(), config.ioc_ttl_secs).with_siem(siem.clone());
+    let http = FeedHttpClient::new(Duration::from_secs(5), 1024 * 1024, "test").unwrap();
+    let collector = Arc::new(
+        Collector::new(
+            config,
+            http,
+            Arc::new(sqlite_sink),
+            Some(storage),
+            metrics.clone(),
+        )
+        .with_siem(siem),
+    );
+    let sources: Vec<Box<dyn FeedSource>> = vec![Box::new(TestFeedSource { url: feed_url })];
+    // run_once drains the SIEM queue before returning.
+    collector::run_once(collector, sources).await.unwrap();
+
+    let log = std::fs::read_to_string(&siem_log).unwrap();
+    let detected: Vec<&str> = log
+        .lines()
+        .filter(|l| l.contains("|IOC_DETECTED|"))
+        .collect();
+    let expired: Vec<&str> = log
+        .lines()
+        .filter(|l| l.contains("|IOC_EXPIRED|"))
+        .collect();
+    assert_eq!(
+        detected.len(),
+        2,
+        "bogon 10.0.0.1 must not be reported:\n{log}"
+    );
+    assert!(detected
+        .iter()
+        .any(|l| l.contains("dhost=phish.target-bank.net")));
+    assert_eq!(expired.len(), 1, "{log}");
+    assert!(expired[0].contains("dhost=stale-phish.org"));
+    assert_eq!(
+        metrics
+            .siem_events
+            .with_label_values(&["detected", "sent"])
+            .get(),
+        2
+    );
 }

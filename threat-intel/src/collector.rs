@@ -19,6 +19,7 @@ pub struct Collector {
     storage: Option<crate::storage::SqliteStorage>,
     metrics: Arc<CollectorMetrics>,
     report: Mutex<CollectionReport>,
+    siem: Arc<crate::siem::SiemEmitter>,
 }
 
 impl Collector {
@@ -36,7 +37,18 @@ impl Collector {
             storage,
             metrics,
             report: Mutex::new(CollectionReport::default()),
+            siem: Arc::new(crate::siem::SiemEmitter::disabled()),
         }
+    }
+
+    /// Reports indicators removed by TTL expiry as SIEM `expired` events.
+    pub fn with_siem(mut self, siem: Arc<crate::siem::SiemEmitter>) -> Self {
+        self.siem = siem;
+        self
+    }
+
+    pub fn siem(&self) -> &crate::siem::SiemEmitter {
+        &self.siem
     }
 
     pub fn config(&self) -> &Config {
@@ -206,7 +218,20 @@ impl Collector {
         };
 
         let now_ts = Utc::now().timestamp();
-        if let Ok(purged) = storage.purge_expired(now_ts) {
+        let purged = if self.siem.wants(crate::siem::SiemEventAction::Expired) {
+            storage.purge_expired_returning(now_ts).map(|rows| {
+                for row in &rows {
+                    self.siem.emit(crate::siem::SiemEvent::from_stored(
+                        row,
+                        crate::siem::SiemEventAction::Expired,
+                    ));
+                }
+                rows.len()
+            })
+        } else {
+            storage.purge_expired(now_ts)
+        };
+        if let Ok(purged) = purged {
             if purged > 0 {
                 self.metrics.purged_expired.inc_by(purged as u64);
                 info!(purged, "purged expired threat indicators from storage");
@@ -329,6 +354,11 @@ pub async fn run_once(
     }
 
     collector.sync_storage_and_exports();
+    // The process exits right after this; deliver what is queued first.
+    let siem = Arc::clone(&collector.siem);
+    tokio::task::spawn_blocking(move || siem.close())
+        .await
+        .map_err(|e| format!("SIEM delivery thread: {e}"))?;
 
     let report = collector.report();
     let total: usize = report.sources.iter().map(|s| s.indicators).sum();
@@ -432,6 +462,9 @@ mod tests {
             siem_syslog_protocol: "udp".into(),
             siem_file_path: None,
             siem_format: "cef".into(),
+            siem_hostname: "bsdm-threat-intel".into(),
+            siem_events: crate::siem::SiemEventFilter::all(),
+            siem_queue_capacity: 10_000,
             sinkhole_reload_url: None,
         }
     }

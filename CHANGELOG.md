@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **threat-intel SIEM delivery was never wired** — the CEF/ECS/syslog formatters and the UDP/TCP/file transports existed, and `TI_SIEM_*` was parsed, but the running service sent nothing. It now delivers `detected` (new feed indicators), `blocked` / `unblocked` (SOAR API) and `expired` (TTL purge) events; `TI_SIEM_EVENTS` selects which. Delivery is asynchronous behind a bounded queue (`TI_SIEM_QUEUE_CAPACITY`), the TCP connection is reused, and outcomes are counted in `threat_intel_siem_events_total{action,outcome}`. `TI_SIEM_HOSTNAME` is now honoured too.
 - **Interactive installer did nothing in Docker and Native modes** — `scripts/installer/docker.sh` and `native.sh` only defined their function; the wizard executed them as scripts, which returned without installing anything. Both now run their entry point when executed directly.
 
 ## [0.9.15] - 2026-09-22
