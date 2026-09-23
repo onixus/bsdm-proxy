@@ -428,7 +428,7 @@ impl PolicyEngine {
         };
 
         let snapshot = handle.load();
-        let engine: &Arc<AclEngine> = &*snapshot;
+        let engine: &Arc<AclEngine> = &snapshot;
         let dimensions = self.cached_acl_dimensions(engine);
         self.evaluate_with_acl(
             Some(engine.as_ref()),
