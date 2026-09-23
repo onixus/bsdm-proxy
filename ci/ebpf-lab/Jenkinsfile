@@ -18,6 +18,9 @@ pipeline {
         timeout(time: 60, unit: 'MINUTES')
         disableConcurrentBuilds()
         buildDiscarder(logRotator(numToKeepStr: '20'))
+        // Every stage checks out explicitly: the agent cannot reach the
+        // controller's /Users/... path, so it gets the sources via stash.
+        skipDefaultCheckout()
     }
     stages {
         stage('Checkout') {
