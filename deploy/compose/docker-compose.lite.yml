@@ -35,6 +35,9 @@ services:
       - INDEX_STORE=sqlite
       - SQLITE_PATH=/var/lib/cache-indexer/events.db
       - SQLITE_MAX_ROWS=1000000
+      - SQLITE_WRITE_QUEUE_CAPACITY=64
+      - SQLITE_BATCH_MAX_EVENTS=500
+      - SQLITE_BUSY_TIMEOUT_MS=5000
       - METRICS_PORT=8080
       - SEARCH_API_ENABLED=true
       - SEARCH_API_ALLOW_INSECURE=true
