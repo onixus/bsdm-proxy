@@ -329,6 +329,7 @@ pub async fn start_pac_server(
     state.reload_bypass_file().await;
 
     let bind = listener.local_addr()?;
+    let bypass_domains = state.document.read().await.domain_count;
     info!(
         bind = %bind,
         proxy = %state.config.proxy,
@@ -339,6 +340,7 @@ pub async fn start_pac_server(
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "<none>".to_string()),
         reload_seconds = state.config.reload_interval.as_secs(),
+        bypass_domains = bypass_domains,
         "PAC server listening on /proxy.pac and /wpad.dat"
     );
 
