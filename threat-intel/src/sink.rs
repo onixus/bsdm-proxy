@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 pub trait IndicatorSink: Send + Sync {
     /// Replace the snapshot for `source` with `indicators`.
@@ -98,11 +99,22 @@ impl IndicatorSink for JsonlFileSink {
 pub struct SqliteSink {
     storage: crate::storage::SqliteStorage,
     ttl_secs: i64,
+    siem: Option<Arc<crate::siem::SiemEmitter>>,
 }
 
 impl SqliteSink {
     pub fn new(storage: crate::storage::SqliteStorage, ttl_secs: i64) -> Self {
-        Self { storage, ttl_secs }
+        Self {
+            storage,
+            ttl_secs,
+            siem: None,
+        }
+    }
+
+    /// Reports every newly stored indicator as a SIEM `detected` event.
+    pub fn with_siem(mut self, siem: Arc<crate::siem::SiemEmitter>) -> Self {
+        self.siem = Some(siem);
+        self
     }
 
     pub fn storage(&self) -> &crate::storage::SqliteStorage {
@@ -119,9 +131,22 @@ impl IndicatorSink for SqliteSink {
             })
             .collect();
 
-        self.storage
-            .upsert_batch(&normalized, self.ttl_secs)
+        let (_, inserted) = self
+            .storage
+            .upsert_batch_tracking(&normalized, self.ttl_secs)
             .map_err(std::io::Error::other)?;
+
+        if let Some(siem) = &self.siem {
+            if siem.wants(crate::siem::SiemEventAction::Detected) {
+                for (index, confidence) in inserted {
+                    siem.emit(crate::siem::SiemEvent::from_normalized(
+                        &normalized[index],
+                        confidence,
+                        crate::siem::SiemEventAction::Detected,
+                    ));
+                }
+            }
+        }
 
         Ok(())
     }
