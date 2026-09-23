@@ -1,15 +1,18 @@
 //! Prometheus metrics for cache-indexer backends.
 
-use prometheus::{
-    CounterVec, Histogram, HistogramOpts, IntCounter, IntGauge, Opts, Registry,
-};
+use prometheus::{CounterVec, Histogram, HistogramOpts, IntCounter, IntGauge, Opts, Registry};
 use std::time::Instant;
 
 #[derive(Clone)]
 pub struct IndexerMetrics {
     registry: Registry,
+    // Only the Kafka ingest loop records inserts; without it the series stay
+    // registered (a stable /metrics surface) but nothing needs the handles.
+    #[cfg(feature = "kafka")]
     pub inserts_total: CounterVec,
+    #[cfg(feature = "kafka")]
     pub insert_errors_total: CounterVec,
+    #[cfg(feature = "kafka")]
     pub batch_duration_seconds: Histogram,
     pub sqlite_writer_queue_depth: IntGauge,
     pub sqlite_writer_saturation_total: IntCounter,
@@ -57,7 +60,9 @@ impl IndexerMetrics {
                 "cache_indexer_sqlite_writer_batch_events",
                 "Number of events committed by one SQLite writer transaction",
             )
-            .buckets(vec![1.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1_000.0, 5_000.0]),
+            .buckets(vec![
+                1.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1_000.0, 5_000.0,
+            ]),
         )?;
         let sqlite_writer_batch_requests = Histogram::with_opts(
             HistogramOpts::new(
@@ -72,8 +77,7 @@ impl IndexerMetrics {
                 "Time spent executing and committing a SQLite writer transaction",
             )
             .buckets(vec![
-                0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0,
-                2.5, 5.0,
+                0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0,
             ]),
         )?;
 
@@ -89,8 +93,11 @@ impl IndexerMetrics {
 
         Ok(Self {
             registry,
+            #[cfg(feature = "kafka")]
             inserts_total,
+            #[cfg(feature = "kafka")]
             insert_errors_total,
+            #[cfg(feature = "kafka")]
             batch_duration_seconds,
             sqlite_writer_queue_depth,
             sqlite_writer_saturation_total,
@@ -101,6 +108,7 @@ impl IndexerMetrics {
         })
     }
 
+    #[cfg(feature = "kafka")]
     pub fn record_success(&self, backend: &str, count: usize, started: Instant) {
         self.inserts_total
             .with_label_values(&[backend])
@@ -109,6 +117,7 @@ impl IndexerMetrics {
             .observe(started.elapsed().as_secs_f64());
     }
 
+    #[cfg(feature = "kafka")]
     pub fn record_error(&self, backend: &str) {
         self.insert_errors_total.with_label_values(&[backend]).inc();
     }

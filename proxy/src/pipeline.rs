@@ -11,6 +11,7 @@ use crate::metrics::Metrics;
 
 pub use bsdm_events::CacheEvent;
 
+#[cfg(feature = "kafka")]
 const DEFAULT_KAFKA_MAX_IN_FLIGHT: usize = 256;
 const DEFAULT_HTTP_MAX_IN_FLIGHT: usize = 16;
 
@@ -125,44 +126,38 @@ mod kafka_pipeline {
         pub fn spawn(brokers: &str, topic: String, metrics: Arc<Metrics>) -> Option<Arc<Self>> {
             let producer = create_kafka_producer(brokers)?;
             let capacity = queue_capacity_from_env();
-            let max_in_flight = positive_usize_from_env(
-                "KAFKA_MAX_IN_FLIGHT",
-                DEFAULT_KAFKA_MAX_IN_FLIGHT,
-            );
+            let max_in_flight =
+                positive_usize_from_env("KAFKA_MAX_IN_FLIGHT", DEFAULT_KAFKA_MAX_IN_FLIGHT);
             let (sender, receiver) = mpsc::channel::<CacheEvent>(capacity);
             let producer_worker = producer.clone();
             let metrics_worker = metrics.clone();
             let topic_worker: Arc<str> = Arc::from(topic);
 
-            tokio::spawn(run_bounded_workers(
-                receiver,
-                max_in_flight,
-                move |event| {
-                    let producer = producer_worker.clone();
-                    let metrics = metrics_worker.clone();
-                    let topic = Arc::clone(&topic_worker);
-                    async move {
-                        match serde_json::to_string(&event) {
-                            Ok(payload) => {
-                                let record = FutureRecord::to(topic.as_ref())
-                                    .payload(&payload)
-                                    .key(&event.event_id);
-                                match producer.send(record, Duration::ZERO).await {
-                                    Ok(_) => metrics.kafka_events_sent.inc(),
-                                    Err((e, _)) => {
-                                        warn!("Kafka send failed: {}", e);
-                                        metrics.kafka_send_errors.inc();
-                                    }
+            tokio::spawn(run_bounded_workers(receiver, max_in_flight, move |event| {
+                let producer = producer_worker.clone();
+                let metrics = metrics_worker.clone();
+                let topic = Arc::clone(&topic_worker);
+                async move {
+                    match serde_json::to_string(&event) {
+                        Ok(payload) => {
+                            let record = FutureRecord::to(topic.as_ref())
+                                .payload(&payload)
+                                .key(&event.event_id);
+                            match producer.send(record, Duration::ZERO).await {
+                                Ok(_) => metrics.kafka_events_sent.inc(),
+                                Err((e, _)) => {
+                                    warn!("Kafka send failed: {}", e);
+                                    metrics.kafka_send_errors.inc();
                                 }
                             }
-                            Err(e) => {
-                                error!("Event serialization failed: {}", e);
-                                metrics.kafka_send_errors.inc();
-                            }
+                        }
+                        Err(e) => {
+                            error!("Event serialization failed: {}", e);
+                            metrics.kafka_send_errors.inc();
                         }
                     }
-                },
-            ));
+                }
+            }));
 
             info!(
                 "Kafka event pipeline started (queue capacity={}, max in-flight={}, drop=policy:drop_new)",
@@ -215,58 +210,51 @@ impl HttpEventPipeline {
             .build()
             .ok()?;
         let capacity = queue_capacity_from_env();
-        let max_in_flight = positive_usize_from_env(
-            "EVENT_SINK_MAX_IN_FLIGHT",
-            DEFAULT_HTTP_MAX_IN_FLIGHT,
-        );
+        let max_in_flight =
+            positive_usize_from_env("EVENT_SINK_MAX_IN_FLIGHT", DEFAULT_HTTP_MAX_IN_FLIGHT);
         let (sender, receiver) = mpsc::channel::<CacheEvent>(capacity);
         let metrics_worker = metrics.clone();
         let url_worker: Arc<str> = Arc::from(url.clone());
         let token_worker = token.map(Arc::<str>::from);
 
-        tokio::spawn(run_bounded_workers(
-            receiver,
-            max_in_flight,
-            move |event| {
-                let client = client.clone();
-                let metrics = metrics_worker.clone();
-                let url = Arc::clone(&url_worker);
-                let token = token_worker.clone();
-                async move {
-                    match serde_json::to_vec(&event) {
-                        Ok(payload) => {
-                            let mut req = client
-                                .post(url.as_ref())
-                                .header("Content-Type", "application/json")
-                                .body(payload);
-                            if let Some(token) = token.as_deref() {
-                                req = req.bearer_auth(token);
-                            }
-                            match req.send().await {
-                                Ok(resp)
-                                    if resp.status().is_success()
-                                        || resp.status().as_u16() == 202 =>
-                                {
-                                    metrics.kafka_events_sent.inc();
-                                }
-                                Ok(resp) => {
-                                    warn!("EVENT_SINK_URL HTTP {}", resp.status());
-                                    metrics.kafka_send_errors.inc();
-                                }
-                                Err(e) => {
-                                    warn!("EVENT_SINK_URL send failed: {e}");
-                                    metrics.kafka_send_errors.inc();
-                                }
-                            }
+        tokio::spawn(run_bounded_workers(receiver, max_in_flight, move |event| {
+            let client = client.clone();
+            let metrics = metrics_worker.clone();
+            let url = Arc::clone(&url_worker);
+            let token = token_worker.clone();
+            async move {
+                match serde_json::to_vec(&event) {
+                    Ok(payload) => {
+                        let mut req = client
+                            .post(url.as_ref())
+                            .header("Content-Type", "application/json")
+                            .body(payload);
+                        if let Some(token) = token.as_deref() {
+                            req = req.bearer_auth(token);
                         }
-                        Err(e) => {
-                            error!("Event serialization failed: {}", e);
-                            metrics.kafka_send_errors.inc();
+                        match req.send().await {
+                            Ok(resp)
+                                if resp.status().is_success() || resp.status().as_u16() == 202 =>
+                            {
+                                metrics.kafka_events_sent.inc();
+                            }
+                            Ok(resp) => {
+                                warn!("EVENT_SINK_URL HTTP {}", resp.status());
+                                metrics.kafka_send_errors.inc();
+                            }
+                            Err(e) => {
+                                warn!("EVENT_SINK_URL send failed: {e}");
+                                metrics.kafka_send_errors.inc();
+                            }
                         }
                     }
+                    Err(e) => {
+                        error!("Event serialization failed: {}", e);
+                        metrics.kafka_send_errors.inc();
+                    }
                 }
-            },
-        ));
+            }
+        }));
 
         info!(
             "HTTP event sink started (url={url}, queue capacity={capacity}, max in-flight={max_in_flight}, drop=policy:drop_new)"
