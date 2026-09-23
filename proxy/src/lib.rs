@@ -40,6 +40,7 @@ pub mod metrics;
 pub mod miss_coalesce;
 pub mod mitm_breaker;
 pub mod oidc;
+pub mod pac;
 pub mod peer_discovery;
 pub mod peer_fetch;
 pub mod peers;
@@ -111,6 +112,7 @@ pub use mitm_breaker::{
     TrippedInfo,
 };
 pub use oidc::{IdentityClaims, OidcRegistry, Provider as OidcProvider, ProviderKind};
+pub use pac::start_pac_server;
 pub use peer_discovery::{run_peer_discovery, PeerDiscoveryConfig};
 pub use peer_fetch::{fetch_via_peer, PeerFetchError, PeerTlsConfig};
 pub use peers::{CachePeer, PeerConfig, PeerRegistry, PeerType, ReplaceStaticStats};
