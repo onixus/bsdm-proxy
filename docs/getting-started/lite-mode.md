@@ -39,10 +39,42 @@ curl 'http://127.0.0.1:8080/api/search?domain=httpbin.org&limit=5'
 | Env | Default | Description |
 |-----|---------|-------------|
 | `SQLITE_PATH` | `/var/lib/cache-indexer/events.db` | File or `:memory:` |
-| `SQLITE_MAX_ROWS` | `1000000` | Prune oldest when exceeded |
+| `SQLITE_MAX_ROWS` | `1000000` | Prune oldest rows atomically when exceeded |
+| `SQLITE_WRITE_QUEUE_CAPACITY` | `64` | Maximum queued HTTP/Kafka ingest requests waiting for the SQLite writer |
+| `SQLITE_BATCH_MAX_EVENTS` | `500` | Target ceiling for opportunistically coalesced events per writer transaction; one large request is never split |
+| `SQLITE_BUSY_TIMEOUT_MS` | `5000` | How long SQLite waits for a database lock before returning an error |
 | `KAFKA_BROKERS` | unset = off | Optional Kafka → store |
 | `EVENT_SINK_URL` | — | Proxy → `POST /api/events` |
 | `EVENT_SINK_TOKEN` / `INGEST_API_TOKEN` | — | Optional Bearer |
+
+## SQLite concurrency model
+
+Lite mode keeps SQLite out of Tokio worker threads:
+
+```text
+HTTP ingest / Kafka consumer
+          │
+          ▼
+ bounded write-request queue
+          │
+          ▼
+ dedicated blocking writer actor ── one transaction for queued requests
+          │
+          └── WAL database ── separate read connection via spawn_blocking
+```
+
+The writer is lossless within the process: when the bounded queue is full, ingest waits instead of dropping accepted events. HTTP `202` and Kafka offset commits are emitted only after SQLite commits the transaction. Under burst load, queued requests are combined into fewer transactions; under light load, the first request is committed immediately rather than waiting for a batching timer.
+
+Watch these Prometheus metrics on the indexer `/metrics` endpoint:
+
+- `cache_indexer_sqlite_writer_queue_depth`
+- `cache_indexer_sqlite_writer_saturation_total`
+- `cache_indexer_sqlite_writer_errors_total`
+- `cache_indexer_sqlite_writer_batch_events`
+- `cache_indexer_sqlite_writer_batch_requests`
+- `cache_indexer_sqlite_writer_commit_duration_seconds`
+
+A rising saturation counter with sustained queue depth means SQLite cannot keep up. Increase `SQLITE_BATCH_MAX_EVENTS` only while commit latency remains acceptable; increasing queue capacity merely stores overload in RAM, a traditional human technique for postponing bad news.
 
 ## Full analytics stack
 
@@ -52,4 +84,5 @@ Root [`docker-compose.yml`](../../docker-compose.yml): Kafka → ClickHouse → 
 
 - [x] `cache-indexer` without mandatory Kafka/ClickHouse (`INDEX_STORE` + HTTP ingest)
 - [x] SQLite / in-memory metadata store
+- [x] Bounded SQLite writer actor with isolated WAL reads
 - [x] Cargo features to drop `rdkafka` from Lite binary (B21 / #52) — `cargo build --no-default-features --features auth-basic -p bsdm-proxy`
