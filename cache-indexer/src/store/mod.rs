@@ -10,6 +10,7 @@ use bsdm_events::CacheEvent;
 use std::sync::Arc;
 
 use crate::clickhouse::ClickHouseWriter;
+use crate::metrics::IndexerMetrics;
 
 #[derive(Debug, Clone)]
 pub struct SearchQuery {
@@ -92,7 +93,7 @@ impl EventStore {
                 s.insert_batch(events);
                 Ok(())
             }
-            Self::Sqlite(s) => s.insert_batch(events),
+            Self::Sqlite(s) => s.insert_batch(events).await,
             Self::ClickHouse(w) => w
                 .insert_batch(events)
                 .await
@@ -106,7 +107,7 @@ impl EventStore {
     ) -> Result<Vec<SearchHit>, Box<dyn std::error::Error + Send + Sync>> {
         match self {
             Self::Memory(s) => Ok(s.search(query)),
-            Self::Sqlite(s) => s.search(query),
+            Self::Sqlite(s) => s.search(query).await,
             Self::ClickHouse(w) => search_clickhouse(w, query).await,
         }
     }
@@ -210,7 +211,9 @@ fn json_u64(v: &serde_json::Value, key: &str) -> Option<u64> {
     })
 }
 
-pub fn open_from_env() -> Result<Arc<EventStore>, Box<dyn std::error::Error + Send + Sync>> {
+pub async fn open_from_env(
+    metrics: Arc<IndexerMetrics>,
+) -> Result<Arc<EventStore>, Box<dyn std::error::Error + Send + Sync>> {
     let kind = std::env::var("INDEX_STORE")
         .unwrap_or_else(|_| "clickhouse".into())
         .to_ascii_lowercase();
@@ -223,7 +226,9 @@ pub fn open_from_env() -> Result<Arc<EventStore>, Box<dyn std::error::Error + Se
             let path = std::env::var("SQLITE_PATH")
                 .unwrap_or_else(|_| "/var/lib/cache-indexer/events.db".into());
             let max = env_usize("SQLITE_MAX_ROWS", 1_000_000);
-            Ok(Arc::new(EventStore::Sqlite(SqliteStore::open(&path, max)?)))
+            Ok(Arc::new(EventStore::Sqlite(
+                SqliteStore::open(&path, max, metrics).await?,
+            )))
         }
         "clickhouse" => Err("clickhouse store is bootstrapped separately".into()),
         other => Err(format!("unknown INDEX_STORE={other} (memory|sqlite|clickhouse)").into()),
