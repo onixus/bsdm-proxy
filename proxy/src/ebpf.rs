@@ -23,11 +23,11 @@ use tracing::{debug, error, info, warn};
 pub const COMPILED_MAX_ENTRIES: u32 = 65536;
 
 /// Name of the IPv4 blocklist map declared by `bpf/xdp_drop.c`.
+///
+/// Only a label for the API: the kernel truncates map names to 15 characters,
+/// which turns both blocklists into `bsdm_blocked_ip`. The manager therefore
+/// never looks maps up by name — see [`KernelMaps`].
 pub const MAP_NAME_V4: &str = "bsdm_blocked_ips";
-/// Name of the IPv6 blocklist map declared by `bpf/xdp_drop.c`.
-pub const MAP_NAME_V6: &str = "bsdm_blocked_ips_v6";
-/// Name of the global drop-counter array map declared by `bpf/xdp_drop.c`.
-pub const MAP_NAME_STATS: &str = "bsdm_drop_stats";
 
 /// Minimum interval between two `bpftool map dump` sweeps, so that a burst of
 /// control-plane requests cannot turn into a burst of subprocesses.
@@ -240,6 +240,29 @@ struct ManagerInner {
     dropped_bytes: AtomicU64,
     attached: AtomicBool,
     last_stats_refresh: Mutex<Option<Instant>>,
+    /// Kernel ids of the maps owned by the attached program; `None` while
+    /// nothing is attached.
+    kernel_maps: Mutex<Option<KernelMaps>>,
+}
+
+/// Kernel ids of the three maps declared by `bpf/xdp_drop.c`.
+///
+/// Resolved from the program attached to the interface instead of by name:
+/// the kernel keeps only 15 characters of a map name, so `bsdm_blocked_ips`
+/// and `bsdm_blocked_ips_v6` both become `bsdm_blocked_ip`, and a name lookup
+/// would also pick up maps left behind by any other loaded copy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct KernelMaps {
+    v4: u32,
+    v6: u32,
+    stats: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MapRole {
+    BlockV4,
+    BlockV6,
+    Stats,
 }
 
 impl Drop for ManagerInner {
@@ -255,6 +278,28 @@ impl Drop for ManagerInner {
         };
         detach_kernel_program(&cfg);
     }
+}
+
+/// clang arguments that build `bpf/xdp_drop.c` into a loadable object.
+///
+/// `-target bpf` has no system include path of its own, so on Debian/Ubuntu,
+/// where `<asm/types.h>` lives under the multiarch directory, the build fails
+/// with "'asm/types.h' file not found" unless that directory is added.
+///
+/// `-g` is not optional: the maps are declared BTF-style in `.maps`, and libbpf
+/// (which `ip link ... obj` uses) refuses such an object without BTF — "BTF is
+/// required, but is missing or corrupted".
+fn bpf_clang_args(src: &str, obj: &str) -> Vec<String> {
+    let mut args: Vec<String> = ["-O2", "-g", "-target", "bpf"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let multiarch = format!("/usr/include/{}-linux-gnu", std::env::consts::ARCH);
+    if std::path::Path::new(&multiarch).is_dir() {
+        args.push(format!("-I{multiarch}"));
+    }
+    args.extend(["-c", src, "-o", obj].iter().map(|s| s.to_string()));
+    args
 }
 
 fn detach_kernel_program(config: &EbpfXdpConfig) {
@@ -300,6 +345,7 @@ impl EbpfXdpManager {
                 dropped_bytes: AtomicU64::new(0),
                 attached: AtomicBool::new(false),
                 last_stats_refresh: Mutex::new(None),
+                kernel_maps: Mutex::new(None),
             }),
         };
 
@@ -328,15 +374,7 @@ impl EbpfXdpManager {
         if !std::path::Path::new("bpf/xdp_drop.o").exists() {
             info!("Compiling bpf/xdp_drop.c to BPF bytecode...");
             let out = Command::new("clang")
-                .args([
-                    "-O2",
-                    "-target",
-                    "bpf",
-                    "-c",
-                    "bpf/xdp_drop.c",
-                    "-o",
-                    "bpf/xdp_drop.o",
-                ])
+                .args(bpf_clang_args("bpf/xdp_drop.c", "bpf/xdp_drop.o"))
                 .output();
             match out {
                 Ok(o) if o.status.success() => {
@@ -384,11 +422,27 @@ impl EbpfXdpManager {
             ])
             .output();
         match attach {
-            Ok(o) if o.status.success() => {
-                info!("Attached XDP program to {} successfully", config.interface);
-                self.inner.attached.store(true, Ordering::SeqCst);
-                true
-            }
+            Ok(o) if o.status.success() => match resolve_kernel_maps(&config.interface) {
+                Ok(maps) => {
+                    info!(
+                        "Attached XDP program to {} successfully (maps: v4 id {}, v6 id {}, stats id {})",
+                        config.interface, maps.v4, maps.v6, maps.stats
+                    );
+                    self.set_kernel_maps(Some(maps));
+                    self.inner.attached.store(true, Ordering::SeqCst);
+                    true
+                }
+                Err(e) => {
+                    // A program whose maps cannot be addressed would drop
+                    // nothing while the API reported an active filter.
+                    error!(
+                        "Attached XDP to {} but could not resolve its maps: {}; detaching",
+                        config.interface, e
+                    );
+                    detach_kernel_program(config);
+                    false
+                }
+            },
             Ok(o) => {
                 error!(
                     "Failed to attach XDP to {}: {}",
@@ -407,6 +461,17 @@ impl EbpfXdpManager {
     fn detach(&self, config: &EbpfXdpConfig) {
         detach_kernel_program(config);
         self.inner.attached.store(false, Ordering::SeqCst);
+        self.set_kernel_maps(None);
+    }
+
+    fn set_kernel_maps(&self, maps: Option<KernelMaps>) {
+        if let Ok(mut guard) = self.inner.kernel_maps.lock() {
+            *guard = maps;
+        }
+    }
+
+    fn kernel_maps(&self) -> Option<KernelMaps> {
+        self.inner.kernel_maps.lock().ok().and_then(|m| *m)
     }
 
     /// Formats an IP address as a hex string suitable for bpftool.
@@ -514,13 +579,6 @@ impl EbpfXdpManager {
         Ok(())
     }
 
-    fn map_name_for(&self, ip: &IpAddr) -> String {
-        match ip {
-            IpAddr::V4(_) => MAP_NAME_V4.to_string(),
-            IpAddr::V6(_) => MAP_NAME_V6.to_string(),
-        }
-    }
-
     /// Programs (or removes) a single address in the kernel map.
     ///
     /// Returns `Err` on any kernel-side failure so callers never report success
@@ -531,28 +589,27 @@ impl EbpfXdpManager {
             return Ok(());
         }
 
-        let map_name = self.map_name_for(ip);
-        let hex = Self::ip_to_hex(ip);
-        // Value layout must match `struct ip_drop_stats` in bpf/xdp_drop.c
-        // (two u64 counters, zero-initialised on insert).
-        let zero_value = vec!["00"; 16].join(" ");
+        let maps = self.kernel_maps().ok_or_else(|| {
+            "eBPF XDP program is not attached; no kernel map to program".to_string()
+        })?;
+        let map_id = match ip {
+            IpAddr::V4(_) => maps.v4,
+            IpAddr::V6(_) => maps.v6,
+        }
+        .to_string();
+        let key = Self::ip_to_hex(ip);
+        let action = if block { "update" } else { "delete" };
 
-        let args: Vec<&str> = if block {
-            vec![
-                "map",
-                "update",
-                "name",
-                &map_name,
-                "key",
-                "hex",
-                &hex,
-                "value",
-                "hex",
-                &zero_value,
-            ]
-        } else {
-            vec!["map", "delete", "name", &map_name, "key", "hex", &hex]
-        };
+        // bpftool takes every byte of a hex key/value as its own argument;
+        // "0a 63 00 02" passed as one string fails with "error parsing byte".
+        let mut args: Vec<&str> = vec!["map", action, "id", &map_id, "key", "hex"];
+        args.extend(key.split(' '));
+        if block {
+            // Value layout must match `struct ip_drop_stats` in bpf/xdp_drop.c
+            // (two u64 counters, zero-initialised on insert).
+            args.extend(["value", "hex"]);
+            args.extend(["00"; 16]);
+        }
 
         let out = Command::new("bpftool")
             .args(&args)
@@ -561,23 +618,22 @@ impl EbpfXdpManager {
 
         if !out.status.success() {
             let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
-            let action = if block { "update" } else { "delete" };
             error!(
-                "Failed to {} BPF map {} for {}: {}",
-                action, map_name, ip, stderr
+                "Failed to {} BPF map id {} for {}: {}",
+                action, map_id, ip, stderr
             );
             return Err(format!("bpftool map {} failed: {}", action, stderr));
         }
 
         if block {
             info!(
-                "eBPF XDP: Blocked IP {} synced to kernel BPF map {}",
-                ip, map_name
+                "eBPF XDP: Blocked IP {} synced to kernel BPF map id {}",
+                ip, map_id
             );
         } else {
             info!(
-                "eBPF XDP: Removed IP {} from kernel BPF map {}",
-                ip, map_name
+                "eBPF XDP: Removed IP {} from kernel BPF map id {}",
+                ip, map_id
             );
         }
         Ok(())
@@ -704,9 +760,12 @@ impl EbpfXdpManager {
             Err(_) => return false,
         }
 
+        let Some(maps) = self.kernel_maps() else {
+            return false;
+        };
         let mut refreshed = false;
 
-        if let Some(entries) = dump_map(MAP_NAME_STATS) {
+        if let Some(entries) = dump_map(maps.stats) {
             let mut packets = None;
             let mut bytes = None;
             for (key, value) in &entries {
@@ -730,8 +789,8 @@ impl EbpfXdpManager {
 
         // Per-address counters live in the value of each blocklist entry.
         let mut per_ip: HashMap<IpAddr, (u64, u64)> = HashMap::new();
-        for (map_name, is_v6) in [(MAP_NAME_V4, false), (MAP_NAME_V6, true)] {
-            let Some(entries) = dump_map(map_name) else {
+        for (map_id, is_v6) in [(maps.v4, false), (maps.v6, true)] {
+            let Some(entries) = dump_map(map_id) else {
                 continue;
             };
             for (key, value) in entries {
@@ -842,25 +901,95 @@ impl EbpfXdpManager {
     }
 }
 
-/// Runs `bpftool -j map dump name <map>` and returns raw (key, value) byte pairs.
-fn dump_map(map_name: &str) -> Option<Vec<(Vec<u8>, Vec<u8>)>> {
+/// Runs `bpftool -j <args>` and parses its JSON output.
+fn bpftool_json(args: &[&str]) -> Result<serde_json::Value, String> {
     let out = Command::new("bpftool")
-        .args(["-j", "map", "dump", "name", map_name])
+        .arg("-j")
+        .args(args)
         .output()
-        .map_err(|e| debug!("bpftool unavailable for map {}: {}", map_name, e))
-        .ok()?;
-
+        .map_err(|e| format!("failed to invoke bpftool: {e}"))?;
     if !out.status.success() {
-        debug!(
-            "bpftool map dump {} failed: {}",
-            map_name,
+        return Err(format!(
+            "bpftool {} failed: {}",
+            args.join(" "),
             String::from_utf8_lossy(&out.stderr).trim()
-        );
+        ));
+    }
+    serde_json::from_slice(&out.stdout)
+        .map_err(|e| format!("unparseable bpftool {} output: {e}", args.join(" ")))
+}
+
+/// Finds the maps of the XDP program currently attached to `iface`.
+fn resolve_kernel_maps(iface: &str) -> Result<KernelMaps, String> {
+    let net = bpftool_json(&["net", "show", "dev", iface])?;
+    let prog_id = xdp_prog_id(&net, iface)
+        .ok_or_else(|| format!("no XDP program reported on {iface}"))?
+        .to_string();
+    let prog = bpftool_json(&["prog", "show", "id", &prog_id])?;
+
+    let (mut v4, mut v6, mut stats) = (None, None, None);
+    for map_id in prog_map_ids(&prog) {
+        let info = bpftool_json(&["map", "show", "id", &map_id.to_string()])?;
+        match classify_map(&info) {
+            Some(MapRole::BlockV4) => v4 = Some(map_id),
+            Some(MapRole::BlockV6) => v6 = Some(map_id),
+            Some(MapRole::Stats) => stats = Some(map_id),
+            None => {}
+        }
+    }
+    match (v4, v6, stats) {
+        (Some(v4), Some(v6), Some(stats)) => Ok(KernelMaps { v4, v6, stats }),
+        _ => Err(format!(
+            "program {prog_id} lacks the expected maps (v4={v4:?}, v6={v6:?}, stats={stats:?})"
+        )),
+    }
+}
+
+/// Program id of the XDP attachment on `iface` from `bpftool -j net show`.
+fn xdp_prog_id(net: &serde_json::Value, iface: &str) -> Option<u32> {
+    net.as_array()?
+        .iter()
+        .filter_map(|section| section.get("xdp")?.as_array())
+        .flatten()
+        .find(|entry| entry.get("devname").and_then(|d| d.as_str()) == Some(iface))
+        .and_then(|entry| entry.get("id")?.as_u64())
+        .and_then(|id| u32::try_from(id).ok())
+}
+
+/// `map_ids` of a program from `bpftool -j prog show id <id>`.
+fn prog_map_ids(prog: &serde_json::Value) -> Vec<u32> {
+    prog.get("map_ids")
+        .and_then(|ids| ids.as_array())
+        .map(|ids| {
+            ids.iter()
+                .filter_map(|id| id.as_u64().and_then(|id| u32::try_from(id).ok()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Recognises the maps of `bpf/xdp_drop.c` by shape, since their names are
+/// truncated and ambiguous in the kernel.
+fn classify_map(info: &serde_json::Value) -> Option<MapRole> {
+    let name = info.get("name")?.as_str()?;
+    if !name.starts_with("bsdm_") {
         return None;
     }
+    let kind = info.get("type")?.as_str()?;
+    let key = info.get("bytes_key")?.as_u64()?;
+    let value = info.get("bytes_value")?.as_u64()?;
+    match (kind, key, value) {
+        ("hash", 4, 16) => Some(MapRole::BlockV4),
+        ("hash", 16, 16) => Some(MapRole::BlockV6),
+        ("array", 4, 8) => Some(MapRole::Stats),
+        _ => None,
+    }
+}
 
-    let parsed: serde_json::Value = serde_json::from_slice(&out.stdout)
-        .map_err(|e| warn!("Unparseable bpftool output for {}: {}", map_name, e))
+/// Runs `bpftool -j map dump id <id>` and returns raw (key, value) byte pairs.
+fn dump_map(map_id: u32) -> Option<Vec<(Vec<u8>, Vec<u8>)>> {
+    let parsed = bpftool_json(&["map", "dump", "id", &map_id.to_string()])
+        .map_err(|e| debug!("BPF map id {} not readable: {}", map_id, e))
         .ok()?;
 
     let entries = parsed.as_array()?;
@@ -1244,6 +1373,42 @@ mod tests {
         );
         assert_eq!(le_u64(&[1, 0, 0, 0, 0, 0, 0, 0]), Some(1));
         assert_eq!(le_u32(&[2, 0, 0, 0]), Some(2));
+    }
+
+    #[test]
+    fn test_kernel_map_resolution_parsing() {
+        // Shapes as printed by bpftool v7 (`-j net show`, `prog show`, `map show`).
+        let net: serde_json::Value = serde_json::from_str(
+            r#"[{"xdp":[{"devname":"lo","ifindex":1,"mode":"generic","id":7},
+                       {"devname":"xdp0","ifindex":4,"mode":"generic","id":42}],
+                 "tc":[],"flow_dissector":[],"netfilter":[]}]"#,
+        )
+        .expect("json");
+        assert_eq!(xdp_prog_id(&net, "xdp0"), Some(42));
+        assert_eq!(xdp_prog_id(&net, "eth0"), None);
+
+        let prog: serde_json::Value =
+            serde_json::from_str(r#"{"id":42,"type":"xdp","map_ids":[11,12,13]}"#).expect("json");
+        assert_eq!(prog_map_ids(&prog), vec![11, 12, 13]);
+
+        let map = |name: &str, kind: &str, key: u64, value: u64| {
+            serde_json::json!({"id": 1, "type": kind, "name": name,
+                               "bytes_key": key, "bytes_value": value})
+        };
+        // Both blocklists share the truncated name; only the shape tells them apart.
+        assert_eq!(
+            classify_map(&map("bsdm_blocked_ip", "hash", 4, 16)),
+            Some(MapRole::BlockV4)
+        );
+        assert_eq!(
+            classify_map(&map("bsdm_blocked_ip", "hash", 16, 16)),
+            Some(MapRole::BlockV6)
+        );
+        assert_eq!(
+            classify_map(&map("bsdm_drop_stats", "array", 4, 8)),
+            Some(MapRole::Stats)
+        );
+        assert_eq!(classify_map(&map("xdp_drop.bss", "array", 4, 8)), None);
     }
 
     #[test]

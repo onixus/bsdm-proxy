@@ -15,6 +15,11 @@
 # Usage:
 #   sudo EBPF_IFACE=eth0 CONTROL_API_TOKEN=... ./scripts/run-ebpf-lab-smoke.sh
 #   EBPF_SKIP_KERNEL=1 CONTROL_API_TOKEN=... ./scripts/run-ebpf-lab-smoke.sh  # API-only
+#
+# Datapath check (optional): with EBPF_PROBE_NETNS set, the script pings
+# EBPF_PROBE_TARGET[_V6] from that network namespace, whose addresses must be
+# EBPF_TEST_IP[_V6], and asserts that the XDP program really drops the traffic
+# while the addresses are blocked. ci/ebpf-lab/run.sh builds such a topology.
 set -euo pipefail
 
 API_URL="${EBPF_API_URL:-http://127.0.0.1:9090}"
@@ -28,6 +33,19 @@ TIMEOUT="${TIMEOUT:-10}"
 SKIP_KERNEL="${EBPF_SKIP_KERNEL:-0}"
 BPF_OBJ="${EBPF_OBJ:-bpf/xdp_drop.o}"
 BPF_SRC="${EBPF_SRC:-bpf/xdp_drop.c}"
+PROBE_NS="${EBPF_PROBE_NETNS:-}"
+PROBE_TARGET="${EBPF_PROBE_TARGET:-}"
+PROBE_TARGET_V6="${EBPF_PROBE_TARGET_V6:-}"
+
+xdp_attached() { # grepping `ip link` for "xdp" also matches interface names like xdp0
+  ip -d link show dev "$IFACE" | grep -q 'prog/xdp id'
+}
+
+probe() { # probe <target> → 0 if at least one echo reply came back
+  local target="$1" v6=()
+  [[ "$target" == *:* ]] && v6=(-6)
+  ip netns exec "$PROBE_NS" ping ${v6[@]+"${v6[@]}"} -c 3 -i 0.2 -W 1 "$target" >/dev/null 2>&1
+}
 
 skip() {
   echo "⏭  SKIP: $*"
@@ -115,11 +133,16 @@ cleanup() {
 trap cleanup EXIT
 
 # --- Optional: build the BPF object before the proxy needs it ------------
-if [[ "$SKIP_KERNEL" != "1" ]]; then
+# EBPF_PREBUILD=0 leaves the build to the proxy, exercising its own compile path.
+if [[ "$SKIP_KERNEL" != "1" ]] && [[ "${EBPF_PREBUILD:-1}" == "1" ]]; then
   if [[ ! -f "$BPF_OBJ" ]]; then
     [[ -f "$BPF_SRC" ]] || fail "${BPF_SRC} not found (run from the repo root)"
     echo "— compiling ${BPF_SRC} → ${BPF_OBJ}"
-    clang -O2 -target bpf -c "$BPF_SRC" -o "$BPF_OBJ" || fail "clang failed to build ${BPF_OBJ}"
+    # Same flags as bpf_clang_args() in proxy/src/ebpf.rs.
+    cflags=(-O2 -g -target bpf)  # -g: libbpf needs BTF for .maps
+    multiarch="/usr/include/$(uname -m)-linux-gnu"
+    [[ -d "$multiarch" ]] && cflags+=("-I${multiarch}")
+    clang "${cflags[@]}" -c "$BPF_SRC" -o "$BPF_OBJ" || fail "clang failed to build ${BPF_OBJ}"
   fi
   echo "✅ BPF object present: ${BPF_OBJ}"
 fi
@@ -156,14 +179,31 @@ echo "✅ PUT /api/ebpf/config (enabled) → $(cat "$TMP_BODY")"
 
 # --- 3. Kernel-side attachment -------------------------------------------
 if [[ "$SKIP_KERNEL" != "1" ]]; then
-  if ip link show dev "$IFACE" | grep -qi 'xdp'; then
+  if xdp_attached; then
     echo "✅ XDP program attached to ${IFACE}"
   else
     fail "no XDP program on ${IFACE} after enabling (check proxy logs)"
   fi
-  bpftool map show name bsdm_blocked_ips >/dev/null 2>&1 \
-    || fail "BPF map bsdm_blocked_ips not visible to bpftool"
-  echo "✅ BPF maps visible (bsdm_blocked_ips)"
+  # Maps are found through the attached program, not by name: the kernel keeps
+  # 15 characters, so both blocklists show up as "bsdm_blocked_ip".
+  prog_id="$(ip -d link show dev "$IFACE" | grep -o 'prog/xdp id [0-9]*' | awk '{print $NF}' | head -1)"
+  [[ -n "$prog_id" ]] || fail "cannot read the XDP program id of ${IFACE}: $(ip -d link show dev "$IFACE")"
+  map_ids="$(bpftool prog show id "$prog_id" | grep -o 'map_ids [0-9,]*' | awk '{print $2}')"
+  [[ -n "$map_ids" ]] || fail "XDP program ${prog_id} reports no maps"
+  for map_id in ${map_ids//,/ }; do
+    bpftool map show id "$map_id" | head -1
+  done
+  n_maps="$(tr ',' '\n' <<<"$map_ids" | grep -c .)"
+  [[ "$n_maps" -ge 3 ]] || fail "XDP program ${prog_id} has ${n_maps} maps, expected 3"
+  echo "✅ XDP program ${prog_id} owns maps ${map_ids}"
+fi
+
+# --- 3b. Datapath baseline: peer reachable before anything is blocked ----
+if [[ -n "$PROBE_NS" && "$SKIP_KERNEL" != "1" ]]; then
+  for target in $PROBE_TARGET $PROBE_TARGET_V6; do
+    probe "$target" || fail "${target} unreachable from netns ${PROBE_NS} before blocking"
+  done
+  echo "✅ Datapath baseline: ${PROBE_TARGET} ${PROBE_TARGET_V6} reachable with XDP attached"
 fi
 
 # --- 4. POST /api/ebpf/ips (IPv4 + IPv6) ---------------------------------
@@ -182,6 +222,29 @@ echo "✅ GET /api/ebpf/ips lists both test addresses"
 code="$(api POST /api/ebpf/ips "{\"ip\":\"${TEST_IP}\"}")"
 [[ "$code" == "409" ]] || fail "duplicate block → HTTP ${code}, expected 409"
 echo "✅ Duplicate block rejected with 409"
+
+# --- 4b. Datapath: the kernel really drops the blocked sources ----------
+if [[ -n "$PROBE_NS" && "$SKIP_KERNEL" != "1" ]]; then
+  for target in $PROBE_TARGET $PROBE_TARGET_V6; do
+    if probe "$target"; then
+      fail "${target} still answers while the source is blocked — XDP is not dropping"
+    fi
+  done
+  echo "✅ Datapath: traffic from blocked sources is dropped"
+  sleep 1.1 # stats sweep is rate-limited to once per second
+  code="$(api GET /api/ebpf/stats)"
+  [[ "$code" == "200" ]] || fail "GET /api/ebpf/stats → HTTP ${code}"
+  dropped="$(grep -o '"packetsDroppedTotal":[0-9]*' "$TMP_BODY" | cut -d: -f2)"
+  [[ "${dropped:-0}" -gt 0 ]] || fail "packetsDroppedTotal=${dropped:-?} after dropped probes: $(cat "$TMP_BODY")"
+  echo "✅ Kernel drop counter: packetsDroppedTotal=${dropped}"
+  code="$(api GET /api/ebpf/ips)"
+  [[ "$code" == "200" ]] || fail "GET /api/ebpf/ips → HTTP ${code}"
+  if grep -q '"packetsDropped":[1-9]' "$TMP_BODY"; then
+    echo "✅ Per-address drop counters populated"
+  else
+    fail "per-address packetsDropped stayed 0: $(cat "$TMP_BODY")"
+  fi
+fi
 
 # --- 5. GET /api/ebpf/stats ----------------------------------------------
 code="$(api GET /api/ebpf/stats)"
@@ -204,12 +267,32 @@ for series in bsdm_proxy_ebpf_armed \
   echo "✅ ${series} = $(printf '%s\n' "$metrics" | grep "^${series} " | awk '{print $2}')"
 done
 
+# The reporter exports kernel drop deltas every 15 s; after real drops the
+# Prometheus counter must catch up with the kernel total.
+if [[ -n "$PROBE_NS" && "$SKIP_KERNEL" != "1" ]]; then
+  exported=0
+  for _ in $(seq 1 25); do
+    exported="$(curl -fsS --max-time "$TIMEOUT" "${auth[@]}" "${METRICS_URL}/metrics" \
+      | awk '$1 == "bsdm_proxy_ebpf_packets_dropped_total" {print int($2)}')"
+    [[ "${exported:-0}" -gt 0 ]] && break
+    sleep 1
+  done
+  [[ "${exported:-0}" -gt 0 ]] \
+    || fail "bsdm_proxy_ebpf_packets_dropped_total still ${exported:-?} 25 s after kernel drops"
+  echo "✅ Kernel drops reached Prometheus: bsdm_proxy_ebpf_packets_dropped_total=${exported}"
+fi
+
 # --- 7. DELETE /api/ebpf/ips ---------------------------------------------
 code="$(api DELETE "/api/ebpf/ips/${TEST_IP}")"
 [[ "$code" == "200" ]] || fail "DELETE /api/ebpf/ips/${TEST_IP} → HTTP ${code}"
 code="$(api DELETE "/api/ebpf/ips/${TEST_IP}")"
 [[ "$code" == "404" ]] || fail "second DELETE → HTTP ${code}, expected 404"
 echo "✅ DELETE by IP works and is idempotent-safe (404 on repeat)"
+
+if [[ -n "$PROBE_NS" && -n "$PROBE_TARGET" && "$SKIP_KERNEL" != "1" ]]; then
+  probe "$PROBE_TARGET" || fail "${PROBE_TARGET} still dropped after unblocking ${TEST_IP}"
+  echo "✅ Datapath: ${TEST_IP} passes again after unblock"
+fi
 
 code="$(api DELETE /api/ebpf/ips)"
 [[ "$code" == "200" ]] || fail "DELETE /api/ebpf/ips (clear) → HTTP ${code}"
@@ -220,7 +303,7 @@ code="$(api PUT /api/ebpf/config \
   "{\"enabled\":false,\"interface\":\"${IFACE}\",\"mode\":\"${MODE}\",\"mapName\":\"bsdm_blocked_ips\",\"maxEntries\":65536}")"
 [[ "$code" == "200" ]] || fail "PUT /api/ebpf/config (disable) → HTTP ${code}"
 if [[ "$SKIP_KERNEL" != "1" ]]; then
-  if ip link show dev "$IFACE" | grep -qi 'xdp'; then
+  if xdp_attached; then
     fail "XDP still attached to ${IFACE} after disable"
   fi
   echo "✅ XDP detached from ${IFACE}"
