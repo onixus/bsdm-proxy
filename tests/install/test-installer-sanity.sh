@@ -15,7 +15,8 @@ for file in \
   "scripts/installer/native.sh" \
   "scripts/installer/release.sh" \
   "scripts/install-release.sh" \
-  "scripts/installer/validation.sh"
+  "scripts/installer/validation.sh" \
+  "packaging/install.sh"
 do
   test -f "${ROOT}/${file}"
   bash -n "${ROOT}/${file}"
@@ -28,5 +29,19 @@ if grep -qE '^[[:space:]]*(source|\.)[[:space:]]' "${ROOT}/scripts/install-relea
   exit 1
 fi
 "${ROOT}/scripts/install-release.sh" --help >/dev/null
+
+# Every service advertised by the release installer must have the assets needed
+# to start. In particular, dns-sinkhole requires both an environment file and a
+# readable RPZ zone; silently installing only the binary leaves a broken unit.
+dns_unit="${ROOT}/packaging/systemd/bsdm-dns-sinkhole.service"
+test -f "$dns_unit"
+grep -Fq 'EnvironmentFile=/etc/bsdm-proxy/dns-sinkhole.env' "$dns_unit"
+grep -Fq 'ExecStart=/opt/bsdm-proxy/bin/dns-sinkhole' "$dns_unit"
+grep -Fq 'AmbientCapabilities=CAP_NET_BIND_SERVICE' "$dns_unit"
+grep -Fq 'dns-sinkhole.env.example' "${ROOT}/packaging/install.sh"
+grep -Fq 'blocklist.rpz.example' "${ROOT}/packaging/install.sh"
+grep -Fq 'examples/dns/blocklist.rpz' "${ROOT}/scripts/build-package.sh"
+test -f "${ROOT}/packaging/config/dns-sinkhole.env.example"
+test -f "${ROOT}/examples/dns/blocklist.rpz"
 
 echo "Installer sanity checks passed"
