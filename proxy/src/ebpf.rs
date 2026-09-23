@@ -257,6 +257,24 @@ impl Drop for ManagerInner {
     }
 }
 
+/// clang arguments that build `bpf/xdp_drop.c` into a loadable object.
+///
+/// `-target bpf` has no system include path of its own, so on Debian/Ubuntu,
+/// where `<asm/types.h>` lives under the multiarch directory, the build fails
+/// with "'asm/types.h' file not found" unless that directory is added.
+fn bpf_clang_args(src: &str, obj: &str) -> Vec<String> {
+    let mut args: Vec<String> = ["-O2", "-target", "bpf"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let multiarch = format!("/usr/include/{}-linux-gnu", std::env::consts::ARCH);
+    if std::path::Path::new(&multiarch).is_dir() {
+        args.push(format!("-I{multiarch}"));
+    }
+    args.extend(["-c", src, "-o", obj].iter().map(|s| s.to_string()));
+    args
+}
+
 fn detach_kernel_program(config: &EbpfXdpConfig) {
     if std::env::consts::OS != "linux" {
         return;
@@ -328,15 +346,7 @@ impl EbpfXdpManager {
         if !std::path::Path::new("bpf/xdp_drop.o").exists() {
             info!("Compiling bpf/xdp_drop.c to BPF bytecode...");
             let out = Command::new("clang")
-                .args([
-                    "-O2",
-                    "-target",
-                    "bpf",
-                    "-c",
-                    "bpf/xdp_drop.c",
-                    "-o",
-                    "bpf/xdp_drop.o",
-                ])
+                .args(bpf_clang_args("bpf/xdp_drop.c", "bpf/xdp_drop.o"))
                 .output();
             match out {
                 Ok(o) if o.status.success() => {

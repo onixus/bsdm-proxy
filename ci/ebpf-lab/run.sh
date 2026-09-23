@@ -80,6 +80,7 @@ EBPF_MODE=skb \
 EBPF_TEST_IP=10.99.0.2 \
 EBPF_TEST_IP_V6=fd99::2 \
 EBPF_PROBE_NETNS="$PEER_NS" \
+EBPF_PREBUILD=0 \
 EBPF_PROBE_TARGET=10.99.0.1 \
 EBPF_PROBE_TARGET_V6=fd99::1 \
   ./scripts/run-ebpf-lab-smoke.sh || rc=$?

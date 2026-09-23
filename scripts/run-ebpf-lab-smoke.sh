@@ -129,11 +129,16 @@ cleanup() {
 trap cleanup EXIT
 
 # --- Optional: build the BPF object before the proxy needs it ------------
-if [[ "$SKIP_KERNEL" != "1" ]]; then
+# EBPF_PREBUILD=0 leaves the build to the proxy, exercising its own compile path.
+if [[ "$SKIP_KERNEL" != "1" ]] && [[ "${EBPF_PREBUILD:-1}" == "1" ]]; then
   if [[ ! -f "$BPF_OBJ" ]]; then
     [[ -f "$BPF_SRC" ]] || fail "${BPF_SRC} not found (run from the repo root)"
     echo "— compiling ${BPF_SRC} → ${BPF_OBJ}"
-    clang -O2 -target bpf -c "$BPF_SRC" -o "$BPF_OBJ" || fail "clang failed to build ${BPF_OBJ}"
+    # Same flags as bpf_clang_args() in proxy/src/ebpf.rs.
+    cflags=(-O2 -target bpf)
+    multiarch="/usr/include/$(uname -m)-linux-gnu"
+    [[ -d "$multiarch" ]] && cflags+=("-I${multiarch}")
+    clang "${cflags[@]}" -c "$BPF_SRC" -o "$BPF_OBJ" || fail "clang failed to build ${BPF_OBJ}"
   fi
   echo "✅ BPF object present: ${BPF_OBJ}"
 fi
