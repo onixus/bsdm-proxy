@@ -262,8 +262,12 @@ impl Drop for ManagerInner {
 /// `-target bpf` has no system include path of its own, so on Debian/Ubuntu,
 /// where `<asm/types.h>` lives under the multiarch directory, the build fails
 /// with "'asm/types.h' file not found" unless that directory is added.
+///
+/// `-g` is not optional: the maps are declared BTF-style in `.maps`, and libbpf
+/// (which `ip link ... obj` uses) refuses such an object without BTF — "BTF is
+/// required, but is missing or corrupted".
 fn bpf_clang_args(src: &str, obj: &str) -> Vec<String> {
-    let mut args: Vec<String> = ["-O2", "-target", "bpf"]
+    let mut args: Vec<String> = ["-O2", "-g", "-target", "bpf"]
         .iter()
         .map(|s| s.to_string())
         .collect();

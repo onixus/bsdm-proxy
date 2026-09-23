@@ -135,7 +135,7 @@ if [[ "$SKIP_KERNEL" != "1" ]] && [[ "${EBPF_PREBUILD:-1}" == "1" ]]; then
     [[ -f "$BPF_SRC" ]] || fail "${BPF_SRC} not found (run from the repo root)"
     echo "— compiling ${BPF_SRC} → ${BPF_OBJ}"
     # Same flags as bpf_clang_args() in proxy/src/ebpf.rs.
-    cflags=(-O2 -target bpf)
+    cflags=(-O2 -g -target bpf)  # -g: libbpf needs BTF for .maps
     multiarch="/usr/include/$(uname -m)-linux-gnu"
     [[ -d "$multiarch" ]] && cflags+=("-I${multiarch}")
     clang "${cflags[@]}" -c "$BPF_SRC" -o "$BPF_OBJ" || fail "clang failed to build ${BPF_OBJ}"
