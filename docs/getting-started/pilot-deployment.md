@@ -106,7 +106,7 @@ curl -X POST http://127.0.0.1:9090/api/security/dlp \
 
 - [ ] `POLICY_MODE=selective-mitm`, `DEPLOYMENT_PROFILE=production`
 - [ ] `full-mitm` **не** используется (и не проходит без `ALLOW_FULL_MITM`)
-- [ ] MITM CA установлен на тестовых клиентах; `curl --cacert certs/ca.crt -x … https://…` работает
+- [ ] MITM CA установлен на тестовых клиентах; `curl --proxy-user pilot --cacert certs/ca.crt -x … https://…` работает
 - [ ] Pinning exceptions registry смонтирован (`PINNING_EXCEPTIONS_PATH`)
 - [ ] В метриках есть `bsdm_proxy_policy_decision_source_total` (после трафика)
 
@@ -252,7 +252,7 @@ docker compose -f docker-compose.yml -f deploy/compose/docker-compose.pilot.yml 
 
 curl -fsS http://127.0.0.1:9090/health
 curl -fsS http://127.0.0.1:9090/ready
-curl --cacert certs/ca.crt -x http://127.0.0.1:3128 https://httpbin.org/get
+curl --proxy-user pilot --cacert certs/ca.crt -x http://127.0.0.1:3128 https://httpbin.org/get
 curl -fsS 'http://127.0.0.1:8123/?query=SELECT+count()+FROM+bsdm.http_cache'
 curl -fsS 'http://127.0.0.1:8080/api/search?limit=5' \
   -H "Authorization: Bearer ${SEARCH_API_TOKEN}"

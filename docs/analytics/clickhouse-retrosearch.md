@@ -15,21 +15,23 @@
 ## 1. Быстрый старт
 
 ```bash
-# Запуск полного стека (Proxy + Kafka + ClickHouse + Indexer + Grafana)
+# Сначала CA, Basic users и токены по docs/getting-started/deployment.md.
+# Полный стек (Proxy + Kafka + ClickHouse + Indexer + Grafana):
 docker compose up -d --build
 
 # Проверка схемы таблиц ClickHouse
 curl 'http://127.0.0.1:8123/?query=SHOW+TABLES+FROM+bsdm'
 
 # Генерация тестового трафика
-curl -x http://127.0.0.1:3128 http://httpbin.org/get
+curl --proxy-user pilot -x http://127.0.0.1:3128 http://httpbin.org/get
 
 # Проверка записей в ClickHouse и через Search API
 curl 'http://127.0.0.1:8123/?query=SELECT+count()+FROM+bsdm.http_cache'
-curl 'http://127.0.0.1:8080/api/search?limit=5'
+curl -H "Authorization: Bearer $SEARCH_API_TOKEN" \
+  'http://127.0.0.1:8080/api/search?limit=5'
 ```
 
-* **Grafana Дашборды:** http://localhost:3000 (`admin/admin`) — готовые дашборды **BSDM HTTP Traffic (ClickHouse)** и метрики прокси.
+* **Grafana Дашборды:** http://localhost:3000 (`admin` / заданный `GRAFANA_ADMIN_PASSWORD`) — готовые дашборды **BSDM HTTP Traffic (ClickHouse)** и метрики прокси.
 * **REST Search API:** `http://localhost:8080/api/search` (поддерживает JSON и CSV выгрузки для SOC).
 
 ---
@@ -45,9 +47,9 @@ curl 'http://127.0.0.1:8080/api/search?limit=5'
 ### Поля таблицы `bsdm.http_cache`:
 | Поле | Тип | Описание |
 |------|-----|----------|
-| `ts` | `DateTime` | Метка времени запроса |
-| `event_id` | `UUID` | Уникальный ID события |
-| `client_ip` | `String` | IP-адрес клиента |
+| `ts` | `DateTime64(3, 'UTC')` | Метка времени запроса |
+| `event_id` | `String` | Уникальный ID события |
+| `client_ip` | `IPv4` | IP-адрес клиента |
 | `username` | `Nullable(String)` | Имя авторизованного пользователя |
 | `method` | `String` | HTTP метод (GET, POST и т.д.) |
 | `domain` | `String` | Домен целевого узла |
@@ -56,12 +58,15 @@ curl 'http://127.0.0.1:8080/api/search?limit=5'
 | `cache_status` | `String` | Статус кэша (HIT, MISS, REVALIDATED, COALESCED-HIT) |
 | `response_size` | `UInt64` | Размер ответа в байтах |
 | `categories` | `Array(String)` | Категории домена (UT1) |
-| `acl_action` | `String` | Действие ACL (allow, block) |
+| `acl_action` | `LowCardinality(Nullable(String))` | Действие ACL (allow, block) |
 | `decision_source` | `Nullable(String)` | Источник решения политики (`dns`, `sni`, `mitm`, `pinning-bypass`, `local-agent`) |
 | `bypass_reason` | `Nullable(String)` | Причина байпаса терминирования TLS (`connect_tunnel`, `certificate_pinning_exception`) |
 | `threat_sources` | `Array(String)` | Источники обнаруженных угроз (PhishTank, ML) |
 | `session_id` | `String` | Soft browsing ID сессии (IP + User + User-Agent) |
-| `parent_event_id` | `Nullable(UUID)` | ID родительского запроса (для цепочек редиректов) |
+| `parent_event_id` | `Nullable(String)` | ID родительского запроса (для цепочек редиректов) |
+| `threat_shadow_match` | `LowCardinality(Nullable(String))` | Имя фида при shadow-совпадении; не Boolean |
+| `acl_rule_id` / `acl_reason` | `Nullable(String)` | Совпавшее правило и объяснение решения |
+| `dlp_violation` / `casb_alert` | `Nullable(String)` | События frozen DLP/CASB |
 | `redirect_url` | `Nullable(String)` | Целевой URL при редиректе (`Location`) |
 
 ---

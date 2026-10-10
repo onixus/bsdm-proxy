@@ -50,8 +50,10 @@
 
 Уровень поддержки в релизе **v1.0** и значение по умолчанию в production-профиле
 ([`deploy/compose/docker-compose.prod.yml`](../deploy/compose/docker-compose.prod.yml), [`charts/bsdm/values-production.yaml`](../charts/bsdm/values-production.yaml)).
-GA означает: есть security boundary, тесты, документированный путь и безопасный
-prod-дефолт **в коде**. Beta/lab/frozen не входят в гарантии релиза. Порядок
+Метки GA ниже обозначают поддерживаемую область v1.0: security boundary, тесты,
+документированный путь и безопасный prod-дефолт **в коде**. Текущая версия
+остаётся RC; приёмка релиза и каждого развёртывания — отдельные
+[критерии выхода](roadmap.md#v10-ga--production-baseline-текущий-rc). Beta/lab/frozen не входят в гарантии релиза. Порядок
 развёртывания — [Production deployment](getting-started/production-deployment.md).
 
 | Компонент | GA v1.0 | Prod default | Условие / комментарий |
@@ -100,8 +102,8 @@ proxy за L4-балансировщиком (без общего кэша и с
 
 ## Известные ограничения
 
-1. `docker compose up` запускает analytics base, но не все опциональные профили.
-   `alert-worker`, `ml-worker`, DNS и ICAP включаются отдельно.
+1. `docker compose up` запускает analytics base **включая DNS sinkhole**.
+   `alert-worker`, `ml-worker`, ICAP и threat-intel включаются профилями.
 2. Поля `dlp_violation` и `casb_alert` интегрированы в схему ClickHouse и event mapper proxy.
 3. Для одновременного запуска нескольких ML-моделей нужны отдельные экземпляры
    `ml-worker` с разными значениями `ML_MODEL`.

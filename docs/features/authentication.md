@@ -9,10 +9,10 @@ BSDM-Proxy supports proxy authentication backends for access control.
 | Backend | Status | Build feature | Header |
 |---------|--------|---------------|--------|
 | **Basic** | ✅ Pilot day-1 | `auth-basic` (default) | `Proxy-Authorization: Basic` |
-| **LDAP** | ✅ | `auth-ldap` | `Basic` (username/password) |
+| **LDAP** | ✅ Beta | `auth-ldap` | `Basic` (username/password) |
 | **NTLM** | ✅ Beta | `auth-ntlm` | `NTLM` (multi-round) |
 | **Kerberos** | ✅ Beta | `auth-kerberos` | `Negotiate` / SPNEGO (multi-round) |
-| **OIDC** | ⚠ Experimental reverse-proxy only | default image | Browser OIDC for IAP (Google, Apple, any discovery-capable issuer) — **not** forward-proxy `AUTH_BACKEND` |
+| **OIDC** | ⚠ Experimental (Frozen), reverse-proxy only | default image | Browser OIDC for IAP (Google, Apple, any discovery-capable issuer) — **not** forward-proxy `AUTH_BACKEND` |
 
 Pilot runbook (users file, smoke, load-test): [pilot-auth.md](../getting-started/pilot-auth.md).
 
@@ -312,4 +312,6 @@ export OIDC_CORP_DISPLAY_NAME="Corporate SSO"
 - [x] Kerberos / SPNEGO with keytab
 - [x] LDAP group lookup after NTLM/Kerberos principal resolution
 - [x] Pilot Basic path + users file + smoke ([pilot-auth.md](../getting-started/pilot-auth.md))
-- [ ] Auth Prometheus metrics (`bsdm_proxy_auth_*`)
+- [x] Basic password verification metrics: `bsdm_proxy_auth_password_verifications_total`,
+  `bsdm_proxy_auth_password_verifications_in_flight`, `bsdm_proxy_auth_password_rehashes_total`.
+  Broader backend-error and per-IP throttling metrics remain future work.

@@ -36,12 +36,16 @@ recognised by the missing leading `$` and rewritten to Argon2id after the first
 successful login, provided the users file and its directory are writable.
 
 ```bash
-# Generate one user entry (password read from stdin, never from argv)
-printf '%s' 'your-strong-password' | ./scripts/gen-basic-auth-user.sh --stdin --role users pilot
-
-# Example file (password for both users is pilot-secret — change before production):
-cp config/basic-auth-users.example.json /etc/bsdm-proxy/basic-auth-users.json
-# or edit and set real hashes
+# Needs a built proxy binary; native install: set BSDM_PROXY_BIN=/opt/bsdm-proxy/bin/proxy
+# Interactive prompt; the password is not placed in argv or shell history.
+umask 077
+./scripts/gen-basic-auth-user.sh --role users pilot \
+  | python3 -c 'import json,sys; json.dump([json.load(sys.stdin)],sys.stdout,indent=2)' \
+  > config/basic-auth-users.json
+chmod 600 config/basic-auth-users.json
+# Native install: copy this file to /etc/bsdm-proxy/basic-auth-users.json
+# with ownership/read permissions for the service user.
+# config/basic-auth-users.example.json contains PUBLIC demonstration credentials.
 ```
 
 Example shape:
@@ -67,18 +71,24 @@ export AUTH_REALM="BSDM Pilot"
 export BASIC_AUTH_USERS_FILE=/etc/bsdm-proxy/basic-auth-users.json
 ```
 
-**Pilot compose** (optional day-1):
+**Pilot compose** (auth включена по умолчанию):
 
 ```bash
 export AUTH_ENABLED=true
-export BASIC_AUTH_USERS_FILE=./config/basic-auth-users.example.json
-# mount is already declared in deploy/compose/docker-compose.pilot.yml when AUTH is on
+export BASIC_AUTH_USERS_HOST=./config/basic-auth-users.json
+export BASIC_AUTH_USERS_FILE=/etc/bsdm-proxy/basic-auth-users.json
+# HOST selects the source file; FILE is the path inside the container.
+# Linux Docker: give the mounted 0600 file to the image UID/GID (1000:1000).
+# Use the actual mapped identity if Docker user namespaces are enabled.
+sudo chown 1000:1000 config/basic-auth-users.json
+# Complete the CA/token/Grafana setup from pilot-deployment.md first.
 docker compose -f docker-compose.yml -f deploy/compose/docker-compose.pilot.yml up -d proxy
 ```
 
-Without `BASIC_AUTH_USERS_FILE` (and empty in-memory DB), Basic accepts **any**
-username/password — fine for e2e, **unsafe for pilot**. Always set a users file
-for pilot/production.
+In production, Basic auth without a users file fails startup. Development/test
+may accept any credentials with an empty in-memory DB; always configure a real
+users file for pilot/production. File/directory permissions must allow the proxy
+service to read it (and to write it if login rehash is required).
 
 ### 3. Client usage
 

@@ -1,5 +1,9 @@
 # Анализ конфигураций по CIS Benchmarks (2026-08-27)
 
+> **ИСТОРИЧЕСКИЙ ДОКУМЕНТ:** срез 2026-08-27, не текущая аттестация.
+> Статус реализации — [project-status](../project-status.md), проверка целевого
+> окружения — [production readiness checklist](../ops-and-dev/production-readiness-checklist.md).
+
 Статический аудит конфигураций репозитория по применимым CIS Benchmarks:
 
 | Бенчмарк | Область | Файлы |

@@ -37,6 +37,7 @@
 | [Capacity planning](architecture/capacity-planning.md) | Формулы, пилотный профиль и масштабирование |
 | [Ресурсный профиль модулей](architecture/module-resource-profile.md) | CPU, RAM и диск по каждому модулю: измерения и расчёты |
 | [Performance](architecture/performance.md) | Benchmarks и production tuning |
+| [Event pipeline](architecture/event-pipeline.md) | Bounded async Kafka/HTTP delivery, overload и ordering |
 | [Hierarchy](architecture/hierarchical-caching.md) | L1/L2, ICP, HTCP и peer selection |
 | [Repository structure](architecture/structure.md) | Cargo workspace и инфраструктура |
 
@@ -44,17 +45,17 @@
 
 | Документ | Зрелость |
 |---|---|
-| [Authentication](features/authentication.md) | Basic/OIDC — основной; LDAP/NTLM/Kerberos — beta |
+| [Authentication](features/authentication.md) | Basic — основной; LDAP/NTLM/Kerberos — beta; reverse-proxy OIDC — frozen |
 | [ACL](features/acl-policy.md) | основной |
 | [ACL в Admin Console](features/acl-console.md) | Policies: категории vs домены |
 | [Categorization](features/categorization.md) | основной/beta по источнику |
 | [Control plane](features/control-plane.md) | REST — основной; gRPC — beta |
 | [Certificate Pinning exceptions](features/certificate-pinning.md) | Управляемый bypass-реестр, reload и аудит |
 | [Admin Console security](features/admin-console-security.md) | Trust boundaries и mutation token gate |
-| [PAC / WPAD server](features/pac-server.md) | beta — отдельный listener и hot reload bypass-файла |
+| [PAC / WPAD server](features/pac-server.md) | GA-скоуп v1.0 — отдельный listener, opt-in и hot reload bypass-файла |
 | [Semantic cache](features/semantic-cache.md) | beta |
-| [DNS sinkhole, DoH, DoT](features/dns-sinkhole.md) | основной |
-| [Threat intel collector](features/threat-intel-collector.md) | beta — мониторинг в Shadow Mode, без блокировки |
+| [DNS sinkhole, DoH, DoT](features/dns-sinkhole.md) | UDP/RPZ — основной; DoH/DoT — beta |
+| [Threat intel collector](features/threat-intel-collector.md) | beta — Shadow по умолчанию; opt-in enforcement по ADR 0008 |
 | [WASM plugins](features/wasm-plugins.md) | experimental (frozen) — Scope Freeze, не security boundary |
 | [ICAP](features/icap-inspection.md) | experimental (frozen) — Scope Freeze, не security boundary |
 | [eBPF / XDP kernel filter](features/ebpf-xdp.md) | beta (lab) — Day-1 пилота: OFF, не security boundary |

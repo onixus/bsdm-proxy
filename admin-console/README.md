@@ -31,15 +31,20 @@ Replaces the legacy static `web-config` generator with a modern React SPA.
 | `/security` | Supported data-security controls |
 | `/policies` | Runtime ACL rules viewer / reload / persist |
 | `/rpz` | DNS policy management |
+| `/devices` | Agent fleet, drift and OS proxy status (lab only) |
+| `/amneziawg` | AmneziaWG peers and configuration (lab only) |
 | `/users` | Basic-auth user management |
 | `/settings` | Live node state + config generator (cache, auth, filtering, threat/ML, hierarchy/TLS, rate-limit/eBPF/Wasm, events) |
 
 These pages replace the supported overlap with the former standalone Trust-UI:
 Dashboard owns node/security posture, Logs owns the recent decision stream, and
-Threat Scores owns ML posture. Endpoint inventory remains deferred with the
-Agent and is not represented as a working operator feature.
+Threat Scores owns ML posture. Devices and AmneziaWG are implemented lab
+surfaces in primary navigation; their endpoints are disabled by default in
+production (`AGENT_API_ENABLED=false`, `AWG_API_ENABLED=false`). UI route
+availability does not grant a component GA maturity.
 
-The default sidebar only advertises the supported Hybrid operator paths above.
+The sidebar advertises the core operator paths plus Devices and AmneziaWG
+with lab-only labels.
 Frozen modules remain directly routable for development and compatibility, but
 are intentionally hidden from primary navigation and wrapped in a **Frozen**
 banner (`FrozenRouteShell` + `routeScope.ts`):
@@ -47,7 +52,6 @@ banner (`FrozenRouteShell` + `routeScope.ts`):
 - `/wasm`
 - `/cluster`
 - `/ai-cache`
-- `/amneziawg`
 
 Header badges: **Read-only (no token)** vs **API token attached**, plus **Frozen**
 on experimental deep-links. Command palette lists supported routes only.
@@ -67,7 +71,7 @@ shown on the core Policies workflow.
 
 ```bash
 cd admin-console
-npm install
+npm ci
 npm run dev
 # → http://127.0.0.1:5173/admin/
 ```
@@ -99,7 +103,7 @@ REST endpoint and the Prometheus `/metrics` scrape the UI consumes.
 npm run test:ui          # build + drive Chromium over every route
 ```
 
-What it checks, per route (all 10 supported pages plus the 4 frozen deep-links):
+What it checks, per route (all 11 primary-navigation pages plus the 3 frozen deep-links):
 
 - the page heading renders and data that **can only come from the backend**
   appears on screen;

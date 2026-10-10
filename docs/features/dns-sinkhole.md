@@ -4,7 +4,7 @@
 Hybrid Policy (DNS -> SNI -> Selective MITM). Отдельный on-ramp относительно
 explicit forward proxy.
 
-Зрелость: **Основной**. С Фазы A входит в базовый `docker-compose.yml` как
+Зрелость UDP/RPZ-lite: **Основной**; DoH/DoT: **Beta**, отдельная приёмка. С Фазы A входит в базовый `docker-compose.yml` как
 Core-компонент поставки, а не опциональный sidecar
 ([project-status.md](../project-status.md), [roadmap.md](../roadmap.md)).
 
@@ -44,6 +44,7 @@ DNS_SINKHOLE_BIND=0.0.0.0:5353 \
 DNS_SINKHOLE_UPSTREAM=1.1.1.1:53 \
 DNS_SINKHOLE_ZONE_PATH=examples/dns/blocklist.rpz \
 DNS_SINKHOLE_ACTION=sinkhole \
+DNS_SINKHOLE_DOH_ENABLED=false DNS_SINKHOLE_DOT_ENABLED=false \
 DNS_SINKHOLE_A=127.0.0.1 \
 cargo run -p dns-sinkhole
 

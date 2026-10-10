@@ -8,6 +8,7 @@
 |-----------|--------|
 | Rust | **1.88+** (рекомендуется latest stable) |
 | Cargo | stable |
+| Node.js | **24+**, `npm ci` для Admin Console |
 | librdkafka | dev-пакет (`librdkafka-dev`) — только при сборке с feature `kafka` (default) |
 | protoc | `protobuf-compiler` — только при сборке с feature `grpc` |
 | OpenSSL | dev-пакет (`libssl-dev`) |
@@ -62,7 +63,7 @@ cargo build -p bsdm-proxy --features grpc --bin proxy
 # Optional Wasm plugin host (runtime: WASM_ENABLED + WASM_MODULE_PATH)
 cargo build -p bsdm-proxy --features wasm --bin proxy
 
-# Optional ICAP (runtime: ICAP_ENABLED + ICAP_URL) — always compiled; see docs/icap.md
+# Optional ICAP (runtime: ICAP_ENABLED + ICAP_URL) — always compiled; see docs/features/icap-inspection.md
 
 # Lite — без rdkafka (HTTP EVENT_SINK only)
 cargo build -p bsdm-proxy --no-default-features --features auth-basic --bin proxy
@@ -123,6 +124,16 @@ make ci
 `security-audit` требует установленный `cargo-audit`, а `load-test` — Docker
 Buildx/Compose, `curl` и `wrk`. Публикующие скрипты не входят в `make ci` и не
 запускаются без отдельного release gate.
+
+### GitHub merge gate и опциональные features
+
+`ci-gate` требует успешных fmt, clippy, workspace test, feature builds,
+default-feature cargo-deny и frontend job для текущего head. Отдельный
+`cargo-deny --all-features (report-only)` имеет `continue-on-error`: известные
+ограничения optional features (AGPL `kerberos_keytab`, RSA Marvin advisory)
+не входят в разрешённый default release graph. Красный report-only job не
+означает провал обязательного gate, а зелёный gate не означает, что all-features
+лишены уязвимостей. Jenkins `security-audit` — отдельный `cargo audit` contract.
 
 ## Jenkins CI/CD
 
@@ -312,12 +323,14 @@ npm run test:ui   # сборка + прогон Chromium по всем марш�
 ```
 
 Создаёт `dist/bsdm-proxy-<version>-linux-<arch>.tar.gz` с:
-- бинарниками `proxy` и `cache-indexer`
+- шестью бинарниками: proxy, cache-indexer, alert-worker, ml-worker, dns-sinkhole, threat-intel
+- Admin Console SPA в `share/admin-console/`
 - примерами конфигурации и systemd unit-файлами
 - `install.sh` и `SHA256SUMS`
 
-Версия берётся из `proxy/Cargo.toml` (например `0.6.1-1` → пакет
-`0.6.1-1`, `0.2.3-test` → `0.2.3test`).
+Версия берётся из `proxy/Cargo.toml`, включая prerelease suffix (сейчас
+`1.0.0-rc.1`). Для переносимого musl-пакета используйте `--docker`; локальная
+Cargo-сборка имеет зависимости от хоста. См. [packaging](../../packaging/README.md).
 
 ## Docker
 
@@ -372,65 +385,41 @@ Actions → **Release** → **Run workflow** — собирает пакеты �
 
 Полный план: [roadmap.md](../roadmap.md)
 
-Создать GitHub milestones / blocker issues (archived — **do not re-run**):
-
-```bash
-# Historical only — see scripts/archive/README.md
-ls scripts/archive/
-```
+Историческая автоматизация B1–B25 удалена из текущего checkout.
+Для состояния задач используйте GitHub Issues и текущий roadmap.
 
 Актуальный статус блокеров: [BLOCKERS.md](../project-status.md).
 
 ## Issue automation
 
-При merge PR связанные GitHub issue закрываются автоматически:
-
-| Способ | Пример | Поведение |
-|--------|--------|-----------|
-| Блокер в **заголовке** PR | `feat(proxy): rate limit (B6)` | Закрывает #37 |
-| **`Closes #NN`** в теле PR | `Closes #37` | Закрывает #37 (стандарт GitHub + workflow) |
-| **workflow_dispatch** | Actions → Close blocker issues | Ручное закрытие / backfill |
-| **Скрипт** | `./scripts/close-blocker-issue.sh 6 65` | Локально через `gh` |
-
-**Маппинг:** B*n* → issue #*(31+n)* (B1→#32 … B25→#56).
-
-**Исключение B13 (#44):** auto-close только при `Closes #44` в теле PR (полная реализация NTLM). PR с docs-only и `(B13)` в заголовке **не** закрывают #44.
-
-Шаблон PR: [.github/pull_request_template.md](../../.github/pull_request_template.md).
-
-### Backfill (уже смерженные PR без Closes)
-
-```bash
-# Через GitHub Actions UI: Close blocker issues → Run workflow
-#   blocker_id: 6, pr_number: 65
-#   blocker_id: 7, pr_number: 67
-
-# Или локально:
-./scripts/close-blocker-issue.sh 6 65   # B6 → #37
-./scripts/close-blocker-issue.sh 7 67   # B7 → #38
-```
+Связанные задачи закрываются стандартным GitHub `Closes #N` / `Fixes #N`
+в теле PR при мерже в default branch. Исторические B1–B25 mapping и скрипты
+backfill удалены из текущего checkout; active close-blocker workflow нет. Зонтичные epic закрываются последними, вручную после всех подзадач.
+Правила: [maintenance.md](../maintenance.md#гигиена-трекера).
+Шаблон: [.github/pull_request_template.md](../../.github/pull_request_template.md).
 
 ## CI
 
 | Workflow | Trigger | Description |
 |----------|---------|-------------|
-| [ci.yml](../../.github/workflows/ci.yml) | push/PR → main | fmt, clippy, build, tests (unit + e2e + smoke), cargo-audit |
+| [ci.yml](../../.github/workflows/ci.yml) | push/PR → main | fmt, clippy, workspace tests, lite/grpc/wasm builds, cargo-deny, Admin Console; required ci-gate |
 | [admin-console.yml](../../.github/workflows/admin-console.yml) | push/PR → main | npm lint, build, unit tests + local UI smoke test (Chromium over every route) |
-| [load-test.yml](../../.github/workflows/load-test.yml) | push/PR → main | wrk high-intensity load test |
+| [load-test.yml](../../.github/workflows/load-test.yml) | push/PR → main по paths / manual | wrk load test; docs-only не запускает |
 | [release.yml](../../.github/workflows/release.yml) | push tag `v*` / manual | test, build packages, GitHub Release |
 | [docs.yml](../../.github/workflows/docs.yml) | push/PR → main | check local markdown links, sync wiki |
 
 ## Local proxy run
 
 ```bash
+export DEPLOYMENT_PROFILE=development
+export MITM_CA_DIR=./certs
 export HTTP_PORT=3128
 export METRICS_PORT=9090
 export MITM_ENABLED=true
 export RUST_LOG=info,bsdm_proxy=debug   # см. docs/ops-and-dev/logging.md
 
 # CA для MITM (обязательно)
-mkdir -p certs
-# ... сгенерировать ca.key / ca.crt (см. README)
+./scripts/gen-ca.sh
 
 cargo run -p bsdm-proxy --bin proxy
 ```
@@ -440,7 +429,7 @@ cargo run -p bsdm-proxy --bin proxy
 Проверка:
 ```bash
 curl http://127.0.0.1:9090/health
-curl -x http://127.0.0.1:3128 https://httpbin.org/get
+curl --cacert certs/ca.crt -x http://127.0.0.1:3128 https://httpbin.org/get
 ```
 
 ## Полезные env для разработки

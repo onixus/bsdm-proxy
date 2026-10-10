@@ -1,5 +1,8 @@
 # Hierarchical Caching Design
 
+Зрелость: **Beta**, выключено в production baseline. Authenticated peer discovery
+и полноценная HA-приёмка остаются отдельными работами ([project-status](../project-status.md)).
+
 ## Overview
 
 Implementation of hierarchical caching similar to Squid proxy, allowing multiple BSDM-Proxy instances to form a cache hierarchy for improved hit rates and reduced upstream traffic.
@@ -57,8 +60,8 @@ Implementation of hierarchical caching similar to Squid proxy, allowing multiple
 
 #### HTCP (Hypertext Caching Protocol)
 - Enhanced version of ICP
-- Supports cache headers and metadata
-- Authentication support
+- BSDM currently implements a simplified UDP subset (`HTCP` magic + version/opcode/request number/URL)
+- No HTCP authentication in this implementation; do not infer full RFC 2756 interoperability
 - More flexible but slightly higher overhead
 
 #### HTTP Cache-Digest

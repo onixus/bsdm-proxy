@@ -1,7 +1,8 @@
 # Лицензирование и third-party компоненты
 
-Обзор лицензий переиспользуемого ПО. Данные валидированы для актуального
-workspace BSDM-Proxy `1.0.0-rc.1`.
+Обзор лицензий переиспользуемого ПО для кода `1.0.0-rc.1`. Состав и версии
+проверяются по manifests/lockfiles, Dockerfile и Compose. Это не юридическое
+заключение и не полный повторный аудит всех транзитивных зависимостей.
 
 > См. также: [NOTICE](../../NOTICE) · [LICENSE](../../LICENSE)
 
@@ -31,7 +32,7 @@ Workspace-крейты:
 
 | Область | Статус | Примечание |
 |---------|--------|------------|
-| Дефолтная сборка (`auth-basic`) | ✅ Permissive | MIT / Apache-2.0 / BSD — без GPL/AGPL |
+| Дефолтная сборка (`auth-basic`, `kafka`) | ✅ Permissive | MIT / Apache-2.0 / BSD — без GPL/AGPL |
 | `auth-ldap`, `auth-ntlm` | ✅ Permissive | ldap3, sspi — Apache-2.0 OR MIT |
 | `auth-kerberos` | ⚠️ AGPL | `kerberos_keytab` — **AGPL-3.0** |
 | Docker Compose (инфра) | ⚠️ AGPL | Grafana core — **AGPL-3.0** |
@@ -56,9 +57,11 @@ cargo install cargo-license
 cargo license --avoid-dev-deps --avoid-build-deps
 ```
 
-На момент `0.5.0`: **~282** runtime crate, все с permissive-лицензиями
-(MIT, Apache-2.0, BSD-3-Clause, ISC и dual Apache/MIT). Перед релизом
-`0.6.1-1` аудит необходимо повторить.
+Точный граф зависит от lockfile и выбранных features. Блокирующий CI запускает
+`cargo deny --locked check` для default features: advisories и
+bans/licenses/sources. `--all-features` — отдельный report-only job с известным
+AGPL `kerberos_keytab` и RSA advisory; его красный результат не скрывается
+успешным default-feature gate ([development](development.md#github-merge-gate-и-опциональные-features)).
 
 ### Прямые зависимости proxy
 
@@ -105,7 +108,7 @@ cd proxy && cargo license --features auth-kerberos --json \
 | Библиотека | Лицензия |
 |------------|----------|
 | librdkafka (через rdkafka-sys) | BSD-2-Clause |
-| OpenSSL | OpenSSL License |
+| OpenSSL 3.x | Apache-2.0 ([upstream LICENSE](https://github.com/openssl/openssl/blob/openssl-3.3.0/LICENSE.txt)) |
 | lz4, zlib, zstd, cyrus-sasl | Permissive (Alpine packages) |
 
 ---
@@ -123,7 +126,7 @@ cd proxy && cargo license --features auth-kerberos --json \
 | **`grafana/grafana:12.3.8`** | **AGPL-3.0** | `docker-compose.yml` |
 | `grafana-clickhouse-datasource` | Apache-2.0 | Grafana plugin |
 | `grafana-piechart-panel` | MIT | Grafana plugin |
-| `redis:7.4-alpine` | BSD-3-Clause | `deploy/compose/docker-compose.redis-l2.yml`, `.ha.yml` |
+| `redis:7.4-alpine` | RSALv2 OR SSPLv1 ([Redis 7.4 LICENSE](https://github.com/redis/redis/blob/7.4/LICENSE.txt)); отличается от BSD-лицензии Rust-клиента `redis-rs` | `deploy/compose/docker-compose.redis-l2.yml`, `.ha.yml` |
 | `kennethreitz/httpbin` | BSD | `deploy/compose/docker-compose.test.yml` (только тесты) |
 
 ### Grafana (AGPL-3.0)
@@ -173,7 +176,7 @@ cargo audit
 |------|------------|
 | [LICENSE](../../LICENSE) | MIT — лицензия BSDM-Proxy |
 | [NOTICE](../../NOTICE) | Краткий реестр third-party (прямые deps, Docker, native) |
-| `docs/licensing.md` | Этот документ — детали и рекомендации |
+| `docs/ops-and-dev/licensing.md` | Этот документ — детали и рекомендации |
 
 ### Исторические компоненты (удалены)
 
@@ -190,7 +193,7 @@ cargo audit
 1. Собирать release **без** `auth-kerberos`, если не проведена AGPL-оценка.
 2. Включать [NOTICE](../../NOTICE) в release tarball (`packaging/`).
 3. Для Docker-стека документировать AGPL Grafana для compliance-команды.
-4. Рассмотреть `cargo-deny` с license policy в CI (allow MIT/Apache/BSD; flag GPL/AGPL).
+4. Проверять действующий `cargo-deny` policy (`deny.toml`) для точного feature graph; optional-feature report не заменяет blocking default gate.
 
 ---
 

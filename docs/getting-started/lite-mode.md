@@ -2,6 +2,12 @@
 
 Standalone caching HTTPS proxy with optional SQLite Search API — **no Kafka or ClickHouse**.
 
+**Изолированный lab/CI, не production.** Compose публикует порты на всех
+интерфейсах, отключает proxy auth/ACL, разрешает anonymous proxy и открывает
+control/search APIs без токенов. Запускайте только в изолированной сети;
+для эксплуатации используйте [production-профиль](production-deployment.md).
+`DEPLOYMENT_PROFILE=production` внутри Lite не отменяет его явные lab opt-outs.
+
 Зрелость профиля — [project-status.md](../project-status.md).
 
 ## One-command start

@@ -22,9 +22,10 @@ helm upgrade --install bsdm-indexer ./charts/bsdm \
 
 - Kubernetes 1.28+
 - Helm 3
-- (prod) Redis L2 — deploy separately or enable future redis subchart
-- (prod) Kafka in `bsdm-analytics` namespace
-- (prod) ClickHouse — Altinity Operator CHI (`examples/clickhouse-installation.yaml`)
+- Optional beta Redis L2 — deploy separately; production baseline keeps it disabled.
+  Redis is not a prerequisite for independent proxy nodes or a complete HA state store.
+- With analytics enabled: Kafka in `bsdm-analytics` namespace
+- With ClickHouse analytics enabled: Altinity Operator CHI (`examples/clickhouse-installation.yaml`)
   or managed / ClickHouse Cloud. **OpenSearch is not required.**
 - MITM CA Secret (if `mitm.enabled`):
 
@@ -119,13 +120,15 @@ longer relaxes the other five.
 | `examples/clickhouse-installation.yaml` | Altinity `ClickHouseInstallation` CR |
 | `values-analytics.yaml` | Indexer-only release (`replicaCount: 0`) |
 
-Build images:
+Build images from the repository root; use the same tag in Helm values:
 ```bash
-docker build --target proxy         -t ghcr.io/onixus/bsdm-proxy:0.6.1-1 .
-docker build --target cache-indexer -t ghcr.io/onixus/bsdm-cache-indexer:0.6.1-1 .
-docker build --target alert-worker  -t ghcr.io/onixus/bsdm-alert-worker:0.6.1-1 .
-docker build --target ml-worker     -t ghcr.io/onixus/bsdm-ml-worker:0.6.1-1 .
-docker build --target dns-sinkhole  -t ghcr.io/onixus/bsdm-dns-sinkhole:0.6.1-1 .
+VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' proxy/Cargo.toml | head -1)"
+docker build --target proxy         -t ghcr.io/onixus/bsdm-proxy:${VERSION} .
+docker build --target cache-indexer -t ghcr.io/onixus/bsdm-cache-indexer:${VERSION} .
+docker build --target alert-worker  -t ghcr.io/onixus/bsdm-alert-worker:${VERSION} .
+docker build --target ml-worker     -t ghcr.io/onixus/bsdm-ml-worker:${VERSION} .
+docker build --target dns-sinkhole  -t ghcr.io/onixus/bsdm-dns-sinkhole:${VERSION} .
+docker build --target threat-intel  -t ghcr.io/onixus/bsdm-threat-intel:${VERSION} .
 ```
 
 ## Not included (deploy separately)

@@ -87,7 +87,7 @@ Stop or drain the proxy first; CA files are loaded at process startup.
 ```bash
 ./scripts/rotate-ca.sh activate certs/rotation/<timestamp>
 # restart the proxy using the deployment-specific command
-curl --cacert certs/ca.crt -x http://127.0.0.1:3128 https://httpbin.org/uuid
+curl --proxy-user pilot --cacert certs/ca.crt -x http://127.0.0.1:3128 https://httpbin.org/uuid
 ```
 
 Activation validates the key/certificate match, CA constraint, expiry, and key

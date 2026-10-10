@@ -1,6 +1,11 @@
 # BSDM-Proxy on Kubernetes
 
-Рекомендуемая архитектура развёртывания BSDM на Kubernetes: data plane (proxy + Redis L2) и analytics plane (Kafka → indexer → ClickHouse).
+Документ разделяет data plane и analytics plane. Для текущего RC поддерживаемая
+production-топология — один proxy или независимые proxy за L4-балансировщиком;
+общий Redis L2 и active-active state остаются beta/планом 1.2.
+Production baseline: [production deployment](../getting-started/production-deployment.md),
+[GA-скоуп](../project-status.md#ga-скоуп-v10), `values-production.yaml`.
+HA-схемы и sizing ниже — проектные примеры, не подтверждённая HA-поставка.
 
 См. также: [capacity-planning.md](../architecture/capacity-planning.md) · [roadmap.md](../roadmap.md) · [helm chart](../../charts/bsdm/README.md)
 
@@ -11,10 +16,10 @@
 | Принцип | Обоснование |
 |---------|-------------|
 | Горизонтальный scale proxy pods | Bench: `WORKER_COUNT=4` + shared L1 хуже, чем N реплик с `WORKER_COUNT=1` |
-| Redis L2 обязателен для HA | L1 локален; без L2 — sticky sessions и cache miss storm |
+| Redis L2 — beta shared-cache вариант | L1 локален; общий кэш не синхронизирует ACL, breaker, sessions или сертификаты и сам по себе не обеспечивает HA |
 | Spill локальный per pod | mmap spill (`CACHE_SPILL_DIR`) не шарить через NFS |
 | Analytics в отдельном namespace | Kafka/ClickHouse не конкурируют с proxy за CPU |
-| `sessionAffinity: None` | Когерентность через L2, не через LB stickiness |
+| `sessionAffinity: None` | Для независимых forward-proxy узлов; отдельно учитывайте IP-bound beta NTLM/Kerberos и frozen reverse-proxy sessions |
 
 ---
 
@@ -77,7 +82,7 @@ flowchart TB
 - **RollingUpdate** + **PodDisruptionBudget** `minAvailable: 1`
 - **Не использовать** `sessionAffinity: ClientIP`
 
-### Рекомендуемый env (k8s-prod)
+### Lab/shared-cache пример env (не production baseline)
 
 ```bash
 WORKER_COUNT=1

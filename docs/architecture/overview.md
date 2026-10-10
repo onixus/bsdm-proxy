@@ -29,26 +29,31 @@ Redis, peers, workers и часть monitoring stack являются опцио
 
 ```mermaid
 flowchart TD
-    Request["Request"] --> PolicyMode{"POLICY_MODE"}
-    PolicyMode -->|DNS / SNI| SNICheck["SNI Filter (no TLS decrypt)"]
-    PolicyMode -->|selective-mitm| CatCheck{"Category MITM Match?"}
-    PolicyMode -->|full-mitm| FullDecrypt["Full TLS Decrypt"]
-    CatCheck -->|No| Passthrough["Bypass / Tunnel"]
-    CatCheck -->|Yes| FullDecrypt
-    SNICheck --> Auth["Authentication (Basic/OIDC)"]
-    FullDecrypt --> Auth
-    Auth --> Rate["Rate limit"]
-    Rate --> Hook["Optional WASM"]
-    Hook --> Policy["ACL + Categorization"]
-    Policy --> L1["L1 lookup"]
-    L1 -->|miss| L2["Optional Redis L2 / Qdrant"]
+    Request["HTTP / CONNECT"] --> Auth["Forward proxy authentication"]
+    Auth --> Rate["Rate limit + destination checks"]
+    Rate --> Hook["Optional WASM (lab)"]
+    Hook --> Policy["ACL + categorization + optional TI domain enforcement"]
+    Policy --> Kind{"CONNECT?"}
+    Kind -->|Yes| PolicyMode{"TLS policy mode + pinning + breaker"}
+    PolicyMode -->|sni / bypass| Tunnel["Opaque TCP tunnel"]
+    PolicyMode -->|selective category match| Decrypt["TLS termination"]
+    PolicyMode -->|full-mitm: development/test only| Decrypt
+    Decrypt --> HTTP["HTTP request policy/cache path"]
+    Kind -->|No| HTTP
+    HTTP --> L1["L1 lookup"]
+    L1 -->|miss| L2["Optional Redis L2"]
     L2 -->|miss| Hier["Optional hierarchy"]
     Hier -->|miss| Upstream["Upstream fetch"]
-    Upstream --> Store["Cache store + event"]
+    Upstream --> Store["Eligible cache store + asynchronous event"]
 ```
 
+DNS/RPZ выполняется отдельным `dns-sinkhole`, до обращения к proxy. Режим
+`sni` использует authority из CONNECT, без разбора ClientHello. OIDC относится
+к отдельному замороженному reverse-proxy сценарию; Qdrant — к beta semantic
+cache для LLM POST, не к обычному Redis L2 lookup.
+
 `PERF_FAST_CACHE_HIT` меняет порядок для cache hits и может пропустить policy
-checks. Это bench-флаг, а не production default.
+checks только в lab/bench; в production флаг игнорируется.
 
 CONNECT работает в двух режимах:
 
@@ -61,6 +66,7 @@ CONNECT работает в двух режимах:
 |---|---|---|
 | proxy | `proxy/` | Data plane, cache, auth, policy, native UI routing, control API |
 | cache-indexer | `cache-indexer/` | Kafka/HTTP ingest в ClickHouse или SQLite |
+| threat-intel | `threat-intel/` | IOC collection → SQLite → shadow/enforce JSON/RPZ artifacts; SIEM/SOAR (beta) |
 | bsdm-events | `bsdm-events/` | Общая event schema |
 | alert-worker | `alert-worker/` | Periodic ClickHouse rules → webhook |
 | ml-worker | `ml-worker/` | Feature extraction, scoring и write-back |

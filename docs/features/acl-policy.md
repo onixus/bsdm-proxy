@@ -24,7 +24,11 @@ Flexible access control system for BSDM-Proxy with multiple rule types, policy r
 |---|---|---|
 | Selective MITM (default) | `selective-mitm` | Only when host categories intersect `MITM_CATEGORIES` |
 | SNI-only | `sni` | **Never** — CONNECT is always a pure tunnel |
-| Full MITM | `full-mitm` | All HTTPS MITM ports (blocked in `DEPLOYMENT_PROFILE=production` unless `ALLOW_FULL_MITM=true`) |
+| Full MITM | `full-mitm` | All HTTPS MITM ports (always rejected in production; development/test also requires `ALLOW_FULL_MITM=true`) |
+
+The name `sni` is retained for compatibility. Filtering currently uses
+CONNECT authority, without ClientHello inspection; IP-based CONNECT and domain
+fronting need separate controls. DNS/RPZ is a separate sidecar path.
 
 ### Invariant (#272)
 

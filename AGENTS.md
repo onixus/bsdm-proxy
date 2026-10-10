@@ -30,7 +30,7 @@ proxy         → bsdm-events  (emits CacheEvent)
 cache-indexer → bsdm-events  (consumes CacheEvent from Kafka)
 ml-worker     → bsdm-events  (scoring input types)
 alert-worker  → bsdm-events  (alert trigger types)
-threat-intel  → proxy        (IOC sync / feed database)
+threat-intel  ⇢ proxy        (JSON IOC export; runtime integration, not a Cargo dependency)
 ```
 
 ## Build & Run
@@ -55,7 +55,8 @@ make docker-full  # Docker Compose: полный стек (Kafka, CH, Prometheus
 ./scripts/gen-ca.sh
 
 # Запуск proxy
-HTTP_PORT=3128 METRICS_PORT=9090 cargo run -p bsdm-proxy --bin proxy
+DEPLOYMENT_PROFILE=development MITM_CA_DIR=./certs \
+  HTTP_PORT=3128 METRICS_PORT=9090 cargo run -p bsdm-proxy --bin proxy
 
 # Проверка
 curl http://127.0.0.1:9090/health
@@ -79,13 +80,19 @@ curl --cacert certs/ca.crt -x http://127.0.0.1:3128 https://httpbin.org/uuid
 
 ### Toolchain & system dependencies
 
-- **Rust 1.85+** (Edition 2021). Более ранние версии не скомпилируют часть зависимостей.
+- **Rust 1.88+** (Edition 2021); lockfile optional features может требовать более
+  новый stable. CI preflight и Docker задают baseline 1.88.
+- **Node.js 24+**, `npm ci` — сборка и тесты Admin Console.
 - System packages (Linux): `libssl-dev pkg-config cmake librdkafka-dev libclang-dev`
   (см. `docs/ops-and-dev/development.md`).
 
 ### MITM certificates
 
-При `MITM_ENABLED=true` (по умолчанию) требуются `./certs/ca.key` и `./certs/ca.crt`.
+При `MITM_ENABLED=true` и `POLICY_MODE!=sni` требуется CA. Production читает
+его только из `MITM_CA_DIR` (default `/etc/bsdm-proxy/certs`) и отказывается
+стартовать при отсутствующей, небезопасной или недействительной паре.
+Для локального запуска задайте `MITM_CA_DIR=./certs`; development/test
+поддерживают legacy fallback в `./certs` и `/certs`.
 Они git-ignored и НЕ в репозитории — сгенерируй через `./scripts/gen-ca.sh`.
 Для тестирования без MITM: `MITM_ENABLED=false`.
 
@@ -95,7 +102,9 @@ curl --cacert certs/ca.crt -x http://127.0.0.1:3128 https://httpbin.org/uuid
 |---|---|---|
 | `HTTP_PORT` | `3128` | Порт прокси |
 | `METRICS_PORT` | `9090` | Порт Prometheus-метрик |
-| `MITM_ENABLED` | `true` | Включить TLS MITM-инспекцию |
+| `MITM_ENABLED` | `true` | Разрешить TLS MITM-инспекцию (выбор домена задаёт POLICY_MODE) |
+| `DEPLOYMENT_PROFILE` | `production` | Fail-closed startup; для локальной разработки задайте development |
+| `MITM_CA_DIR` | `/etc/bsdm-proxy/certs` | Каталог CA для TLS-инспекции |
 | `AUTH_ENABLED` | `false` | Включить аутентификацию |
 | `AGENT_DEVICES_PATH` | — | JSON-файл для персистенции устройств |
 | `REDIS_URL` | — | URL Redis для L2-кэша |

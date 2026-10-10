@@ -7,7 +7,7 @@
 [![Admin Console](https://github.com/onixus/bsdm-proxy/actions/workflows/admin-console.yml/badge.svg)](https://github.com/onixus/bsdm-proxy/actions/workflows/admin-console.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-1.0.0--rc.1-blue.svg)](https://github.com/onixus/bsdm-proxy/releases)
-[![Rust](https://img.shields.io/badge/Rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/Rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
 
 **High-performance HTTP/HTTPS Forward Proxy & Secure Web Gateway written in Rust.**
 
@@ -21,13 +21,14 @@ BSDM-Proxy combines a Rust proxy data plane with selective TLS inspection, tiere
 
 - **Rust data plane** for HTTP forwarding, `CONNECT` tunnelling and selective TLS inspection.
 - **Tiered caching** with in-memory L1, disk spillover and optional Redis L2.
-- **Policy and identity** through ACLs plus Basic, LDAP/AD, NTLM, Kerberos and OIDC integrations.
+- **Policy and identity** through ACLs and Basic auth; LDAP/AD, NTLM and Kerberos are beta, while reverse-proxy OIDC is frozen.
 - **Analytics outside the core proxy flow** through asynchronous event export to Kafka/ClickHouse; Lite Mode uses SQLite and does not require those services.
 - **Operational surface included**: metrics, Admin Console, deployment manifests and documented feature maturity.
 
 ## Quick start
 
-The smallest documented stack is **Lite Mode**:
+The smallest documented stack is **Lite Mode** (изолированный lab/CI: API без токенов, proxy без auth;
+порты доступны на всех интерфейсах хоста):
 
 ```bash
 git clone https://github.com/onixus/bsdm-proxy.git
@@ -84,7 +85,7 @@ The benchmark harness and reports can then be compared across architectural chan
 | **Аутентификация & ACL** | Поддержка Basic, LDAP / Active Directory, NTLM, Kerberos (SPNEGO), OIDC. Гранулярные правила ACL (по IP, подсетям, времени, категориям), rate limiting, встроенный DLP-сканер. |
 | **Аналитика & Телеметрия** | Асинхронный экспорт событий через Apache Kafka, индексация в ClickHouse / SQLite (`cache-indexer`), Search API, Prometheus-метрики, дашборды Grafana. |
 | **Безопасность & ML** | Микросервис `alert-worker` с дедупликацией инцидентов и SIEM-вебхуками; `ml-worker` для скоринга угроз (UEBA, фишинг, DGA/beacon-детекция) с обратной связью (threat-score write-back). |
-| **Threat Intelligence** | Мониторинг угроз в режиме **Shadow** (enforcement в разработке): модуль `threat-intel` периодически собирает и нормализует индикаторы компрометации (OpenPhish, PhishStats, Phishing.Database, URLhaus), ведёт IOC-хранилище и скоринг. Блокировка по фидам по умолчанию выключена — `TI_ENFORCEMENT_MODE=shadow` ([ADR 0008](docs/adr/0008-threat-intel-shadow-mode.md)). |
+| **Threat Intelligence** | Мониторинг угроз в режиме **Shadow** (enforcement реализован как beta, требует явного включения): модуль `threat-intel` периодически собирает и нормализует индикаторы компрометации (OpenPhish, PhishStats, Phishing.Database, URLhaus), ведёт IOC-хранилище и скоринг. Блокировка по фидам по умолчанию выключена — `TI_ENFORCEMENT_MODE=shadow` ([ADR 0008](docs/adr/0008-threat-intel-shadow-mode.md)). |
 | **Расширения & Сайдкары** | DNS Sinkhole (UDP RPZ-lite, DoH/DoT проксирование), Semantic Cache для LLM/AI-запросов, WASM-плагины через Wasmtime SDK, антивирусная проверка ICAP (ClamAV). |
 | **Клиент & Split Routing** | Standalone Rust-клиент `bsdm-connect`, локальное разделение маршрутов по доменам (`Direct`/`Proxy`/`Tunnel`/`Block`), генератор PAC-файлов с защитой от JS-инъекций, защищенный веб-интерфейс на `:8765`, скаффолды для macOS и Android. |
 | **Администрирование** | Единая веб-панель управления (Admin Console) по адресу `/admin/`, REST и gRPC Control Plane API, Helm-чарты, systemd-пакеты. |
@@ -135,10 +136,11 @@ flowchart TB
     Proxy -.->|Cache Events| Kafka
     Kafka --> Indexer
     Indexer --> ClickHouse
-    Proxy -.->|Lite Events| SQLite
+    Proxy -.->|HTTP event sink| Indexer
+    Indexer --> SQLite
 
-    Kafka -.-> Alerts
-    Kafka -.-> ML
+    ClickHouse --> Alerts
+    ClickHouse --> ML
     ThreatIntel -.-> Proxy
 
     Proxy --> PromMetrics["/metrics (:9090)"]
@@ -239,6 +241,8 @@ export SEARCH_API_TOKEN="$(openssl rand -hex 32)"
 # AUTH_ENABLED=true по умолчанию: подставьте свой файл пользователей
 # (scripts/gen-basic-auth-user.sh), иначе смонтируется пример с публичными хешами.
 export BASIC_AUTH_USERS_HOST=./config/basic-auth-users.json
+# Создайте этот файл с реальными Argon2id-хешами и правами 0600:
+# docs/getting-started/pilot-auth.md (раздел Create users file).
 
 # 1. Генерация CA сертификатов
 ./scripts/gen-ca.sh
@@ -261,8 +265,7 @@ docker compose --profile threat-intel pull && docker compose --profile threat-in
 # Детекция алертов и ML-скоринг
 docker compose --profile alerts --profile ml pull && docker compose --profile alerts --profile ml up -d
 
-# DNS Sinkhole
-docker compose --profile dns-sinkhole pull && docker compose --profile dns-sinkhole up -d
+# DNS Sinkhole входит в базовый стек и запускается обычным up -d
 
 # ICAP антивирусная проверка (ClamAV)
 docker compose --profile icap up -d
@@ -310,7 +313,8 @@ docker compose --profile icap up -d
 
 ### Системные требования
 
-- **Rust:** `1.85+` (Edition 2021);
+- **Rust:** `1.88+` (Edition 2021), для optional-feature lockfile используйте актуальный stable;
+- **Node.js:** `24+` для сборки Admin Console, установка зависимостей через `npm ci`;
 - **Системные библиотеки (Debian/Ubuntu):** `libssl-dev`, `pkg-config`, `cmake`, `librdkafka-dev`, `libclang-dev`.
 
 ### Команды сборки
@@ -335,8 +339,8 @@ cargo build --release -p bsdm-proxy --bin proxy --no-default-features --features
 | `auth-all` | ❌ | Включение всех доступных auth-бэкендов |
 | `grpc` | ❌ | gRPC Control Plane интерфейс |
 | `wasm` | ❌ | Выполнение пользовательских WASM-плагинов |
-| `acl` | ❌ | Движок гибких правил ACL |
-| `categorization`| ❌ | Категоризация URL (автоматически активирует `acl`) |
+| `acl` | ❌ | Compatibility feature; runtime ACL управляется `ACL_ENABLED` и доступен в default build |
+| `categorization`| ❌ | Compatibility feature (включает `acl`); runtime — `CATEGORIZATION_ENABLED` |
 
 ---
 
@@ -349,7 +353,7 @@ cargo build --release -p bsdm-proxy --bin proxy --no-default-features --features
 make lint
 # или вручную:
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo clippy --workspace --all-targets -- -D warnings
 
 # Запуск юнит- и интеграционных тестов
 make test

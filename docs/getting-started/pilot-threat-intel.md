@@ -16,25 +16,17 @@
 В соответствии с [ADR 0008](../adr/0008-threat-intel-shadow-mode.md) в пилотной эксплуатации все внешние фиды индикаторов компрометации (IOC) функционируют **исключительно в режиме наблюдения (Shadow Mode)**:
 
 1. **Никакой слепой блокировки (Zero False-Positive Outage)**: Сторонние фиды угроз часто содержат ложные срабатывания (CDN, Shared Hosting, популярные облачные сервисы). В режиме `shadow` совпадения не обрывают сессии пользователей.
-2. **Обогащение событий (Event Enrichment)**: При совпадении домена или URL запроса с базой угроз ядро `proxy` (`ti_shadow.rs`) выставляет флаг `threat_shadow_match = 1` и проставляет метку источника фида (`threat_feed`) в поток событий `CacheEvent` (Kafka → ClickHouse).
+2. **Обогащение событий (Event Enrichment)**: При совпадении домена запроса с базой угроз ядро `proxy` (`ti_shadow.rs`) записывает имя фида в nullable-поле `threat_shadow_match` (например, `openphish`) в поток событий `CacheEvent` (Kafka → ClickHouse).
 3. **Генерация теневых артефактов**: Компилятор зон генерирует файлы с суффиксом `.shadow` (`threats.rpz.shadow` и `threat_domains.json.shadow`), изолируя их от боевого data-plane enforcement.
 4. **Валидация качества**: За 14-дневное окно наблюдения оператор и SOC оценивают точность источников фидов и верифицируют отсутствие пересечений с корпоративным Allowlist.
 
-```
-                    Входящий трафик (DNS/HTTP/TLS)
-                               │
-                ┌──────────────┴──────────────┐
-                │        bsdm-proxy           │
-                │  (POLICY_MODE=selective-mitm│
-                │   TI_SHADOW_MATCH=true)     │
-                └──────────────┬──────────────┘
-                               │
-            ┌──────────────────┼──────────────────┐
-            ▼                                     ▼
-   Трафик пропускается               Событие в аналитику
-   (200 OK / Selective MITM)        threat_shadow_match = 1
-                                    threat_feed = "openphish"
-                                    bsdm_proxy_ti_shadow_matches_total++
+```text
+Client request → proxy policy (auth / ACL / categorization)
+                     │
+                     └→ ti_shadow domain match (observation only)
+                              │
+                              └→ CacheEvent.threat_shadow_match = "openphish"
+                                 bsdm_proxy_ti_shadow_matches_total{feed="openphish"}
 ```
 
 ---
@@ -42,6 +34,9 @@
 ## 2. Развертывание пилотного контура
 
 Запуск сервиса `threat-intel` в режиме `shadow` интегрирован в базовый `docker-compose.yml` и оверлей [docker-compose.pilot.yml](../../deploy/compose/docker-compose.pilot.yml) через Docker-профиль `threat-intel`.
+
+Сначала выполните подготовку CA, Basic users и Grafana из
+[pilot-deployment.md](pilot-deployment.md); переменные ниже дополняют этот профиль.
 
 ### 2.1 Подготовка переменных окружения
 
@@ -88,13 +83,14 @@ docker compose \
 
 1. **Healthcheck коллектора**:
    ```bash
-   curl -fsS http://127.0.0.1:8093/health
-   # Ответ: {"status":"ok",...}
+   # Base Compose does not publish 8093 to the host.
+   docker compose exec threat-intel wget -q -O- http://127.0.0.1:8093/health
+   # Ответ: ok
    ```
 
 2. **Проверка статуса режима в метриках**:
    ```bash
-   curl -fsS http://127.0.0.1:8093/metrics | grep "threat_intel_enforcement_mode"
+   docker compose exec threat-intel wget -q -O- http://127.0.0.1:8093/metrics | grep "threat_intel_enforcement_mode"
    # Ожидаемый вывод:
    # threat_intel_enforcement_mode{mode="shadow"} 1
    # threat_intel_enforcement_mode{mode="enforce"} 0
@@ -111,9 +107,11 @@ docker compose \
 
 4. **Проверка сквозного теневого матчинга**:
    ```bash
-   # Выполните запрос через прокси к домену, присутствующему в теневом фиде
-   # Запрос должен успешно пройти (HTTP 200), не вызывая 403 Forbidden:
-   curl -x http://127.0.0.1:3128 http://httpbin.org/get
+   # A regular auth smoke does not prove a shadow match:
+   curl --proxy-user pilot -x http://127.0.0.1:3128 http://httpbin.org/get
+   # Для доказательства shadow matching используйте контролируемый fixture-домен
+   # в shadow-выгрузке, не реальный вредоносный сайт. Сравните счётчик до/после.
+   # Shadow не меняет решение ACL: другие правила всё ещё могут вернуть 403.
 
    # Проверьте счетчик теневых совпадений:
    curl -fsS http://127.0.0.1:9090/metrics | grep "bsdm_proxy_ti_shadow_matches_total"
@@ -129,7 +127,7 @@ docker compose \
 
 - **Качество сбора фидов**:
   - `threat_intel_fetches_total{source, result="ok|http_error|parse_error"}` — успешность раундов опроса.
-  - `threat_intel_indicators_total{source, kind}` — объем активных индикаторов.
+  - `threat_intel_indicators_total{source, kind}` — накопленный счётчик принятых индикаторов; текущий снимок — `threat_intel_last_batch_size{source}`.
   - `threat_intel_last_success_timestamp_seconds{source}` — отсутствие "залипания" сбора.
   - `threat_intel_stored_indicators` — размер активной базы в SQLite.
 - **Теневой матчинг на Data Plane**:
@@ -146,44 +144,45 @@ docker compose exec clickhouse clickhouse-client
 
 1. **Сводка теневых сработок по источникам фидов за последние 24 часа**:
    ```sql
-   SELECT 
-       threat_feed,
+   SELECT
+       threat_shadow_match,
        count() AS total_matches,
        uniqExact(domain) AS unique_domains,
        uniqExact(client_ip) AS affected_clients
-   FROM bsdm.cache_events
-   WHERE threat_shadow_match = 1 
-     AND timestamp > now() - INTERVAL 1 DAY
-   GROUP BY threat_feed
+   FROM bsdm.http_cache
+   WHERE threat_shadow_match IS NOT NULL
+     AND ts > now() - INTERVAL 1 DAY
+   GROUP BY threat_shadow_match
    ORDER BY total_matches DESC;
    ```
 
 2. **Топ-20 доменов с теневыми совпадениями для аудита ложных срабатываний**:
    ```sql
-   SELECT 
+   SELECT
        domain,
-       threat_feed,
+       threat_shadow_match,
        count() AS hits,
        any(url) AS sample_url,
-       min(timestamp) AS first_seen,
-       max(timestamp) AS last_seen
-   FROM bsdm.cache_events
-   WHERE threat_shadow_match = 1 
-     AND timestamp > now() - INTERVAL 7 DAY
-   GROUP BY domain, threat_feed
+       min(ts) AS first_seen,
+       max(ts) AS last_seen
+   FROM bsdm.http_cache
+   WHERE threat_shadow_match IS NOT NULL
+     AND ts > now() - INTERVAL 7 DAY
+   GROUP BY domain, threat_shadow_match
    ORDER BY hits DESC
    LIMIT 20;
    ```
 
 3. **Проверка на пересечение с корпоративными белыми списками (Allowlist)**:
    ```sql
-   SELECT domain, threat_feed, count() AS hits
-   FROM bsdm.cache_events
-   WHERE threat_shadow_match = 1 
-     AND acl_action = 'allow'
-     AND timestamp > now() - INTERVAL 7 DAY
-   GROUP BY domain, threat_feed;
-   -- В идеальном профиле запрос должен возвращать 0 строк либо известные исключения.
+   SELECT domain, threat_shadow_match, count() AS hits
+   FROM bsdm.http_cache
+   WHERE threat_shadow_match IS NOT NULL
+     AND domain IN ('critical.corp.example', 'identity.corp.example')
+     AND ts > now() - INTERVAL 7 DAY
+   GROUP BY domain, threat_shadow_match;
+   -- Замените список на бизнес-критичные домены своей организации.
+   -- acl_action=allow сам по себе не доказывает совпадение с allowlist-правилом.
    ```
 
 ---

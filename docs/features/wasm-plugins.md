@@ -21,7 +21,7 @@ Issue: [#188](https://github.com/onixus/bsdm-proxy/issues/188) · Статус: 
 | Host ABI (`bsdm` imports) | ✅ |
 | Fuel / memory limits | ✅ |
 | PoC deny-suffix plugin | ✅ `examples/wasm/deny_blocked_suffix.wat` |
-| Rust/AS SDK | sketch via ABI docs (full SDK later) |
+| Rust SDK | `bsdm-wasm-sdk/` and `examples/wasm/rust_plugin/`; AssemblyScript is not supplied |
 | WASI FS/net | **not** granted |
 
 ## Build & run
@@ -30,6 +30,7 @@ Issue: [#188](https://github.com/onixus/bsdm-proxy/issues/188) · Статус: 
 # Needs a Rust toolchain that can link wasmtime (same as proxy)
 cargo build -p bsdm-proxy --features wasm --bin proxy
 
+DEPLOYMENT_PROFILE=development MITM_CA_DIR=./certs \
 WASM_ENABLED=true \
 WASM_MODULE_PATH=examples/wasm/deny_blocked_suffix.wat \
 WASM_FUEL=50000 \
@@ -79,7 +80,8 @@ PoC guest (`examples/wasm/deny_blocked_suffix.wat`): deny if URL contains `.bloc
 
 ## Next steps
 
-- Richer context (headers map, user groups) via host getters
+- Current ABI also exposes request-header, client-IP and username getters, response status/header helpers (`bsdm-wasm-sdk`). Groups are not exposed.
+- Richer context and additional hooks need separate implementation.
 - `pre-upstream` / `post-response` hooks
-- Rust/AssemblyScript SDK crate compiling to the ABI
+- Rust SDK is present; an AssemblyScript SDK remains future work.
 - Hot-reload module path via control plane
