@@ -98,6 +98,9 @@ services:
       # LAB ONLY: the production profile refuses an unauthenticated proxy
       # without a client-IP ACL; this stack is an open proxy on purpose.
       - ALLOW_ANONYMOUS_PROXY=true
+      # LAB ONLY: production blocks loopback forwarding by default; the load
+      # test mock upstream shares this container's loopback (127.0.0.1:18080).
+      - BLOCK_LOOPBACK_FORWARDING=false
       - ACL_ENABLED=false
       - ACL_DEFAULT_ACTION=allow
       - CATEGORIZATION_ENABLED=false

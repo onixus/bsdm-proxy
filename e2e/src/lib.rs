@@ -697,10 +697,25 @@ fn bool_env(value: bool) -> &'static str {
 pub fn ensure_test_ca() -> Result<()> {
     let dir = workspace_path("certs");
     std::fs::create_dir_all(&dir).context("create certs dir")?;
-    if dir.join("ca.crt").exists() && dir.join("ca.key").exists() {
-        return Ok(());
+    if !(dir.join("ca.crt").exists() && dir.join("ca.key").exists()) {
+        write_test_ca(&dir)?;
     }
-    write_test_ca(&dir)
+    restrict_ca_key_permissions(&dir.join("ca.key"))
+}
+
+/// The proxy refuses a world-readable `ca.key` in production (MITM CA
+/// fail-closed), and some e2e tests run with `DEPLOYMENT_PROFILE=production`.
+/// A key written under the default umask (CI runners: 0644) must be narrowed.
+#[cfg(unix)]
+fn restrict_ca_key_permissions(key: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(key, std::fs::Permissions::from_mode(0o600))
+        .context("chmod 600 test CA key")
+}
+
+#[cfg(not(unix))]
+fn restrict_ca_key_permissions(_key: &Path) -> Result<()> {
+    Ok(())
 }
 
 fn write_test_ca(dir: &Path) -> Result<()> {
