@@ -6,12 +6,12 @@
 [![Docs](https://github.com/onixus/bsdm-proxy/actions/workflows/docs.yml/badge.svg)](https://github.com/onixus/bsdm-proxy/actions/workflows/docs.yml)
 [![Admin Console](https://github.com/onixus/bsdm-proxy/actions/workflows/admin-console.yml/badge.svg)](https://github.com/onixus/bsdm-proxy/actions/workflows/admin-console.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.9.15-blue.svg)](https://github.com/onixus/bsdm-proxy/releases)
+[![Version](https://img.shields.io/badge/version-1.0.0--rc.1-blue.svg)](https://github.com/onixus/bsdm-proxy/releases)
 [![Rust](https://img.shields.io/badge/Rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 
 **High-performance HTTP/HTTPS Forward Proxy & Secure Web Gateway written in Rust.**
 
-[Features](#-основные-возможности) • [Architecture](#-архитектура) • [Quick Start](#quick-start) • [Project Status](docs/project-status.md) • [Docs](docs/)
+[Features](#-основные-возможности) • [Architecture](#-архитектура) • [Quick Start](#quick-start) • [Production](#-production) • [Project Status](docs/project-status.md) • [Docs](docs/)
 
 </div>
 
@@ -67,6 +67,7 @@ The benchmark harness and reports can then be compared across architectural chan
   - [Lite Mode (локальная разработка: Proxy + SQLite)](#2-lite-mode-proxy--sqlite)
   - [Full Analytics Stack (полный стек с Kafka и ClickHouse)](#3-full-analytics-stack)
   - [Пилотное развёртывание на 100 пользователей](#4-пилотный-профиль-на-100-пользователей)
+- [Production](#-production)
 - [Сборка и Feature Flags](#сборка-и-feature-flags)
 - [Тестирование и качество кода](#тестирование-и-качество-кода)
 - [Документация](#документация)
@@ -282,6 +283,26 @@ docker compose --profile icap up -d
 Готовая конфигурация Compose: [`deploy/compose/docker-compose.pilot.yml`](deploy/compose/docker-compose.pilot.yml).  
 Чек-лист оператора и критерии приёмки: [Pilot Deployment Guide](docs/getting-started/pilot-deployment.md).
 
+---
+
+## 🏭 Production
+
+Промышленная эксплуатация v1.0 ограничена **GA-скоупом**: forward proxy и `CONNECT`, Hybrid Policy (`selective-mitm` / `sni`) с MITM circuit breaker, L1-кэш, ACL/categorization, Basic auth, control plane + Admin Console (fail-closed), `dns-sinkhole`, cache-indexer/Search API и метрики. Beta-модули включаются только после отдельной приёмки; lab/frozen-модули (TI enforcement, eBPF/XDP, AmneziaWG, agent fleet, WASM, ICAP, DLP) в prod-профиле выключены — см. [матрицу статуса](docs/project-status.md).
+
+| Вариант | Артефакт |
+|---|---|
+| Docker Compose (один хост) | [`deploy/compose/docker-compose.prod.yml`](deploy/compose/docker-compose.prod.yml) + `prod.env` + Compose `secrets:` |
+| Kubernetes | [`charts/bsdm/values-production.yaml`](charts/bsdm/values-production.yaml) (PSS restricted, NetworkPolicy, PDB) |
+| VM / bare metal | `scripts/install-release.sh` + захарденные юниты [`packaging/systemd/`](packaging/systemd/) |
+
+Образы `ghcr.io/onixus/bsdm-*` публикуются с SBOM и подписью cosign — проверяйте подпись перед развёртыванием.
+
+| Документ | Назначение |
+|---|---|
+| [Production deployment](docs/getting-started/production-deployment.md) | Скоуп, сайзинг, CA, секреты, TLS control plane, мониторинг, бэкапы, обновление |
+| [Production readiness checklist](docs/ops-and-dev/production-readiness-checklist.md) | Go-live: требование → проверка → доказательство |
+| [Runbook](docs/ops-and-dev/runbook.md) | Инциденты: proxy down, breaker, компрометация CA, DNS, аналитика, откат |
+| [Upgrade guide 0.9.x → 1.0](docs/ops-and-dev/upgrade-guide.md) | Миграция с пилотных версий |
 
 ---
 
@@ -380,7 +401,9 @@ make backup-drill
 | **Архитектура** | [Обзор архитектуры](docs/architecture/overview.md) | Потоки данных, компоненты ядра и взаимодействие |
 | | [Иерархический кеш](docs/architecture/hierarchical-caching.md) | Многоуровневый кеш L1/L2, протоколы ICP/HTCP |
 | | [Планирование ресурсов](docs/architecture/capacity-planning.md) | Формулы расчёта нагрузки, RAM/CPU/диска и масштабирование |
-| **Эксплуатация** | [Параметры конфигурации](docs/ops-and-dev/configuration.md) | Переменные окружения и конфигурационные файлы |
+| **Эксплуатация** | [Production deployment](docs/getting-started/production-deployment.md) | Промышленное развёртывание v1.0 (GA-скоуп) |
+| | [Runbook инцидентов](docs/ops-and-dev/runbook.md) | Действия дежурного при инцидентах и откате |
+| | [Параметры конфигурации](docs/ops-and-dev/configuration.md) | Переменные окружения и конфигурационные файлы |
 | | [Управление CA и ротация](docs/ops-and-dev/ca-lifecycle.md) | Генерация, ротация, хранение и аварийный отзыв CA |
 | | [Безопасность Control Plane](docs/ops-and-dev/control-plane-security.md) | Защита токенами, сетевая изоляция и биндинг портов |
 | | [Резервное копирование](docs/ops-and-dev/backup-restore.md) | Бэкап и восстановление ClickHouse и сертификатов CA |

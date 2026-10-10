@@ -20,7 +20,7 @@ native install находятся в `packaging/config/*.env.example`; Compose �
 | `PINNING_AUDIT_LOG_PATH` | `<registry>.audit.jsonl` | Append-only audit trail изменений реестра |
 | `PINNING_EXCEPTIONS` | `.slack.com,.teams.microsoft.com,.zoom.us` | Legacy startup fallback; без reload и аудита |
 | `MITM_ENABLED` | `true` | HTTPS MITM; требует `ca.key` и `ca.crt` при POLICY_MODE != sni |
-| `MITM_CA_DIR` | `/etc/bsdm-proxy/certs` | Каталог с `ca.key`/`ca.crt`; при отсутствии CA читаются устаревшие `/certs` и `./certs` (с warning) |
+| `MITM_CA_DIR` | `/etc/bsdm-proxy/certs` | Каталог с `ca.key`/`ca.crt`. В production CA читается **только** отсюда; нет `ca.crt`, пара не совпадает, CA истёк или права `ca.key` шире `0440` — отказ старта. В development/test при отсутствии CA читаются устаревшие `/certs` и `./certs` (с warning). Срок CA — метрика `bsdm_proxy_mitm_ca_not_after_timestamp_seconds` |
 | `TLS_OCSP_STAPLING` | `true` | OCSP staple (RFC 6960 DER, CA-signed **good**) on MITM/control TLS leaves |
 | `TLS_OCSP_STAPLE_REFRESH_SECS` | `900` | TTL refresh cached `ServerConfig` + staple (60–86400) |
 | `MITM_CERT_CACHE_MAX_ENTRIES` | `10000` | Лимит записей в кэшах MITM-сертификатов и `ServerConfig` (ключ — SNI); значения ниже `128` поднимаются до `128`. При заполнении вытесняются самые старые записи |
@@ -31,6 +31,15 @@ native install находятся в `packaging/config/*.env.example`; Compose �
 | `AGENT_REDIS_PREFIX` | `bsdm:agent:` | Redis key prefix (HASH `…devices`, `…crl`, indexes) |
 | `DLP_ENABLED` | `false` | Experimental native signature DLP; `false` = no built-in patterns / no body scan |
 | `SHUTDOWN_TIMEOUT_SECONDS` | `30` | Graceful shutdown |
+| `MAX_REQUEST_BODY_BYTES` | `67108864` (64 MiB) | Лимит тела запроса (буферизуется в RAM); сверх — `413` |
+| `UPSTREAM_CONNECT_TIMEOUT_MS` | `10000` | Таймаут TCP/TLS-соединения с upstream |
+| `UPSTREAM_RESPONSE_TIMEOUT_MS` | `60000` | Таймаут ожидания заголовков ответа upstream (на тело ответа таймаута нет) |
+| `BLOCK_LOOPBACK_FORWARDING` | `true` в production | Запрет проксирования к loopback-адресам узла (проверка по разрешённым адресам) |
+| `ALLOWED_CONNECT_PORTS` | unset (любой порт) | Список портов для `CONNECT`; в production задайте `443` (+ согласованные) |
+| `ALLOW_ANONYMOUS_PROXY` | `false` | В production при `AUTH_ENABLED=false` без `IpRange`-правила ACL proxy не стартует; `true` — явный opt-out |
+| `AGENT_API_ENABLED` / `AWG_API_ENABLED` / `LAB_API_ENABLED` | `false` в production | Включают lab-маршруты control plane (agent, AmneziaWG, прочие lab); выключенные отвечают `404` |
+| `SEARCH_UPSTREAM_TOKEN` | `SEARCH_API_TOKEN` | Токен, которым proxy обращается к cache-indexer Search API (токен вызывающего не пересылается) |
+| `RKN_FALLBACK_URL` | unset в production | Резервный URL снапшота РКН; встроенный сторонний fallback в production не используется |
 | `WORKER_COUNT` | `1` | SO_REUSEPORT accept loops на Unix |
 | `RUST_LOG` | component-specific | tracing filter |
 | `TCP_SNDBUF_BYTES` | `524288` | Client socket send buffer, ставится на **каждое** клиентское соединение; память ядра, в RSS не видна, но в cgroup учитывается. `0` не меняет |
@@ -59,7 +68,8 @@ DEPLOYMENT_PROFILE=development POLICY_MODE=full-mitm ALLOW_FULL_MITM=true \
 | `MITM_CIRCUIT_BREAKER_FAILURE_RATE` | `0.05` | Доля ошибок для срабатывания; принимается только `0 < rate <= 1`, иначе default |
 | `MITM_CIRCUIT_BREAKER_MIN_SAMPLES` | `5` | Минимум попыток в окне до оценки доли ошибок (≥ 1) |
 | `MITM_CIRCUIT_BREAKER_WINDOW_SECS` | `60` | Длина скользящего окна, секунды (≥ 1) |
-| `MITM_CIRCUIT_BREAKER_COOLDOWN_SECS` | `0` | `0` — домен остаётся в bypass до ручного сброса; иначе авто-восстановление через N секунд |
+| `MITM_CIRCUIT_BREAKER_COOLDOWN_SECS` | `900` | Авто-восстановление через N секунд (с v1.0; раньше `0`). `0` — домен остаётся в bypass до ручного сброса |
+| `MITM_CIRCUIT_BREAKER_MIN_CLIENTS` | `3` | Минимум различных IP клиентов со сбоями в окне для срабатывания (с v1.0); защищает от вывода домена из инспекции одним клиентом |
 | `MITM_CIRCUIT_BREAKER_MAX_DOMAINS` | `10000` | Максимум отслеживаемых доменов в памяти; значения ниже `128` поднимаются до `128` |
 
 Некорректное значение любой переменной игнорируется и заменяется значением по
@@ -155,7 +165,7 @@ Redis должен иметь явные `maxmemory` и eviction policy.
 
 | Переменная | Default | Семантика |
 |---|---:|---|
-| `PERF_FAST_CACHE_HIT` | `false` | Bench fast path; может обходить policy |
+| `PERF_FAST_CACHE_HIT` | `false` | Bench fast path; обходит policy, поэтому в `DEPLOYMENT_PROFILE=production` игнорируется |
 | `KAFKA_SAMPLE_RATE` | `0` | `0` — все события; `N` — примерно 1 из N |
 | `METRICS_SAMPLE_RATE` | `0` | `0` — все histograms; `N` — 1 из N |
 | `KAFKA_QUEUE_CAPACITY` | `8192` | Bounded queue proxy → producer |
@@ -175,12 +185,18 @@ Redis должен иметь явные `maxmemory` и eviction policy.
 | `AUTH_CACHE_TTL` | backend-specific |
 | `AUTH_CONN_CACHE_TTL_SECONDS` | `300` |
 | `BASIC_AUTH_USERS_FILE` | unset |
+| `BASIC_AUTH_MAX_CONCURRENT_VERIFICATIONS` | число CPU |
 
 > Колонка Default — это встроенный fallback, когда переменная не задана вообще.
 > Поставляемые эталонные конфиги (`bsdm-proxy.env`, корневой `docker-compose.yml`,
 > `deploy/compose/docker-compose.pilot.yml`) задают `AUTH_ENABLED=true`.
-> При `AUTH_BACKEND=basic` обязательно задайте `BASIC_AUTH_USERS_FILE`: без него
-> прокси принимает ЛЮБЫЕ учётные данные. Лабораторные стеки
+> При `AUTH_BACKEND=basic` обязательно задайте `BASIC_AUTH_USERS_FILE`: в
+> `DEPLOYMENT_PROFILE=production` без него прокси **не стартует** (с v1.0); в
+> development/test — принимает ЛЮБЫЕ учётные данные с предупреждением.
+>
+> `BASIC_AUTH_MAX_CONCURRENT_VERIFICATIONS` ограничивает параллельные
+> Argon2-проверки: при переполнении дольше 5 с вход отклоняется («overloaded»),
+> что защищает память при флуде неверных паролей; per-IP backoff — в 1.1. Лабораторные стеки
 > (`docker-compose.lite.yml`, `.test.yml`, `.ha.yml`, `.hierarchy.yml`,
 > `.redis-l2.yml`) намеренно оставлены с `AUTH_ENABLED=false` и не предназначены
 > для прода.
@@ -287,6 +303,9 @@ Peer mTLS: `HIERARCHY_PEER_MTLS_ENABLED`, `HIERARCHY_PEER_CA_FILE`,
 | `SEARCH_API_ENABLED` | `true` |
 | `SEARCH_API_TOKEN` | unset |
 | `INGEST_API_TOKEN` | fallback search token |
+| `METRICS_BIND` (cache-indexer) | `0.0.0.0` |
+| `INDEXER_HTTP_MAX_CONNECTIONS` | `256` | Лимит одновременных HTTP-соединений indexer |
+| `INDEXER_HTTP_READ_TIMEOUT_MS` | `10000` | Таймаут чтения запроса |
 | `SEARCH_API_MAX_LIMIT` | `10000` |
 | `SEARCH_API_DEFAULT_DAYS` | `30` |
 | `SQLITE_PATH` | deployment-specific |
@@ -296,6 +315,13 @@ Peer mTLS: `HIERARCHY_PEER_MTLS_ENABLED`, `HIERARCHY_PEER_CA_FILE`,
 
 Дополнительный HTTP event sink proxy включается через `EVENT_SINK_URL`;
 Bearer token задаётся `EVENT_SINK_TOKEN`.
+
+С v1.0 cache-indexer слушает admin/Search на `METRICS_BIND` (по умолчанию
+`0.0.0.0`; `127.0.0.1`, если клиенты локальные), ограничивает число соединений
+`INDEXER_HTTP_MAX_CONNECTIONS` и время чтения запроса
+`INDEXER_HTTP_READ_TIMEOUT_MS`. В production задавайте `INGEST_API_TOKEN` отдельно
+от `SEARCH_API_TOKEN` (при совпадении — warn на старте): ingest с существующим
+`event_id` перезаписывает событие.
 
 ## Session correlation и upstream TLS
 
@@ -390,7 +416,16 @@ ML worker:
 | `DNS_SINKHOLE_DOT_BIND` | `0.0.0.0:853` |
 | `DNS_SINKHOLE_TLS_CERT`, `DNS_SINKHOLE_TLS_KEY` | required for DoH/DoT |
 | `RPZ_CONFIRM_GROWTH_RULES` | `5000` | Абсолютный порог правил, выше которого `POST /api/dns/rpz/lists` требует `?confirm=true` |
+| `DNS_SINKHOLE_MAX_INFLIGHT` | `1024` |
+| `DNS_SINKHOLE_MAX_TCP_CONNECTIONS` | `512` |
+| `DNS_SINKHOLE_TLS_HANDSHAKE_TIMEOUT_MS` | `5000` |
+| `DNS_SINKHOLE_TCP_IDLE_TIMEOUT_MS` | `10000` |
 | `RPZ_CONFIRM_GROWTH_PCT` | `50` | Относительный порог: прирост зоны больше этого процента тоже требует `?confirm=true` |
+
+Лимиты с v1.0: UDP — не более `DNS_SINKHOLE_MAX_INFLIGHT` запросов одновременно
+(лишние отбрасываются); DoT/DoH — не более `DNS_SINKHOLE_MAX_TCP_CONNECTIONS`
+соединений (глобально, не на IP), таймауты handshake и простоя. Ответ upstream
+принимается только с адреса `DNS_SINKHOLE_UPSTREAM` с совпадающими ID и вопросом.
 
 `dns-sinkhole` **отказывается** загружать observe-only артефакт коллектора: и по
 имени (путь оканчивается на `.shadow`), и по машинному маркеру внутри зоны

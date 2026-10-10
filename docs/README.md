@@ -11,6 +11,7 @@
 
 | Документ | Назначение |
 |---|---|
+| [**Production deployment (v1.0 GA)**](getting-started/production-deployment.md) | GA-скоуп, сайзинг, CA, секреты, мониторинг, бэкапы, обновление; Compose prod / Helm / systemd |
 | [Deployment](getting-started/deployment.md) | Docker Compose, native package и Kubernetes |
 | [Пилот Hybrid (100 users)](getting-started/pilot-deployment.md) | Selective MITM compose + acceptance checklist (#270) |
 | [Pilot authentication](getting-started/pilot-auth.md) | Basic users file, smoke, OIDC out-of-scope note |
@@ -70,6 +71,9 @@
 
 | Документ | Назначение |
 |---|---|
+| [Production readiness checklist](ops-and-dev/production-readiness-checklist.md) | Go-live v1.0: требование → проверка → доказательство |
+| [Runbook инцидентов](ops-and-dev/runbook.md) | Proxy down, MITM breaker, компрометация CA, DNS, аналитика, откат релиза |
+| [Upgrade guide 0.9.x → 1.0](ops-and-dev/upgrade-guide.md) | Изменения, требующие действий, и процедура миграции |
 | [Kubernetes](ops-and-dev/k8s-architecture.md) | Helm и разделение data/analytics plane |
 | [Control plane security](ops-and-dev/control-plane-security.md) | Tokens, bind и network policy |
 | [Backup & restore](ops-and-dev/backup-restore.md) | ClickHouse и MITM CA rollback drill |
@@ -94,7 +98,7 @@
 - [ADR 0007: Safe selective MITM & circuit breaker](adr/0007-mitm-circuit-breaker.md)
 - [ADR 0008: Threat Intelligence Shadow Mode](adr/0008-threat-intel-shadow-mode.md)
 - [Roadmap](roadmap.md)
-- [Latest release notes (v0.9.15)](releases/v0.9.15.md)
+- [Latest release notes (v1.0.0-rc.1)](releases/v1.0.0-rc.1.md)
 - [Release history](releases/)
 
 Исторические release notes сохраняют версии и ограничения соответствующего
@@ -102,6 +106,7 @@
 
 ## По ролям
 
+- **Production / DevOps:** Production deployment → Readiness checklist → Runbook → Upgrade guide.
 - **Пилот / DevOps:** Pilot deployment → Configuration → Logging → Capacity.
 - **Security / SOC:** Project status → ClickHouse → Alerting → ML.
 - **Разработчик:** Architecture → Repository structure → Development.
