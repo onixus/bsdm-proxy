@@ -1,74 +1,181 @@
 name: CI
 
-# ОТКЛЮЧЕНО: заменено локальным Jenkins (Jenkinsfile, джоба bsdm-proxy).
-# Причина — лимиты минут GitHub Actions. Автоматические триггеры сняты, чтобы
-# не жечь минуты; ручной запуск оставлен на случай, если понадобится сверка.
-# Вернуть: раскомментировать push/pull_request ниже.
+# BLOCKING quality/supply-chain gate for every pull request and every push to
+# main. Mark the single `ci-gate` job as the required status check in branch
+# protection (Settings → Branches → main → Require status checks) — it fails
+# if any job it depends on fails, is cancelled or is skipped, so new jobs only
+# need to be added to its `needs:` list.
+#
+# Jenkins (Jenkinsfile) keeps running the same scripts/ci/run.sh tasks; this
+# workflow is the gate GitHub enforces on merges. Cost control:
+#   * jobs run in parallel, each with its own rust-cache key;
+#   * the cache is saved only from main (PRs restore, never write);
+#   * superseded PR runs are cancelled (concurrency below), main runs are not.
+#
+# Security posture: read-only GITHUB_TOKEN, no secrets used, no
+# pull_request_target, no `${{ github.event.* }}` interpolation in `run:`,
+# checkout without persisted credentials, every action pinned by commit SHA.
+
 on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
   workflow_dispatch:
-  # push:
-  #   branches: [main]
-  # pull_request:
-  #   branches: [main]
+
+permissions:
+  contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
 
 jobs:
-  ci:
-    name: Format, Lint, Build, Test
+  fmt:
+    name: rustfmt
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
+    timeout-minutes: 10
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable branch
+        with:
+          toolchain: stable
+          components: rustfmt
+      - run: ./scripts/ci/run.sh rust-fmt
 
-      - name: Run CA rotation drill
+  clippy:
+    name: clippy (-D warnings)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          components: clippy
+          cache-key: clippy
+      - run: ./scripts/ci/run.sh rust-clippy
+
+  test:
+    name: test --workspace
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+      - name: CA rotation drill
         run: ./scripts/ci/run.sh rust-ca
-
-      - name: Setup Rust environment
-        uses: ./.github/actions/setup-rust
+      - uses: ./.github/actions/setup-rust
         with:
-          components: rustfmt,clippy
-
-      - name: Check formatting
-        run: ./scripts/ci/run.sh rust-fmt
-
-      - name: Run clippy
-        run: ./scripts/ci/run.sh rust-clippy
-
-      - name: Build workspace
-        run: ./scripts/ci/run.sh rust-build
-
-      - name: Build lite profile (no rdkafka)
-        run: ./scripts/ci/run.sh rust-lite
-
-      - name: Run tests (unit + e2e + smoke)
+          cache-key: test
+      - name: Unit + integration + e2e tests
         run: ./scripts/ci/run.sh rust-test
+      - name: Threat-intel Shadow Mode shipped defaults
+        run: ./scripts/ci/run.sh shadow-defaults
 
-      - name: Build and test gRPC control plane feature
-        run: ./scripts/ci/run.sh rust-grpc
-
-      - name: Build and test Wasm plugin host feature
-        run: ./scripts/ci/run.sh rust-wasm
-
-  security-audit:
-    name: Security Audit
+  features:
+    name: feature builds (lite / grpc / wasm)
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      checks: write
+    timeout-minutes: 45
     steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Run cargo-audit
-        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          components: clippy
+          cache-key: features
+      - run: ./scripts/ci/run.sh rust-lite
+      - run: ./scripts/ci/run.sh rust-grpc
+      - run: ./scripts/ci/run.sh rust-wasm
+
+  # Supply chain: RustSec advisories, licenses, bans, sources — policy in
+  # deny.toml. Gates the SHIPPED graph (default features, what the release
+  # images are built with). Supersedes the old rustsec/audit-check job, which
+  # needed `checks: write`. Local equivalent: `cargo deny --locked check`.
+  cargo-deny:
+    name: cargo-deny (${{ matrix.checks }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # advisories in its own leg: a new RUSTSEC entry turns only that leg
+        # red, so a license/bans regression is never hidden behind it.
+        checks: [advisories, "bans licenses sources"]
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          # NB: the action defaults `arguments` to --all-features; override it
+          # so the blocking gate matches deny.toml's [graph] (default features).
+          arguments: --locked
+          command: check
+          command-arguments: ${{ matrix.checks }}
+
+  # REPORT-ONLY: the optional lab/beta features (wasm, auth-ntlm,
+  # auth-kerberos, grpc) have known findings (wasmtime advisories, AGPL
+  # kerberos_keytab, rsa RUSTSEC-2023-0071). They are not in the release
+  # images, so they do not block merges; the job stays visible until they are
+  # fixed — then drop continue-on-error and add it to ci-gate.needs.
+  cargo-deny-all-features:
+    name: cargo-deny --all-features (report-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          arguments: --locked --all-features
+          command: check
+
+  admin-console:
+    name: admin-console lint / test / build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: admin-console/package-lock.json
+      - run: ./scripts/ci/run.sh admin-console-core
+
+  # Single required check. `if: always()` makes it run (and fail) even when a
+  # dependency failed or was cancelled; a skipped dependency also fails it.
+  ci-gate:
+    name: ci-gate
+    if: always()
+    needs: [fmt, clippy, test, features, cargo-deny, admin-console]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: All required jobs succeeded
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$NEEDS_JSON" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          bad="$(printf '%s' "$NEEDS_JSON" | jq -r '[to_entries[] | select(.value.result != "success") | .key] | join(", ")')"
+          if [[ -n "$bad" ]]; then
+            echo "::error::required CI jobs did not succeed: ${bad}"
+            exit 1
+          fi

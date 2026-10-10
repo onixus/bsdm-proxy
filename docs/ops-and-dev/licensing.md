@@ -1,7 +1,7 @@
 # Лицензирование и third-party компоненты
 
 Обзор лицензий переиспользуемого ПО. Данные валидированы для актуального
-workspace BSDM-Proxy `0.9.15`.
+workspace BSDM-Proxy `1.0.0-rc.1`.
 
 > См. также: [NOTICE](../../NOTICE) · [LICENSE](../../LICENSE)
 

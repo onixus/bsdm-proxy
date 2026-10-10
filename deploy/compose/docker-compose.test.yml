@@ -45,7 +45,11 @@ services:
       - HTTP_PORT=3128
       - METRICS_PORT=9090
       - MITM_ENABLED=false
+      - MITM_CA_DIR=/certs  # explicit: production no longer probes /certs or ./certs
       - AUTH_ENABLED=false
+      # LAB ONLY: the production profile refuses an unauthenticated proxy
+      # without a client-IP ACL; this stack is an open proxy on purpose.
+      - ALLOW_ANONYMOUS_PROXY=true
       - ACL_ENABLED=false
       - CATEGORIZATION_ENABLED=false
       - RUST_LOG=warn

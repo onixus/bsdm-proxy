@@ -1,26 +1,168 @@
-# Roadmap BSDM-Proxy (Hybrid + Agent Architecture)
+# Roadmap BSDM-Proxy: v1.0 GA → 1.1 → 1.2 → 2.0
 
-Текущая версия workspace: **`0.9.15`**.
+Текущий релиз: **v1.0** (GA). Версию сверяйте с `proxy/Cargo.toml`.
 
-Roadmap определяет порядок работ в рамках стратегии **Hybrid Policy (DNS -> SNI -> Selective MITM)**, переход к **On-Device Local Policy Agent** и интеграцию **Threat Intelligence**. Фактическая зрелость функционала фиксируется в [матрице статуса](project-status.md).
+Roadmap описывает намерения и последовательность работ. Фактическая зрелость
+функций фиксируется в [матрице статуса](project-status.md) и её разделе
+[GA-скоуп v1.0](project-status.md#ga-скоуп-v10); пункт roadmap не повышает
+уровень зрелости без подтверждения там.
+
+Источники плана на 1.x/2.0 — архитектурное и security-ревью релиз-кандидата
+v1.0 (находки с идентификаторами `P1-xx`/`P2-xx` — архитектура, `AS-xx` —
+AppSec). Номера используются для трассировки в issue и CHANGELOG.
 
 ---
 
 ## Архитектурная философия
 
-1. **DNS/RPZ — первичный рубеж**: фильтрация вредоносных и заблокированных доменов на уровне DNS до установления соединений.
-2. **SNI (ClientHello) — контроль до расшифровки**: применение правил (Allow/Deny/Redirect) без терминирования TLS.
-3. **Selective MITM — селективная расшифровка**: расшифровка HTTPS применяется исключительно для целевых категорий высокого риска (`MITM_CATEGORIES`).
-4. **Local Agent — фильтрация на устройствах**: исполнение правил на эндпоинтах пользователя (On-Device SWG) вместо централизованного туннелирования.
-5. **Threat Intelligence — мониторинг угроз в режиме Shadow**: автоматический сбор и актуализация IOC-индикаторов (фишинг, вредоносное ПО). Enforcement для DNS RPZ и прокси-политик — в разработке и выключен по умолчанию (`TI_ENFORCEMENT_MODE=shadow`, [ADR 0008](adr/0008-threat-intel-shadow-mode.md)).
+1. **DNS/RPZ — первичный рубеж**: блокировка вредоносных и запрещённых доменов на уровне DNS до установления соединения.
+2. **Контроль до расшифровки**: Allow/Deny по authority из `CONNECT` без терминирования TLS (в 1.1 — с проверкой SNI из ClientHello).
+3. **Selective MITM**: расшифровка HTTPS только для категорий высокого риска (`MITM_CATEGORIES`).
+4. **Local Agent**: исполнение политики на устройствах (On-Device SWG) вместо централизованного туннелирования — lab до 1.2.
+5. **Threat Intelligence в Shadow Mode**: сбор и скоринг IOC без блокировки; enforcement — только по [ADR 0008](adr/0008-threat-intel-shadow-mode.md).
+6. **Control plane не слабее data plane** (новое с v1.0): каждая административная операция аутентифицирована, авторизована по роли и проаудирована; компрометация админки не должна давать доступа к ключу CA.
 
 ---
 
-## Фаза A — Hybrid Policy Foundation
+## Обзор этапов
+
+| Этап | Тема | Цель | Статус |
+|---|---|---|---|
+| Фазы A–D | Hybrid Policy, пилот, agent lab, Threat Intelligence | Функциональная база и пилот на 100 пользователей | ✅ Выполнено (ниже) |
+| **v1.0 GA** | Production baseline | Безопасный по умолчанию одноузловой SWG с воспроизводимой поставкой | ✅ Текущий релиз |
+| **1.1** | Control plane & trust hardening | Закрыть архитектурный долг ревью: роли, аудит, TLS админки, честный breaker, CA-иерархия, приватность событий | Планируется |
+| **1.2** | HA одного сайта и enterprise identity | Active-active на сайте, LDAP/Kerberos и TI enforce в GA | Планируется |
+| **2.0** | Multi-site, multi-tenant, раздельные planes | Единый источник политики для нескольких сайтов, изоляция арендаторов, control plane без доступа к `ca.key` | Видение |
+
+Мажорная версия допускает несовместимые изменения конфигурации и API; миноры —
+только аддитивные (новые переменные с безопасным дефолтом, новые колонки
+ClickHouse через `ADD COLUMN IF NOT EXISTS`).
+
+---
+
+## v1.0 GA — Production baseline (текущий релиз)
+
+**Цель.** Одноузловой (или несколько независимых узлов за L4) Secure Web
+Gateway, который безопасен «из коробки»: fail-closed control plane, shared
+cache по RFC 9111, отсутствие lab-модулей в prod-профиле, подписанная поставка.
+
+**Эпики (выполнено в RC):**
+
+- **GA-скоуп и prod-профили** — матрица GA/beta/lab/frozen; [`docker-compose.prod.yml`](../deploy/compose/docker-compose.prod.yml), [`values-production.yaml`](../charts/bsdm/values-production.yaml), захарденные systemd-юниты.
+- **Security-фиксы ревью (data plane)** — shared cache не хранит приватные ответы (`Cookie`/`Authorization`/`Set-Cookie`/`Vary`); `Host` ≠ authority → `400`; SSRF по разрешённым адресам, `BLOCK_LOOPBACK_FORWARDING=true` в production; лимит тела запроса (`413`); таймауты upstream; Basic без users-файла и `PERF_FAST_CACHE_HIT` в production запрещены; hardening dns-sinkhole и cache-indexer (AS-01…AS-10, AS-12…AS-17, AS-19, AS-20, AS-22, AS-23).
+- **Security-фиксы ревью (control plane и доверие)** — allowlist ключей `config/apply` без self-respawn и shell-команд (P0-5); CA fail-closed в production и метрика срока CA (P1-03); breaker срабатывает от ≥ 3 различных клиентов, cooldown 900 с, метрика trip'ов (P1-02, частично); open-proxy guard `ALLOW_ANONYMOUS_PROXY` (P1-04); отдельный `SEARCH_UPSTREAM_TOKEN` (P1-06); lab-маршруты `404` в production и device-токен, привязанный к устройству (P1-07, AS-05); RKN без стороннего fallback (P1-09). Итоговый список — `CHANGELOG.md` `[1.0.0-rc.1]`.
+- **Supply chain** — блокирующий CI-гейт (fmt, clippy `-D warnings`, test, cargo-deny, admin-console), публикация шести образов с SBOM, trivy-гейтом и подписью cosign.
+- **Эксплуатационная документация** — [production deployment](getting-started/production-deployment.md), [readiness checklist](ops-and-dev/production-readiness-checklist.md), [runbook](ops-and-dev/runbook.md), [upgrade guide](ops-and-dev/upgrade-guide.md).
+
+**Критерии выхода (GA):**
+
+- [x] Нет открытых P0 и P1 из ревью, кроме явно перенесённых в 1.1 с записью в known issues (по Re-test AppSec все P1 закрыты; остаток P1-02 — known issue).
+- [ ] `ci-gate` зелёный на релизном теге; образы подписаны, SBOM опубликован, trivy без fixable CRITICAL/HIGH.
+- [ ] Production-профиль не стартует без токена и users-файла; с ними — стартует, `bsdm_proxy_ebpf_armed == 0`, `CONNECT 127.0.0.1:9090` → `403`.
+- [ ] Readiness checklist пройден на референсном стенде (нагрузочный тест, учения CA и restore).
+- [ ] Known issues v1.0 опубликованы ([§7a prod-гайда](getting-started/production-deployment.md#7a-известные-ограничения-безопасности-v10)).
+
+**Метрики:** p95 добавленной latency ≤ 10 мс на HIT / p99 ≤ 50 мс на selective-MITM при 100 пользователях (референс [load-test](ops-and-dev/load-test-results/latest.md)); error rate < 0.5%; RTO proxy ≤ 1 ч, analytics ≤ 4 ч; 0 lab-модулей в prod-профиле.
+
+---
+
+## 1.1 — Control plane & trust hardening
+
+**Цель.** Убрать класс «один токен = root на узле с ключом CA» и сделать
+инспекцию неотключаемой со стороны клиента. После 1.1 control plane можно
+выставлять операторам за пределы хоста без компенсирующих мер.
+
+**Эпики:**
+
+1. **MITM circuit breaker v2** (остаток P1-02, ADR 0007 rev. 2) — учитывать только TLS-alert'ы недоверия к сертификату (`unknown_ca`, `bad_certificate`, `certificate_unknown`), а не любой RST/EOF; для `malware`/`phishing` в production — fail-closed (block) вместо bypass; trip → событие в pipeline + алерт-правило в поставке. Закрывает known issue «3 сговорившихся клиента → 15 мин bypass».
+2. **Профиль MITM-листов и CA** (P2-02) — `not_after ≤ 397 д`, EKU `serverAuth`, случайный serial; поставляемый алерт на `bsdm_proxy_mitm_ca_not_after_timestamp_seconds`.
+3. **Гигиена data plane и секретов** — дефолт `ALLOWED_CONNECT_PORTS=443` в production и разделение CONNECT/HTTP-портов (остаток AS-15); `HTTP_BIND`; поддержка `*_FILE` для секретов; per-IP backoff неудачных входов Basic (остаток AS-07); append-only ingest и обязательный отдельный `INGEST_API_TOKEN` в production (AS-18); таймаут на тело ответа upstream (остаток AS-22); лимит DoT/DoH-соединений на IP (остаток AS-13); RPZ-фиды только по `https` (остаток AS-14).
+4. **Остатки control plane** — публичные `GET /api/stats`, `/api/hierarchy/peers`, `/api/upstream/tls` за токеном (P2-09); проверка `Host` в reverse-proxy режиме при разморозке.
+5. **RBAC control plane** — роли `viewer` / `policy-admin` / `security-admin` / `agent`; per-principal токены с id, хешированные at rest, ротация без рестарта; отдельный scope security-posture (MITM, CA, pinning, auth backend).
+6. **Неизменяемый audit log** изменений политики и конфигурации (actor, diff, время, IP источника) → event pipeline + append-only файл; просмотр в Admin Console.
+7. **TLS для control plane** `:9090` из коробки + опциональный OIDC-вход в Admin Console вместо статического Bearer.
+8. **CA-иерархия** (P2-03, P2-04) — offline root → короткоживущий MITM-intermediate (ротация без смены root на клиентах) / Agent-intermediate / делегированный OCSP-responder с кэшем ответов; hot-reload CA; интерфейс PKCS#11/HSM.
+9. **Реальный SNI-контроль** (P2-01) — peek ClientHello, SNI ≠ `CONNECT` authority → deny/алерт; политика для `CONNECT` по голому IP; явное решение по ECH с метрикой.
+10. **Vary-aware cache** — ключ с нормализованными значениями `Vary` вместо «не хранить».
+11. **Приватность событий** (P1-08) — `EVENT_URL_MODE` (strip/hash query) по умолчанию в production, privacy-профили per category (none / domain-only / path / full), псевдонимизация username; Kafka TLS/SASL и ClickHouse TLS.
+12. **Аутентифицированная иерархия кэшей** — peer discovery с HMAC/mTLS, обязательный mTLS для sibling fetch.
+13. **dns-sinkhole** — TCP fallback, EDNS0, кэш с валидацией, DNSSEC-passthrough, `DNS_SINKHOLE_ALLOWED_CLIENTS`.
+14. **Единая схема конфигурации** — типизированная, валидируемая, версионируемая; `config/apply` работает с allowlist ключей схемы, а не с сырым env.
+15. **Эксплуатационный долг** — очистка `CACHE_SPILL_DIR` при старте; поставляемые Prometheus-правила для proxy (down, latency, breaker, event drop, SSRF blocks); миграция `rustls-pemfile` → `rustls-pki-types`.
+
+**Критерии выхода:**
+
+- [ ] Ни одна операция control plane не выполняется без роли; все мутации видны в audit log.
+- [ ] Admin Console и `/api/*` доступны по TLS без внешнего reverse proxy.
+- [ ] Клиенты, обрывающие собственные handshake (в том числе несколько сговорившихся), не могут перевести домен из категорий `malware`/`phishing` в bypass (e2e-тест); trip порождает событие и алерт.
+- [ ] Алерты на срок CA и trip'ы breaker входят в поставку.
+- [ ] Ни одного публичного endpoint control plane, кроме `/health`, `/ready`; `ALLOWED_CONNECT_PORTS` имеет безопасный дефолт.
+- [ ] Domain fronting (SNI ≠ authority) детектируется e2e-тестом.
+- [ ] События в production по умолчанию без query-строк; Kafka работает по SASL_SSL в референсном стенде.
+
+**Метрики:** 0 эндпоинтов control plane без авторизации; доля bypass-трафика по breaker < 1% с аудитом каждого trip; время ротации токена без простоя = 0; покрытие audit log 100% мутаций; hit ratio на авторизованном контенте не ниже v1.0 после Vary-aware cache.
+
+---
+
+## 1.2 — HA одного сайта и enterprise identity
+
+**Цель.** Отказ любого одного узла сайта не заметен пользователям; корпоративная
+аутентификация и блокировка по threat intelligence — в GA.
+
+**Эпики:**
+
+1. **Active-active HA на сайте** — несколько proxy за L4 LB, общий Redis L2 (`rediss://` + AUTH) с failover-тестами, общий policy/ACL store, согласованное состояние breaker и cert cache (или детерминированные листы); Redis L2 → GA.
+2. **Distributed rate limit, global sessions, threat sync** — довести scaffolding до рабочего multi-node с тестами **или удалить** из кодовой базы.
+3. **LDAP / Kerberos / NTLM → GA** — интеграционный стенд в CI; fail-closed при недоступности DC с метрикой; аутентификация, привязанная к соединению, а не к IP клиента (AS-11); решение по лицензии `kerberos_keytab` (AGPL-3.0) и `rsa` (Marvin) через `sspi` — замена или юридическое заключение. `AUTH_CONN_CACHE_TTL_SECONDS` для топологий с пулящим LB (P2-07).
+4. **Threat-intel enforce → GA** по критериям ADR 0008; подпись/целостность фидов и max-delta guard для всех блок-фидов (RKN, TI, UT1); RKN без стороннего fallback (P1-09).
+5. **Agent Contract → beta-prod** — device-токен привязан к mTLS fingerprint, короткоживущие токены, подписанные policy bundles; signed/notarized дистрибуция — customer pipeline.
+6. **alert-worker и ml-worker → GA** (скоринг и алерты; блокировка по ML остаётся opt-in).
+7. **SLO и алерт-пакет** — breaker trips, CA expiry, event drop rate, auth backend errors, SSRF blocks; документированные fail-modes Redis/Kafka/LDAP (P2-05).
+
+**Критерии выхода:**
+
+- [ ] Остановка любого узла proxy под нагрузкой: error rate < 0.5%, без ручных действий (chaos-тест в CI или на стенде).
+- [ ] Distributed rate limit либо работает на ≥ 2 узлах с тестами, либо удалён.
+- [ ] LDAP и Kerberos проходят интеграционный стенд в CI; NTLM/Kerberos не наследуют аутентификацию между пользователями за NAT.
+- [ ] TI enforce включён хотя бы на одной площадке по записи go/no-go ADR 0008 с FP < 1% за 14 дней shadow.
+
+**Метрики:** доступность сайта ≥ 99.9% (месяц); RTO отказа узла ≤ 30 с (выход из LB по readiness); FP-rate TI enforce < 1%; доля аутентифицированного трафика при Kerberos ≥ 99%.
+
+---
+
+## 2.0 — Multi-site, multi-tenant, раздельные planes
+
+**Цель.** Платформа для нескольких площадок и арендаторов, в которой
+компрометация административного контура не означает компрометацию CA.
+
+**Эпики:**
+
+1. **Multi-node / multi-site control plane** — единый источник политики (GitOps-friendly), согласованный аудит, шардирование аналитики по сайтам.
+2. **Multi-tenancy** — изоляция политик, кэша (tenant-aware cache key), аналитики и CA per tenant.
+3. **Разделение data plane и control plane** по процессам/контейнерам: control plane без доступа к `ca.key`, подпись листов через локальный signer-сервис (HSM-ready).
+4. **Расширения** (WASM / ICAP / DLP) — sandbox с ресурсными квотами, capability-модель и подписанные модули — **или** окончательный отказ и удаление из кода.
+
+**Критерии выхода:**
+
+- [ ] Политика применяется на ≥ 2 сайтах из одного источника с аудитом изменений.
+- [ ] Данные одного арендатора недоступны другому (кэш, аналитика, политика) — подтверждено тестами изоляции и внешним пентестом.
+- [ ] RCE в процессе control plane не даёт доступа к ключу CA (подтверждено threat model и пентестом).
+- [ ] По каждому замороженному модулю принято решение: продукт с sandbox или удаление.
+
+**Метрики:** время распространения политики на все сайты ≤ 60 с; 0 межарендаторных утечек в пентесте; доля кода в процессе с доступом к ключу CA (signer) — минимальная и аудируемая.
+
+---
+
+## Выполнено: фазы A–D
+
+История работ до v1.0. Отмеченные пункты реализованы; уровень зрелости — по
+[матрице статуса](project-status.md).
+
+### Фаза A — Hybrid Policy Foundation
 
 - [x] Внедрение параметра `POLICY_MODE` (`selective-mitm` | `sni` | `full-mitm`) — по умолчанию `selective-mitm`.
 - [x] Перевод `dns-sinkhole` в Core-компонент поставки (включение в базовый `docker-compose.yml`).
-- [x] Движок правил на уровне SNI (ClientHello) до TLS-терминирования.
+- [x] Движок правил до TLS-терминирования. *Уточнение (ревью v1.0): решение принимается по authority из `CONNECT`, ClientHello не разбирается — реальный SNI peek перенесён в 1.1.*
 - [x] Селективный MITM по списку категорий (`MITM_CATEGORIES=malware,phishing,illegal-content`).
 - [x] Изменение порта прокси по умолчанию с `1488` на `3128`.
 - [x] Расширенная наблюдаемость исключений (`decision_source` = `dns | sni | mitm | pinning-bypass`).
@@ -28,7 +170,7 @@ Roadmap определяет порядок работ в рамках стра�
 
 ---
 
-## Фаза B — Selective MITM Hardening & Pilot
+### Фаза B — Selective MITM Hardening & Pilot
 
 - [x] Документирование и регламентация полного жизненного цикла CA (`docs/ops-and-dev/ca-lifecycle.md`).
 - [x] Управление реестром исключений Certificate Pinning (`pinning_exceptions.json`).
@@ -40,7 +182,7 @@ Roadmap определяет порядок работ в рамках стра�
 
 ---
 
-## Фаза C — Agent Direction (On-Device SWG)
+### Фаза C — Agent Direction (On-Device SWG)
 
 - [x] Разработка спецификации Agent Contract v0.1 (`docs/architecture/agent-contract.md`).
 - [x] Написание ADR 0005: Local Policy Agent vs Tunnel-First (`docs/adr/0005-local-policy-agent-vs-tunnel-first.md`).
@@ -62,7 +204,7 @@ Roadmap определяет порядок работ в рамках стра�
 
 ---
 
-## Фаза D — Threat Intelligence & Feed Collector
+### Фаза D — Threat Intelligence & Feed Collector
 
 > Все артефакты ниже реализованы как **генерация и наблюдение**. Применение их для
 > блокировки трафика выключено по умолчанию и допускается только по критериям
@@ -82,10 +224,11 @@ Roadmap определяет порядок работ в рамках стра�
 - [x] **Core Proxy Lock Sharding & Metrics Guard** — 32-секторное шардирование `MitmCircuitBreaker`, защита от взрыва кардинальности Prometheus-метрик (eTLD+1) и 50ms таймауты L2 Redis с неблокирующим `UNLINK`.
 - [x] **Agent Fleet Drift & OS Proxy Enforcement** — вычисление SHA-256 дайджеста локальных правил, мониторинг системного перехвата прокси и индикация дрифта в Admin Console.
 
-
 ---
 
 ## Замороженные модули (Scope Freeze)
+
+Состояние на v1.0; судьба модулей решается в эпике 2.0 «Расширения».
 
 Следующие экспериментальные модули заморожены в текущем виде для исключения фичер-крипа:
 - **Native String DLP**: Заморожен до появления полноценного спека.
@@ -99,5 +242,6 @@ Roadmap определяет порядок работ в рамках стра�
 ## Правила roadmap
 
 1. Выполненная задача не повышает зрелость функции автоматически (требуются тесты, документация, наблюдаемость).
-2. Безопасность и предсказуемость селективного режима имеют приоритет перед расширением функционала.
-3. Исторические release notes не переписываются под новую архитектуру.
+2. Безопасность и предсказуемость важнее расширения функционала; control plane не может быть слабее data plane.
+3. Каждый этап закрывается по критериям выхода, а не по дате; невыполненные эпики явно переносятся с записью в known issues.
+4. Исторические release notes не переписываются под новую архитектуру.

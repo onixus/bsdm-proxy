@@ -186,6 +186,25 @@ security_audit() {
   fi
   log "RustSec dependency audit"
   cargo audit
+  supply_chain
+}
+
+supply_chain() {
+  # cargo-deny: advisories + licenses + bans + sources, policy in deny.toml.
+  # Blocking in GitHub Actions (ci.yml, job cargo-deny). On agents without
+  # cargo-deny this degrades to a loud skip unless REQUIRE_CARGO_DENY=1
+  # (install: cargo install cargo-deny --locked).
+  require_commands cargo
+  if ! cargo deny --version >/dev/null 2>&1; then
+    if [[ "${REQUIRE_CARGO_DENY:-0}" == "1" ]]; then
+      echo "cargo-deny is required (REQUIRE_CARGO_DENY=1)" >&2
+      return 1
+    fi
+    echo "WARNING: cargo-deny not installed — supply-chain policy (deny.toml) NOT checked on this agent" >&2
+    return 0
+  fi
+  log "Supply-chain policy (cargo-deny, shipped graph)"
+  cargo deny --locked check
 }
 
 release_validate() {
@@ -194,7 +213,8 @@ release_validate() {
 }
 
 package() {
-  local actual_arch="$(uname -m)"
+  local actual_arch
+  actual_arch="$(uname -m)"
   if [[ -n "${EXPECTED_ARCH:-}" && "$actual_arch" != "$EXPECTED_ARCH" ]]; then
     echo "package agent architecture mismatch: expected ${EXPECTED_ARCH}, found ${actual_arch}" >&2
     return 1
@@ -278,7 +298,8 @@ Tasks:
   admin-console-ui   Run the Admin Console Chromium smoke test
   sast               Run the semgrep SAST gate (needs Docker)
   secrets            Scan commit history for leaked secrets (needs Docker)
-  security-audit     Run cargo-audit (must be installed on the agent)
+  security-audit     Run cargo-audit (must be installed) + cargo-deny if present
+  supply-chain       Run cargo-deny against deny.toml (REQUIRE_CARGO_DENY=1 to fail when absent)
   release-validate   Validate version, tag, changelog, and Cargo metadata
   package            Build and verify the native release package
   load-test          Run the Docker-based lite/hybrid load-test profile
@@ -306,6 +327,7 @@ case "$task" in
   sast) sast ;;
   secrets) secrets ;;
   security-audit) security_audit ;;
+  supply-chain) supply_chain ;;
   release-validate) release_validate "$@" ;;
   package) package ;;
   load-test) exec ./scripts/ci/run-load-tests.sh ;;

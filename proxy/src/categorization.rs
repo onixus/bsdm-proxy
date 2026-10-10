@@ -438,6 +438,21 @@ impl CategoryCache {
     }
 }
 
+/// Resolves the RKN fallback feed from `RKN_FALLBACK_URL` (P1-09).
+///
+/// The built-in [`DEFAULT_RKN_FALLBACK_URL`] is a third-party repository that
+/// can change block decisions without review, so in production it is used
+/// only when set explicitly; outside production an unset variable keeps the
+/// old convenience default. An empty value disables the fallback everywhere.
+pub fn rkn_fallback_url_from(env_value: Option<String>, production: bool) -> Option<String> {
+    match env_value {
+        Some(value) if value.trim().is_empty() => None,
+        Some(value) => Some(value.trim().to_string()),
+        None if production => None,
+        None => Some(DEFAULT_RKN_FALLBACK_URL.to_string()),
+    }
+}
+
 /// Categorization engine configuration
 #[derive(Debug, Clone)]
 pub struct CategorizationConfig {
@@ -477,7 +492,8 @@ impl Default for CategorizationConfig {
             custom_db_path: None,
             rkn_sync_enabled: false,
             rkn_sync_url: crate::runtime_config::DEFAULT_RKN_SYNC_URL.to_string(),
-            rkn_fallback_url: Some(DEFAULT_RKN_FALLBACK_URL.to_string()),
+            // No implicit third-party fallback (P1-09); see `rkn_fallback_url_from`.
+            rkn_fallback_url: None,
             rkn_sync_interval_secs: 86400,
             rkn_snapshot_path: Some("/var/lib/bsdm-proxy/rkn-registry.json".to_string()),
             rkn_min_entries: 1000,
@@ -1221,6 +1237,27 @@ mod tests {
 
         let allowed = engine.categorize_local("https://shared.example/other");
         assert!(!allowed.categories.contains(&Category::Rkn));
+    }
+
+    #[test]
+    fn rkn_fallback_is_opt_in_in_production() {
+        assert_eq!(rkn_fallback_url_from(None, true), None);
+        assert_eq!(
+            rkn_fallback_url_from(None, false).as_deref(),
+            Some(DEFAULT_RKN_FALLBACK_URL)
+        );
+        let explicit = "https://feeds.corp.example/rkn.lst".to_string();
+        assert_eq!(
+            rkn_fallback_url_from(Some(explicit.clone()), true),
+            Some(explicit.clone())
+        );
+        assert_eq!(
+            rkn_fallback_url_from(Some(format!(" {explicit} ")), false),
+            Some(explicit)
+        );
+        assert_eq!(rkn_fallback_url_from(Some("  ".into()), false), None);
+        assert_eq!(rkn_fallback_url_from(Some(String::new()), true), None);
+        assert_eq!(CategorizationConfig::default().rkn_fallback_url, None);
     }
 
     #[test]

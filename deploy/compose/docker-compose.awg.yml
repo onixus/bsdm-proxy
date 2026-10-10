@@ -15,6 +15,10 @@ services:
     environment:
       - AWG_CONFIG_PATH=/etc/amnezia/amneziawg/awg0.conf
       - AWG_SERVER_ENDPOINT=proxy.corp.internal:51820
+      # AWG (Lab) and agent enrolment APIs are off by default in the production
+      # profile; this overlay exists to exercise them, so opt in explicitly.
+      - AWG_API_ENABLED=true
+      - AGENT_API_ENABLED=true
     volumes:
       - awg-config:/etc/amnezia/amneziawg
 

@@ -82,6 +82,9 @@ services:
       - REDIS_L2_ENABLED=true
       - REDIS_URL=redis://redis:6379
       - AUTH_ENABLED=false
+      # LAB ONLY: the production profile refuses an unauthenticated proxy
+      # without a client-IP ACL; this stack is an open proxy on purpose.
+      - ALLOW_ANONYMOUS_PROXY=true
       - ACL_ENABLED=false
       - CATEGORIZATION_ENABLED=false
       - RUST_LOG=info,bsdm_proxy=info
@@ -129,6 +132,9 @@ services:
       - REDIS_L2_ENABLED=true
       - REDIS_URL=redis://redis:6379
       - AUTH_ENABLED=false
+      # LAB ONLY: the production profile refuses an unauthenticated proxy
+      # without a client-IP ACL; this stack is an open proxy on purpose.
+      - ALLOW_ANONYMOUS_PROXY=true
       - ACL_ENABLED=false
       - CATEGORIZATION_ENABLED=false
       - RUST_LOG=info,bsdm_proxy=info

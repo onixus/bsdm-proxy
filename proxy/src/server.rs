@@ -523,9 +523,32 @@ async fn handle_connect_tunnel(
         return;
     }
 
+    // Resolve once, check the *resolved* addresses, and connect only to those:
+    // the string check above cannot see where a hostname actually points.
+    let addrs = match service
+        .resolved_destination_policy()
+        .resolve(&domain, port)
+        .await
+    {
+        Ok(addrs) => addrs,
+        Err(e) => {
+            if e.kind() == std::io::ErrorKind::PermissionDenied {
+                warn!(%authority, reason = %e, "CONNECT tunnel blocked: resolved address not allowed");
+                service
+                    .metrics
+                    .ssrf_blocked_total
+                    .with_label_values(&["resolved address blocked by security policy"])
+                    .inc();
+            } else {
+                warn!(%authority, "CONNECT tunnel: cannot resolve destination: {e}");
+            }
+            return;
+        }
+    };
+
     let mut client_io = TokioIo::new(upgraded);
 
-    match TcpStream::connect(&authority).await {
+    match TcpStream::connect(&addrs[..]).await {
         Ok(mut upstream) => {
             service.metrics.upstream_connections_created.inc();
             service.metrics.upstream_connections_active.inc();
@@ -639,11 +662,14 @@ async fn handle_connect_mitm(
                 .tls_handshakes_total
                 .with_label_values(&["error"])
                 .inc();
-            service.mitm_circuit_breaker.record_attempt(
+            if service.mitm_circuit_breaker.record_attempt_from(
                 &domain,
                 false,
                 &format!("cert_gen_error: {e}"),
-            );
+                Some(&*client_ip),
+            ) {
+                service.metrics.mitm_circuit_breaker_trips_total.inc();
+            }
             error!(
                 domain = %domain,
                 decision_source = "pinning-bypass",
@@ -662,9 +688,12 @@ async fn handle_connect_mitm(
                 .tls_handshakes_total
                 .with_label_values(&["success"])
                 .inc();
-            service
-                .mitm_circuit_breaker
-                .record_attempt(&domain, true, "ok");
+            service.mitm_circuit_breaker.record_attempt_from(
+                &domain,
+                true,
+                "ok",
+                Some(&*client_ip),
+            );
             stream
         }
         Err(e) => {
@@ -673,11 +702,14 @@ async fn handle_connect_mitm(
                 .tls_handshakes_total
                 .with_label_values(&["error"])
                 .inc();
-            service.mitm_circuit_breaker.record_attempt(
+            if service.mitm_circuit_breaker.record_attempt_from(
                 &domain,
                 false,
                 &format!("tls_handshake_failed: {e}"),
-            );
+                Some(&*client_ip),
+            ) {
+                service.metrics.mitm_circuit_breaker_trips_total.inc();
+            }
             error!("TLS handshake failed for {}: {}", domain, e);
             return;
         }
@@ -799,7 +831,25 @@ pub async fn handle_connection(
                 }
 
                 let connect_url = format!("https://{}", authority);
-                let connect_domain = parse_authority(&authority).0;
+                let (connect_domain, connect_port) = parse_authority(&authority);
+
+                // Destination policy (port allowlist, metadata/loopback literals)
+                // is answered with 403 *before* the 200 that opens the tunnel;
+                // resolved addresses are re-checked again when connecting.
+                if let Err(reason) =
+                    service.check_destination_security(&connect_domain, connect_port)
+                {
+                    warn!(%authority, %reason, "CONNECT blocked by destination security policy");
+                    service
+                        .metrics
+                        .ssrf_blocked_total
+                        .with_label_values(&[reason])
+                        .inc();
+                    let mut resp =
+                        Response::new(full(Bytes::from(format!("403 Forbidden: {reason}"))));
+                    *resp.status_mut() = StatusCode::FORBIDDEN;
+                    return Ok::<_, Infallible>(resp);
+                }
 
                 #[cfg(feature = "wasm")]
                 if let Some(resp) = service.run_wasm_hook_connect(

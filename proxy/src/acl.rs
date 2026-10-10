@@ -509,9 +509,57 @@ impl AclEngine {
     }
 }
 
+/// Whether the ACL actually limits *who* may use the proxy: default-deny with
+/// at least one enabled client `IpRange` allow rule. A deny rule for a single
+/// address does not count — with default-allow everybody else still gets in.
+pub fn acl_restricts_clients_by_ip(engine: &AclEngine) -> bool {
+    engine.default_action() == AclAction::Deny
+        && engine.rules().iter().any(|rule| {
+            rule.enabled
+                && rule.action == AclAction::Allow
+                && matches!(rule.rule_type, AclRuleType::IpRange { .. })
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn ip_rule(action: AclAction, enabled: bool) -> AclRule {
+        AclRule {
+            id: "ip".into(),
+            name: "ip".into(),
+            enabled,
+            priority: 1,
+            action,
+            rule_type: AclRuleType::IpRange {
+                start: "10.0.0.0".parse().unwrap(),
+                end: "10.0.0.255".parse().unwrap(),
+            },
+            redirect_url: None,
+            comment: None,
+        }
+    }
+
+    #[test]
+    fn client_ip_restriction_needs_default_deny_and_an_allow_range() {
+        // Default-allow with a single deny: still open to everybody else.
+        let mut e = AclEngine::new(AclAction::Allow);
+        e.add_rule(ip_rule(AclAction::Deny, true));
+        assert!(!acl_restricts_clients_by_ip(&e));
+        // Default-allow with an allow range: still open.
+        let mut e = AclEngine::new(AclAction::Allow);
+        e.add_rule(ip_rule(AclAction::Allow, true));
+        assert!(!acl_restricts_clients_by_ip(&e));
+        // Default-deny without an allow range, or with a disabled one: no.
+        let mut e = AclEngine::new(AclAction::Deny);
+        e.add_rule(ip_rule(AclAction::Allow, false));
+        assert!(!acl_restricts_clients_by_ip(&e));
+        // Default-deny + enabled allow range: restricted.
+        let mut e = AclEngine::new(AclAction::Deny);
+        e.add_rule(ip_rule(AclAction::Allow, true));
+        assert!(acl_restricts_clients_by_ip(&e));
+    }
 
     #[test]
     fn test_domain_matching() {

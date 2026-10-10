@@ -75,9 +75,12 @@ audit record cannot be persisted, the live registry is not replaced.
 
 The circuit breaker ([ADR 0007](../adr/0007-mitm-circuit-breaker.md),
 `proxy/src/mitm_breaker.rs`) trips automatically when the TLS failure rate for a
-domain crosses the configured threshold, and keeps that domain on blind
-`CONNECT` until an operator resets it (with the default
-`MITM_CIRCUIT_BREAKER_COOLDOWN_SECS=0` there is no automatic recovery). Tuning
+domain crosses the configured threshold **and** the failures come from at least
+`MITM_CIRCUIT_BREAKER_MIN_CLIENTS` distinct client IPs (default 3, since v1.0).
+The domain then stays on blind `CONNECT` until an operator resets it or the
+cooldown expires (`MITM_CIRCUIT_BREAKER_COOLDOWN_SECS`, default 900 s since v1.0;
+`0` keeps the domain bypassed until a manual reset). Every trip increments
+`bsdm_proxy_mitm_circuit_breaker_trips_total` — alert on it. Tuning
 variables are documented in
 [configuration.md](../ops-and-dev/configuration.md#mitm-circuit-breaker).
 

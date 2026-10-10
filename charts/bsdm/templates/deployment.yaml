@@ -1,4 +1,10 @@
 {{- if gt (int .Values.replicaCount) 0 }}
+{{- if and .Values.proxy.controlApi.requireSecret (not .Values.proxy.controlApi.existingSecret) }}
+{{- fail "proxy.controlApi.requireSecret=true: set proxy.controlApi.existingSecret to a Secret holding the control-plane token (key proxy.controlApi.existingSecretKey). Do not use CONTROL_API_ALLOW_INSECURE in production." }}
+{{- end }}
+{{- if and .Values.proxy.basicAuth.requireUsersFile .Values.proxy.authEnabled (eq (.Values.proxy.authBackend | default "basic") "basic") (not .Values.proxy.basicAuth.existingSecret) }}
+{{- fail "proxy.basicAuth.requireUsersFile=true: authEnabled with the basic backend needs proxy.basicAuth.existingSecret (a Secret with the users JSON); without it any credentials would be accepted." }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -73,8 +79,29 @@ spec:
           {{- $phishtankSecret = printf "%s-secrets" (include "bsdm.fullname" .) }}
           {{- $phishtankKey = "phishtank-api-key" }}
           {{- end }}
-          {{- if or $phishtankSecret .Values.proxy.extraEnv }}
+          {{- if or $phishtankSecret .Values.proxy.extraEnv .Values.proxy.controlApi.existingSecret .Values.proxy.metricsAuth.existingSecret .Values.proxy.searchUpstream.existingSecret }}
           env:
+            {{- with .Values.proxy.searchUpstream.existingSecret }}
+            - name: SEARCH_UPSTREAM_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: {{ $.Values.proxy.searchUpstream.existingSecretKey | default "search-api-token" }}
+            {{- end }}
+            {{- with .Values.proxy.controlApi.existingSecret }}
+            - name: CONTROL_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: {{ $.Values.proxy.controlApi.existingSecretKey | default "control-api-token" }}
+            {{- end }}
+            {{- with .Values.proxy.metricsAuth.existingSecret }}
+            - name: METRICS_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: {{ $.Values.proxy.metricsAuth.existingSecretKey | default "metrics-auth-token" }}
+            {{- end }}
             {{- if $phishtankSecret }}
             # Credential: secretKeyRef, not the env ConfigMap (a ConfigMap is
             # readable by anything with namespace get/list and lands in etcd
@@ -90,6 +117,14 @@ spec:
             {{- end }}
           {{- end }}
           volumeMounts:
+            # read-only rootfs: give the process a small private /tmp.
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.proxy.basicAuth.existingSecret }}
+            - name: basic-auth
+              mountPath: {{ .Values.proxy.basicAuth.mountPath }}
+              readOnly: true
+            {{- end }}
             {{- if .Values.spill.enabled }}
             - name: spill
               mountPath: {{ .Values.spill.mountPath }}
@@ -132,6 +167,18 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        {{- if .Values.proxy.basicAuth.existingSecret }}
+        - name: basic-auth
+          secret:
+            secretName: {{ .Values.proxy.basicAuth.existingSecret }}
+            defaultMode: 0440
+            items:
+              - key: {{ .Values.proxy.basicAuth.existingSecretKey }}
+                path: {{ .Values.proxy.basicAuth.existingSecretKey }}
+        {{- end }}
         {{- if .Values.spill.enabled }}
         - name: spill
           emptyDir:

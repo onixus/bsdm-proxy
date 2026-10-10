@@ -11,16 +11,62 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::info;
 
 use crate::http_types::Body;
+use crate::security_util::{ResolvedDestinationPolicy, SsrfGuardResolver};
+
+/// TCP connector whose DNS answers pass the SSRF destination policy (AS-01).
+pub type GuardedHttpConnector = HttpConnector<SsrfGuardResolver>;
 
 pub type UpstreamHttpClient =
-    hyper_util::client::legacy::Client<hyper_rustls::HttpsConnector<HttpConnector>, Body>;
+    hyper_util::client::legacy::Client<hyper_rustls::HttpsConnector<GuardedHttpConnector>, Body>;
 
-#[derive(Clone, Debug, Default)]
+/// Default TCP connect deadline for upstream origins (`UPSTREAM_CONNECT_TIMEOUT_MS`).
+pub const DEFAULT_UPSTREAM_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// Default deadline for upstream response headers (`UPSTREAM_RESPONSE_TIMEOUT_MS`).
+pub const DEFAULT_UPSTREAM_RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
+
+#[derive(Clone, Debug)]
 pub struct UpstreamTlsConfig {
     /// Negotiate HTTP/2 via ALPN on TLS upstream connections.
     pub http2_enabled: bool,
     /// Optional PEM CA bundle path (`UPSTREAM_CA_CERT`).
     pub ca_cert_path: Option<String>,
+    /// TCP connect deadline (`UPSTREAM_CONNECT_TIMEOUT_MS`, default 10 s,
+    /// `0` disables). Bounds black-holed origins (AS-22).
+    pub connect_timeout: Option<Duration>,
+    /// Deadline from sending the request to receiving response headers
+    /// (`UPSTREAM_RESPONSE_TIMEOUT_MS`, default 60 s, `0` disables). Body
+    /// streaming is not covered, so large downloads are unaffected.
+    pub response_timeout: Option<Duration>,
+    /// Checked against every resolved upstream address before connecting
+    /// (`BLOCK_CLOUD_METADATA`, `BLOCK_LOOPBACK_FORWARDING`).
+    pub destination_policy: ResolvedDestinationPolicy,
+}
+
+impl Default for UpstreamTlsConfig {
+    fn default() -> Self {
+        Self {
+            http2_enabled: false,
+            ca_cert_path: None,
+            connect_timeout: Some(DEFAULT_UPSTREAM_CONNECT_TIMEOUT),
+            response_timeout: Some(DEFAULT_UPSTREAM_RESPONSE_TIMEOUT),
+            destination_policy: ResolvedDestinationPolicy {
+                block_metadata: true,
+                block_loopback: false,
+            },
+        }
+    }
+}
+
+/// Reads a millisecond timeout from `key`: unset/invalid → `default`, `0` → disabled.
+fn env_timeout_ms(key: &str, default: Duration) -> Option<Duration> {
+    match std::env::var(key)
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+    {
+        Some(0) => None,
+        Some(ms) => Some(Duration::from_millis(ms)),
+        None => Some(default),
+    }
 }
 
 impl UpstreamTlsConfig {
@@ -35,6 +81,42 @@ impl UpstreamTlsConfig {
         Self {
             http2_enabled,
             ca_cert_path,
+            connect_timeout: env_timeout_ms(
+                "UPSTREAM_CONNECT_TIMEOUT_MS",
+                DEFAULT_UPSTREAM_CONNECT_TIMEOUT,
+            ),
+            response_timeout: env_timeout_ms(
+                "UPSTREAM_RESPONSE_TIMEOUT_MS",
+                DEFAULT_UPSTREAM_RESPONSE_TIMEOUT,
+            ),
+            destination_policy: crate::security_defaults::resolved_destination_policy_from_env(),
+        }
+    }
+}
+
+/// Error from [`UpstreamClientHandle::request`].
+#[derive(Debug)]
+pub enum UpstreamRequestError {
+    /// Connect / TLS / protocol failure reported by the Hyper client.
+    Client(hyper_util::client::legacy::Error),
+    /// No response headers within the configured response timeout.
+    Timeout(Duration),
+}
+
+impl std::fmt::Display for UpstreamRequestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Client(e) => write!(f, "{e}"),
+            Self::Timeout(d) => write!(f, "upstream response timeout after {}ms", d.as_millis()),
+        }
+    }
+}
+
+impl std::error::Error for UpstreamRequestError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Client(e) => Some(e),
+            Self::Timeout(_) => None,
         }
     }
 }
@@ -66,9 +148,25 @@ fn unix_now() -> u64 {
         .unwrap_or(0)
 }
 
+/// Plain TCP connector under the TLS layer. Single construction point so the
+/// resolver (SSRF guard) and socket options live in one place.
+fn build_http_connector(config: &UpstreamTlsConfig) -> GuardedHttpConnector {
+    // IP-literal hosts bypass the resolver inside HttpConnector; those are
+    // covered by the string check in `check_destination_security`.
+    let mut http =
+        HttpConnector::new_with_resolver(SsrfGuardResolver::new(config.destination_policy));
+    // HttpConnector won't enforce scheme; HttpsConnector handles https.
+    http.enforce_http(false);
+    http.set_connect_timeout(config.connect_timeout);
+    http
+}
+
 pub fn build_upstream_https_connector(
     config: &UpstreamTlsConfig,
-) -> Result<hyper_rustls::HttpsConnector<HttpConnector>, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<
+    hyper_rustls::HttpsConnector<GuardedHttpConnector>,
+    Box<dyn std::error::Error + Send + Sync>,
+> {
     let tls_config = if let Some(path) = &config.ca_cert_path {
         let pem = std::fs::read(path)
             .map_err(|e| format!("failed to read UPSTREAM_CA_CERT {path}: {e}"))?;
@@ -103,13 +201,13 @@ pub fn build_upstream_https_connector(
             .https_or_http()
             .enable_http1()
             .enable_http2()
-            .build())
+            .wrap_connector(build_http_connector(config)))
     } else {
         Ok(hyper_rustls::HttpsConnectorBuilder::new()
             .with_tls_config(tls_config)
             .https_or_http()
             .enable_http1()
-            .build())
+            .wrap_connector(build_http_connector(config)))
     }
 }
 
@@ -130,6 +228,7 @@ pub fn build_upstream_http_client(
 pub struct UpstreamClientHandle {
     client: Arc<ArcSwap<UpstreamHttpClient>>,
     snapshot: Arc<ArcSwap<UpstreamTlsSnapshot>>,
+    response_timeout: Arc<ArcSwap<Option<Duration>>>,
 }
 
 impl UpstreamClientHandle {
@@ -141,7 +240,26 @@ impl UpstreamClientHandle {
         Ok(Self {
             client: Arc::new(ArcSwap::from_pointee(client)),
             snapshot: Arc::new(ArcSwap::from_pointee(snapshot)),
+            response_timeout: Arc::new(ArcSwap::from_pointee(config.response_timeout)),
         })
+    }
+
+    /// Sends `req` upstream, bounded by the response timeout (AS-22): fails
+    /// with [`UpstreamRequestError::Timeout`] if response headers do not
+    /// arrive in time, so a stalled origin cannot pin the request forever.
+    pub async fn request(
+        &self,
+        req: hyper::Request<Body>,
+    ) -> Result<hyper::Response<hyper::body::Incoming>, UpstreamRequestError> {
+        let client = self.client.load_full();
+        let fut = client.request(req);
+        match **self.response_timeout.load() {
+            Some(limit) => match tokio::time::timeout(limit, fut).await {
+                Ok(res) => res.map_err(UpstreamRequestError::Client),
+                Err(_) => Err(UpstreamRequestError::Timeout(limit)),
+            },
+            None => fut.await.map_err(UpstreamRequestError::Client),
+        }
     }
 
     pub fn load(&self) -> arc_swap::Guard<Arc<UpstreamHttpClient>> {
@@ -158,6 +276,8 @@ impl UpstreamClientHandle {
         let client = build_upstream_http_client(&config).map_err(|e| e.to_string())?;
         let snapshot = UpstreamTlsSnapshot::from_config(&config);
         self.client.store(Arc::new(client));
+        self.response_timeout
+            .store(Arc::new(config.response_timeout));
         self.snapshot.store(Arc::new(snapshot.clone()));
         info!(
             "Upstream TLS reloaded (http2={}, custom_ca={})",
@@ -209,7 +329,7 @@ mod tests {
         let _ = build_upstream_https_connector(&UpstreamTlsConfig::default()).unwrap();
         let _ = build_upstream_https_connector(&UpstreamTlsConfig {
             http2_enabled: true,
-            ca_cert_path: None,
+            ..UpstreamTlsConfig::default()
         })
         .unwrap();
     }
@@ -229,6 +349,132 @@ mod tests {
         assert!(snap.http2_enabled);
         assert!(handle.snapshot().http2_enabled);
         assert!(!snap.custom_ca);
+    }
+
+    #[test]
+    fn upstream_timeouts_default_and_parse_from_env() {
+        let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("UPSTREAM_CONNECT_TIMEOUT_MS");
+        std::env::remove_var("UPSTREAM_RESPONSE_TIMEOUT_MS");
+        let cfg = UpstreamTlsConfig::from_env();
+        assert_eq!(cfg.connect_timeout, Some(DEFAULT_UPSTREAM_CONNECT_TIMEOUT));
+        assert_eq!(
+            cfg.response_timeout,
+            Some(DEFAULT_UPSTREAM_RESPONSE_TIMEOUT)
+        );
+
+        std::env::set_var("UPSTREAM_CONNECT_TIMEOUT_MS", "1500");
+        std::env::set_var("UPSTREAM_RESPONSE_TIMEOUT_MS", "0");
+        let cfg = UpstreamTlsConfig::from_env();
+        assert_eq!(cfg.connect_timeout, Some(Duration::from_millis(1500)));
+        assert_eq!(cfg.response_timeout, None);
+
+        std::env::set_var("UPSTREAM_CONNECT_TIMEOUT_MS", "garbage");
+        let cfg = UpstreamTlsConfig::from_env();
+        assert_eq!(cfg.connect_timeout, Some(DEFAULT_UPSTREAM_CONNECT_TIMEOUT));
+        std::env::remove_var("UPSTREAM_CONNECT_TIMEOUT_MS");
+        std::env::remove_var("UPSTREAM_RESPONSE_TIMEOUT_MS");
+    }
+
+    fn get(url: &str) -> hyper::Request<Body> {
+        hyper::Request::builder()
+            .uri(url)
+            .body(crate::http_types::empty())
+            .unwrap()
+    }
+
+    /// AS-22: an origin that accepts the connection but never answers is cut
+    /// off by the response timeout instead of hanging forever.
+    #[tokio::test]
+    async fn request_times_out_on_stalled_origin() {
+        ensure_crypto_provider();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((sock, _)) = listener.accept().await {
+                held.push(sock); // read nothing, answer nothing
+            }
+        });
+        let handle = UpstreamClientHandle::new(UpstreamTlsConfig {
+            response_timeout: Some(Duration::from_millis(200)),
+            ..UpstreamTlsConfig::default()
+        })
+        .unwrap();
+        let started = std::time::Instant::now();
+        let err = handle
+            .request(get(&format!("http://{addr}/")))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, UpstreamRequestError::Timeout(_)), "{err}");
+        assert!(err.to_string().contains("timeout after 200ms"));
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    /// AS-01: a hostname that resolves to loopback is refused by the resolver
+    /// even though the URI never names 127.0.0.1.
+    #[tokio::test]
+    async fn guarded_resolver_refuses_names_resolving_to_loopback() {
+        ensure_crypto_provider();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let handle = UpstreamClientHandle::new(UpstreamTlsConfig {
+            destination_policy: ResolvedDestinationPolicy {
+                block_metadata: true,
+                block_loopback: true,
+            },
+            ..UpstreamTlsConfig::default()
+        })
+        .unwrap();
+        let err = handle
+            .request(get(&format!("http://localhost:{port}/")))
+            .await
+            .unwrap_err();
+        let chain = format!("{:?}", err);
+        assert!(chain.contains("loopback destination blocked"), "{chain}");
+    }
+
+    #[tokio::test]
+    async fn request_returns_response_from_responsive_origin() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        ensure_crypto_provider();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = [0u8; 1024];
+                let _ = sock.read(&mut buf).await;
+                let _ = sock
+                    .write_all(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n")
+                    .await;
+            }
+        });
+        let handle = UpstreamClientHandle::new(UpstreamTlsConfig {
+            response_timeout: Some(Duration::from_secs(5)),
+            ..UpstreamTlsConfig::default()
+        })
+        .unwrap();
+        let resp = handle
+            .request(get(&format!("http://{addr}/")))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), hyper::StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn request_reports_connect_failure_as_client_error() {
+        ensure_crypto_provider();
+        // Bind then drop to get a (very likely) closed local port.
+        let addr = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap();
+        let handle = UpstreamClientHandle::new(UpstreamTlsConfig::default()).unwrap();
+        let err = handle
+            .request(get(&format!("http://{addr}/")))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, UpstreamRequestError::Client(_)), "{err}");
     }
 
     #[test]

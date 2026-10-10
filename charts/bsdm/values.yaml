@@ -5,7 +5,7 @@ replicaCount: 2
 
 image:
   repository: ghcr.io/onixus/bsdm-proxy
-  tag: "0.9.15"
+  tag: "1.0.0-rc.1"
   pullPolicy: IfNotPresent
 
 nameOverride: ""
@@ -95,6 +95,58 @@ proxy:
   perfFastCacheHit: false
   mitmEnabled: true
   authEnabled: false
+  authBackend: basic
+  # With deploymentProfile=production and authEnabled=false the proxy refuses
+  # to start unless the ACL has a client-IP rule or this is true. The chart
+  # default keeps the old behaviour (anonymous proxy, clients restricted only by
+  # NetworkPolicy); values-production.yaml turns auth on and this off.
+  allowAnonymousProxy: true
+  # Buffered request body cap in bytes (empty = proxy default, 64 MiB).
+  maxRequestBodyBytes: ""
+  # Admin Console search → cache-indexer (SEARCH_UPSTREAM_URL /
+  # SEARCH_UPSTREAM_TOKEN). Set url and the Secret holding the indexer's
+  # Search API token when the indexer runs alongside the proxy.
+  searchUpstream:
+    url: ""
+    existingSecret: ""
+    existingSecretKey: "search-api-token"
+  # Control-plane Bearer token (CONTROL_API_TOKEN). With
+  # deploymentProfile=production the proxy refuses to start without it, so
+  # reference a Secret instead of reaching for CONTROL_API_ALLOW_INSECURE:
+  #   kubectl create secret generic bsdm-control --from-literal=control-api-token="$(openssl rand -hex 32)"
+  controlApi:
+    existingSecret: ""
+    existingSecretKey: "control-api-token"
+    # true = fail the render when existingSecret is empty (values-production.yaml).
+    requireSecret: false
+  # Optional separate scrape token for GET /metrics (METRICS_AUTH_TOKEN), so
+  # Prometheus does not need the admin token. Prometheus must send
+  # `Authorization: Bearer <token>` (ServiceMonitor bearerTokenSecret).
+  metricsAuth:
+    existingSecret: ""
+    existingSecretKey: "metrics-auth-token"
+  # Basic-auth users file (BASIC_AUTH_USERS_FILE). Required whenever
+  # authEnabled=true with authBackend=basic: in production the proxy refuses to
+  # start without it (otherwise ANY credentials would be accepted).
+  #   kubectl create secret generic bsdm-basic-auth --from-file=basic-auth-users.json
+  basicAuth:
+    existingSecret: ""
+    existingSecretKey: "basic-auth-users.json"
+    # Not under acl.mountPath: that ConfigMap mount is read-only, so a nested
+    # mountpoint inside it could not be created.
+    mountPath: /etc/bsdm-auth
+    # true = fail the render when auth is on (basic) and no Secret is set.
+    requireUsersFile: false
+  # SSRF guards. Loopback forwarding lets any client reach services bound to
+  # the pod's 127.0.0.1; cloud metadata (169.254.169.254, ...) leaks node creds.
+  blockLoopbackForwarding: true
+  blockCloudMetadata: true
+  # CONNECT allow-list, e.g. "443,8443". Empty = proxy built-in behaviour.
+  allowedConnectPorts: ""
+  # Render explicit OFF switches for Lab/Beta/frozen features (eBPF/XDP, WASM,
+  # ICAP, DLP, gRPC control plane, ICP/HTCP/peer discovery, ML score blocking,
+  # threat-intel enforcement) so a changed code default can never turn them on.
+  disableLabFeatures: true
   aclEnabled: false
   categorizationEnabled: false
   hierarchyEnabled: false
@@ -161,6 +213,10 @@ networkPolicy:
   proxyClientNamespaces: []
   # Namespace allowed to scrape metrics (all components).
   monitoringNamespace: "monitoring"
+  # Extra sources allowed to reach the proxy control plane (:9090 — REST API,
+  # Admin Console, /metrics). Keep this to the admin/bastion network.
+  controlPlaneNamespaces: []
+  controlPlaneCidrs: []
   # Namespaces allowed to call the threat-intel admin/SOAR API on :8093.
   threatIntelAdminNamespaces: []
   # Consumers of the cache-indexer Search API (:8080). Same shape as above.
@@ -207,7 +263,7 @@ indexer:
   replicaCount: 2
   image:
     repository: ghcr.io/onixus/bsdm-cache-indexer
-    tag: "0.9.15"
+    tag: "1.0.0-rc.1"
     pullPolicy: IfNotPresent
   # Per-workload override; falls back to the chart-wide .securityContext.
   # securityContext:
@@ -260,7 +316,7 @@ alertWorker:
   replicaCount: 1
   image:
     repository: ghcr.io/onixus/bsdm-alert-worker
-    tag: "0.9.15"
+    tag: "1.0.0-rc.1"
     pullPolicy: IfNotPresent
   resources:
     requests:
@@ -282,7 +338,7 @@ mlWorker:
   replicaCount: 1
   image:
     repository: ghcr.io/onixus/bsdm-ml-worker
-    tag: "0.9.15"
+    tag: "1.0.0-rc.1"
     pullPolicy: IfNotPresent
   resources:
     requests:
@@ -302,7 +358,7 @@ threatIntel:
   replicaCount: 1
   image:
     repository: ghcr.io/onixus/bsdm-threat-intel
-    tag: "0.9.15"
+    tag: "1.0.0-rc.1"
     pullPolicy: IfNotPresent
   resources:
     requests:
@@ -349,7 +405,7 @@ dnsSinkhole:
   replicaCount: 1
   image:
     repository: ghcr.io/onixus/bsdm-dns-sinkhole
-    tag: "0.9.15"
+    tag: "1.0.0-rc.1"
     pullPolicy: IfNotPresent
   resources:
     requests:
@@ -365,6 +421,11 @@ dnsSinkhole:
   bind: "0.0.0.0:53"
   existingConfigMap: ""       # mount custom RPZ zone file
   rustLog: "info,dns_sinkhole=info"
+  # The sinkhole binds :53 as a non-root user with every capability dropped.
+  # This namespaced, "safe" sysctl lets it do so without NET_BIND_SERVICE.
+  # Set to null if your cluster forbids pod sysctls (then grant
+  # NET_BIND_SERVICE via dnsSinkhole.securityContext instead).
+  unprivilegedPortStart: 53
 
 nodeSelector: {}
 tolerations: []

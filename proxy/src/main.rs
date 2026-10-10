@@ -69,6 +69,14 @@ async fn run_accept_loop(
     }
 }
 
+/// Both operator signals and console Apply enter the same graceful drain.
+async fn wait_for_shutdown(mut shutdown_rx: watch::Receiver<bool>) {
+    tokio::select! {
+        _ = wait_shutdown_signal() => {},
+        _ = shutdown_rx.wait_for(|shutdown| *shutdown) => {},
+    }
+}
+
 /// `proxy hash-password`: password on stdin (first line), PHC hash on stdout.
 fn run_hash_password() -> Result<(), Box<dyn std::error::Error>> {
     use std::io::Read;
@@ -192,6 +200,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let cert_cache = CertCache::load_for_startup(mitm_enabled).await?;
+    if let Some(not_after) = cert_cache.ca_not_after_unix() {
+        metrics
+            .mitm_ca_not_after_timestamp_seconds
+            .set(not_after as f64);
+    }
     #[cfg(feature = "kafka")]
     let kafka_brokers = std::env::var("KAFKA_BROKERS").ok();
     #[cfg(not(feature = "kafka"))]
@@ -250,6 +263,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let auth_config = load_auth_config();
+    let has_client_ip_acl = policy_config
+        .acl_engine
+        .as_ref()
+        .is_some_and(|engine| bsdm_proxy::acl_restricts_clients_by_ip(&engine.load()));
+    bsdm_proxy::validate_open_proxy_posture(auth_config.enabled, has_client_ip_acl)?;
     let auth = Some(Arc::new(
         AuthManager::new(auth_config.clone()).with_metrics(metrics.clone()),
     ));
@@ -259,13 +277,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             auth_config.backend, auth_config.realm
         );
         if matches!(auth_config.backend, bsdm_proxy::AuthBackend::Basic) {
-            if auth_config.basic_users_file.is_none() {
-                warn!(
-                    "AUTH_ENABLED with AUTH_BACKEND=basic but BASIC_AUTH_USERS_FILE is unset — \
-                     any Proxy-Authorization credentials will be accepted. For pilot/production \
-                     set BASIC_AUTH_USERS_FILE (see docs/getting-started/pilot-auth.md)"
-                );
-            } else {
+            bsdm_proxy::validate_basic_auth_posture(
+                true,
+                true,
+                auth_config.basic_users_file.is_some(),
+            )?;
+            if auth_config.basic_users_file.is_some() {
                 info!(
                     "Basic auth users file: {}",
                     auth_config.basic_users_file.as_deref().unwrap_or("")
@@ -776,8 +793,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tokio::spawn(run_accept_loop(listener, service_clone, tasks, shutdown_rx));
     }
 
-    wait_shutdown_signal().await;
-    info!("Shutdown signal received, stopping accept loops");
+    // Production Apply delegates restart to the supervisor. Development keeps
+    // its existing self-spawn restart path in schedule_service_restart.
+    if deployment_profile == bsdm_proxy::DeploymentProfile::Production {
+        wait_for_shutdown(shutdown_rx.clone()).await;
+    } else {
+        wait_shutdown_signal().await;
+    }
+    info!("Shutdown requested, stopping accept loops");
     let _ = shutdown_tx.send(true);
 
     draining.store(true, Ordering::SeqCst);
@@ -806,4 +829,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await;
     info!("Graceful shutdown complete");
     Ok(())
+}
+
+#[cfg(test)]
+mod shutdown_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn console_shutdown_wakes_main_without_an_os_signal() {
+        let (tx, rx) = watch::channel(false);
+        let waiting = tokio::spawn(wait_for_shutdown(rx));
+        tx.send(true).unwrap();
+        tokio::time::timeout(Duration::from_secs(1), waiting)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn false_notification_does_not_shutdown() {
+        let (tx, rx) = watch::channel(false);
+        let mut waiting = tokio::spawn(wait_for_shutdown(rx));
+        tx.send(false).unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), &mut waiting)
+                .await
+                .is_err()
+        );
+        tx.send(true).unwrap();
+        tokio::time::timeout(Duration::from_secs(1), waiting)
+            .await
+            .unwrap()
+            .unwrap();
+    }
 }

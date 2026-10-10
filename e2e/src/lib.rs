@@ -118,6 +118,18 @@ impl ProxyHarness {
             .env("ACL_DEFAULT_ACTION", "allow")
             // e2e lab: production profile is default; allow open control plane unless tests set tokens.
             .env("CONTROL_API_ALLOW_INSECURE", "true")
+            // Most tests run without proxy auth or client-IP ACLs, which the
+            // production profile refuses at startup unless opted in.
+            .env("ALLOW_ANONYMOUS_PROXY", "true")
+            // The mock upstreams listen on 127.0.0.1, which production blocks by
+            // default (BLOCK_LOOPBACK_FORWARDING). Tests that exercise the block
+            // opt back in through extra_env.
+            .env("BLOCK_LOOPBACK_FORWARDING", "false")
+            // Lab REST surfaces (agent, AmneziaWG, cluster/threat-sync/eBPF/…)
+            // are 404 in production unless enabled; the harness covers them.
+            .env("AGENT_API_ENABLED", "true")
+            .env("AWG_API_ENABLED", "true")
+            .env("LAB_API_ENABLED", "true")
             // Isolate the proxy from any ambient persisted config. The harness runs it
             // with current_dir set to the workspace root, and config_env_path() falls
             // back to ./bsdm-proxy.env there — a tracked file pinning HTTP_PORT=3128
@@ -143,6 +155,12 @@ impl ProxyHarness {
                 },
             );
 
+        // Explicit CA location: the production profile ignores the relative
+        // ./certs fallback, and some tests run with DEPLOYMENT_PROFILE=production.
+        let ca_dir = workspace.join("certs");
+        let ca_dir = ca_dir.canonicalize().unwrap_or(ca_dir);
+        command.env("MITM_CA_DIR", ca_dir.to_string_lossy().into_owned());
+
         if config.upstream_ca_cert {
             let ca_path = workspace.join("certs/ca.crt");
             let ca_path = ca_path.canonicalize().unwrap_or(ca_path);
@@ -154,6 +172,11 @@ impl ProxyHarness {
         }
         if let Some(brokers) = &config.kafka_brokers {
             command.env("KAFKA_BROKERS", brokers);
+        }
+        if config.auth_enabled {
+            // Basic auth without BASIC_AUTH_USERS_FILE (accept-any credentials,
+            // which these tests rely on) is refused in the production profile.
+            command.env("DEPLOYMENT_PROFILE", "test");
         }
         for (key, value) in &config.extra_env {
             command.env(key, value);
@@ -188,6 +211,14 @@ impl ProxyHarness {
             _upstream_task: upstream_task.handle,
             _stderr_log: stderr_log,
         })
+    }
+
+    /// Wait for a console-triggered graceful exit without sending an OS signal.
+    pub async fn wait_for_exit(&mut self, timeout: Duration) -> Result<std::process::ExitStatus> {
+        tokio::time::timeout(timeout, self.proxy_process.wait())
+            .await
+            .context("proxy did not exit before deadline")?
+            .context("wait for proxy exit")
     }
 
     pub fn metrics_url(&self, path: &str) -> String {
@@ -674,10 +705,25 @@ fn bool_env(value: bool) -> &'static str {
 pub fn ensure_test_ca() -> Result<()> {
     let dir = workspace_path("certs");
     std::fs::create_dir_all(&dir).context("create certs dir")?;
-    if dir.join("ca.crt").exists() && dir.join("ca.key").exists() {
-        return Ok(());
+    if !(dir.join("ca.crt").exists() && dir.join("ca.key").exists()) {
+        write_test_ca(&dir)?;
     }
-    write_test_ca(&dir)
+    restrict_ca_key_permissions(&dir.join("ca.key"))
+}
+
+/// The proxy refuses a world-readable `ca.key` in production (MITM CA
+/// fail-closed), and some e2e tests run with `DEPLOYMENT_PROFILE=production`.
+/// A key written under the default umask (CI runners: 0644) must be narrowed.
+#[cfg(unix)]
+fn restrict_ca_key_permissions(key: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(key, std::fs::Permissions::from_mode(0o600))
+        .context("chmod 600 test CA key")
+}
+
+#[cfg(not(unix))]
+fn restrict_ca_key_permissions(_key: &Path) -> Result<()> {
+    Ok(())
 }
 
 fn write_test_ca(dir: &Path) -> Result<()> {

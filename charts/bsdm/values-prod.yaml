@@ -1,6 +1,11 @@
 # Production profile — corporate medium (~5k users).
 # 4 replicas × 25k L1 capacity ≈ 100k total; Redis L2 required.
 # See docs/ops-and-dev/k8s-architecture.md
+#
+# SIZING profile only. For the v1.0 security baseline (control-plane Secret,
+# basic-auth users Secret, Lab features off, SSRF guards, PDB/HPA/anti-affinity)
+# layer values-production.yaml on top, LAST:
+#   helm upgrade --install bsdm charts/bsdm -f values-prod.yaml -f values-production.yaml
 
 replicaCount: 4
 

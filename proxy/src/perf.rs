@@ -58,8 +58,10 @@ struct Samplers {
 
 impl PerfConfig {
     pub fn from_env() -> Self {
-        let fast_cache_hit =
-            env_bool("PERF_FAST_CACHE_HIT", false) || env_bool("BSM_PERF_MODE", false);
+        let fast_cache_hit = resolve_fast_cache_hit(
+            env_bool("PERF_FAST_CACHE_HIT", false) || env_bool("BSM_PERF_MODE", false),
+            crate::security_defaults::is_production_profile(),
+        );
 
         let worker_count = std::env::var("WORKER_COUNT")
             .ok()
@@ -118,6 +120,21 @@ impl Default for PerfConfig {
     fn default() -> Self {
         Self::from_env()
     }
+}
+
+/// `PERF_FAST_CACHE_HIT` serves cached content before ACL, categorization,
+/// threat-intel and destination checks. That is a bench/lab shortcut only: in
+/// production it would hand a denied user content cached for someone else, so
+/// it is refused there.
+fn resolve_fast_cache_hit(requested: bool, production: bool) -> bool {
+    if requested && production {
+        tracing::error!(
+            "PERF_FAST_CACHE_HIT/BSM_PERF_MODE bypasses ACL and security checks on cache hits \
+             and is ignored in DEPLOYMENT_PROFILE=production"
+        );
+        return false;
+    }
+    requested
 }
 
 fn env_truthy(value: &str) -> bool {
@@ -189,6 +206,14 @@ pub async fn bind_http_listeners(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fast_cache_hit_is_refused_in_production() {
+        assert!(!resolve_fast_cache_hit(true, true));
+        assert!(resolve_fast_cache_hit(true, false));
+        assert!(!resolve_fast_cache_hit(false, false));
+        assert!(!resolve_fast_cache_hit(false, true));
+    }
 
     #[test]
     fn kafka_sample_zero_means_always() {

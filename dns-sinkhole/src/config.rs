@@ -30,6 +30,19 @@ pub struct Config {
     pub dot_bind: SocketAddr,
     pub tls_cert_path: Option<String>,
     pub tls_key_path: Option<String>,
+    /// Max UDP queries processed concurrently (`DNS_SINKHOLE_MAX_INFLIGHT`,
+    /// default 1024). Excess datagrams are dropped so a flood towards a slow
+    /// upstream cannot exhaust file descriptors / tasks (AS-13).
+    pub max_inflight: usize,
+    /// Max concurrent connections per DoT and per DoH listener
+    /// (`DNS_SINKHOLE_MAX_TCP_CONNECTIONS`, default 512).
+    pub max_tcp_connections: usize,
+    /// TLS handshake deadline for DoT/DoH (`DNS_SINKHOLE_TLS_HANDSHAKE_TIMEOUT_MS`,
+    /// default 5000).
+    pub tls_handshake_timeout: Duration,
+    /// Idle / read deadline for DoT frames and DoH request headers
+    /// (`DNS_SINKHOLE_TCP_IDLE_TIMEOUT_MS`, default 10000).
+    pub tcp_idle_timeout: Duration,
 }
 
 impl Config {
@@ -92,6 +105,12 @@ impl Config {
             .ok()
             .filter(|s| !s.is_empty());
 
+        let max_inflight = env_parse("DNS_SINKHOLE_MAX_INFLIGHT", 1024_usize).max(1);
+        let max_tcp_connections = env_parse("DNS_SINKHOLE_MAX_TCP_CONNECTIONS", 512_usize).max(1);
+        let tls_handshake_timeout_ms =
+            env_parse("DNS_SINKHOLE_TLS_HANDSHAKE_TIMEOUT_MS", 5_000_u64).max(1);
+        let tcp_idle_timeout_ms = env_parse("DNS_SINKHOLE_TCP_IDLE_TIMEOUT_MS", 10_000_u64).max(1);
+
         Ok(Self {
             enabled,
             bind,
@@ -110,8 +129,19 @@ impl Config {
             dot_bind,
             tls_cert_path,
             tls_key_path,
+            max_inflight,
+            max_tcp_connections,
+            tls_handshake_timeout: Duration::from_millis(tls_handshake_timeout_ms),
+            tcp_idle_timeout: Duration::from_millis(tcp_idle_timeout_ms),
         })
     }
+}
+
+fn env_parse<T: std::str::FromStr>(key: &str, default: T) -> T {
+    std::env::var(key)
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(default)
 }
 
 fn env_bool(key: &str, default: bool) -> bool {

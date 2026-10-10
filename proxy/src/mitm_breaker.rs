@@ -18,7 +18,13 @@ use tracing::{info, warn};
 const DEFAULT_FAILURE_RATE: f64 = 0.05; // 5%
 const DEFAULT_MIN_SAMPLES: usize = 5;
 const DEFAULT_WINDOW_SECS: u64 = 60;
-const DEFAULT_COOLDOWN_SECS: u64 = 0; // 0 = permanent until manual reset
+/// Finite by default (P1-02): a trip must not disable inspection forever.
+/// `MITM_CIRCUIT_BREAKER_COOLDOWN_SECS=0` still means "until manual reset".
+const DEFAULT_COOLDOWN_SECS: u64 = 900;
+/// Failures must come from at least this many distinct client IPs before a
+/// domain trips (P1-02), so a single endpoint (e.g. an implant aborting its
+/// own handshakes) cannot switch a domain to blind CONNECT for everyone.
+const DEFAULT_MIN_DISTINCT_CLIENTS: usize = 3;
 /// Upper bound on the number of per-domain trackers kept in memory. Without it a
 /// client looping `CONNECT <random>.attacker.tld:443` grows the map without limit.
 const DEFAULT_MAX_DOMAINS: usize = 10_000;
@@ -34,6 +40,14 @@ pub struct MitmCircuitBreakerConfig {
     pub window_secs: u64,
     pub cooldown_secs: u64,
     pub max_domains: usize,
+    /// Minimum distinct client IPs among failures in the window
+    /// (`MITM_CIRCUIT_BREAKER_MIN_CLIENTS`, default 3).
+    #[serde(default = "default_min_distinct_clients")]
+    pub min_distinct_clients: usize,
+}
+
+fn default_min_distinct_clients() -> usize {
+    DEFAULT_MIN_DISTINCT_CLIENTS
 }
 
 impl Default for MitmCircuitBreakerConfig {
@@ -45,6 +59,7 @@ impl Default for MitmCircuitBreakerConfig {
             window_secs: DEFAULT_WINDOW_SECS,
             cooldown_secs: DEFAULT_COOLDOWN_SECS,
             max_domains: DEFAULT_MAX_DOMAINS,
+            min_distinct_clients: DEFAULT_MIN_DISTINCT_CLIENTS,
         }
     }
 }
@@ -78,6 +93,11 @@ impl MitmCircuitBreakerConfig {
             .and_then(|v| v.parse::<usize>().ok())
             .map(|n| n.max(MIN_MAX_DOMAINS))
             .unwrap_or(DEFAULT_MAX_DOMAINS);
+        let min_distinct_clients = std::env::var("MITM_CIRCUIT_BREAKER_MIN_CLIENTS")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .filter(|&n| n >= 1)
+            .unwrap_or(DEFAULT_MIN_DISTINCT_CLIENTS);
 
         Self {
             enabled,
@@ -86,6 +106,7 @@ impl MitmCircuitBreakerConfig {
             window_secs,
             cooldown_secs,
             max_domains,
+            min_distinct_clients,
         }
     }
 }
@@ -108,6 +129,7 @@ pub struct MitmCircuitBreakerStatus {
     pub window_secs: u64,
     pub cooldown_secs: u64,
     pub max_domains: usize,
+    pub min_distinct_clients: usize,
     pub audit_path: Option<String>,
     pub tracked_domains: usize,
     pub evicted_domains_total: u64,
@@ -130,6 +152,9 @@ pub struct BreakerResetReport {
 struct Sample {
     at: Instant,
     success: bool,
+    /// Hash of the client IP; `None` when the caller could not attribute the
+    /// attempt (each such failure then counts as its own source).
+    client: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -360,11 +385,27 @@ impl MitmCircuitBreaker {
             .is_some_and(|tracker| is_active_trip(tracker, now, cooldown))
     }
 
-    /// Record an attempt outcome (success or failure) for a domain.
-    pub fn record_attempt(&self, domain: &str, success: bool, failure_detail: &str) {
+    /// Record an attempt outcome (success or failure) for a domain, without
+    /// client attribution. Prefer [`Self::record_attempt_from`].
+    pub fn record_attempt(&self, domain: &str, success: bool, failure_detail: &str) -> bool {
+        self.record_attempt_from(domain, success, failure_detail, None)
+    }
+
+    /// Record an attempt outcome for a domain from `client` (its IP). A domain
+    /// trips only when the failure rate is exceeded **and** the failures come
+    /// from at least `min_distinct_clients` distinct clients (P1-02).
+    /// Returns `true` when this attempt tripped the breaker.
+    pub fn record_attempt_from(
+        &self,
+        domain: &str,
+        success: bool,
+        failure_detail: &str,
+        client: Option<&str>,
+    ) -> bool {
         if !self.config.enabled {
-            return;
+            return false;
         }
+        let client = client.map(client_bucket);
         let domain_key = normalize_domain_key(domain);
         let now = Instant::now();
         let cutoff = now
@@ -391,7 +432,7 @@ impl MitmCircuitBreaker {
                     dropped_attempts_total = shard.dropped_attempts_total,
                     "MITM circuit breaker tracker shard is full; attempt not recorded"
                 );
-                return;
+                return false;
             }
             shard
                 .trackers
@@ -413,27 +454,39 @@ impl MitmCircuitBreaker {
                 tracker.samples.clear();
             } else {
                 // Still tripped, don't record further samples
-                return;
+                return false;
             }
         }
 
         tracker.prune(cutoff);
-        tracker.samples.push_back(Sample { at: now, success });
+        tracker.samples.push_back(Sample {
+            at: now,
+            success,
+            client,
+        });
 
         let total = tracker.samples.len();
         if total < self.config.min_samples {
-            return;
+            return false;
         }
 
         let failures = tracker.samples.iter().filter(|s| !s.success).count();
         let rate = failures as f64 / total as f64;
+        if rate < self.config.failure_rate_threshold {
+            return false;
+        }
+        let sources = distinct_failure_sources(&tracker.samples);
+        if sources < self.config.min_distinct_clients {
+            return false;
+        }
 
-        if rate >= self.config.failure_rate_threshold {
+        {
             let reason = format!(
-                "TLS failure rate {:.1}% ({}/{}) exceeded {:.1}% threshold in {}s window: {}",
+                "TLS failure rate {:.1}% ({}/{}, {} clients) exceeded {:.1}% threshold in {}s window: {}",
                 rate * 100.0,
                 failures,
                 total,
+                sources,
                 self.config.failure_rate_threshold * 100.0,
                 self.config.window_secs,
                 failure_detail
@@ -452,6 +505,7 @@ impl MitmCircuitBreaker {
                 failure_rate = rate,
                 failures,
                 total,
+                distinct_clients = sources,
                 "MITM circuit breaker TRIPPED; domain switched to blind CONNECT"
             );
 
@@ -474,6 +528,7 @@ impl MitmCircuitBreaker {
                 );
             }
         }
+        true
     }
 
     /// Reset circuit breaker for a domain pattern ("*" or specific domain).
@@ -583,6 +638,7 @@ impl MitmCircuitBreaker {
             window_secs: self.config.window_secs,
             cooldown_secs: self.config.cooldown_secs,
             max_domains: self.config.max_domains,
+            min_distinct_clients: self.config.min_distinct_clients,
             audit_path: self.audit_path(),
             tracked_domains,
             evicted_domains_total,
@@ -592,6 +648,53 @@ impl MitmCircuitBreaker {
             tripped_domains: tripped,
         }
     }
+}
+
+/// Distinct sources among failed samples: distinct client hashes, plus one
+/// per unattributed failure (legacy callers keep their old behaviour).
+fn distinct_failure_sources(samples: &VecDeque<Sample>) -> usize {
+    let mut seen: Vec<u64> = Vec::new();
+    let mut unattributed = 0usize;
+    for sample in samples.iter().filter(|s| !s.success) {
+        match sample.client {
+            Some(c) if !seen.contains(&c) => seen.push(c),
+            Some(_) => {}
+            None => unattributed += 1,
+        }
+    }
+    seen.len() + unattributed
+}
+
+/// Distinct-client key: an IPv4 address, or the /64 of an IPv6 address — one
+/// host can use any address of its /64 (privacy extensions, manual config),
+/// so per-address counting would let a single client pose as many.
+/// IPv4-mapped IPv6 is folded into IPv4.
+fn client_bucket(client: &str) -> u64 {
+    let raw = client.trim();
+    match raw
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .parse::<std::net::IpAddr>()
+    {
+        Ok(std::net::IpAddr::V4(v4)) => fnv1a(&v4.to_string()),
+        Ok(std::net::IpAddr::V6(v6)) => match v6.to_ipv4_mapped() {
+            Some(v4) => fnv1a(&v4.to_string()),
+            None => {
+                let s = v6.segments();
+                fnv1a(&format!("{:x}:{:x}:{:x}:{:x}::/64", s[0], s[1], s[2], s[3]))
+            }
+        },
+        Err(_) => fnv1a(raw),
+    }
+}
+
+fn fnv1a(key: &str) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in key.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
 }
 
 /// A tracker counts as tripped only while its cooldown (when configured) has not
@@ -693,6 +796,8 @@ mod tests {
             window_secs: 60,
             cooldown_secs: 0,
             max_domains: DEFAULT_MAX_DOMAINS,
+            // Legacy rate/eviction tests: no per-client gating.
+            min_distinct_clients: 1,
         };
         let breaker = MitmCircuitBreaker::new(config, Some(audit.clone()));
 
@@ -741,6 +846,8 @@ mod tests {
             window_secs: 60,
             cooldown_secs: 0,
             max_domains: DEFAULT_MAX_DOMAINS,
+            // Legacy rate/eviction tests: no per-client gating.
+            min_distinct_clients: 1,
         };
         let breaker = MitmCircuitBreaker::new(config, None);
 
@@ -763,6 +870,8 @@ mod tests {
             window_secs: 1,
             cooldown_secs: 0,
             max_domains: MIN_MAX_DOMAINS,
+            // Legacy rate/eviction tests: no per-client gating.
+            min_distinct_clients: 1,
         };
         let breaker = MitmCircuitBreaker::new(config, None);
 
@@ -793,6 +902,8 @@ mod tests {
             window_secs: 1,
             cooldown_secs: 0,
             max_domains: MIN_MAX_DOMAINS,
+            // Legacy rate/eviction tests: no per-client gating.
+            min_distinct_clients: 1,
         };
         let breaker = MitmCircuitBreaker::new(config, None);
 
@@ -819,6 +930,8 @@ mod tests {
             window_secs: 60,
             cooldown_secs: 0,
             max_domains: DEFAULT_MAX_DOMAINS,
+            // Legacy rate/eviction tests: no per-client gating.
+            min_distinct_clients: 1,
         };
         let breaker = MitmCircuitBreaker::new(config, None);
 
@@ -848,6 +961,8 @@ mod tests {
             window_secs: 600,
             cooldown_secs: 0,
             max_domains: MIN_MAX_DOMAINS,
+            // Legacy rate/eviction tests: no per-client gating.
+            min_distinct_clients: 1,
         };
         let breaker = MitmCircuitBreaker::new(config, None);
 
@@ -890,6 +1005,8 @@ mod tests {
             window_secs: 600,
             cooldown_secs: 0,
             max_domains: MIN_MAX_DOMAINS,
+            // Legacy rate/eviction tests: no per-client gating.
+            min_distinct_clients: 1,
         };
         let breaker = MitmCircuitBreaker::new(config, None);
 
@@ -915,5 +1032,128 @@ mod tests {
             status.dropped_attempts_total, 0,
             "tier 3 must keep making room instead of dropping attempts"
         );
+    }
+
+    fn p1_02_config() -> MitmCircuitBreakerConfig {
+        MitmCircuitBreakerConfig {
+            enabled: true,
+            failure_rate_threshold: 0.05,
+            min_samples: 5,
+            window_secs: 60,
+            cooldown_secs: 900,
+            max_domains: DEFAULT_MAX_DOMAINS,
+            min_distinct_clients: 3,
+        }
+    }
+
+    #[test]
+    fn defaults_have_finite_cooldown_and_require_three_clients() {
+        let cfg = MitmCircuitBreakerConfig::default();
+        assert_eq!(cfg.cooldown_secs, 900);
+        assert_eq!(cfg.min_distinct_clients, 3);
+        // Older serialized configs without the field still deserialize.
+        let json = r#"{"enabled":true,"failure_rate_threshold":0.05,"min_samples":5,
+            "window_secs":60,"cooldown_secs":0,"max_domains":10000}"#;
+        let parsed: MitmCircuitBreakerConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.min_distinct_clients, 3);
+    }
+
+    #[test]
+    fn ipv6_clients_are_bucketed_by_slash_64() {
+        assert_eq!(
+            client_bucket("2001:db8:1:2::1"),
+            client_bucket("2001:db8:1:2:ffff::9")
+        );
+        assert_ne!(
+            client_bucket("2001:db8:1:2::1"),
+            client_bucket("2001:db8:1:3::1")
+        );
+        assert_eq!(client_bucket("::ffff:10.0.0.1"), client_bucket("10.0.0.1"));
+        assert_ne!(client_bucket("10.0.0.1"), client_bucket("10.0.0.2"));
+        assert_eq!(client_bucket("[2001:db8::1]"), client_bucket("2001:db8::2"));
+    }
+
+    /// P1-02: one IPv6 host rotating addresses inside its /64 is one client.
+    #[test]
+    fn one_ipv6_slash_64_cannot_pose_as_many_clients() {
+        let breaker = MitmCircuitBreaker::new(p1_02_config(), None);
+        for i in 1..=50u32 {
+            let addr = format!("2001:db8:aa:bb::{i:x}");
+            breaker.record_attempt_from("c2.malware.test", false, "unknown_ca", Some(&addr));
+        }
+        assert!(!breaker.is_tripped("c2.malware.test"));
+    }
+
+    /// P1-02: one client aborting its own handshakes must not trip the domain.
+    #[test]
+    fn single_client_failures_do_not_trip() {
+        let breaker = MitmCircuitBreaker::new(p1_02_config(), None);
+        for _ in 0..50 {
+            assert!(!breaker.record_attempt_from(
+                "c2.malware.test",
+                false,
+                "tls_handshake_failed: eof",
+                Some("10.0.0.66"),
+            ));
+        }
+        assert!(!breaker.is_tripped("c2.malware.test"));
+        // A second client is still not enough.
+        for _ in 0..5 {
+            breaker.record_attempt_from("c2.malware.test", false, "eof", Some("10.0.0.67"));
+        }
+        assert!(!breaker.is_tripped("c2.malware.test"));
+    }
+
+    #[test]
+    fn failures_from_three_distinct_clients_trip() {
+        let breaker = MitmCircuitBreaker::new(p1_02_config(), None);
+        for _ in 0..3 {
+            breaker.record_attempt_from("pinned.example", false, "unknown_ca", Some("10.0.0.1"));
+        }
+        breaker.record_attempt_from("pinned.example", false, "unknown_ca", Some("10.0.0.2"));
+        assert!(!breaker.is_tripped("pinned.example"));
+        let tripped =
+            breaker.record_attempt_from("pinned.example", false, "unknown_ca", Some("10.0.0.3"));
+        assert!(tripped, "third distinct client must trip the breaker");
+        assert!(breaker.is_tripped("pinned.example"));
+        let status = breaker.status();
+        assert_eq!(status.min_distinct_clients, 3);
+        assert!(status.tripped_domains[0].reason.contains("3 clients"));
+        // Further attempts while tripped do not report a new trip.
+        assert!(!breaker.record_attempt_from("pinned.example", false, "x", Some("10.0.0.4")));
+    }
+
+    #[test]
+    fn trip_expires_after_cooldown() {
+        let mut cfg = p1_02_config();
+        cfg.min_distinct_clients = 1;
+        let breaker = MitmCircuitBreaker::new(cfg, None);
+        for _ in 0..5 {
+            breaker.record_attempt_from("cool.example", false, "x", Some("10.0.0.1"));
+        }
+        assert!(breaker.is_tripped("cool.example"));
+        // Age the trip past the cooldown.
+        let key = normalize_domain_key("cool.example");
+        {
+            let mut shard = breaker.shards[shard_index(&key)].write().unwrap();
+            let tracker = shard.trackers.get_mut(&key).unwrap();
+            if let DomainState::Tripped { tripped_at, .. } = &mut tracker.state {
+                *tripped_at = Instant::now()
+                    .checked_sub(Duration::from_secs(901))
+                    .expect("monotonic clock far enough from boot");
+            }
+        }
+        assert!(!breaker.is_tripped("cool.example"));
+    }
+
+    #[test]
+    fn min_clients_is_configurable_from_env() {
+        std::env::set_var("MITM_CIRCUIT_BREAKER_MIN_CLIENTS", "5");
+        let cfg = MitmCircuitBreakerConfig::from_env();
+        std::env::set_var("MITM_CIRCUIT_BREAKER_MIN_CLIENTS", "0");
+        let invalid = MitmCircuitBreakerConfig::from_env();
+        std::env::remove_var("MITM_CIRCUIT_BREAKER_MIN_CLIENTS");
+        assert_eq!(cfg.min_distinct_clients, 5);
+        assert_eq!(invalid.min_distinct_clients, DEFAULT_MIN_DISTINCT_CLIENTS);
     }
 }

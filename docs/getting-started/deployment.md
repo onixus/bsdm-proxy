@@ -1,6 +1,6 @@
 # Развёртывание BSDM-Proxy
  
-Текущая версия workspace: **`0.9.15`**.
+Текущая версия workspace: **`1.0.0-rc.1`**.
 
 Сначала выберите режим:
 
@@ -130,7 +130,7 @@ Console, на сервере не нужны компилятор, Node и Docke
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/onixus/bsdm-proxy/main/scripts/install-release.sh \
-  | sudo bash -s -- --version 0.9.15
+  | sudo bash -s -- --version 1.0.0-rc.1
 ```
 
 Тот же путь без сети: скачайте тарболл и `.sha256`, затем
@@ -225,6 +225,11 @@ docker compose logs --tail=200 cache-indexer
 ```
 
 ## Production checklist
+
+Полный prod-путь (GA-скоуп v1.0, prod-профили Compose/Helm/systemd) —
+[Production deployment](production-deployment.md) и
+[readiness checklist](../ops-and-dev/production-readiness-checklist.md). Краткий
+минимум:
 
 - CA key защищён и имеет rotation/backup procedure;
 - secrets не хранятся в Compose/values plaintext;

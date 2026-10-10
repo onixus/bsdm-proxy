@@ -1,5 +1,22 @@
 name: Release
 
+# Native release packages (static musl tarballs + Admin Console) for x86_64 and
+# aarch64, published as a GitHub Release on a v* tag. Container images are
+# published by docker-publish.yml from the same tag.
+#
+# Supply chain for the tarballs:
+#   * SPDX SBOM per package (syft), shipped as a release asset;
+#   * cosign keyless signature bundle (<file>.sigstore.json) for every
+#     tarball, checksum and SBOM. Verify with:
+#       cosign verify-blob bsdm-proxy-<ver>-<arch>.tar.gz \
+#         --bundle bsdm-proxy-<ver>-<arch>.tar.gz.sigstore.json \
+#         --certificate-identity-regexp '^https://github.com/onixus/bsdm-proxy/\.github/workflows/release\.yml@refs/tags/v.*$' \
+#         --certificate-oidc-issuer https://token.actions.githubusercontent.com
+#
+# Degradation: no repository secrets are used. The aarch64 leg needs the
+# GitHub-hosted `ubuntu-24.04-arm` runner; if it is unavailable for the
+# account, that leg fails and the Release is not published (no half release).
+
 on:
   push:
     tags:
@@ -15,8 +32,9 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+# Least privilege by default; only the publish job can write the Release.
 permissions:
-  contents: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -27,9 +45,12 @@ jobs:
     name: Validate before release
     if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
 
       - name: Show release context
         run: |
@@ -40,9 +61,12 @@ jobs:
 
       - name: Setup Rust environment
         uses: ./.github/actions/setup-rust
+        with:
+          components: rustfmt,clippy
+          cache-key: release
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 24
           cache: npm
@@ -63,6 +87,12 @@ jobs:
       - name: Run Rust tests
         run: ./scripts/ci/run.sh rust-test
 
+      - name: Supply-chain policy (cargo-deny, shipped graph)
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          arguments: --locked
+          command: check
+
       - name: Validate Admin Console
         env:
           PLAYWRIGHT_INSTALL_DEPS: '1'
@@ -72,6 +102,7 @@ jobs:
     name: Build package (${{ matrix.arch }})
     needs: validate
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -81,50 +112,88 @@ jobs:
           - runner: ubuntu-24.04-arm
             arch: aarch64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
       # The package is exported from the Dockerfile (static musl binaries +
       # Admin Console), so the runner needs Buildx, not a Rust toolchain.
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
       - run: ./scripts/ci/run.sh package
         env:
           EXPECTED_ARCH: ${{ matrix.arch }}
           PACKAGE_VIA_DOCKER: "1"
       - name: Check the package is static and runs on this runner
+        id: pkg
         run: |
           set -eux
           pkg="$(find dist -mindepth 1 -maxdepth 1 -type d -name 'bsdm-proxy-*')"
           file "${pkg}/bin/proxy"
-          ! ldd "${pkg}/bin/proxy" 2>/dev/null | grep -q '=>'
+          # `! cmd` does not trip `set -e` (SC2251): the old check could never fail.
+          if ldd "${pkg}/bin/proxy" 2>/dev/null | grep -q '=>'; then
+            echo "::error::proxy binary is dynamically linked"
+            exit 1
+          fi
           printf 'probe' | "${pkg}/bin/proxy" hash-password >/dev/null
           test -f "${pkg}/share/admin-console/index.html"
-      - uses: actions/upload-artifact@v4
+          echo "dir=${pkg}" >> "$GITHUB_OUTPUT"
+          echo "name=$(basename "${pkg}")" >> "$GITHUB_OUTPUT"
+      - name: Generate SPDX SBOM for the package
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          path: ${{ steps.pkg.outputs.dir }}
+          format: spdx-json
+          output-file: dist/${{ steps.pkg.outputs.name }}.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: bsdm-proxy-package-${{ matrix.arch }}
           path: |
             dist/*.tar.gz
             dist/*.tar.gz.sha256
+            dist/*.spdx.json
 
   publish:
     name: Publish GitHub Release
     needs: build
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write   # create the Release and upload assets
+      id-token: write   # cosign keyless sign-blob
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         with:
           path: dist
           pattern: bsdm-proxy-package-*
           merge-multiple: true
-      - run: |
+      - name: Release notes
+        run: |
+          set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
           chmod +x scripts/extract-release-notes.sh
           ./scripts/extract-release-notes.sh "$VERSION" > dist/RELEASE_NOTES.md
-      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Sign release assets (keyless)
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for f in *.tar.gz *.tar.gz.sha256 *.spdx.json; do
+            cosign sign-blob --yes --bundle "${f}.sigstore.json" "${f}"
+          done
+      - uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
         with:
           tag_name: ${{ github.ref_name }}
           name: BSDM-Proxy ${{ github.ref_name }}
           body_path: dist/RELEASE_NOTES.md
+          prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
             dist/*.tar.gz
             dist/*.tar.gz.sha256
+            dist/*.spdx.json
+            dist/*.sigstore.json

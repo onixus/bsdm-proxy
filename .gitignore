@@ -21,6 +21,12 @@ certs/
 proxy/certs/
 secrets/
 .env
+# Production compose profile: operator settings + Docker secret files
+deploy/compose/prod.env
+deploy/compose/secrets/
+
+# Scratch space for local runs / agents
+tmp/
 
 # Docker
 .dockerignore

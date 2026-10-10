@@ -49,9 +49,14 @@ fn configured_ca_dir() -> PathBuf {
 }
 
 /// Directories searched for the CA, in order: configured first, then the
-/// legacy locations that pre-date `MITM_CA_DIR`.
-fn ca_dir_candidates(configured: &Path) -> Vec<PathBuf> {
+/// legacy locations that pre-date `MITM_CA_DIR`. In production only the
+/// configured directory is used (P1-03): `./certs` depends on the working
+/// directory and `/certs` silently masks a wrong `MITM_CA_DIR`.
+fn ca_dir_candidates(configured: &Path, production: bool) -> Vec<PathBuf> {
     let mut dirs = vec![configured.to_path_buf()];
+    if production {
+        return dirs;
+    }
     for legacy in [LEGACY_MITM_CA_DIR, RELATIVE_MITM_CA_DIR] {
         let legacy = PathBuf::from(legacy);
         if !dirs.contains(&legacy) {
@@ -68,6 +73,84 @@ fn select_ca_dir(candidates: &[PathBuf]) -> Option<PathBuf> {
         .find(|dir| dir.join("ca.key").is_file())
         .cloned()
 }
+
+/// Warn when the MITM CA expires within this many seconds (30 days).
+const CA_EXPIRY_WARN_SECS: u64 = 30 * 86_400;
+
+/// Facts read from the CA certificate at load time (P1-03).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CaCertFacts {
+    /// `notAfter` as a Unix timestamp.
+    pub not_after_unix: u64,
+    /// The certificate's public key is the one of the loaded `ca.key`.
+    pub key_matches: bool,
+}
+
+/// Parses the first certificate in `ca_cert_pem` and compares its public key
+/// with `ca_key`.
+fn inspect_ca_cert(ca_cert_pem: &[u8], ca_key: &KeyPair) -> Result<CaCertFacts, String> {
+    use der::Decode;
+    let der = certs(&mut Cursor::new(ca_cert_pem))
+        .next()
+        .ok_or_else(|| "no certificate in ca.crt".to_string())?
+        .map_err(|e| format!("ca.crt PEM: {e}"))?;
+    let cert =
+        x509_cert::Certificate::from_der(der.as_ref()).map_err(|e| format!("ca.crt DER: {e}"))?;
+    let tbs = &cert.tbs_certificate;
+    let not_after_unix = tbs.validity.not_after.to_unix_duration().as_secs();
+    let key_matches =
+        tbs.subject_public_key_info.subject_public_key.raw_bytes() == ca_key.public_key_raw();
+    Ok(CaCertFacts {
+        not_after_unix,
+        key_matches,
+    })
+}
+
+fn unix_now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Production gate for an on-disk CA (P1-03): `ca.crt` must exist, belong to
+/// `ca.key` and not be expired. Returns the facts for metrics.
+fn validate_production_ca(
+    ca_cert_pem: &[u8],
+    ca_key: &KeyPair,
+    dir: &Path,
+    now_unix: u64,
+) -> Result<CaCertFacts, String> {
+    if ca_cert_pem.is_empty() {
+        return Err(format!(
+            "MITM CA certificate {} is missing; refusing to start in DEPLOYMENT_PROFILE=production \
+             (an auto-generated CA would not be trusted by clients)",
+            dir.join("ca.crt").display()
+        ));
+    }
+    let facts = inspect_ca_cert(ca_cert_pem, ca_key)
+        .map_err(|e| format!("MITM CA certificate {}: {e}", dir.join("ca.crt").display()))?;
+    if !facts.key_matches {
+        return Err(format!(
+            "MITM CA certificate {} does not match private key {}; refusing to start",
+            dir.join("ca.crt").display(),
+            dir.join("ca.key").display()
+        ));
+    }
+    if facts.not_after_unix <= now_unix {
+        return Err(format!(
+            "MITM CA certificate {} expired at unix {}; refusing to start",
+            dir.join("ca.crt").display(),
+            facts.not_after_unix
+        ));
+    }
+    Ok(facts)
+}
+
+/// Mode bits on `ca.key` that are fatal in production: anything for
+/// "other" and group write. Group *read* is tolerated because Kubernetes
+/// secret volumes are `root:<fsGroup>` with `defaultMode: 0440`.
+const CA_KEY_FATAL_MODE_BITS: u32 = 0o027;
 
 struct CachedCert {
     pair: CertPair,
@@ -125,6 +208,7 @@ pub struct CertCache {
     ca_key: Arc<KeyPair>,
     ca_cert_pem: Bytes,
     in_memory_ca_params: Option<CertificateParams>,
+    ca_facts: Option<CaCertFacts>,
 }
 
 impl CertCache {
@@ -146,19 +230,69 @@ impl CertCache {
             (Bytes::copy_from_slice(ca_cert_pem), None)
         };
 
+        let ca_facts = match inspect_ca_cert(&ca_cert_pem, ca_key.as_ref()) {
+            Ok(facts) => {
+                if !facts.key_matches {
+                    warn!("MITM CA certificate does not match ca.key; clients will reject MITM certificates");
+                }
+                let now = unix_now_secs();
+                if facts.not_after_unix <= now {
+                    warn!(
+                        not_after_unix = facts.not_after_unix,
+                        "MITM CA certificate has EXPIRED"
+                    );
+                } else if facts.not_after_unix - now < CA_EXPIRY_WARN_SECS {
+                    warn!(
+                        not_after_unix = facts.not_after_unix,
+                        "MITM CA certificate expires in less than 30 days"
+                    );
+                }
+                Some(facts)
+            }
+            Err(e) => {
+                warn!("Cannot inspect MITM CA certificate: {e}");
+                None
+            }
+        };
+
         Ok(Self {
             certs: Arc::new(RwLock::new(HashMap::new())),
             server_configs: Arc::new(RwLock::new(HashMap::new())),
             ca_key,
             ca_cert_pem,
             in_memory_ca_params,
+            ca_facts,
         })
     }
 
+    /// `notAfter` of the CA certificate (Unix seconds), for
+    /// `bsdm_proxy_mitm_ca_not_after_timestamp_seconds`.
+    pub fn ca_not_after_unix(&self) -> Option<u64> {
+        self.ca_facts.map(|f| f.not_after_unix)
+    }
+
     /// Load CA for proxy startup. When MITM is off, missing CA files are allowed.
+    ///
+    /// With MITM enabled in `DEPLOYMENT_PROFILE=production` the CA is
+    /// fail-closed (P1-03): only `MITM_CA_DIR` is searched, `ca.key` must not
+    /// be group-writable or accessible by others, and `ca.crt` must exist,
+    /// match the key and be unexpired.
     pub async fn load_for_startup(mitm_enabled: bool) -> Result<Self, Box<dyn std::error::Error>> {
-        let configured = configured_ca_dir();
-        let candidates = ca_dir_candidates(&configured);
+        Self::load_from(
+            configured_ca_dir(),
+            mitm_enabled,
+            crate::security_defaults::is_production_profile(),
+        )
+        .await
+    }
+
+    async fn load_from(
+        configured: PathBuf,
+        mitm_enabled: bool,
+        production: bool,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let strict = mitm_enabled && production;
+        let candidates = ca_dir_candidates(&configured, production);
         let dir = select_ca_dir(&candidates);
 
         if let Some(dir) = dir.as_deref() {
@@ -171,7 +305,7 @@ impl CertCache {
             }
         }
 
-        async fn read_key(dir: Option<&Path>) -> std::io::Result<Vec<u8>> {
+        async fn read_key(dir: Option<&Path>, strict: bool) -> std::io::Result<Vec<u8>> {
             match dir {
                 Some(dir) => {
                     let key_path = dir.join("ca.key");
@@ -180,6 +314,18 @@ impl CertCache {
                         use std::os::unix::fs::PermissionsExt;
                         if let Ok(metadata) = std::fs::metadata(&key_path) {
                             let mode = metadata.permissions().mode();
+                            if strict && (mode & CA_KEY_FATAL_MODE_BITS) != 0 {
+                                return Err(std::io::Error::new(
+                                    std::io::ErrorKind::PermissionDenied,
+                                    format!(
+                                        "{} has insecure mode {:o}; refusing to start in \
+                                         DEPLOYMENT_PROFILE=production (chmod 600, or 0440 \
+                                         for a Kubernetes secret volume)",
+                                        key_path.display(),
+                                        mode & 0o777
+                                    ),
+                                ));
+                            }
                             if (mode & 0o077) != 0 {
                                 warn!(
                                     key = %key_path.display(),
@@ -189,6 +335,8 @@ impl CertCache {
                             }
                         }
                     }
+                    #[cfg(not(unix))]
+                    let _ = strict;
                     tokio::fs::read(key_path).await
                 }
                 None => Err(std::io::Error::new(
@@ -208,7 +356,7 @@ impl CertCache {
         }
 
         if mitm_enabled {
-            let ca_key = read_key(dir.as_deref()).await.map_err(|e| {
+            let ca_key = read_key(dir.as_deref(), strict).await.map_err(|e| {
                 let searched: Vec<String> = candidates
                     .iter()
                     .map(|d| d.join("ca.key").display().to_string())
@@ -219,10 +367,15 @@ impl CertCache {
                 )
             })?;
             let ca_cert = read_cert(dir.as_deref()).await;
+            if strict {
+                let key = KeyPair::from_pem(&String::from_utf8_lossy(&ca_key))?;
+                let ca_dir = dir.as_deref().unwrap_or(configured.as_path());
+                validate_production_ca(&ca_cert, &key, ca_dir, unix_now_secs())?;
+            }
             return Self::from_pem(&ca_key, &ca_cert);
         }
 
-        match read_key(dir.as_deref()).await {
+        match read_key(dir.as_deref(), false).await {
             Ok(ca_key) => {
                 let ca_cert = read_cert(dir.as_deref()).await;
                 Self::from_pem(&ca_key, &ca_cert)
@@ -676,7 +829,7 @@ mod tests {
         let configured = configured_ca_dir();
         assert_eq!(configured, Path::new(DEFAULT_MITM_CA_DIR));
 
-        let candidates = ca_dir_candidates(&configured);
+        let candidates = ca_dir_candidates(&configured, false);
         assert_eq!(
             candidates,
             vec![
@@ -696,12 +849,141 @@ mod tests {
         std::env::set_var("MITM_CA_DIR", dir.path());
 
         let configured = configured_ca_dir();
-        let candidates = ca_dir_candidates(&configured);
+        let candidates = ca_dir_candidates(&configured, false);
         std::env::remove_var("MITM_CA_DIR");
 
         assert_eq!(configured, dir.path());
         assert_eq!(candidates.first().unwrap(), dir.path());
         assert_eq!(select_ca_dir(&candidates).as_deref(), Some(dir.path()));
+    }
+
+    #[test]
+    fn production_searches_only_the_configured_ca_dir() {
+        let configured = PathBuf::from("/srv/ca");
+        assert_eq!(
+            ca_dir_candidates(&configured, true),
+            vec![configured.clone()]
+        );
+        assert_eq!(ca_dir_candidates(&configured, false).len(), 3);
+    }
+
+    /// Writes `ca.key` (mode `key_mode`) and, when `with_cert`, a matching
+    /// self-signed `ca.crt` valid until `not_after_year`.
+    fn write_ca(dir: &Path, key_mode: u32, with_cert: bool, not_after_year: i32) -> KeyPair {
+        let key = KeyPair::generate().unwrap();
+        let key_path = dir.join("ca.key");
+        std::fs::write(&key_path, key.serialize_pem()).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(key_mode)).unwrap();
+        }
+        #[cfg(not(unix))]
+        let _ = key_mode;
+        if with_cert {
+            let mut params = CertCache::in_memory_ca_params().unwrap();
+            params.not_before = date_time_ymd(2000, 1, 1);
+            params.not_after = date_time_ymd(not_after_year, 1, 1);
+            let cert = params.self_signed(&key).unwrap();
+            std::fs::write(dir.join("ca.crt"), cert.pem()).unwrap();
+        }
+        key
+    }
+
+    fn load_err(dir: &Path, production: bool) -> String {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        match rt.block_on(CertCache::load_from(dir.to_path_buf(), true, production)) {
+            Ok(_) => String::new(),
+            Err(e) => e.to_string(),
+        }
+    }
+
+    #[test]
+    fn production_accepts_valid_ca_and_exposes_not_after() {
+        let dir = tempfile::tempdir().unwrap();
+        write_ca(dir.path(), 0o600, true, 2099);
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let cache = rt
+            .block_on(CertCache::load_from(dir.path().to_path_buf(), true, true))
+            .expect("valid CA must load in production");
+        let not_after = cache.ca_not_after_unix().expect("not_after");
+        assert!(not_after > unix_now_secs());
+        // Kubernetes secret volume mode is accepted too.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                dir.path().join("ca.key"),
+                std::fs::Permissions::from_mode(0o440),
+            )
+            .unwrap();
+            assert_eq!(load_err(dir.path(), true), "");
+        }
+    }
+
+    #[test]
+    fn production_refuses_missing_ca_cert_but_development_generates_one() {
+        let dir = tempfile::tempdir().unwrap();
+        write_ca(dir.path(), 0o600, false, 2099);
+        let err = load_err(dir.path(), true);
+        assert!(err.contains("missing"), "{err}");
+        assert_eq!(
+            load_err(dir.path(), false),
+            "",
+            "development keeps in-memory CA"
+        );
+    }
+
+    #[test]
+    fn production_refuses_ca_cert_of_another_key() {
+        let dir = tempfile::tempdir().unwrap();
+        write_ca(dir.path(), 0o600, true, 2099);
+        // Replace the key: the certificate now belongs to a different key.
+        std::fs::write(
+            dir.path().join("ca.key"),
+            KeyPair::generate().unwrap().serialize_pem(),
+        )
+        .unwrap();
+        let err = load_err(dir.path(), true);
+        assert!(err.contains("does not match"), "{err}");
+        assert_eq!(load_err(dir.path(), false), "");
+    }
+
+    #[test]
+    fn production_refuses_expired_ca() {
+        let dir = tempfile::tempdir().unwrap();
+        write_ca(dir.path(), 0o600, true, 2001);
+        let err = load_err(dir.path(), true);
+        assert!(err.contains("expired"), "{err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn production_refuses_world_readable_or_group_writable_ca_key() {
+        for mode in [0o644, 0o604, 0o660, 0o666] {
+            let dir = tempfile::tempdir().unwrap();
+            write_ca(dir.path(), mode, true, 2099);
+            let err = load_err(dir.path(), true);
+            assert!(err.contains("insecure mode"), "mode {mode:o}: {err}");
+            assert_eq!(load_err(dir.path(), false), "", "development only warns");
+        }
+    }
+
+    #[test]
+    fn inspect_ca_cert_reports_key_match() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = write_ca(dir.path(), 0o600, true, 2099);
+        let pem = std::fs::read(dir.path().join("ca.crt")).unwrap();
+        assert!(inspect_ca_cert(&pem, &key).unwrap().key_matches);
+        let other = KeyPair::generate().unwrap();
+        assert!(!inspect_ca_cert(&pem, &other).unwrap().key_matches);
+        assert!(inspect_ca_cert(b"not a cert", &key).is_err());
     }
 
     #[test]
@@ -823,6 +1105,17 @@ mod tests {
             .self_signed(&key_pair)
             .unwrap();
         std::fs::write(dir.path().join("ca.key"), key_pair.serialize_pem()).unwrap();
+        // The default profile is production, which refuses a group/world
+        // accessible ca.key (P1-03).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                dir.path().join("ca.key"),
+                std::fs::Permissions::from_mode(0o600),
+            )
+            .unwrap();
+        }
         std::fs::write(dir.path().join("ca.crt"), ca_cert.pem()).unwrap();
 
         std::env::set_var("MITM_CA_DIR", dir.path());

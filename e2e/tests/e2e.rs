@@ -623,3 +623,247 @@ async fn e2e_proxy_credentials_do_not_reach_the_origin() {
         "origin lost its own Authorization header:\n{seen_by_origin}"
     );
 }
+
+async fn raw_proxy_exchange(proxy_port: u16, request: String) -> String {
+    let mut stream = TcpStream::connect(("127.0.0.1", proxy_port))
+        .await
+        .expect("connect to proxy");
+    stream
+        .write_all(request.as_bytes())
+        .await
+        .expect("write request");
+    let mut buf = vec![0u8; 4096];
+    let n = tokio::time::timeout(Duration::from_secs(5), stream.read(&mut buf))
+        .await
+        .expect("proxy answered in time")
+        .expect("read response");
+    String::from_utf8_lossy(&buf[..n]).to_string()
+}
+
+/// CONNECT to a port outside ALLOWED_CONNECT_PORTS gets 403 before any 200,
+/// instead of "200 Connection established" followed by a dropped tunnel.
+#[tokio::test]
+async fn e2e_connect_to_forbidden_port_is_403_before_tunnel() {
+    let _guard = proxy_test_guard().await;
+    let mut extra_env = std::collections::HashMap::new();
+    extra_env.insert("ALLOWED_CONNECT_PORTS".to_string(), "443".to_string());
+    let harness = ProxyHarness::start(HarnessConfig {
+        extra_env,
+        ..Default::default()
+    })
+    .await
+    .expect("start proxy");
+
+    let resp = raw_proxy_exchange(
+        harness.proxy_port,
+        "CONNECT example.test:6379 HTTP/1.1\r\nHost: example.test:6379\r\n\r\n".to_string(),
+    )
+    .await;
+    assert!(resp.starts_with("HTTP/1.1 403"), "unexpected: {resp}");
+}
+
+/// AS-01: a host that only *resolves* to loopback (decimal IPv4 form, which the
+/// string check does not recognise) is refused when loopback forwarding is
+/// blocked — both for plain HTTP and for CONNECT.
+#[tokio::test]
+async fn e2e_names_resolving_to_loopback_are_blocked() {
+    let _guard = proxy_test_guard().await;
+    let mut extra_env = std::collections::HashMap::new();
+    extra_env.insert("BLOCK_LOOPBACK_FORWARDING".to_string(), "true".to_string());
+    let harness = ProxyHarness::start(HarnessConfig {
+        extra_env,
+        ..Default::default()
+    })
+    .await
+    .expect("start proxy");
+    // 2130706433 == 127.0.0.1; libc resolves the decimal form.
+    let port = harness.upstream_port;
+    let resp = raw_proxy_exchange(
+        harness.proxy_port,
+        format!(
+            "GET http://2130706433:{port}/x HTTP/1.1\r\nHost: 2130706433:{port}\r\nConnection: close\r\n\r\n"
+        ),
+    )
+    .await;
+    assert!(
+        !resp.starts_with("HTTP/1.1 200"),
+        "loopback reached through a decimal host: {resp}"
+    );
+    // Direct literal is refused by the string check as well.
+    let resp = raw_proxy_exchange(
+        harness.proxy_port,
+        format!(
+            "GET http://127.0.0.1:{port}/x HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+        ),
+    )
+    .await;
+    assert!(resp.starts_with("HTTP/1.1 403"), "unexpected: {resp}");
+}
+
+#[tokio::test]
+async fn e2e_production_config_apply_exits_and_saved_settings_survive_restart() {
+    let _guard = proxy_test_guard().await;
+    let config_dir = tempfile::tempdir().unwrap();
+    let env_path = config_dir.path().join("runtime.env");
+    let extra_env = std::collections::HashMap::from([
+        ("DEPLOYMENT_PROFILE".to_string(), "production".to_string()),
+        (
+            "CONFIG_ENV_PATH".to_string(),
+            env_path.to_string_lossy().into_owned(),
+        ),
+        (
+            "CONTROL_API_TOKEN".to_string(),
+            "apply-test-token".to_string(),
+        ),
+        (
+            "CONTROL_API_ALLOW_INSECURE".to_string(),
+            "false".to_string(),
+        ),
+        ("CONFIG_RESTART_CMD".to_string(), String::new()),
+    ]);
+    let mut harness = ProxyHarness::start(HarnessConfig {
+        extra_env: extra_env.clone(),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+    let response = client
+        .post(harness.metrics_url("/api/config/apply"))
+        .bearer_auth("apply-test-token")
+        .json(&serde_json::json!({"env":{"CACHE_TTL_SECONDS":"123"},"restart":true}))
+        .send()
+        .await
+        .unwrap();
+    assert!(response.status().is_success(), "{}", response.status());
+    let result: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(result["restart"], "scheduled");
+    assert!(harness
+        .wait_for_exit(Duration::from_secs(10))
+        .await
+        .unwrap()
+        .success());
+    assert!(std::fs::read_to_string(&env_path)
+        .unwrap()
+        .contains("CACHE_TTL_SECONDS=123"));
+    let restarted = ProxyHarness::start(HarnessConfig {
+        extra_env,
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    let snapshot: serde_json::Value = client
+        .get(restarted.metrics_url("/api/config"))
+        .bearer_auth("apply-test-token")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(snapshot["env"]["CACHE_TTL_SECONDS"], "123");
+}
+
+#[tokio::test]
+async fn e2e_repeated_response_privacy_headers_bypass_both_cache_modes() {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    let _guard = proxy_test_guard().await;
+    for streaming in ["false", "true"] {
+        let harness = ProxyHarness::start(HarnessConfig {
+            extra_env: std::collections::HashMap::from([(
+                "STREAMING_MISS_ENABLED".to_string(),
+                streaming.to_string(),
+            )]),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+        for policy in [
+            "Cache-Control: private\r\nCache-Control: max-age=60\r\n",
+            "Vary: Cookie\r\nVary: Accept-Encoding\r\nCache-Control: max-age=60\r\n",
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let hits = Arc::new(AtomicUsize::new(0));
+            let recorded = hits.clone();
+            let origin = tokio::spawn(async move {
+                loop {
+                    let (mut socket, _) = listener.accept().await.unwrap();
+                    let mut request = vec![0u8; 4096];
+                    let n = socket.read(&mut request).await.unwrap();
+                    assert!(n > 0, "expected an upstream request");
+                    recorded.fetch_add(1, Ordering::SeqCst);
+                    let response = format!("HTTP/1.1 200 OK\r\n{policy}Content-Length: 4\r\nConnection: close\r\n\r\nbody");
+                    socket.write_all(response.as_bytes()).await.unwrap();
+                }
+            });
+            let client = harness.proxy_client().unwrap();
+            for _ in 0..2 {
+                let response = client
+                    .get(format!("http://{addr}/private"))
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(response.headers().get("x-cache-status").unwrap(), "BYPASS");
+                assert_eq!(response.text().await.unwrap(), "body");
+            }
+            assert_eq!(
+                hits.load(Ordering::SeqCst),
+                2,
+                "streaming={streaming}, {policy}"
+            );
+            origin.abort();
+        }
+    }
+}
+
+#[tokio::test]
+async fn e2e_private_304_invalidates_cached_response_and_fetches_fresh_body() {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    let _guard = proxy_test_guard().await;
+    let harness = ProxyHarness::start(HarnessConfig::default()).await.unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let hits = Arc::new(AtomicUsize::new(0));
+    let recorded = hits.clone();
+    let origin = tokio::spawn(async move {
+        loop {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = vec![0u8; 4096];
+            let n = socket.read(&mut request).await.unwrap();
+            let count = recorded.fetch_add(1, Ordering::SeqCst);
+            let response = match count {
+                0 => "HTTP/1.1 200 OK\r\nCache-Control: public, no-cache\r\nETag: v1\r\nContent-Length: 3\r\nConnection: close\r\n\r\nold",
+                1 => {
+                    assert!(String::from_utf8_lossy(&request[..n]).to_ascii_lowercase().contains("if-none-match: v1"));
+                    "HTTP/1.1 304 Not Modified\r\nCache-Control: private\r\nCache-Control: max-age=60\r\nConnection: close\r\n\r\n"
+                },
+                _ => "HTTP/1.1 200 OK\r\nCache-Control: private\r\nContent-Length: 5\r\nConnection: close\r\n\r\nfresh",
+            };
+            socket.write_all(response.as_bytes()).await.unwrap();
+        }
+    });
+    let client = harness.proxy_client().unwrap();
+    let url = format!("http://{addr}/revalidated");
+    assert_eq!(
+        client.get(&url).send().await.unwrap().text().await.unwrap(),
+        "old"
+    );
+    for _ in 0..2 {
+        let response = client.get(&url).send().await.unwrap();
+        assert_eq!(response.headers().get("x-cache-status").unwrap(), "BYPASS");
+        assert_eq!(response.text().await.unwrap(), "fresh");
+    }
+    assert_eq!(hits.load(Ordering::SeqCst), 4);
+    origin.abort();
+}

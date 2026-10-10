@@ -78,6 +78,9 @@ services:
       - METRICS_PORT=9090
       - MITM_ENABLED=false
       - AUTH_ENABLED=false
+      # LAB ONLY: the production profile refuses an unauthenticated proxy
+      # without a client-IP ACL; this stack is an open proxy on purpose.
+      - ALLOW_ANONYMOUS_PROXY=true
       - ACL_ENABLED=false
       - CATEGORIZATION_ENABLED=false
       - CACHE_CAPACITY=100
@@ -124,6 +127,9 @@ services:
       - METRICS_PORT=9090
       - MITM_ENABLED=false
       - AUTH_ENABLED=false
+      # LAB ONLY: the production profile refuses an unauthenticated proxy
+      # without a client-IP ACL; this stack is an open proxy on purpose.
+      - ALLOW_ANONYMOUS_PROXY=true
       - ACL_ENABLED=false
       - CATEGORIZATION_ENABLED=false
       - CACHE_CAPACITY=100

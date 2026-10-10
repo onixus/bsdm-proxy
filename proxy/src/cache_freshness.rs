@@ -15,6 +15,29 @@ pub struct CacheControlDirectives {
     pub max_age: Option<u64>,
     pub s_maxage: Option<u64>,
     pub private: bool,
+    pub public: bool,
+    pub must_revalidate: bool,
+}
+
+/// Request-side facts that limit what a shared cache may store (RFC 9111 §3.5).
+///
+/// The cache key is `method + URL` only, so a response to a credentialed
+/// request would otherwise be replayed to every other user of the proxy.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RequestCacheContext {
+    /// Request carried `Authorization` (origin credentials, not `Proxy-Authorization`).
+    pub has_authorization: bool,
+    /// Request carried `Cookie` — the response is very likely personalised.
+    pub has_cookie: bool,
+}
+
+impl RequestCacheContext {
+    pub fn from_headers(headers: &hyper::HeaderMap) -> Self {
+        Self {
+            has_authorization: headers.contains_key(hyper::header::AUTHORIZATION),
+            has_cookie: headers.contains_key(hyper::header::COOKIE),
+        }
+    }
 }
 
 /// Whether an upstream response may be stored and with what metadata.
@@ -98,6 +121,8 @@ pub fn parse_cache_control(value: &str) -> CacheControlDirectives {
             "no-store" => directives.no_store = true,
             "no-cache" => directives.no_cache = true,
             "private" => directives.private = true,
+            "public" => directives.public = true,
+            "must-revalidate" => directives.must_revalidate = true,
             "max-age" => {
                 if let Some(v) = arg.and_then(|s| s.parse::<u64>().ok()) {
                     directives.max_age = Some(v);
@@ -112,6 +137,23 @@ pub fn parse_cache_control(value: &str) -> CacheControlDirectives {
         }
     }
     directives
+}
+
+/// Preserve repeated list-valued privacy fields before cache admission.
+/// Non-list fields keep their existing representation (notably Set-Cookie).
+pub(crate) fn insert_cache_header(headers: &mut HashMap<String, String>, name: &str, value: &str) {
+    let name = name.to_ascii_lowercase();
+    if matches!(name.as_str(), "cache-control" | "vary") {
+        headers
+            .entry(name)
+            .and_modify(|existing| {
+                existing.push_str(", ");
+                existing.push_str(value);
+            })
+            .or_insert_with(|| value.to_string());
+    } else {
+        headers.insert(name, value.to_string());
+    }
 }
 
 pub fn header_value<'a>(headers: &'a HashMap<String, String>, name: &str) -> Option<&'a str> {
@@ -141,10 +183,20 @@ pub fn evaluate_store_precheck(
     method: &str,
     status: u16,
     headers: &HashMap<String, String>,
+    request: &RequestCacheContext,
     config: &CacheConfig,
 ) -> CacheStoreDecision {
     let size_hint = content_length(headers).unwrap_or(0);
-    evaluate_store(method, status, headers, size_hint, config)
+    evaluate_store(method, status, headers, size_hint, request, config)
+}
+
+/// `Vary` the cache can honour without the varied headers in the key. Only
+/// `Accept-Encoding` qualifies: stored bodies are kept decoded/re-encodable.
+fn vary_is_storable(vary: &str) -> bool {
+    vary.split(',')
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .all(|t| t.eq_ignore_ascii_case("accept-encoding"))
 }
 
 /// Decide whether to store a response and compute freshness metadata.
@@ -153,6 +205,7 @@ pub fn evaluate_store(
     status: u16,
     headers: &HashMap<String, String>,
     body_size: usize,
+    request: &RequestCacheContext,
     config: &CacheConfig,
 ) -> CacheStoreDecision {
     if !CACHEABLE_METHODS.contains(&method) {
@@ -172,6 +225,34 @@ pub fn evaluate_store(
 
     // Shared caches must not store private responses unless explicitly allowed.
     if cache_control.private {
+        return CacheStoreDecision::bypass();
+    }
+
+    // A response that sets a cookie is per-client by construction; storing it
+    // would replay one user's session cookie to everybody else.
+    if header_value(headers, "set-cookie").is_some() {
+        return CacheStoreDecision::bypass();
+    }
+
+    // The key does not include the varied request headers, so any Vary other
+    // than Accept-Encoding (and `Vary: *`) cannot be served correctly.
+    if header_value(headers, "vary").is_some_and(|v| !vary_is_storable(v)) {
+        return CacheStoreDecision::bypass();
+    }
+
+    // RFC 9111 §3.5: a shared cache stores a response to an authorised request
+    // only when the origin explicitly allows it.
+    if request.has_authorization
+        && !(cache_control.public
+            || cache_control.s_maxage.is_some()
+            || cache_control.must_revalidate)
+    {
+        return CacheStoreDecision::bypass();
+    }
+
+    // Cookie-bearing requests are treated as personalised unless the origin
+    // marks the response `public`.
+    if request.has_cookie && !cache_control.public {
         return CacheStoreDecision::bypass();
     }
 
@@ -244,6 +325,10 @@ mod tests {
             .collect()
     }
 
+    fn anon() -> RequestCacheContext {
+        RequestCacheContext::default()
+    }
+
     fn default_config() -> CacheConfig {
         CacheConfig {
             negative_cache_enabled: true,
@@ -266,14 +351,14 @@ mod tests {
     #[test]
     fn no_store_bypasses_cache() {
         let h = headers(&[("Cache-Control", "no-store")]);
-        let decision = evaluate_store("GET", 200, &h, 100, &default_config());
+        let decision = evaluate_store("GET", 200, &h, 100, &anon(), &default_config());
         assert!(!decision.store);
     }
 
     #[test]
     fn max_age_sets_ttl() {
         let h = headers(&[("Cache-Control", "max-age=600")]);
-        let decision = evaluate_store("GET", 200, &h, 100, &default_config());
+        let decision = evaluate_store("GET", 200, &h, 100, &anon(), &default_config());
         assert!(decision.store);
         assert_eq!(decision.ttl, Duration::from_secs(600));
         assert!(!decision.is_negative);
@@ -282,14 +367,14 @@ mod tests {
     #[test]
     fn s_maxage_overrides_max_age() {
         let h = headers(&[("Cache-Control", "max-age=600, s-maxage=300")]);
-        let decision = evaluate_store("GET", 200, &h, 100, &default_config());
+        let decision = evaluate_store("GET", 200, &h, 100, &anon(), &default_config());
         assert_eq!(decision.ttl, Duration::from_secs(300));
     }
 
     #[test]
     fn negative_404_cached_when_enabled() {
         let h = headers(&[]);
-        let decision = evaluate_store("GET", 404, &h, 0, &default_config());
+        let decision = evaluate_store("GET", 404, &h, 0, &anon(), &default_config());
         assert!(decision.store);
         assert!(decision.is_negative);
         assert_eq!(decision.ttl, Duration::from_secs(120));
@@ -298,7 +383,7 @@ mod tests {
     #[test]
     fn negative_403_cached_when_enabled() {
         let h = headers(&[]);
-        let decision = evaluate_store("GET", 403, &h, 0, &default_config());
+        let decision = evaluate_store("GET", 403, &h, 0, &anon(), &default_config());
         assert!(decision.store);
         assert!(decision.is_negative);
     }
@@ -308,14 +393,14 @@ mod tests {
         let mut config = default_config();
         config.negative_cache_enabled = false;
         let h = headers(&[]);
-        let decision = evaluate_store("GET", 404, &h, 0, &config);
+        let decision = evaluate_store("GET", 404, &h, 0, &anon(), &config);
         assert!(!decision.store);
     }
 
     #[test]
     fn no_cache_sets_must_revalidate() {
         let h = headers(&[("Cache-Control", "no-cache"), ("ETag", "\"abc\"")]);
-        let decision = evaluate_store("GET", 200, &h, 100, &default_config());
+        let decision = evaluate_store("GET", 200, &h, 100, &anon(), &default_config());
         assert!(decision.store);
         assert!(decision.must_revalidate);
         assert_eq!(decision.etag.as_deref(), Some("\"abc\""));
@@ -324,8 +409,85 @@ mod tests {
     #[test]
     fn private_response_not_stored() {
         let h = headers(&[("Cache-Control", "private, max-age=3600")]);
-        let decision = evaluate_store("GET", 200, &h, 100, &default_config());
+        let decision = evaluate_store("GET", 200, &h, 100, &anon(), &default_config());
         assert!(!decision.store);
+    }
+
+    #[test]
+    fn authorized_request_not_stored_without_explicit_permission() {
+        let req = RequestCacheContext {
+            has_authorization: true,
+            has_cookie: false,
+        };
+        let h = headers(&[]);
+        assert!(!evaluate_store("GET", 200, &h, 100, &req, &default_config()).store);
+        let h = headers(&[("Cache-Control", "max-age=600")]);
+        assert!(!evaluate_store("GET", 200, &h, 100, &req, &default_config()).store);
+        for allowed in [
+            "public, max-age=60",
+            "s-maxage=60",
+            "must-revalidate, max-age=60",
+        ] {
+            let h = headers(&[("Cache-Control", allowed)]);
+            assert!(
+                evaluate_store("GET", 200, &h, 100, &req, &default_config()).store,
+                "{allowed} should permit storing"
+            );
+        }
+    }
+
+    #[test]
+    fn cookie_request_not_stored_unless_public() {
+        let req = RequestCacheContext {
+            has_authorization: false,
+            has_cookie: true,
+        };
+        let h = headers(&[]);
+        assert!(!evaluate_store("GET", 200, &h, 100, &req, &default_config()).store);
+        let h = headers(&[("Cache-Control", "public, max-age=60")]);
+        assert!(evaluate_store("GET", 200, &h, 100, &req, &default_config()).store);
+        // Negative responses follow the same rule.
+        assert!(!evaluate_store("GET", 404, &headers(&[]), 0, &req, &default_config()).store);
+    }
+
+    #[test]
+    fn set_cookie_response_never_stored() {
+        let h = headers(&[
+            ("Set-Cookie", "sid=abc"),
+            ("Cache-Control", "public, max-age=600"),
+        ]);
+        assert!(!evaluate_store("GET", 200, &h, 100, &anon(), &default_config()).store);
+        assert!(!evaluate_store_precheck("GET", 200, &h, &anon(), &default_config()).store);
+    }
+
+    #[test]
+    fn vary_other_than_accept_encoding_not_stored() {
+        for vary in ["*", "Cookie", "accept-encoding, User-Agent"] {
+            let h = headers(&[("Vary", vary), ("Cache-Control", "max-age=60")]);
+            assert!(
+                !evaluate_store("GET", 200, &h, 100, &anon(), &default_config()).store,
+                "Vary: {vary} must bypass"
+            );
+        }
+        let h = headers(&[("Vary", "Accept-Encoding"), ("Cache-Control", "max-age=60")]);
+        assert!(evaluate_store("GET", 200, &h, 100, &anon(), &default_config()).store);
+    }
+
+    #[test]
+    fn request_context_from_headers() {
+        let mut map = hyper::HeaderMap::new();
+        assert_eq!(RequestCacheContext::from_headers(&map), anon());
+        map.insert(hyper::header::COOKIE, "a=b".parse().unwrap());
+        map.insert(
+            hyper::header::PROXY_AUTHORIZATION,
+            "Basic eA==".parse().unwrap(),
+        );
+        let ctx = RequestCacheContext::from_headers(&map);
+        assert!(ctx.has_cookie);
+        // Proxy credentials address the proxy, not the origin.
+        assert!(!ctx.has_authorization);
+        map.insert(hyper::header::AUTHORIZATION, "Bearer t".parse().unwrap());
+        assert!(RequestCacheContext::from_headers(&map).has_authorization);
     }
 
     #[test]

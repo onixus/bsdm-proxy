@@ -93,7 +93,14 @@ services:
       - PINNING_EXCEPTIONS_PATH=/etc/bsdm-proxy/pinning-exceptions.json
       - PINNING_AUDIT_LOG_PATH=/var/log/bsdm-proxy/pinning-audit.jsonl
       - MITM_ENABLED=true
+      - MITM_CA_DIR=/certs  # explicit: production no longer probes /certs or ./certs
       - AUTH_ENABLED=false
+      # LAB ONLY: the production profile refuses an unauthenticated proxy
+      # without a client-IP ACL; this stack is an open proxy on purpose.
+      - ALLOW_ANONYMOUS_PROXY=true
+      # LAB ONLY: production blocks loopback forwarding by default; the load
+      # test mock upstream shares this container's loopback (127.0.0.1:18080).
+      - BLOCK_LOOPBACK_FORWARDING=false
       - ACL_ENABLED=false
       - ACL_DEFAULT_ACTION=allow
       - CATEGORIZATION_ENABLED=false

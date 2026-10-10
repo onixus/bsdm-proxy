@@ -34,6 +34,18 @@ validate_install_path() {
   esac
 }
 
+# Last effective value of KEY in an env file (systemd's EnvironmentFile and the
+# proxy both let the last assignment win). Prints nothing when unset.
+env_get() {
+  local file="$1" key="$2" line
+  [[ -f "$file" ]] || return 0
+  line="$(grep -E "^[[:space:]]*${key}=" "$file" | tail -n 1 || true)"
+  line="${line#*=}"
+  line="${line%"${line##*[![:space:]]}"}"
+  line="${line#\"}"; line="${line%\"}"
+  printf '%s' "$line"
+}
+
 need_value() {
   # need_value <option> <remaining-argc>
   [[ "$2" -ge 2 ]] || { echo "error: $1 requires a value" >&2; exit 2; }
@@ -223,9 +235,10 @@ if [[ -z "$CERTS_DIR" ]]; then
   fi
 fi
 
-# 0700, not 0750: the directory holds ca.key. Group read buys nothing here and
-# gives every member of the group the ability to mint certificates for any site.
-install -d -m 0700 "$CERTS_DIR"
+# Root-owned with group = service account (see the ownership block below): the
+# proxy can read ca.key, but neither it nor anyone else can replace the CA.
+# The group holds only the service user, so group read is not a wider grant.
+install -d -m 0750 "$CERTS_DIR"
 
 # Point the proxy at the directories this install actually uses, whichever
 # they are: the MITM CA and, when the package ships it, the Admin Console.
@@ -234,6 +247,11 @@ if [[ -f "${ETC_DIR}/bsdm-proxy.env" ]]; then
   grep -v -e '^[[:space:]]*MITM_CA_DIR=' -e '^[[:space:]]*ADMIN_CONSOLE_DIR=' \
     "${ETC_DIR}/bsdm-proxy.env" >"${env_tmp}" || true
   echo "MITM_CA_DIR=${CERTS_DIR}" >>"${env_tmp}"
+  # ${ETC_DIR} is read-only for the service (root-owned). Admin Console
+  # "Apply" persists runtime overrides in the service's StateDirectory instead.
+  if ! grep -qE '^[[:space:]]*CONFIG_ENV_PATH=' "${env_tmp}"; then
+    echo "CONFIG_ENV_PATH=/var/lib/bsdm-proxy/bsdm-proxy.env" >>"${env_tmp}"
+  fi
   if [[ -n "$ADMIN_CONSOLE_DIR" ]]; then
     echo "ADMIN_CONSOLE_DIR=${ADMIN_CONSOLE_DIR}" >>"${env_tmp}"
   fi
@@ -241,9 +259,75 @@ if [[ -f "${ETC_DIR}/bsdm-proxy.env" ]]; then
   rm -f "${env_tmp}"
 fi
 
-if $CREATE_USER; then
-  chown bsdm-proxy:bsdm-proxy "$CERTS_DIR" "${ETC_DIR}"
-  chown -R bsdm-proxy:bsdm-proxy "${PREFIX}"
+# Ownership model (anti-persistence): everything the installer lays down is
+# owned by root. The service account only gets group READ on its config and
+# CA; it can write nothing but its systemd StateDirectory / CacheDirectory /
+# LogsDirectory (/var/lib, /var/cache, /var/log). A compromised proxy process
+# therefore cannot rewrite its own binary, units, config, ACL or MITM CA.
+SERVICE_GROUP=""
+if getent group bsdm-proxy >/dev/null 2>&1; then
+  SERVICE_GROUP="bsdm-proxy"
+fi
+chown -R root:root "${PREFIX}"
+chmod -R go-w "${PREFIX}"
+if [[ -n "$SERVICE_GROUP" ]]; then
+  chown root:"${SERVICE_GROUP}" "${ETC_DIR}" "${CERTS_DIR}"
+  chmod 0750 "${ETC_DIR}" "${CERTS_DIR}"
+  # (the generated initial password stays root-only even on re-runs)
+  find "${ETC_DIR}" -maxdepth 1 -type f ! -name initial-basic-auth-password \
+    -exec chown root:"${SERVICE_GROUP}" {} + -exec chmod g+r,g-w,o-rwx {} +
+  # Existing CA (e.g. a legacy /certs install): readable by the service only.
+  if [[ -f "${CERTS_DIR}/ca.key" ]]; then
+    chown root:"${SERVICE_GROUP}" "${CERTS_DIR}/ca.key"
+    chmod 0640 "${CERTS_DIR}/ca.key"
+  fi
+  if [[ -f "${CERTS_DIR}/ca.crt" ]]; then
+    chown root:"${SERVICE_GROUP}" "${CERTS_DIR}/ca.crt"
+    chmod 0644 "${CERTS_DIR}/ca.crt"
+  fi
+else
+  echo "WARNING: group bsdm-proxy does not exist (re-run with --create-user)." >&2
+  echo "         ${ETC_DIR} and ${CERTS_DIR} stay root-only; the services cannot read them." >&2
+fi
+
+# Basic-auth users file. With AUTH_ENABLED=true and the basic backend the
+# production profile refuses to start without one (otherwise any credentials
+# would be accepted). Generate a first user rather than leave a unit that cannot
+# start; the password goes to a root-only file, never to stdout or logs.
+PROXY_ENV="${ETC_DIR}/bsdm-proxy.env"
+AUTH_NOTICE=""
+GEN_HINT="printf '%s' '<password>' | BSDM_PROXY_BIN=${PREFIX}/bin/proxy ./scripts/gen-basic-auth-user.sh --stdin <user>"
+auth_enabled="$(env_get "$PROXY_ENV" AUTH_ENABLED | tr '[:upper:]' '[:lower:]')"
+auth_backend="$(env_get "$PROXY_ENV" AUTH_BACKEND)"
+users_file="$(env_get "$PROXY_ENV" BASIC_AUTH_USERS_FILE)"
+if [[ "$auth_enabled" =~ ^(1|true|yes|on)$ && "${auth_backend:-basic}" == "basic" ]]; then
+  if [[ -z "$users_file" ]]; then
+    AUTH_NOTICE="BASIC_AUTH_USERS_FILE is not set in ${PROXY_ENV}: bsdm-proxy WILL NOT START (production profile). Set it and create the file:
+  ${GEN_HINT}"
+  elif [[ -f "$users_file" ]]; then
+    :
+  elif [[ "$users_file" != /* || ! -d "$(dirname "$users_file")" ]]; then
+    AUTH_NOTICE="${users_file} does not exist and its directory is missing: bsdm-proxy WILL NOT START until you create it:
+  ${GEN_HINT}"
+  else
+    pw_file="${ETC_DIR}/initial-basic-auth-password"
+    password="$(openssl rand -hex 16)"
+    hash="$(printf '%s' "$password" | "${PREFIX}/bin/proxy" hash-password 2>/dev/null | tail -n 1 || true)"
+    if [[ "$hash" == '$argon2id$'* ]]; then
+      users_tmp="$(mktemp)"
+      printf '[\n  {"username": "admin", "password_hash": "%s", "role": "admins"}\n]\n' "$hash" >"$users_tmp"
+      install -m 0640 -o root -g "${SERVICE_GROUP:-root}" "$users_tmp" "$users_file"
+      rm -f "$users_tmp"
+      ( umask 077; printf 'username: admin\npassword: %s\n' "$password" >"$pw_file" )
+      chmod 0600 "$pw_file"
+      AUTH_NOTICE="Generated ${users_file} with proxy user 'admin'. Its password is in ${pw_file} (root-only, 0600): store it in your vault, then DELETE that file. Add users with:
+  ${GEN_HINT}"
+    else
+      AUTH_NOTICE="Could not generate ${users_file} (proxy hash-password failed): bsdm-proxy WILL NOT START until you create it:
+  ${GEN_HINT} > ${users_file}"
+    fi
+    unset password hash
+  fi
 fi
 
 if $INSTALL_SYSTEMD; then
@@ -277,9 +361,10 @@ cat <<EOF
 
 BSDM-Proxy installed to ${PREFIX}
 
-MITM requires CA certificates (0600 ca.key, owned by bsdm-proxy):
+MITM requires CA certificates (owner root, group bsdm-proxy, ca.key 0640):
   ${CERTS_DIR}/ca.key
   ${CERTS_DIR}/ca.crt
+  chown root:bsdm-proxy ${CERTS_DIR}/ca.key ${CERTS_DIR}/ca.crt && chmod 0640 ${CERTS_DIR}/ca.key
 
 The directory is recorded as MITM_CA_DIR in ${ETC_DIR}/bsdm-proxy.env.
 
@@ -288,3 +373,7 @@ Metrics:       http://127.0.0.1:9090/metrics
 Admin Console: http://127.0.0.1:9090/admin/${ADMIN_CONSOLE_DIR:+ (from ${ADMIN_CONSOLE_DIR})}
 
 EOF
+
+if [[ -n "$AUTH_NOTICE" ]]; then
+  printf '\n*** PROXY AUTHENTICATION ***\n%s\n\n' "$AUTH_NOTICE" >&2
+fi

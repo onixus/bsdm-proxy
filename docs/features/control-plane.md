@@ -66,6 +66,17 @@ curl -X POST http://127.0.0.1:9090/api/config/apply \
 
 When `CONFIG_RESTART_CMD` is unset, the proxy spawns a replacement process with the updated environment, then shuts down gracefully.
 
+**Since v1.0** `config/apply` edits only an allowlist of operational keys. Requests touching
+`CONTROL_API_TOKEN`, `ACL_API_TOKEN`, `SEARCH_API_TOKEN`, `ACL_RULES_PATH`,
+`UPSTREAM_CA_CERT`, `WASM_*` or `CONFIG_*` are rejected with `400`, as are values
+containing `\`, `"`, `'` or leading/trailing whitespace (they would inject lines
+into a systemd `EnvironmentFile`; set such values by editing
+`/etc/bsdm-proxy/bsdm-proxy.env` on the host). In
+`DEPLOYMENT_PROFILE=production` a restart is a graceful shutdown only — the
+supervisor (systemd `Restart=`, Compose `restart:`, Kubernetes) brings the process
+back; no self-respawn and no shell command from the runtime environment. Applied
+changes are logged; a dedicated audit log is planned for 1.1 ([roadmap](../roadmap.md)).
+
 ## Stats (Lite JSON)
 
 ```bash

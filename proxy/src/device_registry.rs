@@ -551,29 +551,50 @@ impl DeviceRegistry {
 
     /// Constant-time check that `token` matches a non-revoked enrolled device.
     pub fn device_token_valid(&self, token: &str) -> bool {
+        self.device_id_for_token(token).is_some()
+    }
+
+    /// Device that owns `token` (non-revoked), so agent endpoints can scope a
+    /// device token to that device's own resources.
+    pub fn device_id_for_token(&self, token: &str) -> Option<String> {
         if token.is_empty() {
-            return false;
+            return None;
         }
         let hash = hash_device_token(token);
         {
             let devices = self.devices.read().expect("device registry lock");
-            if devices.values().any(|d| {
+            if let Some(d) = devices.values().find(|d| {
                 !d.revoked
                     && d.device_token_hash
                         .as_ref()
                         .is_some_and(|h| constant_time_eq(h.as_bytes(), hash.as_bytes()))
             }) {
-                return true;
+                return Some(d.id.clone());
             }
         }
         // Multi-node: resolve token hash via Redis index.
         if let Some(dev) = self.redis_get_by_token_hash(&hash) {
             if !dev.revoked {
+                let id = dev.id.clone();
                 self.cache_device(dev);
-                return true;
+                return Some(id);
             }
         }
-        false
+        None
+    }
+
+    /// Whether `device_id` is already registered (locally or in Redis).
+    pub fn contains_device(&self, device_id: &str) -> bool {
+        let id = device_id.trim();
+        if self
+            .devices
+            .read()
+            .expect("device registry lock")
+            .contains_key(id)
+        {
+            return true;
+        }
+        self.redis_get_device(id).is_some()
     }
 
     /// True if `fingerprint` (SHA-256 hex of client cert DER) matches a non-revoked enroll.

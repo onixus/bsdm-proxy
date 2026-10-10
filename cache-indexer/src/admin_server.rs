@@ -5,16 +5,73 @@ use crate::search_api::SearchApi;
 use prometheus::{Encoder, TextEncoder};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use std::time::Duration;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
-use tracing::{error, info, warn};
+use tokio::sync::Semaphore;
+use tracing::{debug, error, info, warn};
+
+/// Default host for the admin listener (`METRICS_BIND`). `0.0.0.0` keeps the
+/// pre-1.0 behaviour (containers / k8s reach the Search API over the network);
+/// set `METRICS_BIND=127.0.0.1` on hosts where only local clients need it.
+const DEFAULT_BIND_HOST: &str = "0.0.0.0";
+/// Default cap on concurrent admin connections (`INDEXER_HTTP_MAX_CONNECTIONS`).
+const DEFAULT_MAX_CONNECTIONS: usize = 256;
+/// Default deadline to receive a full request and to send the response
+/// (`INDEXER_HTTP_READ_TIMEOUT_MS`).
+const DEFAULT_READ_TIMEOUT_MS: u64 = 10_000;
+/// Max request head size; larger heads are rejected with 400.
+const MAX_HEADER_BYTES: usize = 64 * 1024;
+
+/// Listener limits for the admin / Search API server (AS-13).
+#[derive(Clone, Debug)]
+pub struct AdminServerLimits {
+    pub bind_host: String,
+    pub max_connections: usize,
+    pub read_timeout: Duration,
+}
+
+impl AdminServerLimits {
+    pub fn from_env() -> Self {
+        let bind_host = std::env::var("METRICS_BIND")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| DEFAULT_BIND_HOST.to_string());
+        let max_connections = std::env::var("INDEXER_HTTP_MAX_CONNECTIONS")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .unwrap_or(DEFAULT_MAX_CONNECTIONS)
+            .max(1);
+        let read_timeout_ms = std::env::var("INDEXER_HTTP_READ_TIMEOUT_MS")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .unwrap_or(DEFAULT_READ_TIMEOUT_MS)
+            .max(1);
+        Self {
+            bind_host,
+            max_connections,
+            read_timeout: Duration::from_millis(read_timeout_ms),
+        }
+    }
+
+    fn bind_addr(&self, port: u16) -> String {
+        // Bare IPv6 literals need brackets in `host:port` form.
+        if self.bind_host.contains(':') && !self.bind_host.starts_with('[') {
+            format!("[{}]:{port}", self.bind_host)
+        } else {
+            format!("{}:{port}", self.bind_host)
+        }
+    }
+}
 
 pub async fn run_admin_server(
     port: u16,
     metrics: Arc<IndexerMetrics>,
     search_api: Option<Arc<SearchApi>>,
 ) {
-    let bind_addr = format!("0.0.0.0:{port}");
+    let limits = AdminServerLimits::from_env();
+    let bind_addr = limits.bind_addr(port);
     let listener = match TcpListener::bind(&bind_addr).await {
         Ok(l) => l,
         Err(e) => {
@@ -26,53 +83,123 @@ pub async fn run_admin_server(
         Some(_) => ", /api/search, /api/events",
         None => "",
     };
-    info!("cache-indexer admin on {bind_addr} (/metrics, /health{extras})");
+    info!(
+        "cache-indexer admin on {bind_addr} (/metrics, /health{extras}; max_connections={}, read_timeout={:?})",
+        limits.max_connections, limits.read_timeout
+    );
+    serve(listener, limits, metrics, search_api).await;
+}
 
+async fn serve(
+    listener: TcpListener,
+    limits: AdminServerLimits,
+    metrics: Arc<IndexerMetrics>,
+    search_api: Option<Arc<SearchApi>>,
+) {
+    let conn_limit = Arc::new(Semaphore::new(limits.max_connections));
+    let timeout = limits.read_timeout;
     loop {
-        let Ok((mut socket, _)) = listener.accept().await else {
+        let Ok((mut socket, peer)) = listener.accept().await else {
+            continue;
+        };
+        let Ok(permit) = conn_limit.clone().try_acquire_owned() else {
+            // Shed instead of queueing: idle clients cannot starve the server.
+            debug!("admin: connection limit reached, dropping {peer}");
             continue;
         };
         let metrics = metrics.clone();
         let search_api = search_api.clone();
         tokio::spawn(async move {
-            let mut buf = vec![0u8; 64 * 1024];
-            let n = socket.read(&mut buf).await.unwrap_or(0);
-            if n == 0 {
-                return;
-            }
-            let (header_end, content_length) = match parse_header_end_and_cl(&buf[..n]) {
-                Some(v) => v,
-                None => {
-                    let _ = socket
-                        .write_all(&http_response(400, "text/plain", b"bad request", None))
-                        .await;
-                    return;
+            let _permit = permit;
+            // Authenticate ingest by its headers before buffering up to 4 MiB
+            // of body: unauthenticated clients get 401 without the upload.
+            let api = search_api.clone();
+            let wants_body = move |header: &str| body_allowed(header, api.as_deref());
+            let request =
+                match tokio::time::timeout(timeout, read_request(&mut socket, wants_body)).await {
+                    Ok(Some(r)) => r,
+                    Ok(None) => return,
+                    Err(_) => {
+                        debug!("admin: read timeout from {peer}");
+                        return;
+                    }
+                };
+            let response = match request {
+                Ok((header, body)) => {
+                    handle_request(&header, &body, &metrics, search_api.as_deref()).await
                 }
+                Err(()) => http_response(400, "text/plain", b"bad request", None),
             };
-            let mut body = if header_end < n {
-                buf[header_end..n].to_vec()
-            } else {
-                Vec::new()
-            };
-            while body.len() < content_length {
-                let mut chunk = vec![0u8; 64 * 1024];
-                let m = socket.read(&mut chunk).await.unwrap_or(0);
-                if m == 0 {
-                    break;
-                }
-                body.extend_from_slice(&chunk[..m]);
-                if body.len() >= content_length {
-                    break;
-                }
-            }
-            if body.len() > content_length {
-                body.truncate(content_length);
-            }
-            let header = String::from_utf8_lossy(&buf[..header_end.min(n)]);
-            let response = handle_request(&header, &body, &metrics, search_api.as_deref()).await;
-            let _ = socket.write_all(&response).await;
+            let _ = tokio::time::timeout(timeout, socket.write_all(&response)).await;
         });
     }
+}
+
+/// Whether the body of the request with this `header` should be read: only
+/// for an authorized `POST /api/events` (the only route that uses a body).
+fn body_allowed(header: &str, search_api: Option<&SearchApi>) -> bool {
+    let mut request_line = header.lines().next().unwrap_or("").split_whitespace();
+    let method = request_line.next().unwrap_or("");
+    let path = request_line.next().unwrap_or("");
+    if method != "POST" || !path.starts_with("/api/events") {
+        return false;
+    }
+    let auth = header
+        .lines()
+        .skip(1)
+        .take_while(|line| !line.is_empty())
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.trim()
+                .eq_ignore_ascii_case("authorization")
+                .then(|| value.trim())
+        });
+    search_api.is_some_and(|api| api.is_ingest_authorized(auth))
+}
+
+/// Reads one request head and, when `wants_body(head)` allows it, the body.
+/// `None` = client closed before sending anything; `Some(Err(()))` =
+/// malformed / oversized head.
+async fn read_request<S>(
+    socket: &mut S,
+    wants_body: impl Fn(&str) -> bool,
+) -> Option<Result<(String, Vec<u8>), ()>>
+where
+    S: AsyncRead + Unpin,
+{
+    let mut buf = vec![0u8; MAX_HEADER_BYTES];
+    let mut n = 0usize;
+    let (header_end, content_length) = loop {
+        let m = socket.read(&mut buf[n..]).await.unwrap_or(0);
+        if m == 0 {
+            if n == 0 {
+                return None;
+            }
+            return Some(Err(()));
+        }
+        n += m;
+        if let Some(v) = parse_header_end_and_cl(&buf[..n]) {
+            break v;
+        }
+        if n == buf.len() {
+            return Some(Err(()));
+        }
+    };
+    let header = String::from_utf8_lossy(&buf[..header_end]).into_owned();
+    if !wants_body(&header) {
+        return Some(Ok((header, Vec::new())));
+    }
+    let mut body = buf[header_end..n].to_vec();
+    while body.len() < content_length {
+        let mut chunk = vec![0u8; 64 * 1024];
+        let m = socket.read(&mut chunk).await.unwrap_or(0);
+        if m == 0 {
+            break;
+        }
+        body.extend_from_slice(&chunk[..m]);
+    }
+    body.truncate(content_length);
+    Some(Ok((header, body)))
 }
 
 fn parse_header_end_and_cl(buf: &[u8]) -> Option<(usize, usize)> {
@@ -332,6 +459,185 @@ mod tests {
         let (end, cl) = parse_header_end_and_cl(req).unwrap();
         assert_eq!(cl, 2);
         assert!(end > 10);
+    }
+
+    fn test_limits(max_connections: usize, timeout_ms: u64) -> AdminServerLimits {
+        AdminServerLimits {
+            bind_host: "127.0.0.1".into(),
+            max_connections,
+            read_timeout: Duration::from_millis(timeout_ms),
+        }
+    }
+
+    async fn spawn_server(limits: AdminServerLimits) -> std::net::SocketAddr {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let metrics = Arc::new(IndexerMetrics::new().unwrap());
+        tokio::spawn(serve(listener, limits, metrics, None));
+        addr
+    }
+
+    async fn get_health(addr: std::net::SocketAddr) -> String {
+        let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
+        // Head split across two writes must still be parsed.
+        s.write_all(b"GET /health HTTP/1.1\r\n").await.unwrap();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        s.write_all(b"Host: x\r\n\r\n").await.unwrap();
+        let mut out = String::new();
+        tokio::time::timeout(Duration::from_secs(2), s.read_to_string(&mut out))
+            .await
+            .unwrap()
+            .unwrap();
+        out
+    }
+
+    #[test]
+    fn bind_addr_defaults_and_ipv6() {
+        let mut l = test_limits(1, 1);
+        assert_eq!(l.bind_addr(8080), "127.0.0.1:8080");
+        l.bind_host = "::1".into();
+        assert_eq!(l.bind_addr(8080), "[::1]:8080");
+        l.bind_host = "[::]".into();
+        assert_eq!(l.bind_addr(8080), "[::]:8080");
+        assert_eq!(DEFAULT_BIND_HOST, "0.0.0.0");
+    }
+
+    /// AS-13: silent clients are disconnected after the read timeout, and
+    /// over-limit connections are shed while the server keeps serving.
+    #[tokio::test]
+    async fn idle_connections_time_out_and_limit_is_enforced() {
+        let addr = spawn_server(test_limits(2, 300)).await;
+        let mut idle1 = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let mut idle2 = tokio::net::TcpStream::connect(addr).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let mut over = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let mut b = [0u8; 1];
+        let n = tokio::time::timeout(Duration::from_millis(200), over.read(&mut b))
+            .await
+            .expect("over-limit connection must be closed immediately")
+            .unwrap_or(0);
+        assert_eq!(n, 0);
+
+        for s in [&mut idle1, &mut idle2] {
+            let n = tokio::time::timeout(Duration::from_secs(2), s.read(&mut b))
+                .await
+                .expect("idle connection survived the read timeout")
+                .unwrap_or(0);
+            assert_eq!(n, 0);
+        }
+        let resp = get_health(addr).await;
+        assert!(resp.starts_with("HTTP/1.1 200 OK"), "{resp}");
+    }
+
+    fn token_api(token: &str) -> Arc<SearchApi> {
+        let store = Arc::new(crate::store::EventStore::Memory(
+            crate::store::MemoryStore::new(10),
+        ));
+        Arc::new(SearchApi::new(
+            store,
+            crate::search_api::SearchApiConfig {
+                api_token: Some(token.to_string()),
+                ingest_token: Some(token.to_string()),
+                max_limit: 10,
+                default_days: 1,
+            },
+        ))
+    }
+
+    #[test]
+    fn body_is_read_only_for_authorized_ingest() {
+        let api = token_api("tok");
+        let post =
+            |auth: &str| format!("POST /api/events HTTP/1.1\r\nContent-Length: 2\r\n{auth}\r\n");
+        assert!(body_allowed(
+            &post("Authorization: Bearer tok\r\n"),
+            Some(&api)
+        ));
+        assert!(body_allowed(
+            &post("authorization:Bearer tok\r\n"),
+            Some(&api)
+        ));
+        assert!(!body_allowed(
+            &post("Authorization: Bearer nope\r\n"),
+            Some(&api)
+        ));
+        assert!(!body_allowed(&post(""), Some(&api)));
+        assert!(!body_allowed(&post("Authorization: Bearer tok\r\n"), None));
+        assert!(!body_allowed(
+            "GET /api/events HTTP/1.1\r\nAuthorization: Bearer tok\r\n\r\n",
+            Some(&api)
+        ));
+    }
+
+    /// Unauthenticated ingest is answered 401 from the headers alone, without
+    /// waiting for (or buffering) the announced body.
+    #[tokio::test]
+    async fn unauthenticated_ingest_is_rejected_before_body() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let metrics = Arc::new(IndexerMetrics::new().unwrap());
+        tokio::spawn(serve(
+            listener,
+            test_limits(4, 5_000),
+            metrics,
+            Some(token_api("tok")),
+        ));
+        let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
+        s.write_all(b"POST /api/events HTTP/1.1\r\nContent-Length: 4000000\r\n\r\n")
+            .await
+            .unwrap();
+        let mut out = Vec::new();
+        tokio::time::timeout(Duration::from_secs(2), s.read_to_end(&mut out))
+            .await
+            .expect("401 must not wait for the 4 MB body")
+            .unwrap();
+        assert!(
+            out.starts_with(b"HTTP/1.1 401"),
+            "{:?}",
+            String::from_utf8_lossy(&out)
+        );
+    }
+
+    #[tokio::test]
+    async fn trickled_body_is_cut_off_by_read_timeout() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let metrics = Arc::new(IndexerMetrics::new().unwrap());
+        tokio::spawn(serve(
+            listener,
+            test_limits(4, 300),
+            metrics,
+            Some(token_api("tok")),
+        ));
+        let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
+        s.write_all(
+            b"POST /api/events HTTP/1.1\r\nAuthorization: Bearer tok\r\nContent-Length: 1000\r\n\r\n{",
+        )
+            .await
+            .unwrap();
+        let mut out = Vec::new();
+        tokio::time::timeout(Duration::from_secs(2), s.read_to_end(&mut out))
+            .await
+            .expect("slow body was not cut off")
+            .unwrap();
+        assert!(out.is_empty());
+    }
+
+    #[tokio::test]
+    async fn oversized_head_is_rejected() {
+        let addr = spawn_server(test_limits(4, 2_000)).await;
+        let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let mut head = b"GET /health HTTP/1.1\r\nX-Pad: ".to_vec();
+        head.extend(std::iter::repeat_n(b'a', MAX_HEADER_BYTES));
+        let _ = s.write_all(&head).await;
+        let mut out = Vec::new();
+        let _ = tokio::time::timeout(Duration::from_secs(2), s.read_to_end(&mut out)).await;
+        assert!(
+            out.starts_with(b"HTTP/1.1 400"),
+            "{:?}",
+            String::from_utf8_lossy(&out)
+        );
     }
 
     #[test]

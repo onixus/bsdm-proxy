@@ -2,8 +2,8 @@ apiVersion: v2
 name: bsdm
 description: BSDM-Proxy forward proxy with optional Redis L2
 type: application
-version: 0.9.15
-appVersion: "0.9.15"
+version: 1.0.0-rc.1
+appVersion: "1.0.0-rc.1"
 keywords:
   - proxy
   - cache

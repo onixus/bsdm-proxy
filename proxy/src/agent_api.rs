@@ -7,7 +7,7 @@
 use bytes::Bytes;
 use http_body_util::BodyExt;
 use hyper::header::HeaderValue;
-use hyper::{Method, Response, StatusCode};
+use hyper::{HeaderMap, Method, Response, StatusCode};
 use serde::Deserialize;
 use std::time::Duration;
 use tracing::{info, warn};
@@ -55,18 +55,54 @@ impl From<AgentHeartbeatDto> for HeartbeatUpdate {
     }
 }
 
+/// Who is calling an agent route, once the route-level token check passed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum AgentCaller {
+    /// Control-plane token (or open lab mode): fleet-wide operations.
+    Operator,
+    /// Enrolled device token: only that device's own resources.
+    Device(String),
+}
+
+fn forbidden_for_device() -> Response<Body> {
+    json_response(
+        StatusCode::FORBIDDEN,
+        r#"{"error":"operation requires the control-plane token"}"#,
+    )
+}
+
 impl ControlApiState {
+    /// Resolve the caller identity from the Bearer token.
+    pub(crate) fn agent_caller(&self, headers: &HeaderMap) -> Option<AgentCaller> {
+        if self.is_authorized(headers) {
+            return Some(AgentCaller::Operator);
+        }
+        let bearer = self.extract_bearer(headers)?;
+        self.device_registry
+            .device_id_for_token(bearer)
+            .map(AgentCaller::Device)
+    }
+
     /// Dispatch Agent Contract + device inventory routes.
     /// Returns `Some` when the path is agent-owned (including 404 for unknown
     /// agent sub-paths is not done here — only known routes).
+    ///
+    /// A device token is scoped to its own device (AS-05): fleet operations
+    /// (inventory, revoke, policy push, recent events) need the operator
+    /// token, and heartbeat / tunnel config only address the caller's device.
     pub(crate) async fn dispatch_agent(
         &self,
         method: &Method,
         path: &str,
         query: Option<&str>,
         body: Bytes,
+        headers: &HeaderMap,
     ) -> Option<Response<Body>> {
+        let is_operator = || self.agent_caller(headers) == Some(AgentCaller::Operator);
         if method == Method::GET && path == "/api/v1/devices" {
+            if !is_operator() {
+                return Some(forbidden_for_device());
+            }
             return Some(self.registered_devices());
         }
         if method == Method::POST {
@@ -75,6 +111,9 @@ impl ControlApiState {
                 .or_else(|| path.strip_prefix("/api/v1/agent/devices/"))
                 .and_then(|p| p.strip_suffix("/revoke"));
             if let Some(id) = device_id {
+                if !is_operator() {
+                    return Some(forbidden_for_device());
+                }
                 return Some(self.revoke_device(id).await);
             }
         }
@@ -83,12 +122,27 @@ impl ControlApiState {
             (&Method::GET, "/api/v1/agent/policy") => self.agent_policy(),
             (&Method::GET, "/api/v1/agent/policy/watch") => self.agent_policy_watch(query).await,
             (&Method::GET, "/api/v1/agent/policy/stream") => self.agent_policy_stream(),
-            (&Method::POST, "/api/v1/agent/policy/push") => self.agent_policy_push(body),
-            (&Method::POST, "/api/v1/agent/heartbeat") => self.agent_heartbeat(body).await,
+            (&Method::POST, "/api/v1/agent/policy/push") => {
+                if !is_operator() {
+                    return Some(forbidden_for_device());
+                }
+                self.agent_policy_push(body)
+            }
+            (&Method::POST, "/api/v1/agent/heartbeat") => {
+                self.agent_heartbeat(body, self.agent_caller(headers)).await
+            }
             (&Method::POST, "/api/v1/agent/events") => self.agent_events_ingest(body),
-            (&Method::GET, "/api/v1/agent/events/recent") => self.agent_events_recent(),
-            (&Method::POST, "/api/v1/agent/enroll") => self.agent_enroll(body).await,
-            (&Method::GET, "/api/v1/agent/tunnel/config") => self.agent_tunnel_config(query).await,
+            (&Method::GET, "/api/v1/agent/events/recent") => {
+                if !is_operator() {
+                    return Some(forbidden_for_device());
+                }
+                self.agent_events_recent()
+            }
+            (&Method::POST, "/api/v1/agent/enroll") => self.agent_enroll(body, is_operator()).await,
+            (&Method::GET, "/api/v1/agent/tunnel/config") => {
+                self.agent_tunnel_config(query, self.agent_caller(headers))
+                    .await
+            }
             (&Method::GET, "/api/v1/agent/crl") => self.agent_crl_json(),
             (&Method::GET, "/api/v1/agent/crl.pem") => self.agent_crl_pem(),
             (&Method::GET, "/api/v1/agent/ocsp/status") => self.agent_ocsp_status(query),
@@ -97,15 +151,17 @@ impl ControlApiState {
             (&Method::GET, "/api/agent/policy") => {
                 deprecated_agent_alias(self.agent_policy(), "/api/v1/agent/policy")
             }
-            (&Method::POST, "/api/agent/heartbeat") => {
-                deprecated_agent_alias(self.agent_heartbeat(body).await, "/api/v1/agent/heartbeat")
-            }
+            (&Method::POST, "/api/agent/heartbeat") => deprecated_agent_alias(
+                self.agent_heartbeat(body, self.agent_caller(headers)).await,
+                "/api/v1/agent/heartbeat",
+            ),
             (&Method::POST, "/api/agent/events") => {
                 deprecated_agent_alias(self.agent_events_ingest(body), "/api/v1/agent/events")
             }
-            (&Method::POST, "/api/agent/enroll") => {
-                deprecated_agent_alias(self.agent_enroll(body).await, "/api/v1/agent/enroll")
-            }
+            (&Method::POST, "/api/agent/enroll") => deprecated_agent_alias(
+                self.agent_enroll(body, is_operator()).await,
+                "/api/v1/agent/enroll",
+            ),
             _ => return None,
         };
         Some(resp)
@@ -324,7 +380,7 @@ impl ControlApiState {
         )
     }
 
-    async fn agent_heartbeat(&self, body: Bytes) -> Response<Body> {
+    async fn agent_heartbeat(&self, body: Bytes, caller: Option<AgentCaller>) -> Response<Body> {
         let hb: AgentHeartbeatDto = match serde_json::from_slice(&body) {
             Ok(hb) => hb,
             Err(e) => {
@@ -337,6 +393,19 @@ impl ControlApiState {
                 );
             }
         };
+        // A device reports only for itself; otherwise one endpoint could
+        // rewrite trust score / status of the whole fleet or create records.
+        match &caller {
+            Some(AgentCaller::Operator) => {}
+            // Exact match: "own " would otherwise create a fresh record per variant.
+            Some(AgentCaller::Device(own)) if hb.device_id == *own => {}
+            _ => {
+                return json_response(
+                    StatusCode::FORBIDDEN,
+                    r#"{"error":"device token may only report its own device_id"}"#,
+                )
+            }
+        }
         match self.device_registry.apply_heartbeat(hb.into()) {
             Ok(persisted) => json_response(
                 StatusCode::OK,
@@ -572,7 +641,7 @@ impl ControlApiState {
         )
     }
 
-    async fn agent_enroll(&self, body: Bytes) -> Response<Body> {
+    async fn agent_enroll(&self, body: Bytes, operator: bool) -> Response<Body> {
         #[derive(Deserialize)]
         struct EnrollDto {
             #[serde(default)]
@@ -615,6 +684,22 @@ impl ControlApiState {
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| format!("dev-{}", hex::encode(rand::random::<u64>().to_be_bytes())));
 
+        // AS-05b: the enroll token is shared by every endpoint, so re-enrolling
+        // an existing device_id with it would hand over that device's identity
+        // (new token, new client cert). Only the operator may re-enroll; and
+        // only the operator may assert a user identity for the client cert.
+        if !operator && self.device_registry.contains_device(&device_id_hint) {
+            return json_response(
+                StatusCode::CONFLICT,
+                r#"{"error":"device_id already enrolled; re-enroll requires the control-plane token"}"#,
+            );
+        }
+        let user_identity = if operator {
+            dto.user_identity.clone()
+        } else {
+            None
+        };
+
         let mut client_cert_pem = None;
         let mut ca_cert_pem = None;
         let mut cert_not_after = None;
@@ -638,7 +723,7 @@ impl ControlApiState {
             match cache.sign_agent_client_csr(
                 &csr,
                 &device_id_hint,
-                dto.user_identity.as_deref(),
+                user_identity.as_deref(),
                 &dto.platform,
                 days,
             ) {
@@ -712,7 +797,7 @@ impl ControlApiState {
             device_id: Some(device_id_hint),
             platform: dto.platform,
             name: dto.name,
-            user_identity: dto.user_identity,
+            user_identity,
             capabilities: dto.capabilities,
             device_type: dto.device_type,
             cert_subject: cert_subject.clone(),
@@ -777,7 +862,11 @@ impl ControlApiState {
     }
 
     /// Retrieve tunnel configuration for an agent (`GET /api/v1/agent/tunnel/config`)
-    async fn agent_tunnel_config(&self, query: Option<&str>) -> Response<Body> {
+    async fn agent_tunnel_config(
+        &self,
+        query: Option<&str>,
+        caller: Option<AgentCaller>,
+    ) -> Response<Body> {
         let mut device_id: Option<String> = None;
         let mut format_raw = false;
         if let Some(q) = query {
@@ -792,12 +881,27 @@ impl ControlApiState {
             }
         }
 
-        let awg = self.awg_server.read().await;
-        let peer = if let Some(id) = device_id.as_deref() {
-            awg.peers.iter().find(|p| p.id == id)
-        } else {
-            awg.peers.first()
+        // The response carries the peer's private key: a device gets only its
+        // own peer, and nobody gets "whichever peer is first".
+        let device_id = match (&caller, device_id) {
+            (Some(AgentCaller::Device(own)), None) => own.clone(),
+            (Some(AgentCaller::Device(own)), Some(id)) if &id == own => id,
+            (Some(AgentCaller::Device(_)), Some(_)) | (None, _) => {
+                return json_response(
+                    StatusCode::FORBIDDEN,
+                    r#"{"error":"device token may only read its own tunnel config"}"#,
+                );
+            }
+            (Some(AgentCaller::Operator), Some(id)) => id,
+            (Some(AgentCaller::Operator), None) => {
+                return json_response(
+                    StatusCode::BAD_REQUEST,
+                    r#"{"error":"device_id is required"}"#,
+                );
+            }
         };
+        let awg = self.awg_server.read().await;
+        let peer = awg.peers.iter().find(|p| p.id == device_id);
 
         let Some(peer) = peer else {
             return json_response(
