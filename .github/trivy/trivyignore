@@ -1,0 +1,10 @@
+# Trivy image-gate exceptions for .github/workflows/docker-publish.yml and
+# Jenkinsfile.publish. The gate fails on CRITICAL/HIGH vulnerabilities that
+# have a fix available; list a CVE here ONLY with:
+#   - why it is not exploitable in BSDM-Proxy (or why no fix can be taken),
+#   - who accepted the risk, and
+#   - an expiry date (Trivy honours `exp:`), so the exception cannot rot.
+#
+# Format:
+#   # <reason>; accepted by <name>; ticket <link>
+#   CVE-YYYY-NNNNN exp:YYYY-MM-DD

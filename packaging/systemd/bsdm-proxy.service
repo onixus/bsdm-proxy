@@ -25,14 +25,20 @@ LimitNOFILE=65536
 #                            device registry / CRL   (StateDirectory)
 #   /var/cache/bsdm-proxy    CACHE_SPILL_DIR when moved off /tmp (CacheDirectory)
 #   /var/log/bsdm-proxy      PINNING_AUDIT_LOG_PATH  (LogsDirectory)
-#   /etc/bsdm-proxy          ACL persist (ACL_RULES_PATH), runtime config
-#                            rewrite (CONFIG_ENV_PATH), custom category DB,
-#                            MITM CA under /etc/bsdm-proxy/certs
+# /etc/bsdm-proxy is deliberately NOT writable: it is root-owned (install.sh)
+# and holds the config, ACL rules and MITM CA, so a compromised proxy cannot
+# persist by rewriting them. Admin Console "Apply" writes CONFIG_ENV_PATH=
+# /var/lib/bsdm-proxy/bsdm-proxy.env (set by install.sh). ACL edits through the
+# control API need ACL_RULES_PATH under /var/lib/bsdm-proxy; otherwise manage
+# acl-rules.json as a file (GitOps) and restart/reload.
 StateDirectory=bsdm-proxy
 CacheDirectory=bsdm-proxy
 LogsDirectory=bsdm-proxy
 WorkingDirectory=/var/lib/bsdm-proxy
-ReadWritePaths=/etc/bsdm-proxy
+# Belt and braces for installs that re-add ReadWritePaths=/etc/bsdm-proxy in a
+# drop-in: the MITM CA stays read-only for the process regardless.
+# Adjust if MITM_CA_DIR points elsewhere. ('-' = ignore if absent.)
+ReadOnlyPaths=-/etc/bsdm-proxy/certs
 
 # Hardening.
 NoNewPrivileges=true

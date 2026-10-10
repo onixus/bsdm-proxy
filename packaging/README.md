@@ -37,13 +37,13 @@ and runs the packaged `install.sh`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/onixus/bsdm-proxy/main/scripts/install-release.sh \
-  | sudo bash -s -- --version 0.9.15
+  | sudo bash -s -- --version 1.0.0-rc.1
 ```
 
 Or by hand, from a downloaded tarball:
 
 ```bash
-VERSION=0.9.15
+VERSION=1.0.0-rc.1
 ARCH=x86_64
 sha256sum -c bsdm-proxy-${VERSION}-linux-${ARCH}.tar.gz.sha256
 tar xzf bsdm-proxy-${VERSION}-linux-${ARCH}.tar.gz

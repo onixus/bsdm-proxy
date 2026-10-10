@@ -22,14 +22,18 @@ on:
       - "scripts/sync-wiki.py"
       - ".github/workflows/docs.yml"
 
+# Read-only by default: the link check runs on pull requests (including from
+# forks) and must not get a writable token. Only the Wiki publisher, which runs
+# on push to main, is granted contents: write.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   links:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
       - name: Check local Markdown links
         run: python3 scripts/check-doc-links.py
       - name: Validate Wiki catalog and generated links
@@ -39,8 +43,11 @@ jobs:
     if: github.event_name == 'push'
     needs: links
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
       - name: Checkout Wiki
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

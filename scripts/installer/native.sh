@@ -65,8 +65,13 @@ finalize_native_install() {
   # No /certs symlink: the proxy takes the directory from MITM_CA_DIR, which the
   # package installer writes into bsdm-proxy.env (proxy/src/tls.rs
   # load_for_startup also falls back to a real /certs on its own).
-  if id bsdm-proxy >/dev/null 2>&1; then
-    chown -R bsdm-proxy:bsdm-proxy "$certs_dir"
+  # Root-owned, readable by the service group only: the proxy must be able to
+  # read ca.key but never replace it (same model as packaging/install.sh).
+  if getent group bsdm-proxy >/dev/null 2>&1; then
+    chown root:bsdm-proxy "$certs_dir" "${certs_dir}/ca.key" "${certs_dir}/ca.crt"
+    chmod 0750 "$certs_dir"
+    chmod 0640 "${certs_dir}/ca.key"
+    chmod 0644 "${certs_dir}/ca.crt"
   fi
 
   systemctl daemon-reload

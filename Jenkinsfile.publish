@@ -1,12 +1,25 @@
-// Публикация образа в ghcr.io — замена .github/workflows/docker-publish.yml.
+// Публикация образов в ghcr.io — fallback-публикатор к
+// .github/workflows/docker-publish.yml (основной путь — GitHub Actions по тегу
+// v*: Trivy-гейт, SBOM, cosign keyless). Эта джоба нужна, когда минуты
+// Actions исчерпаны; реестр и имена образов те же.
 //
-// Лимиты GitHub, из-за которых мы ушли с Actions, считаются в минутах раннеров;
-// сам ghcr.io тарифицируется отдельно. Поэтому реестр остаётся прежним, и
-// k8s-манифесты с compose править не нужно — меняется только то, КТО пушит.
+// Запуск ручной и параметризованный: пуш образа — действие наружу, оно должно
+// быть осознанным. DRY_RUN по умолчанию включён: собрать + просканировать, но
+// не публиковать.
 //
-// Запуск ручной и параметризованный, а не по каждому коммиту: пуш образа —
-// действие наружу, оно должно быть осознанным. DRY_RUN по умолчанию включён,
-// то есть первый прогон ничего не публикует.
+// Цепочка поставки на каждый образ:
+//   1. сборка образа под архитектуру агента (--load) и Trivy-гейт
+//      CRITICAL/HIGH с доступным фиксом — уязвимый образ не пушится;
+//      исключения — .github/trivy/trivyignore (с причиной и сроком);
+//   2. multi-arch build + push с BuildKit SBOM и provenance;
+//   3. подпись digest'а cosign'ом КЛЮЧОМ (keyless из Jenkins невозможен — нет
+//      GitHub OIDC). Нужен Jenkins credential COSIGN_KEY (Secret file,
+//      cosign.key) и COSIGN_PASSWORD (Secret text). Нет credential'ов или
+//      бинаря cosign — подпись ПРОПУСКАЕТСЯ с предупреждением и сборка
+//      помечается UNSTABLE (не молча зелёная).
+//      Проверка: cosign verify --key cosign.pub ghcr.io/onixus/bsdm-<target>:<ver>
+//   4. SPDX SBOM (syft, если установлен) — в артефакты сборки, и при наличии
+//      ключа — как подписанная cosign-аттестация.
 
 pipeline {
   agent any
@@ -20,7 +33,7 @@ pipeline {
     booleanParam(
       name: 'DRY_RUN',
       defaultValue: true,
-      description: 'Собрать и залогиниться, но НЕ пушить. Снять галочку для реальной публикации.'
+      description: 'Собрать и просканировать, но НЕ пушить. Снять галочку для реальной публикации.'
     )
     booleanParam(
       name: 'MULTIARCH',
@@ -33,24 +46,27 @@ pipeline {
     timestamps()
     disableConcurrentBuilds()
     buildDiscarder(logRotator(numToKeepStr: '30'))
-    timeout(time: 90, unit: 'MINUTES')
+    timeout(time: 150, unit: 'MINUTES')
   }
 
   environment {
     REGISTRY = 'ghcr.io'
     // Один образ на стадию Dockerfile. Имена совпадают с тем, что ждут
-    // charts/bsdm/values.yaml и docker-compose.yml: без них helm/compose
-    // могут только собирать из исходников.
+    // charts/bsdm/values.yaml и docker-compose.yml.
     IMAGE_PREFIX = 'ghcr.io/onixus/bsdm'
     TARGETS      = 'proxy cache-indexer alert-worker ml-worker dns-sinkhole threat-intel'
+    TRIVY_IMAGE  = 'aquasec/trivy:0.70.0'
+    TRIVY_DB_REPOSITORY = 'mirror.gcr.io/aquasec/trivy-db:2,ghcr.io/aquasecurity/trivy-db:2'
   }
 
   stages {
     stage('Checkout tag') {
       steps {
         script {
-          if (!params.TAG?.trim()) {
-            error('TAG обязателен: укажи тег релиза, например v0.9.11')
+          // TAG попадает в shell-команды ниже: строгая валидация закрывает
+          // command injection через параметр джобы.
+          if (!(params.TAG ==~ /^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$/)) {
+            error("TAG должен быть вида vX.Y.Z или vX.Y.Z-rc.N, получено: '${params.TAG}'")
           }
         }
         // Собираем строго содержимое тега. refspec с тегами обязателен:
@@ -87,27 +103,53 @@ pipeline {
       }
     }
 
-    stage('Build & push') {
+    stage('Build, scan & push') {
       steps {
         script {
-          // Теги как в docker-publish.yml: semver и latest.
           def version = params.TAG.replaceFirst(/^v/, '')
+          // latest двигаем только для финального релиза, не для -rc.
+          def isPrerelease = version.contains('-')
           def platforms = params.MULTIARCH ? 'linux/amd64,linux/arm64' : 'linux/arm64'
-          // Мультиарх требует драйвера docker-container: штатный docker
-          // собирать под несколько платформ не умеет.
           def output = params.DRY_RUN ? '' : '--push'
 
-          sh """
+          sh '''
             set -eu
             docker buildx inspect bsdm-publisher >/dev/null 2>&1 \
               || docker buildx create --name bsdm-publisher --driver docker-container --bootstrap
-          """
+            mkdir -p dist/supply-chain
+          '''
 
-          // Стадии делят один builder-слой: после первого target остальные
-          // только копируют уже собранные бинарники из кэша buildx.
+          def signed = []
+          def unsigned = []
           for (target in env.TARGETS.split(' ')) {
             def image = "${env.IMAGE_PREFIX}-${target}"
-            def tags = ["-t ${image}:${version}", "-t ${image}:latest"].join(' ')
+            def tagList = ["-t ${image}:${version}"]
+            if (!isPrerelease) { tagList << "-t ${image}:latest" }
+            def tags = tagList.join(' ')
+
+            // 1. Gate: сканируем образ под архитектуру агента ДО публикации.
+            //    docker save → trivy --input: docker.sock в сканер не монтируем.
+            sh """
+              set -eu
+              docker buildx build --builder bsdm-publisher \
+                --target ${target} --load \
+                -t bsdm-scan/${target}:${version} \
+                -f Dockerfile .
+              docker save -o dist/supply-chain/${target}.tar bsdm-scan/${target}:${version}
+              docker run --rm \
+                -e TRIVY_DB_REPOSITORY \
+                -v "\$PWD:/work" -w /work \
+                -v bsdm-trivy-cache:/root/.cache/trivy \
+                ${env.TRIVY_IMAGE} image \
+                  --input dist/supply-chain/${target}.tar \
+                  --scanners vuln,secret \
+                  --severity CRITICAL,HIGH --ignore-unfixed \
+                  --ignorefile .github/trivy/trivyignore \
+                  --exit-code 1 --no-progress
+              rm -f dist/supply-chain/${target}.tar
+            """
+
+            // 2. Publish.
             sh """
               set -eu
               docker buildx build --builder bsdm-publisher \
@@ -118,10 +160,59 @@ pipeline {
                 -f Dockerfile .
             """
             if (params.DRY_RUN) {
-              echo "DRY_RUN: ${image} собран, публикации не было. Теги были бы: ${version}, latest"
-            } else {
-              echo "Опубликовано: ${image}:${version} и :latest"
+              echo "DRY_RUN: ${image} собран и прошёл Trivy-гейт, публикации не было."
+              continue
             }
+
+            // 3–4. SBOM + подпись по digest'у (никогда по mutable-тегу).
+            def digest = sh(
+              returnStdout: true,
+              script: "docker buildx imagetools inspect ${image}:${version} --format '{{json .Manifest.Digest}}' | tr -d '\"'"
+            ).trim()
+            if (!(digest ==~ /^sha256:[0-9a-f]{64}$/)) {
+              error("не удалось получить digest для ${image}:${version}: '${digest}'")
+            }
+            def ref = "${image}@${digest}"
+            def sbom = "dist/supply-chain/sbom-${target}-${version}.spdx.json"
+            def haveSbom = sh(returnStatus: true, script: """
+              set -eu
+              command -v syft >/dev/null 2>&1 || { echo "syft не установлен — SPDX SBOM пропущен (BuildKit SBOM уже в образе)"; exit 3; }
+              syft "${ref}" -o spdx-json="${sbom}" -q
+            """) == 0
+
+            // -1 = credentials missing; 0 = signed; 3 = no cosign binary; else = failure.
+            def cosignRc = -1
+            try {
+              withCredentials([
+                file(credentialsId: 'COSIGN_KEY', variable: 'COSIGN_KEY_FILE'),
+                string(credentialsId: 'COSIGN_PASSWORD', variable: 'COSIGN_PASSWORD'),
+              ]) {
+                withEnv(["REF=${ref}", "SBOM=${sbom}", "HAVE_SBOM=${haveSbom}"]) {
+                  def rc = sh(returnStatus: true, script: '''
+                    set -eu
+                    command -v cosign >/dev/null 2>&1 || { echo "cosign не установлен на агенте" >&2; exit 3; }
+                    cosign sign --yes --key "$COSIGN_KEY_FILE" "$REF"
+                    if [ "$HAVE_SBOM" = "true" ]; then
+                      cosign attest --yes --key "$COSIGN_KEY_FILE" --type spdxjson --predicate "$SBOM" "$REF"
+                    fi
+                  ''')
+                  cosignRc = rc
+                }
+              }
+            } catch (Exception e) {
+              // withCredentials бросает CredentialNotFoundException, если
+              // COSIGN_KEY/COSIGN_PASSWORD не заведены — это штатная деградация.
+              echo "Подпись пропущена: ${e.getClass().simpleName}: ${e.message}"
+            }
+            if (cosignRc > 0 && cosignRc != 3) {
+              error("cosign завершился с кодом ${cosignRc} для ${ref}")
+            }
+            if (cosignRc == 0) { signed << ref } else { unsigned << ref }
+            echo "Опубликовано: ${ref} (${tagList.collect { it.replace('-t ', '') }.join(', ')})"
+          }
+
+          if (!params.DRY_RUN && unsigned) {
+            unstable("Опубликованы НЕПОДПИСАННЫЕ образы: ${unsigned.join(', ')}")
           }
         }
       }
@@ -130,6 +221,7 @@ pipeline {
 
   post {
     always {
+      archiveArtifacts artifacts: 'dist/supply-chain/*.spdx.json', allowEmptyArchive: true
       sh 'docker logout ${REGISTRY} || true'
     }
   }

@@ -16,4 +16,12 @@ spec:
     - port: metrics
       path: /metrics
       interval: {{ .Values.serviceMonitor.interval }}
+      {{- with .Values.proxy.metricsAuth.existingSecret }}
+      # /metrics requires METRICS_AUTH_TOKEN when proxy.metricsAuth is set.
+      authorization:
+        type: Bearer
+        credentials:
+          name: {{ . }}
+          key: {{ $.Values.proxy.metricsAuth.existingSecretKey | default "metrics-auth-token" }}
+      {{- end }}
 {{- end }}

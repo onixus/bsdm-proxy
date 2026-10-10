@@ -1,0 +1,60 @@
+# MITM health alerts (proxy). Loaded via rule_files: /etc/prometheus/alerts/*.yml.
+# Metrics: proxy/src/metrics.rs
+#   bsdm_proxy_mitm_circuit_breaker_trips_total      (counter)
+#   bsdm_proxy_mitm_ca_not_after_timestamp_seconds   (gauge, unix seconds;
+#                                                     0 / absent when MITM is off)
+groups:
+  - name: bsdm_mitm
+    interval: 1m
+    rules:
+      # A tripped breaker means TLS interception for a domain failed for
+      # several distinct clients and the proxy now TUNNELS that domain without
+      # inspection for the cooldown (MITM_CIRCUIT_BREAKER_COOLDOWN_SECS, 900 s).
+      # Security-relevant: inspection is silently bypassed, and it is also how a
+      # pinning-heavy site or an attacker forcing handshake failures shows up.
+      - alert: BsdmMitmBreakerTripped
+        expr: increase(bsdm_proxy_mitm_circuit_breaker_trips_total[5m]) > 0
+        labels:
+          severity: warning
+          team: bsdm-proxy
+        annotations:
+          summary: "MITM circuit breaker tripped on {{ $labels.instance }}"
+          description: >-
+            {{ $value | humanize }} breaker trip(s) in 5m: affected domains are
+            tunnelled WITHOUT TLS inspection until the cooldown ends. Check the
+            proxy log (mitm_breaker) and decide between a pinning exception and
+            an incident. See docs/features/certificate-pinning.md.
+
+      - alert: BsdmMitmCaExpiringSoon
+        expr: |
+          (bsdm_proxy_mitm_ca_not_after_timestamp_seconds - time()) < 30 * 86400
+          and
+          bsdm_proxy_mitm_ca_not_after_timestamp_seconds > 0
+        # ($value = remaining seconds: `and` keeps the left-hand side)
+        for: 15m
+        labels:
+          severity: warning
+          team: bsdm-proxy
+        annotations:
+          summary: "MITM CA on {{ $labels.instance }} expires in < 30 days"
+          description: >-
+            The interception CA expires in
+            {{ $value | humanizeDuration }}. Plan the rotation now
+            (scripts/test-ca-rotation.sh / docs CA rotation runbook) — after
+            expiry every intercepted HTTPS connection fails.
+
+      - alert: BsdmMitmCaExpiringSoon
+        expr: |
+          (bsdm_proxy_mitm_ca_not_after_timestamp_seconds - time()) < 7 * 86400
+          and
+          bsdm_proxy_mitm_ca_not_after_timestamp_seconds > 0
+        for: 15m
+        labels:
+          severity: critical
+          team: bsdm-proxy
+        annotations:
+          summary: "MITM CA on {{ $labels.instance }} expires in < 7 days"
+          description: >-
+            The interception CA expires in {{ $value | humanizeDuration }}.
+            Rotate it immediately; after expiry all intercepted HTTPS traffic
+            breaks.

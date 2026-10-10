@@ -1,5 +1,9 @@
 name: Admin Console CI
 
+# Lint / unit tests / build of the console are part of the blocking gate in
+# ci.yml (job `admin-console`). This workflow only adds the slower Chromium
+# smoke test, path-filtered so it runs when the console or its CI changes.
+
 on:
   push:
     branches: [main]
@@ -15,35 +19,23 @@ on:
       - '.github/workflows/admin-console.yml'
 
 concurrency:
-  group: admin-console-${{ github.ref }}
+  group: admin-console-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  build:
-    name: Build & Lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: admin-console/package-lock.json
-
-      - name: Lint, test, and build
-        run: ./scripts/ci/run.sh admin-console-core
-
   ui-smoke:
     name: Local UI smoke test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: '24'
           cache: npm
@@ -55,7 +47,7 @@ jobs:
           UI_TEST_SCREENSHOTS: '1'
           PLAYWRIGHT_INSTALL_DEPS: '1'
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         if: always()
         with:
           name: admin-console-screenshots

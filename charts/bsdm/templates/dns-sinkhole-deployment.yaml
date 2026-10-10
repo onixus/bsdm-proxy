@@ -18,8 +18,12 @@ spec:
     spec:
       serviceAccountName: {{ include "bsdm.serviceAccountName" . }}
       automountServiceAccountToken: false
+      {{- $psc := include "bsdm.podSecurityContext" (dict "ctx" . "component" .Values.dnsSinkhole) | fromYaml }}
+      {{- if and (not (hasKey $psc "sysctls")) (not (kindIs "invalid" .Values.dnsSinkhole.unprivilegedPortStart)) }}
+      {{- $_ := set $psc "sysctls" (list (dict "name" "net.ipv4.ip_unprivileged_port_start" "value" (toString .Values.dnsSinkhole.unprivilegedPortStart))) }}
+      {{- end }}
       securityContext:
-        {{- include "bsdm.podSecurityContext" (dict "ctx" . "component" .Values.dnsSinkhole) | nindent 8 }}
+        {{- toYaml $psc | nindent 8 }}
       containers:
         - name: dns-sinkhole
           image: "{{ .Values.dnsSinkhole.image.repository }}:{{ .Values.dnsSinkhole.image.tag | default .Chart.AppVersion }}"

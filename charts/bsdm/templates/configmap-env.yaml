@@ -25,7 +25,52 @@ data:
   METRICS_SAMPLE_RATE: {{ .Values.proxy.metricsSampleRate | quote }}
   PERF_FAST_CACHE_HIT: {{ .Values.proxy.perfFastCacheHit | quote }}
   MITM_ENABLED: {{ .Values.proxy.mitmEnabled | quote }}
+  {{- if and .Values.mitm.enabled .Values.mitm.existingSecret }}
+  # Explicit: the Secret is mounted at certMountPath; do not rely on the
+  # deprecated /certs fallback lookup.
+  MITM_CA_DIR: {{ .Values.mitm.certMountPath | quote }}
+  {{- end }}
   AUTH_ENABLED: {{ .Values.proxy.authEnabled | quote }}
+  AUTH_BACKEND: {{ .Values.proxy.authBackend | default "basic" | quote }}
+  ALLOW_ANONYMOUS_PROXY: {{ .Values.proxy.allowAnonymousProxy | default false | quote }}
+  {{- with .Values.proxy.maxRequestBodyBytes }}
+  MAX_REQUEST_BODY_BYTES: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.proxy.searchUpstream.url }}
+  SEARCH_UPSTREAM_URL: {{ . | quote }}
+  {{- end }}
+  {{- if .Values.proxy.basicAuth.existingSecret }}
+  BASIC_AUTH_USERS_FILE: {{ printf "%s/%s" .Values.proxy.basicAuth.mountPath .Values.proxy.basicAuth.existingSecretKey | quote }}
+  {{- end }}
+  {{- if .Values.proxy.metricsAuth.existingSecret }}
+  METRICS_REQUIRE_AUTH: "true"
+  {{- end }}
+  BLOCK_LOOPBACK_FORWARDING: {{ .Values.proxy.blockLoopbackForwarding | quote }}
+  BLOCK_CLOUD_METADATA: {{ .Values.proxy.blockCloudMetadata | quote }}
+  {{- if .Values.proxy.allowedConnectPorts }}
+  ALLOWED_CONNECT_PORTS: {{ .Values.proxy.allowedConnectPorts | quote }}
+  {{- end }}
+  {{- if .Values.proxy.disableLabFeatures }}
+  # Lab / Beta / frozen features — explicitly off (proxy.disableLabFeatures).
+  EBPF_XDP_ENABLED: "false"
+  EBPF_XDP_ALLOW_RUNTIME_ENABLE: "false"
+  WASM_ENABLED: "false"
+  WASM_FAIL_OPEN: "false"
+  ICAP_ENABLED: "false"
+  DLP_ENABLED: "false"
+  CONTROL_GRPC_ENABLED: "false"
+  ICP_SERVER_ENABLED: "false"
+  HTCP_SERVER_ENABLED: "false"
+  PEER_DISCOVERY_ENABLED: "false"
+  SEMANTIC_CACHE_ENABLED: "false"
+  THREAT_SCORE_BLOCK_THRESHOLD: "0"
+  TI_ENFORCEMENT_MODE: "shadow"
+  TI_ENFORCE_ENABLED: "false"
+  TI_ENFORCEMENT_ENABLED: "false"
+  AGENT_API_ENABLED: "false"
+  AWG_API_ENABLED: "false"
+  LAB_API_ENABLED: "false"
+  {{- end }}
   ACL_ENABLED: {{ .Values.proxy.aclEnabled | quote }}
   ACL_DEFAULT_ACTION: {{ .Values.acl.defaultAction | quote }}
   ACL_RULES_PATH: {{ printf "%s/acl-rules.json" .Values.acl.mountPath | quote }}

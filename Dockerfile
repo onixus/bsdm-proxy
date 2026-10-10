@@ -5,8 +5,10 @@
 # ============================================================
 # Pinned toolchain: the project requires Rust 1.88+ (docs/ops-and-dev/development.md,
 # Jenkinsfile agent label) and the alpine3.21 variant matches the runtime base below.
-# TODO: pin by digest (rust:1.88-alpine3.21@sha256:...) once we can verify hashes in CI.
-FROM rust:1.88-alpine3.21 AS builder
+# Pinned by multi-arch index digest (resolved with `docker buildx imagetools
+# inspect`), so a re-pushed tag cannot change what we build with. Bump tag and
+# digest together; Dependabot/Renovate understand the `tag@digest` form.
+FROM rust:1.88-alpine3.21@sha256:54e937b1530d435dc83b94f5a61ef08365127f2fefbb3789712c5d6f55bbb58c AS builder
 ARG TARGETARCH
 ARG LITE_BUILD=0
 WORKDIR /build
@@ -132,17 +134,27 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
 # собираются один раз и переиспользуются всеми runtime-стадиями,
 # вместо повторной установки apk-пакетов в каждой из 5 стадий.
 # ============================================================
-FROM alpine:3.21 AS runtime-base
+FROM alpine:3.21@sha256:ce64758a109eb420d874a118f87920e625e12d3634e03b4a5573fd9f6e5d3507 AS runtime-base
 
-RUN apk add --no-cache \
+# `apk upgrade` pulls security fixes published after the pinned base digest was
+# cut, so the Trivy release gate (CRITICAL/HIGH with a fix) does not fail on
+# already-patched Alpine packages.
+RUN apk upgrade --no-cache && \
+    apk add --no-cache \
     ca-certificates \
     libgcc \
     dumb-init \
     wget && \
     addgroup -g 1000 bsdm && \
     adduser -D -u 1000 -G bsdm bsdm && \
-    mkdir -p /var/lib/cache-indexer /var/cache/bsdm-spill && \
-    chown -R bsdm:bsdm /var/lib/cache-indexer /var/cache/bsdm-spill
+    mkdir -p /var/lib/cache-indexer /var/cache/bsdm-spill \
+             /var/lib/bsdm-proxy/rpz /var/log/bsdm-proxy && \
+    chown -R bsdm:bsdm /var/lib/cache-indexer /var/cache/bsdm-spill \
+             /var/lib/bsdm-proxy /var/log/bsdm-proxy
+# ^ Writable state paths exist in the image owned by uid 1000, so an empty
+#   named volume mounted there inherits that ownership on first use (Docker
+#   copies the image directory's owner/mode). Without them a fresh volume is
+#   root-owned and the non-root process cannot write its state.
 
 USER bsdm
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
@@ -150,7 +162,7 @@ ENTRYPOINT ["/usr/bin/dumb-init", "--"]
 # ============================================================
 # Admin Console SPA (served by proxy at /admin/)
 # ============================================================
-FROM node:24-alpine AS admin-console-builder
+FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS admin-console-builder
 WORKDIR /app
 COPY admin-console/package.json admin-console/package-lock.json ./
 RUN npm ci
@@ -178,7 +190,9 @@ FROM runtime-base AS proxy
 
 USER root
 COPY --from=builder --chmod=755 /dist/proxy /usr/local/bin/proxy
-COPY --from=admin-console-builder --chown=bsdm:bsdm /app/dist /opt/bsdm/admin-console
+# Static bundle stays root-owned (read-only for uid 1000): a compromised proxy
+# process must not be able to rewrite the Admin Console it serves.
+COPY --from=admin-console-builder /app/dist /opt/bsdm/admin-console
 ENV ADMIN_CONSOLE_DIR=/opt/bsdm/admin-console
 USER bsdm
 

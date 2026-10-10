@@ -42,9 +42,17 @@ RestrictNamespaces=true
 RestrictRealtime=true
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 LockPersonality=true
+# No JIT/WASM in this binary (cargo tree -p threat-intel: no wasmtime/cranelift
+# — the proxy dependency is built without the `wasm` feature), so W^X is safe.
+MemoryDenyWriteExecute=true
 SystemCallFilter=@system-service
 SystemCallFilter=~@privileged @resources
 SystemCallArchitectures=native
+
+# Moderate ceilings; override with a drop-in
+# (/etc/systemd/system/bsdm-threat-intel.service.d/20-limits.conf).
+TasksMax=256
+MemoryMax=1G
 
 [Install]
 WantedBy=multi-user.target

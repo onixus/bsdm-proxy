@@ -1,0 +1,112 @@
+# cargo-deny policy for the BSDM-Proxy workspace.
+#
+# Enforced as a BLOCKING gate by .github/workflows/ci.yml (job `cargo-deny`)
+# and runnable locally:
+#   cargo install cargo-deny --locked
+#   cargo deny --all-features check            # advisories bans licenses sources
+#
+# Changing this file weakens or strengthens a supply-chain gate: every
+# `ignore`/`skip`/`exceptions` entry needs a reason and an owner, and should be
+# revisited on each release (see docs/ops-and-dev/ for the review checklist).
+
+[graph]
+# Evaluate the dependency graph for the targets we actually ship (container
+# images are musl, packages are linux-gnu/musl; the agent is cross-platform).
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-unknown-linux-musl",
+  "aarch64-unknown-linux-musl",
+  "x86_64-apple-darwin",
+  "aarch64-apple-darwin",
+  "x86_64-pc-windows-msvc",
+]
+# The BLOCKING gate evaluates the shipped graph: default features, i.e. exactly
+# what the release images and packages are built with (Dockerfile builds
+# without --features). The optional lab/frozen features (wasm, auth-ntlm,
+# auth-kerberos, grpc) are checked by a separate, report-only CI job
+# (`cargo deny --all-features check`) until their findings are resolved —
+# see the comments in .github/workflows/ci.yml. Do not flip this to true
+# without fixing those findings first.
+all-features = false
+
+[output]
+feature-depth = 1
+
+# ---------------------------------------------------------------------------
+# RustSec advisories. Any vulnerability, unsound or yanked crate fails the gate.
+# ---------------------------------------------------------------------------
+[advisories]
+db-urls = ["https://github.com/rustsec/advisory-db"]
+yanked = "deny"
+# Unmaintained crates are reported for the whole tree but only fail the build
+# for crates we depend on directly — transitive ones are outside our control
+# until upstream moves.
+unmaintained = "workspace"
+unsound = "all"
+# Format: { id = "RUSTSEC-YYYY-NNNN", reason = "why it does not apply / ticket" }
+ignore = [
+  # Not a vulnerability: the crate is archived (no further releases). Direct
+  # dependency of proxy and dns-sinkhole for PEM parsing; migration target is
+  # rustls-pki-types `PemObject`. Remove this entry together with the dependency.
+  { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile unmaintained, no vuln; migrate to rustls-pki-types PemObject" },
+]
+
+# ---------------------------------------------------------------------------
+# Licenses: permissive OSS only. Copyleft (GPL/AGPL/LGPL-only/MPL-only/SSPL)
+# and unknown licenses fail the gate.
+# ---------------------------------------------------------------------------
+[licenses]
+confidence-threshold = 0.9
+allow = [
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "MIT",
+  "MIT-0",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "BSL-1.0",
+  "CC0-1.0",
+  "Unlicense",
+  "Unicode-3.0",
+  # Mozilla's CA bundle data shipped by webpki-roots / webpki-root-certs.
+  "CDLA-Permissive-2.0",
+]
+# The workspace's own crates are never published to crates.io; with
+# `publish = false` in their manifests cargo-deny treats them as private and
+# skips the (absent) license field of examples / wasm sdk.
+[licenses.private]
+ignore = true
+
+# ---------------------------------------------------------------------------
+# Bans: no wildcard version requirements; duplicate versions are reported
+# (warn) — the tree has a few unavoidable dual-major crates (rustix,
+# linux-raw-sys, webpki-roots) and failing on them would only train people to
+# add skips.
+# ---------------------------------------------------------------------------
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+highlight = "all"
+workspace-default-features = "allow"
+external-default-features = "allow"
+deny = [
+  # OpenSSL must stay a deliberate, feature-gated choice: the TLS stack is
+  # rustls. Uncomment once the remaining openssl users are confirmed gone.
+  # { name = "openssl-sys" },
+]
+skip = []
+skip-tree = []
+
+# ---------------------------------------------------------------------------
+# Sources: crates.io only. A git or alternative-registry dependency is a new
+# trust root and must be added here explicitly, with a pinned rev in Cargo.toml.
+# ---------------------------------------------------------------------------
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

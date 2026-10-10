@@ -20,6 +20,7 @@ LimitNOFILE=65536
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 NoNewPrivileges=true
+UMask=0077
 
 # The service only reads its environment, RPZ zone and optional TLS material
 # from /etc/bsdm-proxy. Zone updates are written by the proxy control plane and
@@ -40,9 +41,16 @@ RestrictNamespaces=true
 RestrictRealtime=true
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 LockPersonality=true
+# No JIT/WASM in this binary (cargo tree: no wasmtime/cranelift), so W^X is safe.
+MemoryDenyWriteExecute=true
 SystemCallFilter=@system-service
 SystemCallFilter=~@privileged @resources
 SystemCallArchitectures=native
+
+# Moderate ceilings; override with a drop-in
+# (/etc/systemd/system/bsdm-dns-sinkhole.service.d/20-limits.conf).
+TasksMax=256
+MemoryMax=512M
 
 [Install]
 WantedBy=multi-user.target

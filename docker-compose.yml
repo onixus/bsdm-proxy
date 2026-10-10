@@ -133,7 +133,7 @@ services:
           memory: 1G
 
   proxy:
-    image: ghcr.io/onixus/bsdm-proxy:${BSDM_IMAGE_TAG:-0.9.15}
+    image: ghcr.io/onixus/bsdm-proxy:${BSDM_IMAGE_TAG:-1.0.0-rc.1}
     build:
       context: .
       dockerfile: Dockerfile
@@ -164,6 +164,7 @@ services:
       # Agent Phase C device inventory (survives restart); empty path = memory-only
       - AGENT_DEVICES_PATH=${AGENT_DEVICES_PATH:-/var/lib/bsdm-proxy/agent-devices.json}
       - MITM_ENABLED=true
+      - MITM_CA_DIR=/certs  # explicit: production no longer probes /certs or ./certs
       # Proxy auth is ON by default (matches bsdm-proxy.env). Clients must send
       # Proxy-Authorization; unauthenticated requests get 407.
       - AUTH_ENABLED=${AUTH_ENABLED:-true}
@@ -206,6 +207,11 @@ services:
       - ACL_API_TOKEN=${ACL_API_TOKEN:-}
       - CONTROL_API_ALLOW_INSECURE=${CONTROL_API_ALLOW_INSECURE:-false}
       - METRICS_BIND=${METRICS_BIND:-0.0.0.0}
+      # SSRF guards: no forwarding to the container's loopback or to cloud
+      # metadata endpoints. The fast path serves cache hits before auth/ACL.
+      - BLOCK_LOOPBACK_FORWARDING=${BLOCK_LOOPBACK_FORWARDING:-true}
+      - BLOCK_CLOUD_METADATA=${BLOCK_CLOUD_METADATA:-true}
+      - PERF_FAST_CACHE_HIT=false
       - DLP_ENABLED=${DLP_ENABLED:-false}
       - THREAT_SCORE_ENABLED=${THREAT_SCORE_ENABLED:-false}
       - THREAT_SCORE_POLL_URL=${THREAT_SCORE_POLL_URL:-http://ml-worker:8091/api/threat-scores}
@@ -260,7 +266,7 @@ services:
           memory: 256M
 
   cache-indexer:
-    image: ghcr.io/onixus/bsdm-cache-indexer:${BSDM_IMAGE_TAG:-0.9.15}
+    image: ghcr.io/onixus/bsdm-cache-indexer:${BSDM_IMAGE_TAG:-1.0.0-rc.1}
     build:
       context: .
       dockerfile: Dockerfile
@@ -320,7 +326,7 @@ services:
 
   alert-worker:
     profiles: ["alerts"]
-    image: ghcr.io/onixus/bsdm-alert-worker:${BSDM_IMAGE_TAG:-0.9.15}
+    image: ghcr.io/onixus/bsdm-alert-worker:${BSDM_IMAGE_TAG:-1.0.0-rc.1}
     build:
       context: .
       dockerfile: Dockerfile
@@ -373,7 +379,7 @@ services:
 
   ml-worker:
     profiles: ["ml"]
-    image: ghcr.io/onixus/bsdm-ml-worker:${BSDM_IMAGE_TAG:-0.9.15}
+    image: ghcr.io/onixus/bsdm-ml-worker:${BSDM_IMAGE_TAG:-1.0.0-rc.1}
     build:
       context: .
       dockerfile: Dockerfile
@@ -582,7 +588,7 @@ services:
   # Hybrid first hop (Core). UDP :5353 on host → :53 in container.
   # Day-1 pilot: UDP only (DoH/DoT off unless TLS certs provided).
   dns-sinkhole:
-    image: ghcr.io/onixus/bsdm-dns-sinkhole:${BSDM_IMAGE_TAG:-0.9.15}
+    image: ghcr.io/onixus/bsdm-dns-sinkhole:${BSDM_IMAGE_TAG:-1.0.0-rc.1}
     build:
       context: .
       dockerfile: Dockerfile
@@ -645,7 +651,7 @@ services:
   # for the IOC store and the scoring engine.
   threat-intel:
     profiles: ["threat-intel"]
-    image: ghcr.io/onixus/bsdm-threat-intel:${BSDM_IMAGE_TAG:-0.9.15}
+    image: ghcr.io/onixus/bsdm-threat-intel:${BSDM_IMAGE_TAG:-1.0.0-rc.1}
     build:
       context: .
       dockerfile: Dockerfile
