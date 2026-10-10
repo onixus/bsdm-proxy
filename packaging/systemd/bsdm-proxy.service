@@ -15,7 +15,9 @@ EnvironmentFile=/etc/bsdm-proxy/bsdm-proxy.env
 # Optional operator drop-ins (may be absent).
 EnvironmentFile=-/etc/bsdm-proxy/conf.d/*.env
 ExecStart=/opt/bsdm-proxy/bin/proxy
-Restart=on-failure
+# Console Apply exits successfully after draining; restart it too.
+# Explicit systemctl stop still suppresses automatic restart.
+Restart=always
 RestartSec=5
 LimitNOFILE=65536
 

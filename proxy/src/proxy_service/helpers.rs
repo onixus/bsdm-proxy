@@ -99,11 +99,18 @@ impl ProxyService {
     }
 
     fn headers_map(headers: &hyper::HeaderMap) -> HashMap<String, String> {
-        let mut map = HashMap::with_capacity(headers.len());
+        let mut map: HashMap<String, String> = HashMap::with_capacity(headers.len());
         for (name, value) in headers.iter() {
-            if let Ok(value) = value.to_str() {
-                map.insert(name.as_str().to_string(), value.to_string());
-            }
+            let value = match value.to_str() {
+                Ok(value) => value,
+                // Do not discard an unreadable cache directive and accidentally
+                // cache a response whose privacy constraints we cannot interpret.
+                Err(_) if name == hyper::header::CACHE_CONTROL => "no-store",
+                Err(_) if name == hyper::header::VARY => "*",
+                Err(_) if name == hyper::header::SET_COOKIE => "",
+                Err(_) => continue,
+            };
+            crate::cache_freshness::insert_cache_header(&mut map, name.as_str(), value);
         }
         map
     }
@@ -410,5 +417,76 @@ mod event_header_tests {
         assert_eq!(ev.get("user-agent").map(String::as_str), Some("curl/8"));
         let joined = format!("{ev:?}");
         assert!(!joined.contains("sk-live") && !joined.contains("YWxpY2U6"));
+    }
+}
+
+#[cfg(test)]
+mod cache_header_tests {
+    use super::*;
+    use crate::cache_freshness::{evaluate_store, RequestCacheContext};
+
+    fn store(values: &[(&str, &[u8])]) -> bool {
+        let mut headers = hyper::HeaderMap::new();
+        for (name, value) in values {
+            headers.append(
+                HeaderName::from_bytes(name.as_bytes()).unwrap(),
+                HeaderValue::from_bytes(value).unwrap(),
+            );
+        }
+        let headers = ProxyService::headers_map(&headers);
+        evaluate_store(
+            "GET",
+            200,
+            &headers,
+            10,
+            &RequestCacheContext::default(),
+            &CacheConfig::default(),
+        )
+        .store
+    }
+
+    #[test]
+    fn repeated_privacy_headers_cannot_be_overwritten() {
+        for directive in [b"private".as_slice(), b"no-store"] {
+            for values in [
+                vec![
+                    ("cache-control", directive),
+                    ("cache-control", b"max-age=60".as_slice()),
+                ],
+                vec![
+                    ("cache-control", b"max-age=60".as_slice()),
+                    ("cache-control", directive),
+                ],
+            ] {
+                assert!(!store(&values));
+            }
+        }
+        for vary in [b"Cookie".as_slice(), b"Authorization", b"*"] {
+            for values in [
+                vec![("vary", vary), ("vary", b"Accept-Encoding".as_slice())],
+                vec![("vary", b"Accept-Encoding".as_slice()), ("vary", vary)],
+            ] {
+                assert!(!store(&values));
+            }
+        }
+    }
+
+    #[test]
+    fn unreadable_privacy_headers_fail_closed() {
+        assert!(!store(&[
+            ("cache-control", b"\xff"),
+            ("cache-control", b"max-age=60")
+        ]));
+        assert!(!store(&[("vary", b"\xff"), ("vary", b"Accept-Encoding")]));
+    }
+
+    #[test]
+    fn repeated_public_directives_remain_cacheable() {
+        assert!(store(&[
+            ("cache-control", b"public"),
+            ("cache-control", b"max-age=60"),
+            ("vary", b"Accept-Encoding"),
+            ("vary", b"Accept-Encoding")
+        ]));
     }
 }

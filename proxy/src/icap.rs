@@ -572,7 +572,7 @@ fn finish_http_response(hdr: &str, body_rest: &[u8]) -> Result<Option<IcapOutcom
             {
                 chunked = true;
             }
-            headers.insert(key.to_ascii_lowercase(), val);
+            crate::cache_freshness::insert_cache_header(&mut headers, &key, &val);
         }
     }
 
@@ -642,6 +642,35 @@ fn decode_chunked(data: &[u8]) -> Result<Option<Bytes>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn adapted_response_preserves_repeated_privacy_headers() {
+        for fields in [
+            "Cache-Control: private\r\nCache-Control: max-age=60\r\n",
+            "Cache-Control: no-store\r\nCache-Control: public\r\n",
+            "Vary: Cookie\r\nVary: Accept-Encoding\r\n",
+        ] {
+            let header = format!("HTTP/1.1 200 OK\r\n{fields}Content-Length: 4\r\n\r\n");
+            let Some(IcapOutcome::HttpResponse {
+                status,
+                headers,
+                body,
+            }) = finish_http_response(&header, b"body").unwrap()
+            else {
+                panic!("adapted response expected")
+            };
+            let decision = crate::cache_freshness::evaluate_store(
+                "GET",
+                status,
+                &headers,
+                body.len(),
+                &crate::cache_freshness::RequestCacheContext::default(),
+                &crate::cache::CacheConfig::default(),
+            );
+            assert!(!decision.store, "{fields}");
+        }
+    }
+
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 

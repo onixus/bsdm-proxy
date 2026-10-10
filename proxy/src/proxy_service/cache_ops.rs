@@ -142,17 +142,22 @@ impl ProxyService {
             .record_upstream_duration(&domain, upstream_duration);
 
         if status == StatusCode::NOT_MODIFIED {
-            let headers_map: HashMap<String, String> = response
-                .headers()
-                .iter()
-                .filter_map(|(k, v)| {
-                    v.to_str()
-                        .ok()
-                        .map(|v| (k.as_str().to_string(), v.to_string()))
-                })
-                .collect();
-            let ttl = refresh_ttl_from_headers(&headers_map, self.cache_config.default_ttl);
-            let refreshed = cached.refreshed_after_not_modified(ttl);
+            let headers_map = Self::headers_map_from_response(&response);
+            let Some(refreshed) = refresh_cache_response(
+                cached,
+                headers_map,
+                method,
+                &RequestCacheContext::from_headers(req.headers()),
+                &self.cache_config,
+            ) else {
+                // An origin may withdraw permission to share a previously
+                // cached representation. Do not serve it or leave it in L2.
+                self.http_cache.remove(cache_key);
+                if let Some(l2) = &self.l2_cache {
+                    l2.delete(cache_key).await;
+                }
+                return None;
+            };
             self.store_in_l1_and_l2(cache_key.clone(), refreshed.clone());
             debug!("Cache REVALIDATED (304): {} {}", method, url);
             let user_agent = Self::request_header(req, "user-agent");
@@ -304,5 +309,119 @@ impl ProxyService {
         }
 
         None
+    }
+}
+
+/// Apply 304 metadata through the same privacy gate as a newly fetched body.
+fn refresh_cache_response(
+    cached: &CachedResponse,
+    updated_headers: HashMap<String, String>,
+    method: &str,
+    request: &RequestCacheContext,
+    config: &CacheConfig,
+) -> Option<CachedResponse> {
+    let mut headers: HashMap<String, String> = cached
+        .headers
+        .iter()
+        .map(|(name, value)| (name.to_ascii_lowercase(), value.to_string()))
+        .collect();
+    headers.extend(updated_headers);
+    let decision = evaluate_store(
+        method,
+        cached.status,
+        &headers,
+        cached.response_body_len(),
+        request,
+        config,
+    );
+    if !decision.store {
+        return None;
+    }
+    let mut refreshed = cached.refreshed_after_not_modified(decision.ttl);
+    refreshed.headers = headers
+        .into_iter()
+        .map(|(name, value)| (Arc::from(name), Arc::from(value)))
+        .collect();
+    refreshed.must_revalidate = decision.must_revalidate;
+    refreshed.etag = decision.etag;
+    refreshed.last_modified = decision.last_modified;
+    Some(refreshed)
+}
+
+#[cfg(test)]
+mod revalidation_privacy_tests {
+    use super::*;
+
+    fn cached() -> CachedResponse {
+        CachedResponse::from_upstream(
+            200,
+            vec![
+                (Arc::from("cache-control"), Arc::from("public, max-age=60")),
+                (Arc::from("etag"), Arc::from("v1")),
+            ]
+            .into(),
+            Bytes::from_static(b"body"),
+            Duration::from_secs(60),
+            &crate::cache_compress::CompressionConfig::default(),
+            usize::MAX,
+            &std::env::temp_dir(),
+            Some(Arc::from("v1")),
+            None,
+            false,
+            false,
+        )
+    }
+
+    #[test]
+    fn revalidation_cannot_restore_private_or_varied_content() {
+        for (name, value) in [
+            ("cache-control", "private, max-age=60"),
+            ("cache-control", "no-store, max-age=60"),
+            ("vary", "Cookie, Accept-Encoding"),
+            ("vary", "*"),
+            ("set-cookie", "sid=1"),
+        ] {
+            let updated = HashMap::from([(name.to_string(), value.to_string())]);
+            assert!(
+                refresh_cache_response(
+                    &cached(),
+                    updated,
+                    "GET",
+                    &RequestCacheContext::default(),
+                    &CacheConfig::default()
+                )
+                .is_none(),
+                "{name}: {value}"
+            );
+        }
+    }
+
+    #[test]
+    fn benign_revalidation_preserves_and_updates_policy_metadata() {
+        let updated = HashMap::from([(
+            "cache-control".to_string(),
+            "public, no-cache, max-age=120".to_string(),
+        )]);
+        let refreshed = refresh_cache_response(
+            &cached(),
+            updated,
+            "GET",
+            &RequestCacheContext::default(),
+            &CacheConfig::default(),
+        )
+        .unwrap();
+        assert_eq!(refreshed.ttl, Duration::from_secs(120));
+        assert!(refreshed.must_revalidate);
+        assert_eq!(refreshed.etag.as_deref(), Some("v1"));
+        let again = refresh_cache_response(
+            &refreshed,
+            HashMap::new(),
+            "GET",
+            &RequestCacheContext::default(),
+            &CacheConfig::default(),
+        )
+        .unwrap();
+        assert!(again.must_revalidate);
+        assert_eq!(again.ttl, Duration::from_secs(120));
     }
 }

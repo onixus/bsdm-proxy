@@ -213,6 +213,14 @@ impl ProxyHarness {
         })
     }
 
+    /// Wait for a console-triggered graceful exit without sending an OS signal.
+    pub async fn wait_for_exit(&mut self, timeout: Duration) -> Result<std::process::ExitStatus> {
+        tokio::time::timeout(timeout, self.proxy_process.wait())
+            .await
+            .context("proxy did not exit before deadline")?
+            .context("wait for proxy exit")
+    }
+
     pub fn metrics_url(&self, path: &str) -> String {
         format!("http://127.0.0.1:{}{}", self.metrics_port, path)
     }

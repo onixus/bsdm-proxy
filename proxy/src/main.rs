@@ -69,6 +69,14 @@ async fn run_accept_loop(
     }
 }
 
+/// Both operator signals and console Apply enter the same graceful drain.
+async fn wait_for_shutdown(mut shutdown_rx: watch::Receiver<bool>) {
+    tokio::select! {
+        _ = wait_shutdown_signal() => {},
+        _ = shutdown_rx.wait_for(|shutdown| *shutdown) => {},
+    }
+}
+
 /// `proxy hash-password`: password on stdin (first line), PHC hash on stdout.
 fn run_hash_password() -> Result<(), Box<dyn std::error::Error>> {
     use std::io::Read;
@@ -785,8 +793,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tokio::spawn(run_accept_loop(listener, service_clone, tasks, shutdown_rx));
     }
 
-    wait_shutdown_signal().await;
-    info!("Shutdown signal received, stopping accept loops");
+    // Production Apply delegates restart to the supervisor. Development keeps
+    // its existing self-spawn restart path in schedule_service_restart.
+    if deployment_profile == bsdm_proxy::DeploymentProfile::Production {
+        wait_for_shutdown(shutdown_rx.clone()).await;
+    } else {
+        wait_shutdown_signal().await;
+    }
+    info!("Shutdown requested, stopping accept loops");
     let _ = shutdown_tx.send(true);
 
     draining.store(true, Ordering::SeqCst);
@@ -815,4 +829,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await;
     info!("Graceful shutdown complete");
     Ok(())
+}
+
+#[cfg(test)]
+mod shutdown_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn console_shutdown_wakes_main_without_an_os_signal() {
+        let (tx, rx) = watch::channel(false);
+        let waiting = tokio::spawn(wait_for_shutdown(rx));
+        tx.send(true).unwrap();
+        tokio::time::timeout(Duration::from_secs(1), waiting)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn false_notification_does_not_shutdown() {
+        let (tx, rx) = watch::channel(false);
+        let mut waiting = tokio::spawn(wait_for_shutdown(rx));
+        tx.send(false).unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), &mut waiting)
+                .await
+                .is_err()
+        );
+        tx.send(true).unwrap();
+        tokio::time::timeout(Duration::from_secs(1), waiting)
+            .await
+            .unwrap()
+            .unwrap();
+    }
 }

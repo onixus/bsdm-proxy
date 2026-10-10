@@ -16,7 +16,7 @@ use crate::cache::{CacheConfig, CachedResponse, CACHEABLE_METHODS};
 use crate::cache_digest::DigestRegistry;
 use crate::cache_freshness::{
     cache_status_metric_label, evaluate_store, evaluate_store_precheck, miss_x_cache_status_header,
-    refresh_ttl_from_headers, RequestCacheContext,
+    RequestCacheContext,
 };
 use crate::categorization::CategorizationEngine;
 use crate::hierarchy::{HierarchyManager, HierarchyResult};

@@ -139,6 +139,23 @@ pub fn parse_cache_control(value: &str) -> CacheControlDirectives {
     directives
 }
 
+/// Preserve repeated list-valued privacy fields before cache admission.
+/// Non-list fields keep their existing representation (notably Set-Cookie).
+pub(crate) fn insert_cache_header(headers: &mut HashMap<String, String>, name: &str, value: &str) {
+    let name = name.to_ascii_lowercase();
+    if matches!(name.as_str(), "cache-control" | "vary") {
+        headers
+            .entry(name)
+            .and_modify(|existing| {
+                existing.push_str(", ");
+                existing.push_str(value);
+            })
+            .or_insert_with(|| value.to_string());
+    } else {
+        headers.insert(name, value.to_string());
+    }
+}
+
 pub fn header_value<'a>(headers: &'a HashMap<String, String>, name: &str) -> Option<&'a str> {
     headers
         .iter()
