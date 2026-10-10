@@ -7,8 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-rc.1] - 2026-10-10
+
+First release candidate for **v1.0.0 GA**. The GA scope, production profiles and the
+known limitations are defined in [project-status.md](docs/project-status.md),
+[production-deployment.md](docs/getting-started/production-deployment.md) and the
+[upgrade guide](docs/ops-and-dev/upgrade-guide.md). This release is the outcome of a
+production-readiness review (architecture + AppSec): every P0 and P1 finding is fixed or
+explicitly listed as a known limitation.
+
+### Security
+
+- **Shared cache no longer leaks private responses** — responses to requests carrying `Authorization` (unless `public` / `s-maxage` / `must-revalidate`) or `Cookie` (unless `public`), responses with `Set-Cookie`, and responses with `Vary` other than `Accept-Encoding` are not stored; `Set-Cookie` is never replayed on a cache hit (covers old L2 entries). LLM semantic-cache entries are scoped to the caller's credentials.
+- **Host / request-target mismatch is rejected with `400`** — closes cache poisoning and domain fronting past ACLs, on the forward path and inside MITM.
+- **SSRF guard checks resolved addresses** — the upstream client and `CONNECT` resolve, check every address and connect only to checked ones (no DNS-rebinding window); IPv4-mapped / compatible / NAT64 IPv6 is normalised and AWS IPv6 IMDS (`fd00:ec2::254`) is blocked. `BLOCK_LOOPBACK_FORWARDING` defaults to `true` in production.
+- **Bounded request bodies** — `MAX_REQUEST_BODY_BYTES` (default 64 MiB → `413`) on the forward and LLM paths; ACL and control APIs authorize from headers before reading the body and cap it (1 MiB / 16 MiB / 64 KiB on public routes); DoH POST and the OIDC `form_post` callback are capped before buffering.
+- **`POST /api/config/apply` hardened** — only an allowlist of operational keys is editable (tokens, trust anchors, deployment posture, listener binds, destinations that receive traffic or credentials and the eBPF arming switch stay host-managed); control characters, backslashes, quotes and surrounding whitespace are rejected (they could be reinterpreted by systemd `EnvironmentFile`); paths are confined to `/etc/bsdm-proxy` and `/var/lib/bsdm-proxy` in production; the process environment is no longer mutated at runtime, `CONFIG_RESTART_CMD` / `ACL_RULES_PATH` come only from the startup environment, and a production restart is a clean shutdown for the supervisor.
+- **Agent device tokens are scoped to their own device** — fleet operations (device list, revoke, policy push, recent events) require the control token; heartbeat and tunnel config only for the token's own `device_id`; re-enrolling an existing device requires the control token.
+- **Production start-up guards** — the proxy refuses to start with basic auth and no `BASIC_AUTH_USERS_FILE`, or as an anonymous open proxy unless the ACL is default-deny with a client `IpRange` allow rule or `ALLOW_ANONYMOUS_PROXY=true` is set. `PERF_FAST_CACHE_HIT` / `BSM_PERF_MODE` (cache hit before ACL) are ignored in production.
+- **MITM CA is fail-closed in production** — start-up is refused when `ca.crt` is missing, does not match `ca.key`, is expired, or `ca.key` is group-writable / world-accessible; only `MITM_CA_DIR` is used (no `/certs`, `./certs` fallback). New metric `bsdm_proxy_mitm_ca_not_after_timestamp_seconds`.
+- **MITM circuit breaker** trips only on failures from ≥ 3 distinct clients (`MITM_CIRCUIT_BREAKER_MIN_CLIENTS`; IPv6 counted per /64) and recovers after a finite default cooldown of 900 s (was: until manual reset). New metric `bsdm_proxy_mitm_circuit_breaker_trips_total`.
+- **`CONNECT` to a destination rejected by policy** (port allowlist, metadata / loopback literals) is answered `403` before the tunnel is established (was `200` followed by a dropped tunnel).
+- **Lab REST surfaces return `404` in production** (agent, AmneziaWG, cluster, threat sync, CASB/DLP editing, eBPF, WASM) unless `AGENT_API_ENABLED` / `AWG_API_ENABLED` / `LAB_API_ENABLED` is set.
+- **Credentials are redacted from analytics events**; user identity is no longer derived from an origin `Authorization` header when proxy auth is off.
+- **Search proxy no longer forwards the caller's `Authorization`** to cache-indexer; it uses its own `SEARCH_UPSTREAM_TOKEN` (fallback `SEARCH_API_TOKEN`).
+- **No implicit third-party RKN feed in production** — `RKN_FALLBACK_URL` must be set explicitly.
+- **Basic auth**: concurrent Argon2 verifications are bounded (`BASIC_AUTH_MAX_CONCURRENT_VERIFICATIONS`) and unknown usernames incur a dummy verification (no timing-based enumeration).
+- **Upstream timeouts** — `UPSTREAM_CONNECT_TIMEOUT_MS` (10 s) and `UPSTREAM_RESPONSE_TIMEOUT_MS` (60 s, to response headers).
+- **RPZ feeds** are streamed with an 8 MiB cap instead of being buffered whole.
+- **dns-sinkhole**: upstream answers are accepted only from the configured upstream (connected UDP socket) with matching ID and question; bounded in-flight UDP queries and DoT/DoH connections (`DNS_SINKHOLE_MAX_INFLIGHT`, `DNS_SINKHOLE_MAX_TCP_CONNECTIONS`); TLS handshake, read and idle timeouts; suffix rules are indexed so lookup cost no longer grows with zone size.
+- **cache-indexer**: connection limit, request read timeout and configurable bind (`METRICS_BIND`, `INDEXER_HTTP_MAX_CONNECTIONS`, `INDEXER_HTTP_READ_TIMEOUT_MS`); ingest is authenticated before the body is read; constant-time token comparison; CSV export neutralises spreadsheet formulas and quotes CR/LF; start-up warning when `INGEST_API_TOKEN` is not set.
+- **CI gate** — blocking GitHub Actions workflow on every PR and push to `main` (`ci-gate`: rustfmt, clippy `-D warnings`, workspace tests, lite/grpc/wasm feature builds, cargo-deny, Admin Console lint/test/build); every action pinned by commit SHA, read-only `GITHUB_TOKEN`, Cargo cache written only from `main`.
+- **Supply chain** — new `deny.toml` (RustSec advisories, permissive-license allow-list, wildcard bans, crates.io-only sources). Release images (all six, amd64/arm64) are published on `v*` tags only after a Trivy CRITICAL/HIGH gate, with SBOM + provenance attestations, an SPDX SBOM and a cosign keyless signature; release tarballs ship an SPDX SBOM and cosign bundles.
+- Replaced two GitHub Action pins that do not exist upstream (`Swatinem/rust-cache`, `aquasecurity/trivy-action`) with verified SHAs; fixed script injection in the image publish workflow and command injection via the `TAG` parameter in `Jenkinsfile.publish`.
+- Dockerfile base images pinned by digest; the Admin Console bundle is read-only for the service user. systemd: `ReadOnlyPaths` for the MITM CA, `MemoryDenyWriteExecute`, `UMask` and resource limits for dns-sinkhole and threat-intel.
+- **Native install ownership** — `packaging/install.sh` makes binaries, config and the MITM CA root-owned (the service account gets read-only group access and writes only to `/var/lib`, `/var/cache`, `/var/log`); `bsdm-proxy.service` no longer has `/etc/bsdm-proxy` writable; Admin Console runtime overrides persist to `/var/lib/bsdm-proxy/bsdm-proxy.env`; the installer generates a first Basic-auth user (password in a root-only file) or fails loudly when the users file cannot be created.
+- Dependencies: `wasmtime` 48.0.5 (RUSTSEC-2026-0316, RUSTSEC-2026-0327; feature `wasm`), `chacha20` 0.10.2 (0.10.1 yanked).
+
+### Changed
+
+- **Behaviour changes on upgrade** (see the [upgrade guide](docs/ops-and-dev/upgrade-guide.md)): responses described above are no longer cached; Host ≠ target → `400`; bodies over the limit → `413`; production refuses to start without a valid CA, without a users file for basic auth, or as an anonymous open proxy; lab routes answer `404` in production; the console can no longer edit tokens or host-managed keys (`400`).
+- Shipped defaults in `bsdm-proxy.env` are fail-safe: `DEPLOYMENT_PROFILE=production`, `PERF_FAST_CACHE_HIT=false`, `BLOCK_LOOPBACK_FORWARDING=true`, `BLOCK_CLOUD_METADATA=true`, ML score blocking, Redis L2, HTCP and multicast peer discovery off, no RKN fallback; the env example no longer ships a placeholder `CONTROL_API_TOKEN`.
+- Lab compose stacks set `ALLOW_ANONYMOUS_PROXY=true` explicitly; every stack that mounts `./certs` sets `MITM_CA_DIR=/certs`.
+- All workspace crates are `publish = false`. Version scheme moves to `1.0.0-rc.N` → `1.0.0`.
+
 ### Added
 
+- `deploy/compose/docker-compose.prod.yml` + `prod.env.example` — GA-only production profile (proxy + dns-sinkhole, optional `analytics` profile with cache-indexer): non-root, read-only rootfs, no capabilities, file-based secrets, control plane on loopback only, Lab/Beta features explicitly off.
+- `charts/bsdm/values-production.yaml` — production baseline: control-plane / basic-auth / metrics tokens from Secrets with fail-closed render, PSS-restricted security contexts, NetworkPolicy, HPA, PDB, anti-affinity. New chart values `proxy.controlApi`, `proxy.metricsAuth`, `proxy.basicAuth`, `proxy.searchUpstream`, `proxy.allowAnonymousProxy`, `proxy.disableLabFeatures`, `networkPolicy.controlPlaneNamespaces/Cidrs`, `dnsSinkhole.unprivilegedPortStart`.
+- Prometheus alerts `BsdmMitmBreakerTripped` and `BsdmMitmCaExpiringSoon` (`prometheus/alerts/mitm.yml`).
+- Production documentation: [production deployment](docs/getting-started/production-deployment.md), [readiness checklist](docs/ops-and-dev/production-readiness-checklist.md), [upgrade guide](docs/ops-and-dev/upgrade-guide.md), [runbook](docs/ops-and-dev/runbook.md); GA scope in [project-status](docs/project-status.md); a new [roadmap](docs/roadmap.md) v1.0 → 1.1 → 1.2 → 2.0; ADR 0007 revision 1.
 - **eBPF/XDP lab run on a real kernel** — `ci/ebpf-lab/` (Jenkins job `bsdm-ebpf-lab`) builds the proxy on a Linux agent and runs `scripts/run-ebpf-lab-smoke.sh` in a `--privileged --network none` container, with XDP on a veth pair so the agent's NICs are untouched. The smoke gained a datapath check (`EBPF_PROBE_NETNS`): pings from a blocked source must be dropped by the kernel and show up in the API and Prometheus counters.
 - **Install without a toolchain** — `scripts/install-release.sh` downloads the GitHub Release tarball for the host architecture, verifies its `.sha256`, unpacks it and runs the packaged `install.sh`; it is self-contained so it also works as `curl … | sudo bash -s -- --version X.Y.Z` and offline via `--archive`. The interactive `./install.sh` gained a "prebuilt release" mode built on it (no `cargo`, `npm` or `docker` on the host); building from the checkout is now mode 3.
 - **Static release binaries** — `scripts/build-package.sh --docker` (what `release.yml` and `scripts/ci/run.sh package` now use) exports the new `artifacts` stage of the `Dockerfile`: musl `crt-static` binaries stripped at link time, identical to the container images. Packages built this way run on any Linux x86_64 / aarch64; the previous packages were linked against the CI runner's glibc 2.39 and failed on Debian 12, Ubuntu 22.04 and RHEL 9. The workflow asserts static linkage and runs the packaged binary before publishing.
@@ -21,6 +69,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **eBPF/XDP filter did not work on a real kernel** — found by the first run on Linux (7.2, Arch host, `ci/ebpf-lab/`). The XDP object failed to build on Debian/Ubuntu (`asm/types.h` not found: the multiarch include directory is now passed) and, once built, would not load (`BTF is required`: it is now compiled with `-g`). With the program attached, every block and unblock failed: the maps were looked up by name, but the kernel truncates names to 15 characters and both blocklists became `bsdm_blocked_ip`; they are now resolved by id through the attached program. The key bytes were also passed to `bpftool` as one argument (`error parsing byte`). Blocking IPv4 and IPv6 sources now really drops their packets, and the kernel counters reach `/api/ebpf/stats` and `bsdm_proxy_ebpf_*_dropped_total`. A leftover `bpf/xdp_drop.o` built without `-g` must be deleted.
 - **threat-intel SIEM delivery was never wired** — the CEF/ECS/syslog formatters and the UDP/TCP/file transports existed, and `TI_SIEM_*` was parsed, but the running service sent nothing. It now delivers `detected` (new feed indicators), `blocked` / `unblocked` (SOAR API) and `expired` (TTL purge) events; `TI_SIEM_EVENTS` selects which. Delivery is asynchronous behind a bounded queue (`TI_SIEM_QUEUE_CAPACITY`), the TCP connection is reused, and outcomes are counted in `threat_intel_siem_events_total{action,outcome}`. `TI_SIEM_HOSTNAME` is now honoured too.
 - **Interactive installer did nothing in Docker and Native modes** — `scripts/installer/docker.sh` and `native.sh` only defined their function; the wizard executed them as scripts, which returned without installing anything. Both now run their entry point when executed directly.
+- **Reverse-proxy login redirect** — panic and open redirect in the AD/Basic login redirect for non-ASCII or `//host` paths; the redirect now goes through `sanitize_return_to`.
+- **ICAP chunked decoder** no longer panics on an overflowing chunk size.
+- **Helm**: dns-sinkhole could not bind `:53` as a non-root user without capabilities on containerd-based clusters.
+- **Release workflow**: the static-linking check could never fail.
+- **Admin Console** settings apply skips host-managed keys instead of sending them and failing the whole apply.
 
 ## [0.9.15] - 2026-09-22
 
