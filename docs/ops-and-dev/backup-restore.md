@@ -55,7 +55,7 @@ install -m 600 certs/archive/<timestamp>/ca.key certs/ca.key
 install -m 644 certs/archive/<timestamp>/ca.crt certs/ca.crt
 ./scripts/rotate-ca.sh verify
 # Start proxy; verify:
-curl --cacert certs/ca.crt -x http://127.0.0.1:3128 https://httpbin.org/uuid
+curl --proxy-user pilot --cacert certs/ca.crt -x http://127.0.0.1:3128 https://httpbin.org/uuid
 ```
 
 ### Automated drill

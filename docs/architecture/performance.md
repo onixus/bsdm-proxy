@@ -33,7 +33,7 @@ cargo install oha   # или бинарь с https://github.com/hatoo/oha
 
 | Переменная | Default | Описание |
 |------------|---------|----------|
-| `PERF_FAST_CACHE_HIT` | `false` | Cache serve (HIT / REVALIDATED / NEGATIVE_HIT / L2_HIT) до ACL: без policy/Kafka/heavy metrics |
+| `PERF_FAST_CACHE_HIT` | `false` | Lab/bench only; ignored in production. Cache serve (HIT / REVALIDATED / NEGATIVE_HIT / L2_HIT) до ACL: без policy/Kafka/heavy metrics |
 | `BSM_PERF_MODE` | `false` | Алиас `PERF_FAST_CACHE_HIT=true` |
 | `WORKER_COUNT` | `1` | Число accept-loop с SO_REUSEPORT (Linux); **4** для sites/large-object bench |
 | `TCP_SNDBUF_BYTES` | `524288` | SO_SNDBUF на клиентских соединениях (`0` = не менять) |

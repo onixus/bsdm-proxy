@@ -46,7 +46,7 @@ C ps; C logs --tail=300 proxy          # / journalctl -u bsdm-proxy -n 300 / kub
 docker stats --no-stream                # CPU, mem против лимита
 curl -s -H "Authorization: Bearer $METRICS_AUTH_TOKEN" http://127.0.0.1:9090/metrics \
   | grep -E 'bsdm_proxy_requests_in_flight|bsdm_proxy_upstream_connections_active'
-curl -x http://127.0.0.1:3128 -sS -o /dev/null -w '%{http_code} %{time_total}\n' http://example.com/
+curl --proxy-user pilot -x http://127.0.0.1:3128 -sS -o /dev/null -w '%{http_code} %{time_total}\n' http://example.com/
 ```
 
 | Наблюдение | Вероятная причина | Действие |

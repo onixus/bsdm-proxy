@@ -1,6 +1,6 @@
 # Threat intelligence collector & pipeline (TASK-TI-001..040)
 
-> **Threat monitoring in Shadow Mode — enforcement is in development.** The
+> **Shadow by default; proxy domain enforcement is implemented as beta.** The
 > feeds are observed, not enforced: `TI_ENFORCEMENT_MODE=shadow` is the default
 > posture and blocking on feed content requires an explicit `enforce` decision
 > under the transition criteria of
@@ -11,7 +11,7 @@ normalizes and scores indicators, persists them into SQLite with TTL management 
 and compiles DNS RPZ zones (`threats.rpz`) with standard `YYYYMMDDNN` monotonic BIND serials, `.bak` zone backups,
 and atomic rollback (`rollback_rpz_zone`). It also exports Proxy ACL feeds (`threat_domains.json`) to disk.
 In the default shadow mode those artifacts are written with a `.shadow` suffix that no
-data-plane component loads. It exposes enterprise SIEM formatting (CEF/ECS/Syslog) with unified network and file
+enforcement component loads; `ti_shadow.rs` reads the JSON for observation only. It exposes enterprise SIEM formatting (CEF/ECS/Syslog) with unified network and file
 delivery transports (`SyslogTransport` UDP/TCP, `FileSiemTransport`, `SiemDispatcher`),
 a SOAR API (`/api/v1/soar/*`) which in shadow mode records indicators for observation only
 (`202`, `enforced:false`), and ML domain reputation, typosquatting/homoglyph detection,
@@ -46,8 +46,9 @@ curl http://127.0.0.1:8093/health
 curl http://127.0.0.1:8093/metrics | grep threat_intel_
 ```
 
-A plain binary run binds `127.0.0.1` (`TI_ADMIN_BIND`). Under Compose the port
-is published on `127.0.0.1:8093` and in Helm it is an internal service.
+A plain binary run binds `127.0.0.1` (`TI_ADMIN_BIND`). The base Compose uses `expose: 8093` without a host port; access from the
+service network or add a deliberate management-only mapping. In Helm it is
+an internal service. SOAR requests require `TI_API_TOKEN`.
 
 Prometheus scrapes both the collector (`threat_intel_*`) and the proxy
 (`bsdm_proxy_ti_*`). The provisioned Grafana dashboard **BSDM Threat

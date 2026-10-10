@@ -1,11 +1,12 @@
 # Threat Intelligence Integration with BSDM Proxy
 
-> **Shadow Mode is the current posture.** BSDM-Proxy performs threat
-> *monitoring* from these feeds; enforcement is in development and is off by
-> default (`TI_ENFORCEMENT_MODE=shadow`). Everything described below as blocking
-> or enforcement is the target design and may only be enabled per installation
-> under the transition criteria in
-> [ADR 0008](../adr/0008-threat-intel-shadow-mode.md).
+> **Shadow Mode is the default posture** (`TI_ENFORCEMENT_MODE=shadow`).
+> Proxy domain enforcement is implemented as beta in `ti_enforce.rs`, with
+> Triple-Gate checks and explicit ACL allow-rule precedence. Enable collector
+> and proxy enforcement only after the installation meets
+> [ADR 0008](../adr/0008-threat-intel-shadow-mode.md). DNS publication is a
+> separate operator action. Current implementation and limits:
+> [collector guide](../features/threat-intel-collector.md).
 
 ## Goal
 
@@ -38,9 +39,11 @@ the allow/deny path is unchanged.
 In `enforce` (explicit opt-in, [ADR 0008](../adr/0008-threat-intel-shadow-mode.md))
 the same data is used for:
 
-- domain blocking
-- URL filtering
-- malicious destination prevention
+- exact-domain and subdomain blocking via `ti_enforce.rs`
+- explicit ACL allow-rule precedence
+
+URL/IP normalization in the collector does not imply URL-path or destination-IP
+enforcement by the proxy TI matcher. Its hot-path lookup is domain-based.
 
 ### DNS Layer
 

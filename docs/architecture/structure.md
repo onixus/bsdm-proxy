@@ -54,7 +54,9 @@ bsdm-proxy/
 | Файл | Назначение |
 |---|---|
 | `docker-compose.yml` | Analytics base + optional profiles |
-| `deploy/compose/docker-compose.lite.yml` | Proxy + SQLite |
+| `deploy/compose/docker-compose.lite.yml` | Proxy + SQLite (изолированный lab/CI без auth) |
+| `deploy/compose/docker-compose.pilot.yml` | Overlay базового Compose: пилот 100 пользователей / retention 5 дней |
+| `deploy/compose/docker-compose.prod.yml` | Самостоятельный production-профиль GA-скоупа с secrets |
 | `deploy/compose/docker-compose.test.yml` | Test stack |
 | `deploy/compose/docker-compose.redis-l2.yml` | Redis L2 example |
 | `deploy/compose/docker-compose.hierarchy.yml` | Cache hierarchy example |

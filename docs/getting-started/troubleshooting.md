@@ -16,7 +16,14 @@ docker compose logs --tail=200 proxy
 ./scripts/gen-ca.sh
 ```
 
-Для проверки без MITM задайте `MITM_ENABLED=false`.
+Для проверки без MITM задайте `MITM_ENABLED=false` либо `POLICY_MODE=sni`.
+В production CA читается только из `MITM_CA_DIR`; неверная пара, expiry и
+небезопасные права — отказ старта. Проверьте путь и владельца, не ослабляйте права.
+
+Другие причины отказа v1.0 RC: отсутствует `CONTROL_API_TOKEN`; Basic auth без
+`BASIC_AUTH_USERS_FILE`; auth выключена без client-IP ACL и без явного lab opt-out;
+`full-mitm` в production. Сверьте ошибку с
+[configuration.md](../ops-and-dev/configuration.md) и production-профилем.
 
 ## Клиент не доверяет HTTPS
 
@@ -26,14 +33,16 @@ docker compose logs --tail=200 proxy
 Проверка:
 
 ```bash
-curl --cacert certs/ca.crt \
+curl --proxy-user pilot --cacert certs/ca.crt \
   -x http://127.0.0.1:3128 \
   https://httpbin.org/get
 ```
 
 ## Нет cache HIT для HTTPS
 
-HTTPS cache требует MITM. При `MITM_ENABLED=false` CONNECT создаёт opaque tunnel,
+HTTPS cache требует фактического MITM для выбранного домена. `selective-mitm`
+расшифровывает только `MITM_CATEGORIES`; pinning и breaker могут перевести его
+в bypass. При `MITM_ENABLED=false` или `POLICY_MODE=sni` CONNECT создаёт opaque tunnel,
 поэтому proxy не видит HTTP response.
 
 Проверьте response header `X-Cache-Status` и metrics:
@@ -63,7 +72,9 @@ clickhouse-client --multiquery < scripts/clickhouse/http_cache.sql
 clickhouse-client --multiquery < scripts/clickhouse/ml_features.sql
 ```
 
-До включения DLP/CASB analytics синхронизируйте event mapper и ClickHouse schema.
+Поля DLP/CASB и `threat_shadow_match` уже включены в текущий DDL; для старой
+инсталляции примените его идемпотентные ALTER. Это не включает frozen DLP/CASB.
+Без `SEARCH_API_TOKEN` в production indexer тоже отказывается стартовать.
 
 ## Kafka lag растёт
 

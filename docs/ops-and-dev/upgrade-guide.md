@@ -184,7 +184,7 @@ sudo systemctl restart bsdm-proxy bsdm-dns-sinkhole
 ```bash
 curl -fsS http://127.0.0.1:9090/health
 curl -fsS http://127.0.0.1:9090/ready
-curl --cacert certs/ca.crt -x http://127.0.0.1:3128 https://httpbin.org/get
+curl --proxy-user pilot --cacert certs/ca.crt -x http://127.0.0.1:3128 https://httpbin.org/get
 curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:9090/api/cache/purge   # 401
 curl -fsS 'http://127.0.0.1:8080/api/search?limit=5' -H "Authorization: Bearer $SEARCH_API_TOKEN"
 ./scripts/run-dns-pilot-smoke.sh

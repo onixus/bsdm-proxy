@@ -6,7 +6,7 @@
 
 | Режим | Состав | Назначение |
 |---|---|---|
-| Lite | proxy + SQLite indexer | Dev, lab, edge |
+| Lite | proxy + SQLite indexer | Изолированный dev/lab/CI, API без auth |
 | Analytics Compose | proxy + Kafka + ClickHouse + monitoring | Пилот |
 | Native | systemd binaries + external dependencies | VM/bare metal |
 | Kubernetes | Helm + external/in-cluster analytics | Масштабирование и HA |
@@ -65,6 +65,8 @@ export SEARCH_API_TOKEN="$(openssl rand -hex 32)"
 # AUTH_ENABLED=true по умолчанию: подставьте свой файл пользователей
 # (scripts/gen-basic-auth-user.sh), иначе смонтируется пример с публичными хешами.
 export BASIC_AUTH_USERS_HOST=./config/basic-auth-users.json
+# Создайте этот файл с реальными Argon2id-хешами и правами 0600:
+# docs/getting-started/pilot-auth.md (раздел Create users file).
 ./scripts/gen-ca.sh
 # Готовые образы ghcr.io/onixus/bsdm-*:<версия> — на хосте нужен только
 # Docker. BSDM_IMAGE_TAG переключает релиз; `up -d --build` пересобирает
@@ -95,8 +97,7 @@ docker compose --profile threat-intel pull && docker compose --profile threat-in
 # Детекция алертов и ML-скоринг
 docker compose --profile alerts --profile ml pull && docker compose --profile alerts --profile ml up -d
 
-# DNS Sinkhole
-docker compose --profile dns-sinkhole pull && docker compose --profile dns-sinkhole up -d
+# DNS Sinkhole входит в базовый стек и запускается обычным up -d
 
 # ICAP антивирусная проверка (ClamAV)
 docker compose --profile icap up -d
@@ -167,7 +168,7 @@ sudo ./install.sh --create-user --systemd
 Default chart:
 
 ```bash
-helm upgrade --install bsdm ../../charts/bsdm \
+helm upgrade --install bsdm ./charts/bsdm \
   --namespace bsdm-proxy \
   --create-namespace
 ```
@@ -178,10 +179,10 @@ helm upgrade --install bsdm ../../charts/bsdm \
 Analytics plane можно разместить отдельно:
 
 ```bash
-helm upgrade --install bsdm-indexer ../../charts/bsdm \
+helm upgrade --install bsdm-indexer ./charts/bsdm \
   --namespace bsdm-analytics \
   --create-namespace \
-  -f ../../charts/bsdm/values-analytics.yaml
+  -f ./charts/bsdm/values-analytics.yaml
 ```
 
 Подробнее: [Kubernetes architecture](../ops-and-dev/k8s-architecture.md).
@@ -211,9 +212,10 @@ endpoints в client network.
 ```bash
 curl http://127.0.0.1:9090/health
 curl http://127.0.0.1:9090/ready
-curl -x http://127.0.0.1:3128 http://httpbin.org/get
+curl --proxy-user pilot -x http://127.0.0.1:3128 http://httpbin.org/get
 curl 'http://127.0.0.1:8123/?query=SELECT+count()+FROM+bsdm.http_cache'
-curl 'http://127.0.0.1:8080/api/search?limit=5'
+curl -H "Authorization: Bearer $SEARCH_API_TOKEN" \
+  'http://127.0.0.1:8080/api/search?limit=5'
 ```
 
 Диагностика:

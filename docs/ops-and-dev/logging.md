@@ -124,12 +124,14 @@ bsdm_proxy_policy_decision_source_total{source="pinning-bypass"} 14
 
 ### Threat Intelligence: Shadow Mode
 
-TI работает в режиме наблюдения ([ADR 0008](../adr/0008-threat-intel-shadow-mode.md)):
+По умолчанию TI работает в режиме наблюдения ([ADR 0008](../adr/0008-threat-intel-shadow-mode.md)):
 совпадение трафика с IOC **не** меняет allow/deny решение, а помечает событие.
 
 | Сигнал | Где |
 |---|---|
 | Поле `threat_shadow_match` (имя фида) в `CacheEvent` | ClickHouse `bsdm.http_cache`, колонка `threat_shadow_match`; Search API |
+| `bsdm_proxy_ti_effective_mode{configured,effective}` | Posture proxy после Triple-Gate (`shadow` / `enforce` / `disabled`) |
+| `bsdm_proxy_ti_enforce_blocked_total{feed}` | Блокировки beta domain enforcement; в пилоте не растёт |
 | `bsdm_proxy_ti_shadow_matches_total{feed}` | Prometheus (proxy, `proxy/src/metrics.rs`) |
 | `threat_intel_soar_blocks_total{mode}` | Prometheus (`threat-intel`, метки `shadow` / `enforce`) |
 | Debug-лог `threat-intel shadow match (request not blocked)` | proxy, target `bsdm_proxy` |

@@ -1,6 +1,8 @@
 # Roadmap BSDM-Proxy: v1.0 GA → 1.1 → 1.2 → 2.0
 
-Текущий релиз: **v1.0** (GA). Версию сверяйте с `proxy/Cargo.toml`.
+Текущая версия кода: **`1.0.0-rc.1`**, релиз-кандидат v1.0.
+GA-скоуп описывает целевой поддерживаемый набор, а завершение GA-приёмки
+фиксируется отдельно в критериях выхода ниже. Версию сверяйте с `proxy/Cargo.toml`.
 
 Roadmap описывает намерения и последовательность работ. Фактическая зрелость
 функций фиксируется в [матрице статуса](project-status.md) и её разделе
@@ -20,7 +22,7 @@ AppSec). Номера используются для трассировки в 
 3. **Selective MITM**: расшифровка HTTPS только для категорий высокого риска (`MITM_CATEGORIES`).
 4. **Local Agent**: исполнение политики на устройствах (On-Device SWG) вместо централизованного туннелирования — lab до 1.2.
 5. **Threat Intelligence в Shadow Mode**: сбор и скоринг IOC без блокировки; enforcement — только по [ADR 0008](adr/0008-threat-intel-shadow-mode.md).
-6. **Control plane не слабее data plane** (новое с v1.0): каждая административная операция аутентифицирована, авторизована по роли и проаудирована; компрометация админки не должна давать доступа к ключу CA.
+6. **Control plane не слабее data plane**: цель 1.1/2.0 — роли, полный аудит и изоляция CA. В RC control API использует один Bearer-токен без RBAC; он работает в процессе proxy с доступом к CA ([known issues](getting-started/production-deployment.md#7a-известные-ограничения-безопасности-v10)).
 
 ---
 
@@ -29,7 +31,7 @@ AppSec). Номера используются для трассировки в 
 | Этап | Тема | Цель | Статус |
 |---|---|---|---|
 | Фазы A–D | Hybrid Policy, пилот, agent lab, Threat Intelligence | Функциональная база и пилот на 100 пользователей | ✅ Выполнено (ниже) |
-| **v1.0 GA** | Production baseline | Безопасный по умолчанию одноузловой SWG с воспроизводимой поставкой | ✅ Текущий релиз |
+| **v1.0 GA** | Production baseline | Безопасный по умолчанию одноузловой SWG с воспроизводимой поставкой | RC реализован; GA-приёмка по чек-листу ниже |
 | **1.1** | Control plane & trust hardening | Закрыть архитектурный долг ревью: роли, аудит, TLS админки, честный breaker, CA-иерархия, приватность событий | Планируется |
 | **1.2** | HA одного сайта и enterprise identity | Active-active на сайте, LDAP/Kerberos и TI enforce в GA | Планируется |
 | **2.0** | Multi-site, multi-tenant, раздельные planes | Единый источник политики для нескольких сайтов, изоляция арендаторов, control plane без доступа к `ca.key` | Видение |
@@ -40,7 +42,7 @@ ClickHouse через `ADD COLUMN IF NOT EXISTS`).
 
 ---
 
-## v1.0 GA — Production baseline (текущий релиз)
+## v1.0 GA — Production baseline (текущий RC)
 
 **Цель.** Одноузловой (или несколько независимых узлов за L4) Secure Web
 Gateway, который безопасен «из коробки»: fail-closed control plane, shared
@@ -60,7 +62,7 @@ cache по RFC 9111, отсутствие lab-модулей в prod-профи�
 - [ ] `ci-gate` зелёный на релизном теге; образы подписаны, SBOM опубликован, trivy без fixable CRITICAL/HIGH.
 - [ ] Production-профиль не стартует без токена и users-файла; с ними — стартует, `bsdm_proxy_ebpf_armed == 0`, `CONNECT 127.0.0.1:9090` → `403`.
 - [ ] Readiness checklist пройден на референсном стенде (нагрузочный тест, учения CA и restore).
-- [ ] Known issues v1.0 опубликованы ([§7a prod-гайда](getting-started/production-deployment.md#7a-известные-ограничения-безопасности-v10)).
+- [x] Known issues v1.0 опубликованы ([§7a prod-гайда](getting-started/production-deployment.md#7a-известные-ограничения-безопасности-v10)).
 
 **Метрики:** p95 добавленной latency ≤ 10 мс на HIT / p99 ≤ 50 мс на selective-MITM при 100 пользователях (референс [load-test](ops-and-dev/load-test-results/latest.md)); error rate < 0.5%; RTO proxy ≤ 1 ч, analytics ≤ 4 ч; 0 lab-модулей в prod-профиле.
 

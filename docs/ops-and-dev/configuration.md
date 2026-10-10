@@ -101,8 +101,8 @@ DEPLOYMENT_PROFILE=development POLICY_MODE=full-mitm ALLOW_FULL_MITM=true \
 ## Threat intel shadow matching (proxy)
 
 Наблюдение за совпадениями трафика с IOC без блокировки (`proxy/src/ti_shadow.rs`,
-[ADR 0008](../adr/0008-threat-intel-shadow-mode.md)). Proxy читает **только**
-shadow-выгрузку коллектора и никогда не меняет allow/deny решение.
+[ADR 0008](../adr/0008-threat-intel-shadow-mode.md)). Модуль `ti_shadow` читает
+shadow-выгрузку и не меняет allow/deny решение. Отдельный `ti_enforce` описан ниже.
 
 | Переменная | Default | Назначение |
 |---|---:|---|
@@ -114,6 +114,33 @@ shadow-выгрузку коллектора и никогда не меняет
 `threat_shadow_match` в ClickHouse — и увеличивает
 `bsdm_proxy_ti_shadow_matches_total{feed}`. Отсутствующий файл не является
 ошибкой: коллектор мог ещё не сформировать выгрузку.
+
+## Threat intel domain enforcement (proxy, beta)
+
+`proxy/src/ti_enforce.rs` читает отдельную JSON-выгрузку коллектора. Настройки
+коллектора и proxy — отдельные окружения процессов: `enforce` только у
+коллектора не включает блокировку в proxy.
+
+| Переменная | Default | Назначение |
+|---|---|---|
+| `TI_ENFORCE_ENABLED` | `true` | Запуск матчера; сам по себе не включает блокировку |
+| `TI_ENFORCEMENT_MODE` | `shadow` | Только явное `enforce` разрешает блокировку; неизвестное значение → shadow |
+| `TI_ENFORCE_FEED_PATH` | `/var/lib/bsdm-proxy/threat-intel/threat_domains.json` | Enforcement JSON, доступный proxy на чтение |
+| `TI_ENFORCE_RELOAD_SECS` | `300` | Перечитывание выгрузки; минимум 10 с |
+
+Triple-Gate при загрузке: posture `enforce`, путь без суффикса `.shadow`,
+поле JSON `mode: "enforce"`. Lookup проверяет домен и поддомены, не URL-path
+или destination IP; явное совпавшее ACL allow-правило имеет приоритет.
+Успешный reload инвалидирует policy cache. Ошибка reload сохраняет предыдущую
+таблицу: удаление файла или остановка коллектора **не является откатом**.
+
+Откат: задайте proxy `TI_ENFORCEMENT_MODE=shadow` (либо
+`TI_ENFORCE_ENABLED=false`) и перезапустите его; переведите коллектор в shadow
+и отдельно восстановите опубликованную DNS-зону. Проверьте
+`bsdm_proxy_ti_effective_mode{configured="shadow",effective="shadow"}`
+(либо `effective="disabled"` при выключенном matcher) и отсутствие
+новых `bsdm_proxy_ti_enforce_blocked_total` на контролируемом трафике.
+Процедура и критерии включения — [ADR 0008](../adr/0008-threat-intel-shadow-mode.md).
 
 ## L1 cache
 
@@ -314,7 +341,11 @@ Peer mTLS: `HIERARCHY_PEER_MTLS_ENABLED`, `HIERARCHY_PEER_CA_FILE`,
 [ClickHouse](../analytics/clickhouse-retrosearch.md).
 
 Дополнительный HTTP event sink proxy включается через `EVENT_SINK_URL`;
-Bearer token задаётся `EVENT_SINK_TOKEN`.
+Bearer token задаётся `EVENT_SINK_TOKEN`. Доставка ограничена
+`KAFKA_QUEUE_CAPACITY` (8192 событий), `KAFKA_MAX_IN_FLIGHT` (256 для Kafka)
+и `EVENT_SINK_MAX_IN_FLIGHT` (16 для HTTP). Переполнение очереди proxy
+отбрасывает новые события; HTTP/Kafka send errors не ретраятся этой очередью.
+Семантика и sizing — [event-pipeline.md](../architecture/event-pipeline.md).
 
 С v1.0 cache-indexer слушает admin/Search на `METRICS_BIND` (по умолчанию
 `0.0.0.0`; `127.0.0.1`, если клиенты локальные), ограничивает число соединений

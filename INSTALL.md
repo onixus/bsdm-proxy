@@ -78,6 +78,8 @@ export SEARCH_API_TOKEN="$(openssl rand -hex 32)"
 # AUTH_ENABLED=true по умолчанию: подставьте свой файл пользователей
 # (scripts/gen-basic-auth-user.sh), иначе смонтируется пример с публичными хешами.
 export BASIC_AUTH_USERS_HOST=./config/basic-auth-users.json
+# Создайте этот файл с реальными Argon2id-хешами и правами 0600:
+# docs/getting-started/pilot-auth.md (раздел Create users file).
 # MITM CA: 4096-bit RSA, 730 дней (2 года), CA:TRUE pathlen:0,
 # keyUsage=keyCertSign,cRLSign. Срок переопределяется: --days N.
 # Ротация раз в два года: docs/ops-and-dev/ca-lifecycle.md (scripts/rotate-ca.sh).
@@ -99,8 +101,7 @@ docker compose --profile threat-intel pull && docker compose --profile threat-in
 # SIEM вебхуки и ML-скоринг
 docker compose --profile alerts --profile ml pull && docker compose --profile alerts --profile ml up -d
 
-# DNS Sinkhole / RPZ сайдкар
-docker compose --profile dns-sinkhole pull && docker compose --profile dns-sinkhole up -d
+# DNS Sinkhole входит в базовый стек и запускается обычным up -d
 ```
 
 Проверка:
@@ -108,8 +109,8 @@ docker compose --profile dns-sinkhole pull && docker compose --profile dns-sinkh
 ```bash
 curl http://127.0.0.1:9090/health
 curl http://127.0.0.1:9090/ready
-curl -x http://127.0.0.1:3128 http://httpbin.org/get
-curl --cacert certs/ca.crt -x http://127.0.0.1:3128 https://httpbin.org/uuid
+curl --proxy-user pilot -x http://127.0.0.1:3128 http://httpbin.org/get
+curl --proxy-user pilot --cacert certs/ca.crt -x http://127.0.0.1:3128 https://httpbin.org/uuid
 ```
 
 Admin Console доступна по адресу `http://127.0.0.1:9090/admin/`.
@@ -124,7 +125,7 @@ docker compose -f deploy/compose/docker-compose.lite.yml up -d --build
 cargo build -p bsdm-proxy --bin proxy
 ```
 
-Для Cargo-сборки используйте актуальный Rust stable (1.85+), совместимый с lockfile.
+Для Cargo-сборки используйте актуальный Rust stable (1.88+), совместимый с lockfile.
 Системные зависимости перечислены в
 [руководстве разработчика](docs/ops-and-dev/development.md).
 

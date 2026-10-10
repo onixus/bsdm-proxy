@@ -8,6 +8,10 @@
 
 ## Context
 
+This section records the situation at the decision date (2026-08-25). Current
+implementation and the operator procedure are described below; the historical
+statements here are not current deployment defaults.
+
 The `threat-intel` crate collects public phishing/malware feeds (OpenPhish, PhishStats, Phishing.Database, URLhaus), normalizes them, stores them in SQLite with TTL, and scores them by source weight. That part is uncontroversial: it is metadata-only collection.
 
 The enforcement path, however, landed **before** this decision was written down, and it is on by default:
@@ -39,7 +43,7 @@ Public phishing feeds carry URL-level indicators, shared hosters, URL shorteners
    - In shadow mode `POST /api/v1/soar/block` returns `202 Accepted` with a `shadow` marker instead of `200`, and the indicator is tagged `shadow` in the store so that it reaches the shadow export only. Flipping `TI_ENFORCEMENT_MODE` to `enforce` does **not** promote indicators accepted while shadow was in force — the enforcement export skips them, and promoting one takes a deliberate re-submission under `enforce`. The response must make it unambiguous to the calling playbook that nothing is being blocked.
    - `enforce` mode keeps the current `200` semantics.
 
-5. **Documentation states the mode, not an aspiration.** README, `project-status.md` and the TI pages describe the feature as *threat monitoring in Shadow Mode (enforcement in development)*, without present-tense claims of protection or blocking.
+5. **Documentation states the mode, not an aspiration.** README, `project-status.md` and the TI pages describe the default as *threat monitoring in Shadow Mode*, and distinguish the implemented beta domain enforcement from installation acceptance, without present-tense claims of protection or blocking.
 
 ## Transition criteria to enforcement
 
@@ -59,26 +63,26 @@ Enforcement is enabled per feed set and per installation. Passing these criteria
 
 1. `TI_ENFORCEMENT_MODE` is unset or `shadow` in the environment of the `threat-intel` service.
 2. The path referenced by `DNS_SINKHOLE_ZONE_PATH` is **not** a collector-generated `threats.rpz`, and no automation copies it there.
-3. The proxy ACL configuration does not reference `TI_ACL_EXPORT_PATH` / `threat_domains.json`.
+3. The proxy process also has `TI_ENFORCEMENT_MODE=shadow` (or `TI_ENFORCE_ENABLED=false`). Its `ti_shadow` module reads `.shadow` JSON for observation; `ti_enforce` must not report effective `enforce`.
 4. `bsdm_proxy_ti_shadow_matches_total` is present in `/metrics` on the proxy and grows with traffic; events carrying `threat_shadow_match` are searchable in ClickHouse.
 5. Grafana dashboard **BSDM Threat Intelligence (Shadow)** (`/d/bsdm-threat-intel-shadow`) shows both posture stats as `shadow`, "Enforce blocks" flat at 0, and the per-feed match rate plus the ClickHouse FP-review table used to fill in the transition record.
 
 **Enabling enforcement (only after the transition criteria are met):**
 
 1. Record the evidence (shadow window, per-feed FP rate, reviewer) in the go/no-go record.
-2. Set `TI_ENFORCEMENT_MODE=enforce` for the `threat-intel` service and restart it.
-3. Publish the generated zone to the sinkhole path through the control-plane RPZ API, keeping the previous serial for rollback.
+2. Set `TI_ENFORCEMENT_MODE=enforce` for the collector and restart it. Validate its generated JSON (`mode: "enforce"`, path without `.shadow`) and RPZ artifacts.
+3. For proxy blocking, separately set `TI_ENFORCEMENT_MODE=enforce` in the proxy process, mount the JSON at `TI_ENFORCE_FEED_PATH` and restart proxy. The base Compose does not pass this variable to proxy automatically: use an explicit overlay. Check Triple-Gate and `bsdm_proxy_ti_effective_mode`. For DNS blocking, deliberately publish the generated zone through the RPZ API, retaining the previous serial. These are independent enforcement paths.
 4. Watch deny volume and user reports for the first 24 hours with a named on-call operator.
 
 **Rolling back:**
 
-1. Set `TI_ENFORCEMENT_MODE=shadow` (or unset it) and restart `threat-intel`.
+1. First set proxy `TI_ENFORCEMENT_MODE=shadow` (or `TI_ENFORCE_ENABLED=false`) and restart it; verify its effective mode and a controlled request. Then set the collector to shadow and restart it. Stopping the collector or removing an export alone leaves the proxy last-known-good table in memory and does not undo blocking.
 2. Restore the previous DNS zone serial ([RPZ_Deployment.md](../threat-intelligence/RPZ_Deployment.md)); the sinkhole falls back to the compiled zone it had before.
 3. If the incident touched stored indicators, restore from the backup/restore runbook ([backup-restore.md](../ops-and-dev/backup-restore.md)).
 
 ## Implementation status
 
-Implemented on this branch; the mode contract above is what the code does:
+Implemented in current code; the mode contract above is separate from production acceptance:
 
 - `TI_ENFORCEMENT_MODE` parsing, the fail-safe fallback for any unrecognised value and the warning for `TI_RPZ_ENABLED=true` without `enforce`: `threat-intel/src/config.rs`.
 - Artifacts under the enforcement names are written **only** in `enforce`; in shadow the collector writes `threats.rpz.shadow` and `threat_domains.json.shadow`, and the zone body carries a `SHADOW MODE … Do NOT load this zone into dns-sinkhole` banner: `threat-intel/src/collector.rs`, `threat-intel/src/rpz.rs`.
@@ -87,6 +91,7 @@ Implemented on this branch; the mode contract above is what the code does:
 - `dns-sinkhole` refuses an observe-only artifact outright — by `.shadow` path suffix and by the `_bsdm-enforcement-mode IN TXT "shadow"` marker the collector writes into the zone; at boot this is a hard error rather than a fallback, so a mistaken `DNS_SINKHOLE_ZONE_PATH` cannot pass unnoticed: `threat-intel/src/rpz.rs`, `dns-sinkhole/src/zone.rs`, `dns-sinkhole/src/main.rs`.
 - The control-plane RPZ API (`/api/dns/*`) is a separate path into the same zone and is **not** governed by `TI_ENFORCEMENT_MODE`; it is bounded instead by a mutation audit trail, `?dryRun=true` previews and a confirmation threshold on list size: `proxy/src/rpz_api.rs` ([control-plane-security.md](../ops-and-dev/control-plane-security.md)).
 - The proxy-side matcher reads only the shadow export (`TI_SHADOW_MATCH_ENABLED`, `TI_SHADOW_FEED_PATH`, `TI_SHADOW_RELOAD_SECS`), annotates `threat_shadow_match` and counts `bsdm_proxy_ti_shadow_matches_total{feed}` without touching the allow/deny path: `proxy/src/ti_shadow.rs`, `proxy/src/metrics.rs`.
+- The separate proxy domain enforcement matcher (`ti_enforce.rs`) requires configured `enforce`, a non-shadow path and JSON `mode: "enforce"`; an explicit matched ACL allow-rule wins. A successful reload invalidates policy cache; failed reload retains the old table. See [configuration](../ops-and-dev/configuration.md#threat-intel-domain-enforcement-proxy-beta).
 - The event field and its ClickHouse column: `bsdm-events/src/lib.rs`, `bsdm-events/src/clickhouse.rs`, `cache-indexer/src/clickhouse.rs`.
 
 Operator-facing variables and metrics: [configuration.md](../ops-and-dev/configuration.md#threat-intel-shadow-matching-proxy) · [logging.md](../ops-and-dev/logging.md).
@@ -97,7 +102,7 @@ Operator-facing variables and metrics: [configuration.md](../ops-and-dev/configu
 
 - **Fail-safe by default**: no default configuration and no single legacy flag can turn unmoderated feed content into a block decision. Enforcement is an explicit, named act.
 - **Decision based on measurement**: the false-positive question is answered with per-feed data from the installation's own traffic instead of vendor reputation.
-- **Reversible**: switching back to shadow is one variable plus a zone serial restore, both exercised before enforcement is allowed.
+- **Reversible**: switching both collector and proxy back to shadow, plus a published-zone restore, is exercised before enforcement is allowed.
 - **Honest product surface**: documentation and UI describe monitoring, which is what the code does.
 
 ### Negative

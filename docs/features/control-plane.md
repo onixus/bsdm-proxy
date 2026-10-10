@@ -61,10 +61,15 @@ curl -X POST http://127.0.0.1:9090/api/config/apply \
 | Variable | Default | Role |
 |----------|---------|------|
 | `CONFIG_ENV_PATH` | `/etc/bsdm-proxy/bsdm-proxy.env` or `./bsdm-proxy.env` | Persisted env file |
-| `CONFIG_RESTART_CMD` | _(empty)_ | Optional shell command before shutdown (e.g. `systemctl restart bsdm-proxy`) |
+| `CONFIG_RESTART_CMD` | _(empty)_ | Development/test only: optional shell command before shutdown (e.g. `systemctl restart bsdm-proxy`) |
 | `RKN_SYNC_URL` | SourceForge `dump.csv` mirror | Daily Roskomnadzor registry sync |
 
-When `CONFIG_RESTART_CMD` is unset, the proxy spawns a replacement process with the updated environment, then shuts down gracefully.
+Only development/test may use self-respawn or `CONFIG_RESTART_CMD`. In production
+these mechanisms are disabled; the supervisor must restart the process and read
+the persisted env file. Compose does not automatically reread an arbitrary
+`CONFIG_ENV_PATH`: reconcile its environment/`env_file` and recreate the service.
+Kubernetes also needs its ConfigMap/Secret reconciled; a pod restart alone does
+not promote a process-local file into deployment configuration.
 
 **Since v1.0** `config/apply` edits only an allowlist of operational keys. Requests touching
 `CONTROL_API_TOKEN`, `ACL_API_TOKEN`, `SEARCH_API_TOKEN`, `ACL_RULES_PATH`,
@@ -106,20 +111,24 @@ curl http://127.0.0.1:9090/api/stats
 ```bash
 # Exact URL (method defaults to GET)
 curl -X POST http://127.0.0.1:9090/api/cache/purge \
+  -H "Authorization: Bearer $CONTROL_API_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"url":"https://example.com/asset.js"}'
 
 # By Cache-Tag / Surrogate-Key (indexed on L1 insert)
 curl -X POST http://127.0.0.1:9090/api/cache/purge \
+  -H "Authorization: Bearer $CONTROL_API_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"tag":"product-42"}'
 
 curl -X POST http://127.0.0.1:9090/api/cache/purge \
+  -H "Authorization: Bearer $CONTROL_API_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"tags":["catalog","homepage"]}'
 
 # Entire L1 (+ Redis L2 prefix when enabled)
 curl -X POST http://127.0.0.1:9090/api/cache/purge \
+  -H "Authorization: Bearer $CONTROL_API_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"all":true}'
 ```

@@ -8,7 +8,11 @@ Phase B operational drill execution record and runbook for MITM CA rotation/roll
 
 ## 1. Drill Summary & Acceptance Matrix
 
-All operational drills required for the pilot phase (**Issue #329** / **#327**) have been executed and verified.
+This table preserves the historical execution record for **Issue #329 / #327**.
+Timings and test counts are that run's evidence, not current CI or acceptance of
+this installation. Repeat the procedures below on the target deployment.
+The RC uses fail-closed CA startup checks; the older warning description in the
+record does not describe the current production posture.
 
 | Drill Component | Target / Criteria | Measured Outcome | Verdict |
 |---|---|---|---|
@@ -45,7 +49,7 @@ All operational drills required for the pilot phase (**Issue #329** / **#327**) 
    ```
 3. Start the proxy and verify MITM interception:
    ```bash
-   curl --cacert certs/ca.crt -x http://127.0.0.1:3128 https://httpbin.org/uuid
+   curl --proxy-user pilot --cacert certs/ca.crt -x http://127.0.0.1:3128 https://httpbin.org/uuid
    ```
 
 #### Phase 3: Emergency Rollback
@@ -61,7 +65,7 @@ install -m 644 "${LATEST_ARCHIVE}/ca.crt" certs/ca.crt
 ./scripts/rotate-ca.sh verify
 
 # 4. Restart the proxy and verify traffic:
-curl --cacert certs/ca.crt -x http://127.0.0.1:3128 https://httpbin.org/uuid
+curl --proxy-user pilot --cacert certs/ca.crt -x http://127.0.0.1:3128 https://httpbin.org/uuid
 ```
 
 ---
