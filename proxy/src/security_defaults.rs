@@ -24,6 +24,40 @@ fn configured_deployment_profile() -> DeploymentProfile {
         .unwrap_or(DeploymentProfile::Production)
 }
 
+/// `DEPLOYMENT_PROFILE` is production (also when unset or unparsable).
+pub(crate) fn is_production_profile() -> bool {
+    configured_deployment_profile() == DeploymentProfile::Production
+}
+
+/// `BLOCK_CLOUD_METADATA` (default on; `0/false/no/off` disables).
+pub(crate) fn block_cloud_metadata_from_env() -> bool {
+    std::env::var("BLOCK_CLOUD_METADATA")
+        .map(|v| {
+            !matches!(
+                v.to_ascii_lowercase().as_str(),
+                "0" | "false" | "no" | "off"
+            )
+        })
+        .unwrap_or(true)
+}
+
+/// `BLOCK_LOOPBACK_FORWARDING` (default on in production, off in lab profiles):
+/// proxy users must not reach services bound to the proxy host's loopback
+/// (Redis L2, control/metrics, threat-intel admin).
+pub(crate) fn block_loopback_forwarding_from_env() -> bool {
+    std::env::var("BLOCK_LOOPBACK_FORWARDING")
+        .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or_else(|_| is_production_profile())
+}
+
+pub(crate) fn resolved_destination_policy_from_env(
+) -> crate::security_util::ResolvedDestinationPolicy {
+    crate::security_util::ResolvedDestinationPolicy {
+        block_metadata: block_cloud_metadata_from_env(),
+        block_loopback: block_loopback_forwarding_from_env(),
+    }
+}
+
 /// Explicit lab override — never enable on a real pilot network.
 pub fn control_api_allow_insecure() -> bool {
     env_flag("CONTROL_API_ALLOW_INSECURE")
@@ -107,6 +141,75 @@ pub fn validate_control_plane_security() -> Result<(), String> {
     }
 }
 
+/// Open-proxy guard (P1-04): in production a proxy without authentication
+/// must restrict clients by ACL source IP, or the operator must opt in to an
+/// anonymous proxy explicitly (`ALLOW_ANONYMOUS_PROXY=true`) — otherwise
+/// `0.0.0.0:3128` with the MITM CA is an open proxy for anyone who reaches it.
+pub fn validate_open_proxy_posture(
+    auth_enabled: bool,
+    has_client_ip_acl: bool,
+) -> Result<(), String> {
+    if auth_enabled || has_client_ip_acl {
+        return Ok(());
+    }
+    if env_flag("ALLOW_ANONYMOUS_PROXY") {
+        warn!("ALLOW_ANONYMOUS_PROXY=true: proxy accepts unauthenticated clients without a client-IP ACL");
+        return Ok(());
+    }
+    match configured_deployment_profile() {
+        DeploymentProfile::Production => {
+            error!(
+                "AUTH_ENABLED=false and no client-IP ACL rule in DEPLOYMENT_PROFILE=production \
+                 (enable auth, add an IpRange ACL rule, or set ALLOW_ANONYMOUS_PROXY=true)"
+            );
+            Err(
+                "refusing to start an open proxy in production: enable AUTH_ENABLED, add a \
+                 client-IP (IpRange) ACL rule, or set ALLOW_ANONYMOUS_PROXY=true"
+                    .to_string(),
+            )
+        }
+        DeploymentProfile::Development | DeploymentProfile::Test => {
+            warn!("AUTH_ENABLED=false and no client-IP ACL rule — open proxy (lab profile)");
+            Ok(())
+        }
+    }
+}
+
+/// Basic proxy auth without a users file accepts *any* credentials (the
+/// username is taken on trust). In production that is an identity-spoofing hole
+/// — any client picks the username with the widest ACL and forges the audit
+/// trail — so startup fails; lab profiles keep the warning.
+pub fn validate_basic_auth_posture(
+    auth_enabled: bool,
+    backend_is_basic: bool,
+    users_file_configured: bool,
+) -> Result<(), String> {
+    if !(auth_enabled && backend_is_basic && !users_file_configured) {
+        return Ok(());
+    }
+    match configured_deployment_profile() {
+        DeploymentProfile::Production => {
+            error!(
+                "AUTH_ENABLED=true with AUTH_BACKEND=basic requires BASIC_AUTH_USERS_FILE \
+                 in DEPLOYMENT_PROFILE=production"
+            );
+            Err(
+                "AUTH_ENABLED with AUTH_BACKEND=basic requires BASIC_AUTH_USERS_FILE in \
+                 production (without it any credentials are accepted)"
+                    .to_string(),
+            )
+        }
+        DeploymentProfile::Development | DeploymentProfile::Test => {
+            warn!(
+                "AUTH_ENABLED with AUTH_BACKEND=basic but BASIC_AUTH_USERS_FILE is unset — \
+                 any Proxy-Authorization credentials will be accepted (lab only). For pilot/production \
+                 set BASIC_AUTH_USERS_FILE (see docs/getting-started/pilot-auth.md)"
+            );
+            Ok(())
+        }
+    }
+}
+
 /// Metrics/control listener bind host (not including port).
 ///
 /// Default `0.0.0.0` for container port publishing. Bare-metal pilots should
@@ -170,6 +273,38 @@ mod tests {
         assert!(!control_api_fail_closed());
         assert!(validate_control_plane_security().is_ok());
         std::env::remove_var("CONTROL_API_ALLOW_INSECURE");
+        std::env::remove_var("DEPLOYMENT_PROFILE");
+    }
+
+    #[test]
+    fn basic_auth_without_users_file_fails_in_production_only() {
+        let _g = env_lock().lock().unwrap();
+        std::env::set_var("DEPLOYMENT_PROFILE", "production");
+        assert!(validate_basic_auth_posture(true, true, false).is_err());
+        assert!(validate_basic_auth_posture(true, true, true).is_ok());
+        assert!(validate_basic_auth_posture(false, true, false).is_ok());
+        assert!(validate_basic_auth_posture(true, false, false).is_ok());
+        std::env::remove_var("DEPLOYMENT_PROFILE");
+        // Unset profile means production.
+        assert!(validate_basic_auth_posture(true, true, false).is_err());
+        std::env::set_var("DEPLOYMENT_PROFILE", "development");
+        assert!(validate_basic_auth_posture(true, true, false).is_ok());
+        std::env::remove_var("DEPLOYMENT_PROFILE");
+    }
+
+    #[test]
+    fn open_proxy_refused_in_production_without_opt_in() {
+        let _g = env_lock().lock().unwrap();
+        std::env::set_var("DEPLOYMENT_PROFILE", "production");
+        std::env::remove_var("ALLOW_ANONYMOUS_PROXY");
+        assert!(validate_open_proxy_posture(false, false).is_err());
+        assert!(validate_open_proxy_posture(true, false).is_ok());
+        assert!(validate_open_proxy_posture(false, true).is_ok());
+        std::env::set_var("ALLOW_ANONYMOUS_PROXY", "true");
+        assert!(validate_open_proxy_posture(false, false).is_ok());
+        std::env::remove_var("ALLOW_ANONYMOUS_PROXY");
+        std::env::set_var("DEPLOYMENT_PROFILE", "development");
+        assert!(validate_open_proxy_posture(false, false).is_ok());
         std::env::remove_var("DEPLOYMENT_PROFILE");
     }
 

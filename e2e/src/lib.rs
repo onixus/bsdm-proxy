@@ -118,6 +118,18 @@ impl ProxyHarness {
             .env("ACL_DEFAULT_ACTION", "allow")
             // e2e lab: production profile is default; allow open control plane unless tests set tokens.
             .env("CONTROL_API_ALLOW_INSECURE", "true")
+            // Most tests run without proxy auth or client-IP ACLs, which the
+            // production profile refuses at startup unless opted in.
+            .env("ALLOW_ANONYMOUS_PROXY", "true")
+            // The mock upstreams listen on 127.0.0.1, which production blocks by
+            // default (BLOCK_LOOPBACK_FORWARDING). Tests that exercise the block
+            // opt back in through extra_env.
+            .env("BLOCK_LOOPBACK_FORWARDING", "false")
+            // Lab REST surfaces (agent, AmneziaWG, cluster/threat-sync/eBPF/…)
+            // are 404 in production unless enabled; the harness covers them.
+            .env("AGENT_API_ENABLED", "true")
+            .env("AWG_API_ENABLED", "true")
+            .env("LAB_API_ENABLED", "true")
             // Isolate the proxy from any ambient persisted config. The harness runs it
             // with current_dir set to the workspace root, and config_env_path() falls
             // back to ./bsdm-proxy.env there — a tracked file pinning HTTP_PORT=3128
@@ -143,6 +155,12 @@ impl ProxyHarness {
                 },
             );
 
+        // Explicit CA location: the production profile ignores the relative
+        // ./certs fallback, and some tests run with DEPLOYMENT_PROFILE=production.
+        let ca_dir = workspace.join("certs");
+        let ca_dir = ca_dir.canonicalize().unwrap_or(ca_dir);
+        command.env("MITM_CA_DIR", ca_dir.to_string_lossy().into_owned());
+
         if config.upstream_ca_cert {
             let ca_path = workspace.join("certs/ca.crt");
             let ca_path = ca_path.canonicalize().unwrap_or(ca_path);
@@ -154,6 +172,11 @@ impl ProxyHarness {
         }
         if let Some(brokers) = &config.kafka_brokers {
             command.env("KAFKA_BROKERS", brokers);
+        }
+        if config.auth_enabled {
+            // Basic auth without BASIC_AUTH_USERS_FILE (accept-any credentials,
+            // which these tests rely on) is refused in the production profile.
+            command.env("DEPLOYMENT_PROFILE", "test");
         }
         for (key, value) in &config.extra_env {
             command.env(key, value);

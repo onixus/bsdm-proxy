@@ -1,7 +1,8 @@
 [package]
 name = "dns-sinkhole"
-version = "0.9.15"
+version = "1.0.0-rc.1"
 edition = "2021"
+publish = false
 license = "MIT"
 authors = ["BSDM-Proxy Contributors"]
 description = "Optional UDP DNS sinkhole / RPZ-lite proxy (sidecar, not in bsdm-proxy)"
@@ -30,3 +31,4 @@ rustls-pemfile = "2.2"
 [dev-dependencies]
 tokio = { workspace = true }
 tempfile = "3.14"
+rcgen = "0.14"

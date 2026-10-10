@@ -623,11 +623,19 @@ fn decode_chunked(data: &[u8]) -> Result<Option<Bytes>, String> {
         if size == 0 {
             return Ok(Some(Bytes::from(out)));
         }
-        if data.len() < i + size + 2 {
+        // `size` comes from the ICAP server: `i + size + 2` must not overflow
+        // (AS-20) — a wrapped sum would slice with end < start and panic.
+        let chunk_end = i
+            .checked_add(size)
+            .ok_or_else(|| format!("chunk size too large: {line}"))?;
+        let next = chunk_end
+            .checked_add(2)
+            .ok_or_else(|| format!("chunk size too large: {line}"))?;
+        if data.len() < next {
             return Ok(None);
         }
-        out.extend_from_slice(&data[i..i + size]);
-        i += size + 2;
+        out.extend_from_slice(&data[i..chunk_end]);
+        i = next;
     }
 }
 
@@ -636,6 +644,26 @@ mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
+
+    #[test]
+    fn decode_chunked_rejects_overflowing_chunk_size() {
+        for size in ["ffffffffffffffff", "fffffffffffffffe", "fffffffffffffff0"] {
+            let data = format!("{size}\r\nabc\r\n0\r\n\r\n");
+            let err = decode_chunked(data.as_bytes()).unwrap_err();
+            assert!(err.contains("too large"), "{size}: {err}");
+        }
+    }
+
+    #[test]
+    fn decode_chunked_handles_complete_and_partial_bodies() {
+        assert_eq!(
+            decode_chunked(b"3\r\nabc\r\n2\r\nde\r\n0\r\n\r\n").unwrap(),
+            Some(Bytes::from_static(b"abcde"))
+        );
+        // Large but non-overflowing size: incomplete, wait for more data.
+        assert_eq!(decode_chunked(b"ffff\r\nabc").unwrap(), None);
+        assert!(decode_chunked(b"zz\r\n").is_err());
+    }
 
     async fn spawn_mock_icap() -> SocketAddr {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

@@ -14,6 +14,9 @@ use crate::acl_config::{load_acl_engine_from_file, parse_acl_action, save_acl_en
 use crate::http_types::{full, Body};
 use crate::policy_cache::PolicyDecisionCache;
 
+/// ACL rule payloads are a few KiB; 1 MiB leaves ample room for bulk imports.
+const MAX_ACL_API_BODY_BYTES: usize = 1024 * 1024;
+
 #[derive(Clone)]
 pub struct AclApiConfig {
     pub default_action: AclAction,
@@ -63,12 +66,39 @@ impl AclApiState {
     }
 
     pub async fn handle_request(&self, req: Request<Incoming>) -> Response<Body> {
+        self.handle_request_body(req).await
+    }
+
+    /// Body-generic core of [`Self::handle_request`]. Authorization is checked
+    /// from the headers *before* the body is read, and the body is capped: this
+    /// listener is reachable without a token, so neither an unauthenticated nor
+    /// an oversized upload may make the process buffer it.
+    async fn handle_request_body<B>(&self, req: Request<B>) -> Response<Body>
+    where
+        B: hyper::body::Body,
+        B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    {
         let (parts, body) = req.into_parts();
-        let body = match BodyExt::collect(body).await {
+        if !self.is_authorized(&parts.headers) {
+            return json_response(StatusCode::UNAUTHORIZED, r#"{"error":"unauthorized"}"#);
+        }
+        let body = match http_body_util::Limited::new(body, MAX_ACL_API_BODY_BYTES)
+            .collect()
+            .await
+        {
             Ok(collected) => collected.to_bytes(),
+            Err(e)
+                if e.downcast_ref::<http_body_util::LengthLimitError>()
+                    .is_some() =>
+            {
+                return json_response(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    r#"{"error":"payload too large"}"#,
+                );
+            }
             Err(e) => {
                 warn!("Failed to read ACL API body: {}", e);
-                Bytes::new()
+                return json_response(StatusCode::BAD_REQUEST, r#"{"error":"cannot read body"}"#);
             }
         };
         self.dispatch(&parts.method, parts.uri.path(), body, &parts.headers)
@@ -405,6 +435,40 @@ mod tests {
             "redirect_url": null,
             "comment": null
         }"#;
+
+    fn http_req(token: Option<&str>, body: Vec<u8>) -> Request<http_body_util::Full<Bytes>> {
+        let mut b = Request::builder()
+            .method(Method::POST)
+            .uri("/api/acl/rules");
+        if let Some(t) = token {
+            b = b.header(AUTHORIZATION, format!("Bearer {t}"));
+        }
+        b.body(http_body_util::Full::new(Bytes::from(body)))
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn unauthorized_request_rejected_before_body_and_oversized_body_capped() {
+        let state = test_state_with_token();
+        // No token: 401 regardless of the (oversized) body.
+        let resp = state
+            .handle_request_body(http_req(None, vec![b' '; 2 * MAX_ACL_API_BODY_BYTES]))
+            .await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        // Valid token, body over the cap: 413.
+        let resp = state
+            .handle_request_body(http_req(
+                Some("secret-token"),
+                vec![b' '; MAX_ACL_API_BODY_BYTES + 1],
+            ))
+            .await;
+        assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        // Valid token, normal body: handled.
+        let resp = state
+            .handle_request_body(http_req(Some("secret-token"), SAMPLE_RULE.to_vec()))
+            .await;
+        assert!(resp.status().is_success(), "{}", resp.status());
+    }
 
     #[tokio::test]
     async fn list_rules_empty() {

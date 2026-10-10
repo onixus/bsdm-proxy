@@ -2,7 +2,7 @@
 
 use crate::acl::{AclAction, AclEngine, AclEngineHandle};
 use crate::acl_config::{load_acl_engine_from_file, parse_acl_action};
-use crate::categorization::{CategorizationConfig, CategorizationEngine, DEFAULT_RKN_FALLBACK_URL};
+use crate::categorization::{rkn_fallback_url_from, CategorizationConfig, CategorizationEngine};
 use crate::mitm_breaker::MitmCircuitBreaker;
 use crate::pinning::PinningRegistry;
 use std::sync::Arc;
@@ -157,11 +157,10 @@ fn load_categorization_config() -> CategorizationConfig {
         rkn_sync_enabled: env_flag("RKN_SYNC_ENABLED"),
         rkn_sync_url: std::env::var("RKN_SYNC_URL")
             .unwrap_or_else(|_| crate::runtime_config::DEFAULT_RKN_SYNC_URL.to_string()),
-        rkn_fallback_url: match std::env::var("RKN_FALLBACK_URL") {
-            Ok(value) if value.trim().is_empty() => None,
-            Ok(value) => Some(value),
-            Err(_) => Some(DEFAULT_RKN_FALLBACK_URL.to_string()),
-        },
+        rkn_fallback_url: rkn_fallback_url_from(
+            std::env::var("RKN_FALLBACK_URL").ok(),
+            crate::security_defaults::is_production_profile(),
+        ),
         rkn_sync_interval_secs: std::env::var("RKN_SYNC_INTERVAL_SECS")
             .ok()
             .and_then(|s| s.parse().ok())

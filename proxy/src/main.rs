@@ -192,6 +192,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let cert_cache = CertCache::load_for_startup(mitm_enabled).await?;
+    if let Some(not_after) = cert_cache.ca_not_after_unix() {
+        metrics
+            .mitm_ca_not_after_timestamp_seconds
+            .set(not_after as f64);
+    }
     #[cfg(feature = "kafka")]
     let kafka_brokers = std::env::var("KAFKA_BROKERS").ok();
     #[cfg(not(feature = "kafka"))]
@@ -250,6 +255,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let auth_config = load_auth_config();
+    let has_client_ip_acl = policy_config
+        .acl_engine
+        .as_ref()
+        .is_some_and(|engine| bsdm_proxy::acl_restricts_clients_by_ip(&engine.load()));
+    bsdm_proxy::validate_open_proxy_posture(auth_config.enabled, has_client_ip_acl)?;
     let auth = Some(Arc::new(
         AuthManager::new(auth_config.clone()).with_metrics(metrics.clone()),
     ));
@@ -259,13 +269,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             auth_config.backend, auth_config.realm
         );
         if matches!(auth_config.backend, bsdm_proxy::AuthBackend::Basic) {
-            if auth_config.basic_users_file.is_none() {
-                warn!(
-                    "AUTH_ENABLED with AUTH_BACKEND=basic but BASIC_AUTH_USERS_FILE is unset — \
-                     any Proxy-Authorization credentials will be accepted. For pilot/production \
-                     set BASIC_AUTH_USERS_FILE (see docs/getting-started/pilot-auth.md)"
-                );
-            } else {
+            bsdm_proxy::validate_basic_auth_posture(
+                true,
+                true,
+                auth_config.basic_users_file.is_some(),
+            )?;
+            if auth_config.basic_users_file.is_some() {
                 info!(
                     "Basic auth users file: {}",
                     auth_config.basic_users_file.as_deref().unwrap_or("")

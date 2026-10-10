@@ -124,7 +124,7 @@ impl ProxyService {
         let domain = Self::extract_domain(url);
         let upstream_start = Instant::now();
 
-        let response = match self.http_client.load().request(cond_req).await {
+        let response = match self.http_client.request(cond_req).await {
             Ok(resp) => resp,
             Err(e) => {
                 warn!("Revalidation upstream error for {}: {}", url, e);

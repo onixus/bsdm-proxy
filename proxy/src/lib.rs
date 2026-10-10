@@ -78,7 +78,10 @@ pub mod upstream;
 pub mod wasm_host;
 
 // Re-export commonly used types
-pub use acl::{AclAction, AclDecision, AclEngine, AclEngineHandle, AclRule, AclRuleType};
+pub use acl::{
+    acl_restricts_clients_by_ip, AclAction, AclDecision, AclEngine, AclEngineHandle, AclRule,
+    AclRuleType,
+};
 pub use acl_api::{AclApiConfig, AclApiState};
 pub use acl_config::{load_acl_engine_from_file, parse_acl_action, save_acl_engine_to_file};
 #[cfg(feature = "auth-kerberos")]
@@ -135,7 +138,8 @@ pub use rate_limit::{
 pub use reverse_proxy::ReverseProxyConfig;
 pub use security_defaults::{
     control_api_fail_closed, control_api_token_from_env, metrics_auth_token, metrics_bind_addr,
-    metrics_bind_host, validate_control_plane_security,
+    metrics_bind_host, validate_basic_auth_posture, validate_control_plane_security,
+    validate_open_proxy_posture,
 };
 pub use selection::{parse_strategy, SelectionStrategy};
 pub use semantic_cache::{

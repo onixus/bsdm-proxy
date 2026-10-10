@@ -116,6 +116,12 @@ impl CachedResponse {
             if is_hop_by_hop_or_framing_header(key) {
                 continue;
             }
+            // Never replay a stored Set-Cookie to another client. New entries
+            // with Set-Cookie are not stored at all; this also covers entries
+            // written by older versions (e.g. still in L2/Redis).
+            if key.eq_ignore_ascii_case("set-cookie") {
+                continue;
+            }
             if let (Ok(name), Ok(val)) = (
                 HeaderName::from_bytes(key.as_bytes()),
                 HeaderValue::from_str(value),
@@ -361,6 +367,34 @@ mod tests {
         );
         assert!(cached.body.is_mmap());
         assert_eq!(cached.response_body(), body);
+    }
+
+    #[test]
+    fn cached_response_never_replays_set_cookie() {
+        let dir = tempdir().unwrap();
+        let headers: Arc<[(Arc<str>, Arc<str>)]> = Arc::from([
+            (Arc::from("Set-Cookie"), Arc::from("sid=victim")),
+            (Arc::from("content-type"), Arc::from("text/plain")),
+        ]);
+        let cached = CachedResponse::from_upstream(
+            200,
+            headers,
+            Bytes::from_static(b"x"),
+            Duration::from_secs(60),
+            &CompressionConfig::default(),
+            usize::MAX,
+            dir.path(),
+            None,
+            None,
+            false,
+            false,
+        );
+        let response = cached.to_response_with_cache_status("HIT");
+        assert!(response.headers().get("set-cookie").is_none());
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "text/plain"
+        );
     }
 
     #[test]

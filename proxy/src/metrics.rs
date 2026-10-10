@@ -56,13 +56,21 @@ pub struct Metrics {
     pub kafka_send_errors: Counter,
     pub kafka_queue_dropped_total: Counter,
     pub tls_handshakes_total: CounterVec,
+    /// `notAfter` of the MITM CA certificate (Unix seconds); alert when it
+    /// is less than 30 days away (P1-03). 0 = unknown.
+    pub mitm_ca_not_after_timestamp_seconds: Gauge,
+    /// Domains switched to blind CONNECT by the MITM circuit breaker (P1-02).
+    pub mitm_circuit_breaker_trips_total: Counter,
 
     // Basic-auth password hashing metrics
     /// Password verifications by stored hash format (`argon2id` / `sha256_legacy`)
-    /// and result (`success` / `failure`).
+    /// and result (`success` / `failure` / `overloaded` — no Argon2 slot, AS-07).
     pub auth_password_verifications_total: CounterVec,
     /// Legacy SHA-256 hashes transparently upgraded to Argon2id on login.
     pub auth_password_rehashes_total: Counter,
+    /// Argon2 password verifications currently running (bounded by
+    /// `BASIC_AUTH_MAX_CONCURRENT_VERIFICATIONS`).
+    pub auth_password_verifications_in_flight: Gauge,
 
     // ACL metrics
     pub acl_decisions_total: CounterVec,
@@ -338,6 +346,18 @@ impl Metrics {
         )?;
         registry.register(Box::new(tls_handshakes_total.clone()))?;
 
+        let mitm_ca_not_after_timestamp_seconds = Gauge::new(
+            "bsdm_proxy_mitm_ca_not_after_timestamp_seconds",
+            "notAfter of the MITM CA certificate as a Unix timestamp",
+        )?;
+        registry.register(Box::new(mitm_ca_not_after_timestamp_seconds.clone()))?;
+
+        let mitm_circuit_breaker_trips_total = Counter::new(
+            "bsdm_proxy_mitm_circuit_breaker_trips_total",
+            "Domains switched to blind CONNECT by the MITM circuit breaker",
+        )?;
+        registry.register(Box::new(mitm_circuit_breaker_trips_total.clone()))?;
+
         let auth_password_verifications_total = CounterVec::new(
             Opts::new(
                 "bsdm_proxy_auth_password_verifications_total",
@@ -352,6 +372,12 @@ impl Metrics {
             "Legacy SHA-256 password hashes upgraded to Argon2id on successful login",
         )?;
         registry.register(Box::new(auth_password_rehashes_total.clone()))?;
+
+        let auth_password_verifications_in_flight = Gauge::new(
+            "bsdm_proxy_auth_password_verifications_in_flight",
+            "Basic-auth Argon2 password verifications currently running",
+        )?;
+        registry.register(Box::new(auth_password_verifications_in_flight.clone()))?;
 
         let acl_decisions_total = CounterVec::new(
             Opts::new("bsdm_proxy_acl_decisions_total", "Total ACL decisions"),
@@ -652,8 +678,11 @@ impl Metrics {
             kafka_send_errors,
             kafka_queue_dropped_total,
             tls_handshakes_total,
+            mitm_ca_not_after_timestamp_seconds,
+            mitm_circuit_breaker_trips_total,
             auth_password_verifications_total,
             auth_password_rehashes_total,
+            auth_password_verifications_in_flight,
             acl_decisions_total,
             acl_rules_matched_total,
             acl_eval_duration_seconds,

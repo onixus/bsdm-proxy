@@ -16,7 +16,7 @@ use crate::cache::{CacheConfig, CachedResponse, CACHEABLE_METHODS};
 use crate::cache_digest::DigestRegistry;
 use crate::cache_freshness::{
     cache_status_metric_label, evaluate_store, evaluate_store_precheck, miss_x_cache_status_header,
-    refresh_ttl_from_headers,
+    refresh_ttl_from_headers, RequestCacheContext,
 };
 use crate::categorization::CategorizationEngine;
 use crate::hierarchy::{HierarchyManager, HierarchyResult};
@@ -39,8 +39,7 @@ use crate::policy_engine::{PolicyEngine, PolicyEvaluation};
 use crate::policy_event::{build_policy_event, effective_decision_source, PolicyEventContext};
 use crate::rate_limit::{extract_api_key_ref, RateLimitViolation, RateLimiter};
 use crate::semantic_cache::{
-    content_cache_key, evaluate_llm_store, extract_embed_text, normalize_llm_body,
-    SemanticCacheConfig, SemanticIndex,
+    evaluate_llm_store, extract_embed_text, normalize_llm_body, SemanticCacheConfig, SemanticIndex,
 };
 use crate::session::{header_ci, resolve_location, SessionCorrelator};
 use crate::sharded_cache::HttpL1Cache;
@@ -207,6 +206,8 @@ pub struct ProxyService {
     pub(crate) block_cloud_metadata: bool,
     pub(crate) block_loopback_forwarding: bool,
     pub(crate) allowed_connect_ports: Option<Vec<u16>>,
+    /// Upper bound for a buffered request body (`MAX_REQUEST_BODY_BYTES`).
+    max_request_body_bytes: usize,
 }
 
 impl ProxyService {
@@ -363,17 +364,9 @@ impl ProxyService {
         let wasm_hook = try_load_from_env();
         let icap = IcapClient::try_from_env();
 
-        let block_cloud_metadata = std::env::var("BLOCK_CLOUD_METADATA")
-            .map(|v| {
-                !matches!(
-                    v.to_ascii_lowercase().as_str(),
-                    "0" | "false" | "no" | "off"
-                )
-            })
-            .unwrap_or(true);
-        let block_loopback_forwarding = std::env::var("BLOCK_LOOPBACK_FORWARDING")
-            .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
-            .unwrap_or(false);
+        let block_cloud_metadata = crate::security_defaults::block_cloud_metadata_from_env();
+        let block_loopback_forwarding =
+            crate::security_defaults::block_loopback_forwarding_from_env();
         let allowed_connect_ports = std::env::var("ALLOWED_CONNECT_PORTS")
             .ok()
             .map(|s| {
@@ -382,6 +375,7 @@ impl ProxyService {
                     .collect::<Vec<u16>>()
             })
             .filter(|ports| !ports.is_empty());
+        let max_request_body_bytes = helpers::max_request_body_bytes_from_env();
 
         Self {
             cert_cache,
@@ -426,6 +420,18 @@ impl ProxyService {
             block_cloud_metadata,
             block_loopback_forwarding,
             allowed_connect_ports,
+            max_request_body_bytes,
+        }
+    }
+
+    /// Policy for resolved upstream addresses (CONNECT tunnels and the
+    /// upstream HTTP connector).
+    pub(crate) fn resolved_destination_policy(
+        &self,
+    ) -> crate::security_util::ResolvedDestinationPolicy {
+        crate::security_util::ResolvedDestinationPolicy {
+            block_metadata: self.block_cloud_metadata,
+            block_loopback: self.block_loopback_forwarding,
         }
     }
 
@@ -1028,15 +1034,7 @@ impl ProxyService {
                                         .path_and_query()
                                         .map(|pq| pq.as_str())
                                         .unwrap_or("/");
-                                    return hyper::Response::builder()
-                                        .status(hyper::StatusCode::FOUND)
-                                        .header(hyper::header::LOCATION, path_query)
-                                        .header(
-                                            hyper::header::SET_COOKIE,
-                                            rp_config.session_cookie(&session_id),
-                                        )
-                                        .body(crate::http_types::empty())
-                                        .unwrap();
+                                    return rp_config.session_redirect(&session_id, path_query);
                                 } else {
                                     return hyper::Response::builder()
                                         .status(hyper::StatusCode::FORBIDDEN)
@@ -1087,6 +1085,18 @@ impl ProxyService {
                 authenticated_at: std::time::Instant::now(),
             }));
         }
+        // Reverse-proxy mode rewrites the URI to the fixed upstream, so the
+        // public Host legitimately differs there.
+        if self.reverse_proxy_config.is_none() {
+            if let Err(reason) = helpers::check_host_matches_authority(req.uri(), req.headers()) {
+                warn!(uri = %req.uri(), %reason, "Request rejected: Host/authority mismatch");
+                let mut resp = Response::new(full(Bytes::from_static(
+                    b"400 Bad Request: Host header does not match the request target",
+                )));
+                *resp.status_mut() = StatusCode::BAD_REQUEST;
+                return resp;
+            }
+        }
         let detailed_metrics = self.perf.record_detailed_metrics();
         let http_method = req.method().clone();
         let method = http_method.as_str();
@@ -1113,11 +1123,11 @@ impl ProxyService {
         let mut cache_key = self.generate_cache_key(method, &url);
 
         let req_ref = req.as_ref().expect("request present");
-        let (user_id, username) = if let Some(user) = proxy_user.as_deref() {
-            Self::user_fields(Some(user))
-        } else {
-            Self::extract_user_info(req_ref)
-        };
+        // Identity comes only from proxy authentication. The origin
+        // `Authorization` header is addressed to the destination server and is
+        // never verified here, so it must not name the user for ACL, rate
+        // limiting or audit (AS-09).
+        let (user_id, username) = Self::user_fields(proxy_user.as_deref());
         let user_agent = Self::request_header_str(req_ref, "user-agent");
 
         if let Some(resp) = self.check_rate_limit(client_ip, username.as_deref(), req_ref.headers())
@@ -1239,9 +1249,19 @@ impl ProxyService {
         if llm_mode {
             let (parts, body) = req.take().expect("request present").into_parts();
             let is_casb = self.casb_engine.is_llm_provider(&domain);
-            let dlp_body = crate::dlp::DlpBodyStream::new(body, self.dlp_engine.clone());
-            let body_bytes = match http_body_util::BodyExt::collect(dlp_body).await {
-                Ok(collected) => collected.to_bytes(),
+            let body_bytes = match helpers::collect_request_body(
+                body,
+                self.dlp_engine.clone(),
+                self.max_request_body_bytes,
+            )
+            .await
+            {
+                Ok(bytes) => bytes,
+                Err(e) if helpers::is_body_too_large(e.as_ref()) => {
+                    warn!(%url, limit = self.max_request_body_bytes, "Request body too large");
+                    Self::finish_request_metrics(&mut guard, &mut fast_scope, 413, 0, 0);
+                    return helpers::payload_too_large_response();
+                }
                 Err(e) => {
                     let err_msg = e.to_string();
                     error!("LLM body collection failed: {}", err_msg);
@@ -1263,15 +1283,7 @@ impl ProxyService {
                                     .duration_since(SystemTime::UNIX_EPOCH)
                                     .unwrap()
                                     .as_secs(),
-                                headers: parts
-                                    .headers
-                                    .iter()
-                                    .filter_map(|(k, v)| {
-                                        v.to_str()
-                                            .ok()
-                                            .map(|s| (k.as_str().to_string(), s.to_string()))
-                                    })
-                                    .collect(),
+                                headers: helpers::event_request_headers(&parts.headers),
                                 user_id: user_id.clone(),
                                 username: username.clone(),
                                 client_ip: client_ip.to_string(),
@@ -1312,7 +1324,23 @@ impl ProxyService {
                 }
             };
             let normalized = Bytes::from(normalize_llm_body(&body_bytes));
-            cache_key = content_cache_key(method, &url, &normalized);
+            // Entries are scoped to the caller's credentials (AS-02, LLM path).
+            // Any credential-bearing header counts: provider keys also travel
+            // as x-api-key / api-key / x-goog-api-key, not only Authorization.
+            let credentials: Vec<(&str, &[u8])> = parts
+                .headers
+                .iter()
+                .filter(|(name, _)| helpers::is_credential_header(name.as_str()))
+                .map(|(name, value)| (name.as_str(), value.as_bytes()))
+                .collect();
+            let credential_scope =
+                crate::semantic_cache::llm_credential_scope(&credentials, username.as_deref());
+            cache_key = crate::semantic_cache::scoped_content_cache_key(
+                credential_scope.as_deref(),
+                method,
+                &url,
+                &normalized,
+            );
 
             if let Some(cached) = self.http_cache.get(&cache_key) {
                 if cached.can_serve_fresh() {
@@ -1348,7 +1376,12 @@ impl ProxyService {
                             .find_similar(&emb, self.semantic_config.similarity_threshold)
                             .await
                         {
-                            Ok(Some(near_key)) => {
+                            Ok(Some(near_key))
+                                if crate::semantic_cache::key_in_scope(
+                                    &near_key,
+                                    credential_scope.as_deref(),
+                                ) =>
+                            {
                                 if let Some(cached) = self.http_cache.get(&near_key) {
                                     if cached.can_serve_fresh() {
                                         debug!("LLM cache semantic HIT: {} {}", method, url);
@@ -1374,7 +1407,7 @@ impl ProxyService {
                                     }
                                 }
                             }
-                            Ok(None) => {}
+                            Ok(_) => {}
                             Err(e) => {
                                 self.metrics.semantic_cache_vector_errors_total.inc();
                                 warn!("semantic index search failed: {e}");
@@ -1565,9 +1598,22 @@ impl ProxyService {
         } else {
             let (parts, body) = req.take().expect("request present").into_parts();
             let is_casb = self.casb_engine.is_llm_provider(&domain);
-            let dlp_body = crate::dlp::DlpBodyStream::new(body, self.dlp_engine.clone());
-            let body_bytes = match http_body_util::BodyExt::collect(dlp_body).await {
-                Ok(collected) => collected.to_bytes(),
+            let body_bytes = match helpers::collect_request_body(
+                body,
+                self.dlp_engine.clone(),
+                self.max_request_body_bytes,
+            )
+            .await
+            {
+                Ok(bytes) => bytes,
+                Err(e) if helpers::is_body_too_large(e.as_ref()) => {
+                    warn!(%url, limit = self.max_request_body_bytes, "Request body too large");
+                    if let Some(permit) = flight_permit.take() {
+                        permit.complete(None);
+                    }
+                    Self::finish_request_metrics(&mut guard, &mut fast_scope, 413, 0, 0);
+                    return helpers::payload_too_large_response();
+                }
                 Err(e) => {
                     let err_msg = e.to_string();
                     error!("Body collection failed: {}", err_msg);
@@ -1592,15 +1638,7 @@ impl ProxyService {
                                     .duration_since(SystemTime::UNIX_EPOCH)
                                     .unwrap()
                                     .as_secs(),
-                                headers: parts
-                                    .headers
-                                    .iter()
-                                    .filter_map(|(k, v)| {
-                                        v.to_str()
-                                            .ok()
-                                            .map(|s| (k.as_str().to_string(), s.to_string()))
-                                    })
-                                    .collect(),
+                                headers: helpers::event_request_headers(&parts.headers),
                                 user_id: user_id.clone(),
                                 username: username.clone(),
                                 client_ip: client_ip.to_string(),
@@ -1651,6 +1689,9 @@ impl ProxyService {
             (parts, body_bytes)
         };
         let request_body_size = body_bytes.len();
+        // Captured before hop-by-hop stripping and before `parts` moves into the
+        // upstream request: storing must know whether the request was credentialed.
+        let request_cache_ctx = RequestCacheContext::from_headers(&parts.headers);
 
         // ICAP REQMOD (optional): before peer/upstream fetch. ICAP is opt-in, so
         // the header map is only materialized when an adaptation stage will
@@ -1702,7 +1743,7 @@ impl ProxyService {
         let fetch_result = if let Some((_, response)) = peer_fetch {
             Ok(response)
         } else {
-            self.http_client.load().request(req).await
+            self.http_client.request(req).await
         };
 
         match fetch_result {
@@ -1722,12 +1763,19 @@ impl ProxyService {
                 let store_precheck = if llm_mode {
                     evaluate_llm_store(
                         status_code,
+                        &headers_map,
                         0,
                         self.cache_config.max_body_size,
                         self.semantic_config.ttl,
                     )
                 } else {
-                    evaluate_store_precheck(method, status_code, &headers_map, &self.cache_config)
+                    evaluate_store_precheck(
+                        method,
+                        status_code,
+                        &headers_map,
+                        &request_cache_ctx,
+                        &self.cache_config,
+                    )
                 };
 
                 if self.perf.streaming_miss_enabled {
@@ -1777,6 +1825,7 @@ impl ProxyService {
                             } else if handle.llm_mode {
                                 evaluate_llm_store(
                                     status_code,
+                                    &headers_cb,
                                     body_bytes.len(),
                                     handle.cache_config.max_body_size,
                                     handle.semantic_config.ttl,
@@ -1787,6 +1836,7 @@ impl ProxyService {
                                     status_code,
                                     &headers_cb,
                                     body_bytes.len(),
+                                    &request_cache_ctx,
                                     &handle.cache_config,
                                 )
                             };
@@ -1872,6 +1922,7 @@ impl ProxyService {
                 let store_decision = if llm_mode {
                     evaluate_llm_store(
                         status_code,
+                        &headers_map,
                         body_bytes.len(),
                         self.cache_config.max_body_size,
                         self.semantic_config.ttl,
@@ -1882,6 +1933,7 @@ impl ProxyService {
                         status_code,
                         &headers_map,
                         body_bytes.len(),
+                        &request_cache_ctx,
                         &self.cache_config,
                     )
                 };

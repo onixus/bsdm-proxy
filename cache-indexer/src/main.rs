@@ -101,6 +101,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .into(),
         );
     }
+    if search_api_enabled()
+        && search_cfg.api_token.is_some()
+        && std::env::var("INGEST_API_TOKEN")
+            .map(|t| t.is_empty())
+            .unwrap_or(true)
+    {
+        // AS-18: ingest upserts by event_id, so whoever can ingest can rewrite
+        // stored events. Sharing the read token widens that to every reader.
+        tracing::warn!(
+            "INGEST_API_TOKEN is unset — POST /api/events accepts SEARCH_API_TOKEN; \
+             set a separate INGEST_API_TOKEN so Search API readers cannot write or overwrite events"
+        );
+    }
     let search_api = if search_api_enabled() {
         Some(Arc::new(SearchApi::new(store.clone(), search_cfg)))
     } else {

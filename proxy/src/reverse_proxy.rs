@@ -25,6 +25,9 @@ const STATE_TTL_SECONDS: u64 = 600;
 /// анонимным запросом, так что без предела это ручка для исчерпания памяти.
 const MAX_PENDING_STATES: usize = 10_000;
 
+/// Потолок на тело form_post-колбэка (OIDC response_mode=form_post).
+const MAX_CALLBACK_BODY_BYTES: usize = 64 * 1024;
+
 /// Незавершённый вход. Живёт от редиректа на IdP до колбэка.
 struct PendingAuth {
     provider_id: String,
@@ -194,6 +197,20 @@ impl ReverseProxyConfig {
     /// же, а не вручную.
     pub fn session_cookie(&self, session_id: &str) -> String {
         self.cookie(SESSION_COOKIE, session_id, Some(self.session_ttl), false)
+    }
+
+    /// 302 на исходный путь запроса с выданной сессионной cookie (ветка
+    /// AD/LDAP/Basic). Путь берётся из запроса клиента, поэтому проходит ту же
+    /// проверку, что и `return_to`: `//evil.example` не должен стать открытым
+    /// редиректом, а не-ASCII байты пути (их принимает парсер URI, но не
+    /// `HeaderValue`) — паникой.
+    pub(crate) fn session_redirect(&self, session_id: &str, path_query: &str) -> Response<Body> {
+        let mut resp = Response::new(empty());
+        *resp.status_mut() = StatusCode::FOUND;
+        let headers = resp.headers_mut();
+        headers.insert(LOCATION, location_value(path_query));
+        headers.insert(SET_COOKIE, header_value(&self.session_cookie(session_id)));
+        resp
     }
 
     pub fn drop_session(&self, session_id: &str) {
@@ -394,31 +411,9 @@ impl ReverseProxyConfig {
         // Apple отдаёт колбэк POST-ом с form-urlencoded телом; остальные — GET
         // с query. Читаем то, что пришло.
         let params = if is_form_post {
-            match req.into_body().collect().await {
-                Ok(collected) => {
-                    let bytes = collected.to_bytes();
-                    // Тело колбэка — несколько сотен байт; всё, что заметно
-                    // больше, к делу не относится.
-                    if bytes.len() > 64 * 1024 {
-                        return text_response(
-                            StatusCode::BAD_REQUEST,
-                            "Callback body is too large",
-                        );
-                    }
-                    match std::str::from_utf8(&bytes) {
-                        Ok(body) => oidc::parse_form(body),
-                        Err(_) => {
-                            return text_response(
-                                StatusCode::BAD_REQUEST,
-                                "Callback body is not valid UTF-8",
-                            )
-                        }
-                    }
-                }
-                Err(e) => {
-                    error!("cannot read the callback body: {}", e);
-                    return text_response(StatusCode::BAD_REQUEST, "Cannot read the callback body");
-                }
+            match read_callback_form(req.into_body()).await {
+                Ok(params) => params,
+                Err(resp) => return resp,
             }
         } else {
             oidc::parse_form(&query)
@@ -499,6 +494,51 @@ impl ReverseProxyConfig {
     }
 }
 
+/// Читает form_post-тело колбэка. Тело колбэка — несколько сотен байт; всё,
+/// что заметно больше, к делу не относится. Лимит ставится ДО буферизации:
+/// колбэк доступен без аутентификации, и полное чтение тела позволило бы
+/// исчерпать память одним запросом.
+/// The error is the ready-to-send response; it is returned on a cold error path
+/// once per callback, so its size does not matter.
+#[allow(clippy::result_large_err)]
+async fn read_callback_form<B>(body: B) -> Result<HashMap<String, String>, Response<Body>>
+where
+    B: hyper::body::Body,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
+    match http_body_util::Limited::new(body, MAX_CALLBACK_BODY_BYTES)
+        .collect()
+        .await
+    {
+        Ok(collected) => {
+            let bytes = collected.to_bytes();
+            match std::str::from_utf8(&bytes) {
+                Ok(body) => Ok(oidc::parse_form(body)),
+                Err(_) => Err(text_response(
+                    StatusCode::BAD_REQUEST,
+                    "Callback body is not valid UTF-8",
+                )),
+            }
+        }
+        Err(e)
+            if e.downcast_ref::<http_body_util::LengthLimitError>()
+                .is_some() =>
+        {
+            Err(text_response(
+                StatusCode::BAD_REQUEST,
+                "Callback body is too large",
+            ))
+        }
+        Err(e) => {
+            error!("cannot read the callback body: {}", e);
+            Err(text_response(
+                StatusCode::BAD_REQUEST,
+                "Cannot read the callback body",
+            ))
+        }
+    }
+}
+
 fn path_provider(path: &str) -> Option<String> {
     path.strip_prefix("/-/callback/")
         .filter(|s| !s.is_empty())
@@ -518,6 +558,22 @@ fn sanitize_return_to(candidate: &str) -> String {
         return "/".to_string();
     }
     trimmed.to_string()
+}
+
+/// `Location` на локальный путь: проходит `sanitize_return_to`, а байты вне
+/// видимого ASCII percent-кодируются (браузер сделал бы то же самое).
+fn location_value(raw: &str) -> HeaderValue {
+    use std::fmt::Write as _;
+    let safe = sanitize_return_to(raw);
+    let mut encoded = String::with_capacity(safe.len());
+    for b in safe.bytes() {
+        if (0x21..=0x7e).contains(&b) {
+            encoded.push(char::from(b));
+        } else {
+            let _ = write!(encoded, "%{b:02X}");
+        }
+    }
+    header_value(&encoded)
 }
 
 fn header_value(raw: &str) -> HeaderValue {
@@ -670,6 +726,63 @@ mod tests {
             config.begin_auth("google", "n".into(), "v".into(), "/".into());
         }
         assert!(config.states.read().unwrap().len() <= MAX_PENDING_STATES);
+    }
+
+    #[test]
+    fn session_redirect_keeps_local_path_and_sets_cookie() {
+        let config = config();
+        let resp = config.session_redirect("sid123", "/app/page?x=1");
+        assert_eq!(resp.status(), StatusCode::FOUND);
+        assert_eq!(resp.headers().get(LOCATION).unwrap(), "/app/page?x=1");
+        let cookie = resp.headers().get(SET_COOKIE).unwrap().to_str().unwrap();
+        assert!(cookie.starts_with("bsdm_session=sid123"), "{cookie}");
+    }
+
+    #[test]
+    fn session_redirect_survives_non_ascii_path() {
+        // httparse/http принимают UTF-8 в пути, а HeaderValue — нет: раньше
+        // здесь была паника через unwrap() в обработчике соединения.
+        let uri: hyper::Uri = "/caf%C3%A9".parse().unwrap();
+        assert_eq!(uri.path(), "/caf%C3%A9");
+        let raw = "/café?q=ü";
+        let resp = config().session_redirect("sid", raw);
+        assert_eq!(resp.status(), StatusCode::FOUND);
+        assert_eq!(resp.headers().get(LOCATION).unwrap(), "/caf%C3%A9?q=%C3%BC");
+    }
+
+    #[test]
+    fn session_redirect_is_not_an_open_redirect() {
+        // Путь запроса `//evil.test/x` — валидный origin-form, но как Location
+        // это протокол-относительный редирект на чужой хост.
+        let uri: hyper::Uri = "//evil.test/x".parse().unwrap();
+        let pq = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
+        let resp = config().session_redirect("sid", pq);
+        assert_eq!(resp.headers().get(LOCATION).unwrap(), "/");
+        let resp = config().session_redirect("sid", "/\\evil.test");
+        assert_eq!(resp.headers().get(LOCATION).unwrap(), "/");
+    }
+
+    #[tokio::test]
+    async fn callback_form_body_is_capped_before_buffering() {
+        let ok = read_callback_form(http_body_util::Full::new(Bytes::from_static(
+            b"code=abc&state=xyz",
+        )))
+        .await
+        .unwrap();
+        assert_eq!(ok.get("code").map(String::as_str), Some("abc"));
+        assert_eq!(ok.get("state").map(String::as_str), Some("xyz"));
+
+        let big = vec![b'a'; MAX_CALLBACK_BODY_BYTES + 1];
+        let err = read_callback_form(http_body_util::Full::new(Bytes::from(big)))
+            .await
+            .unwrap_err();
+        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+
+        let bad_utf8 =
+            read_callback_form(http_body_util::Full::new(Bytes::from_static(&[0xff, 0xfe])))
+                .await
+                .unwrap_err();
+        assert_eq!(bad_utf8.status(), StatusCode::BAD_REQUEST);
     }
 
     #[test]

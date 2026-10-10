@@ -38,7 +38,12 @@ pub struct Zone {
     /// Exact FQDN (lowercase, no trailing dot) → action.
     exact: HashMap<String, ZoneAction>,
     /// Suffix match: hostname ends with `.{suffix}` or equals suffix.
-    suffixes: Vec<(String, ZoneAction)>,
+    ///
+    /// Indexed by suffix so a lookup costs one hash probe per label of the
+    /// queried name instead of a linear scan over every rule (AS-23). The
+    /// `usize` is the rule's position in the zone file: when several suffixes
+    /// match, the earliest rule wins, exactly as the former linear scan did.
+    suffixes: HashMap<String, (usize, ZoneAction)>,
 }
 
 impl Zone {
@@ -103,12 +108,30 @@ impl Zone {
         if let Some(a) = self.exact.get(&name) {
             return Some(a);
         }
-        for (suf, action) in &self.suffixes {
-            if name == *suf || name.ends_with(&format!(".{suf}")) {
-                return Some(action);
+        if self.suffixes.is_empty() {
+            return None;
+        }
+        // Probe `name` itself and every parent domain (`a.b.c` → `b.c` → `c`).
+        let mut best: Option<&(usize, ZoneAction)> = None;
+        let mut candidate = name.as_str();
+        loop {
+            if let Some(hit) = self.suffixes.get(candidate) {
+                if best.is_none_or(|b| hit.0 < b.0) {
+                    best = Some(hit);
+                }
+            }
+            match candidate.split_once('.') {
+                Some((_, parent)) => candidate = parent,
+                None => break,
             }
         }
-        None
+        best.map(|(_, action)| action)
+    }
+
+    fn add_suffix(&mut self, suffix: String, action: ZoneAction) {
+        let order = self.suffixes.len();
+        // Keep the first occurrence of a duplicated suffix (first match wins).
+        self.suffixes.entry(suffix).or_insert((order, action));
     }
 
     pub fn len(&self) -> usize {
@@ -167,8 +190,7 @@ fn parse_line(zone: &mut Zone, line: &str) -> Result<(), String> {
     if parts.len() == 1 {
         let tok = parts[0];
         if let Some(suf) = tok.strip_prefix('.') {
-            zone.suffixes
-                .push((normalize_name(suf), ZoneAction::Policy));
+            zone.add_suffix(normalize_name(suf), ZoneAction::Policy);
         } else {
             zone.exact.insert(normalize_name(tok), ZoneAction::Policy);
         }
@@ -219,7 +241,7 @@ fn parse_line(zone: &mut Zone, line: &str) -> Result<(), String> {
     };
 
     if is_suffix {
-        zone.suffixes.push((name, action));
+        zone.add_suffix(name, action);
     } else {
         zone.exact.insert(name, action);
     }
@@ -324,5 +346,58 @@ malware.example
             Some(ZoneAction::Policy)
         ));
         assert!(z.lookup("clean.example").is_none());
+    }
+
+    #[test]
+    fn suffix_index_matches_only_on_label_boundaries() {
+        let z = Zone::parse(
+            ".evil.example
+",
+        )
+        .unwrap();
+        assert!(z.lookup("evil.example").is_some());
+        assert!(z.lookup("EVIL.example.").is_some());
+        assert!(z.lookup("a.b.evil.example").is_some());
+        // Not a label boundary: must not match.
+        assert!(z.lookup("notevil.example").is_none());
+        assert!(z.lookup("example").is_none());
+        assert!(z.lookup("").is_none());
+    }
+
+    #[test]
+    fn earliest_matching_suffix_rule_wins() {
+        let z = Zone::parse(
+            "*.sub.evil.example. A 10.0.0.1\n*.evil.example. A 10.0.0.2\n*.sub.evil.example. A 10.0.0.3\n",
+        )
+        .unwrap();
+        assert!(matches!(
+            z.lookup("x.sub.evil.example"),
+            Some(ZoneAction::A(ip)) if *ip == Ipv4Addr::new(10, 0, 0, 1)
+        ));
+        assert!(matches!(
+            z.lookup("x.evil.example"),
+            Some(ZoneAction::A(ip)) if *ip == Ipv4Addr::new(10, 0, 0, 2)
+        ));
+        let z =
+            Zone::parse("*.evil.example. A 10.0.0.2\n*.sub.evil.example. A 10.0.0.1\n").unwrap();
+        assert!(matches!(
+            z.lookup("x.sub.evil.example"),
+            Some(ZoneAction::A(ip)) if *ip == Ipv4Addr::new(10, 0, 0, 2)
+        ));
+    }
+
+    #[test]
+    fn large_suffix_zone_lookup_is_indexed() {
+        let text: String = (0..200_000).map(|i| format!(".s{i}.example\n")).collect();
+        let z = Zone::parse(&text).unwrap();
+        assert_eq!(z.len(), 200_000);
+        let start = std::time::Instant::now();
+        for _ in 0..10_000 {
+            assert!(z.lookup("a.b.c.clean.test").is_none());
+        }
+        assert!(z.lookup("x.s199999.example").is_some());
+        // A linear scan would do 2·10^9 `ends_with`+`format!` here; the index
+        // does ~5 hash probes per lookup.
+        assert!(start.elapsed() < std::time::Duration::from_secs(2));
     }
 }

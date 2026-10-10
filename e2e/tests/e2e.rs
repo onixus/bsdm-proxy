@@ -623,3 +623,79 @@ async fn e2e_proxy_credentials_do_not_reach_the_origin() {
         "origin lost its own Authorization header:\n{seen_by_origin}"
     );
 }
+
+async fn raw_proxy_exchange(proxy_port: u16, request: String) -> String {
+    let mut stream = TcpStream::connect(("127.0.0.1", proxy_port))
+        .await
+        .expect("connect to proxy");
+    stream
+        .write_all(request.as_bytes())
+        .await
+        .expect("write request");
+    let mut buf = vec![0u8; 4096];
+    let n = tokio::time::timeout(Duration::from_secs(5), stream.read(&mut buf))
+        .await
+        .expect("proxy answered in time")
+        .expect("read response");
+    String::from_utf8_lossy(&buf[..n]).to_string()
+}
+
+/// CONNECT to a port outside ALLOWED_CONNECT_PORTS gets 403 before any 200,
+/// instead of "200 Connection established" followed by a dropped tunnel.
+#[tokio::test]
+async fn e2e_connect_to_forbidden_port_is_403_before_tunnel() {
+    let _guard = proxy_test_guard().await;
+    let mut extra_env = std::collections::HashMap::new();
+    extra_env.insert("ALLOWED_CONNECT_PORTS".to_string(), "443".to_string());
+    let harness = ProxyHarness::start(HarnessConfig {
+        extra_env,
+        ..Default::default()
+    })
+    .await
+    .expect("start proxy");
+
+    let resp = raw_proxy_exchange(
+        harness.proxy_port,
+        "CONNECT example.test:6379 HTTP/1.1\r\nHost: example.test:6379\r\n\r\n".to_string(),
+    )
+    .await;
+    assert!(resp.starts_with("HTTP/1.1 403"), "unexpected: {resp}");
+}
+
+/// AS-01: a host that only *resolves* to loopback (decimal IPv4 form, which the
+/// string check does not recognise) is refused when loopback forwarding is
+/// blocked — both for plain HTTP and for CONNECT.
+#[tokio::test]
+async fn e2e_names_resolving_to_loopback_are_blocked() {
+    let _guard = proxy_test_guard().await;
+    let mut extra_env = std::collections::HashMap::new();
+    extra_env.insert("BLOCK_LOOPBACK_FORWARDING".to_string(), "true".to_string());
+    let harness = ProxyHarness::start(HarnessConfig {
+        extra_env,
+        ..Default::default()
+    })
+    .await
+    .expect("start proxy");
+    // 2130706433 == 127.0.0.1; libc resolves the decimal form.
+    let port = harness.upstream_port;
+    let resp = raw_proxy_exchange(
+        harness.proxy_port,
+        format!(
+            "GET http://2130706433:{port}/x HTTP/1.1\r\nHost: 2130706433:{port}\r\nConnection: close\r\n\r\n"
+        ),
+    )
+    .await;
+    assert!(
+        !resp.starts_with("HTTP/1.1 200"),
+        "loopback reached through a decimal host: {resp}"
+    );
+    // Direct literal is refused by the string check as well.
+    let resp = raw_proxy_exchange(
+        harness.proxy_port,
+        format!(
+            "GET http://127.0.0.1:{port}/x HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+        ),
+    )
+    .await;
+    assert!(resp.starts_with("HTTP/1.1 403"), "unexpected: {resp}");
+}

@@ -2,6 +2,7 @@
 name = "agent-spike"
 version = "0.1.0"
 edition = "2021"
+publish = false
 description = "BSDM Local Policy Agent (product binary bsdm-agent; lab alias agent-spike)"
 
 [dependencies]

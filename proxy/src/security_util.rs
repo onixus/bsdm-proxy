@@ -1,6 +1,6 @@
 //! Security helper utilities shared across proxy core, control-plane APIs, and auth.
 
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 
 /// Constant-time equality check for secrets (bearer tokens, password hashes).
 ///
@@ -58,28 +58,63 @@ pub fn is_cloud_metadata_host(host: &str) -> bool {
         return true;
     }
     if let Ok(ip) = clean.parse::<IpAddr>() {
-        match ip {
-            IpAddr::V4(ipv4) => {
-                let octets = ipv4.octets();
-                // 169.254.0.0/16 (Link Local / IMDS)
-                if octets[0] == 169 && octets[1] == 254 {
-                    return true;
-                }
-                // 100.100.100.200 (Alibaba Cloud IMDS)
-                if octets == [100, 100, 100, 200] {
-                    return true;
-                }
-            }
-            IpAddr::V6(ipv6) => {
-                let segments = ipv6.segments();
-                // fe80::/10 (Link-Local)
-                if (segments[0] & 0xffc0) == 0xfe80 {
-                    return true;
-                }
-            }
-        }
+        return is_cloud_metadata_ip(ip);
     }
     false
+}
+
+/// IPv4-mapped (`::ffff:a.b.c.d`) and IPv4-compatible (`::a.b.c.d`) IPv6
+/// addresses reach the embedded IPv4 host, so they are judged as that host.
+fn canonical_ip(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+            Some(v4) => IpAddr::V4(v4),
+            None => {
+                let seg = v6.segments();
+                // ::a.b.c.d (IPv4-compatible) and 64:ff9b::a.b.c.d (NAT64
+                // well-known prefix, RFC 6052) both reach the embedded IPv4.
+                let compat = seg[..6].iter().all(|s| *s == 0) && !(seg[6] == 0 && seg[7] <= 1);
+                let nat64 = seg[0] == 0x64 && seg[1] == 0xff9b && seg[2..6].iter().all(|s| *s == 0);
+                if compat || nat64 {
+                    IpAddr::V4(std::net::Ipv4Addr::new(
+                        (seg[6] >> 8) as u8,
+                        seg[6] as u8,
+                        (seg[7] >> 8) as u8,
+                        seg[7] as u8,
+                    ))
+                } else {
+                    IpAddr::V6(v6)
+                }
+            }
+        },
+        v4 => v4,
+    }
+}
+
+/// AWS IMDS over IPv6 (Nitro): `fd00:ec2::254`.
+const AWS_IMDS_V6: Ipv6Addr = Ipv6Addr::new(0xfd00, 0x0ec2, 0, 0, 0, 0, 0, 0x0254);
+
+/// IP-level metadata check, applied both to literals and to resolved addresses.
+pub fn is_cloud_metadata_ip(ip: IpAddr) -> bool {
+    match canonical_ip(ip) {
+        IpAddr::V4(ipv4) => {
+            let octets = ipv4.octets();
+            // 169.254.0.0/16 (Link Local / IMDS), 100.100.100.200 (Alibaba Cloud IMDS)
+            (octets[0] == 169 && octets[1] == 254) || octets == [100, 100, 100, 200]
+        }
+        IpAddr::V6(ipv6) => {
+            // fe80::/10 (Link-Local) and AWS IPv6 IMDS
+            (ipv6.segments()[0] & 0xffc0) == 0xfe80 || ipv6 == AWS_IMDS_V6
+        }
+    }
+}
+
+/// IP-level loopback/unspecified check (the proxy host itself).
+pub fn is_loopback_ip(ip: IpAddr) -> bool {
+    match canonical_ip(ip) {
+        IpAddr::V4(ipv4) => ipv4.is_loopback() || ipv4.is_unspecified(),
+        IpAddr::V6(ipv6) => ipv6.is_loopback() || ipv6.is_unspecified(),
+    }
 }
 
 /// Identifies loopback destinations (127.0.0.0/8, ::1, localhost).
@@ -93,10 +128,7 @@ pub fn is_loopback_host(host: &str) -> bool {
         return true;
     }
     if let Ok(ip) = clean.parse::<IpAddr>() {
-        return match ip {
-            IpAddr::V4(ipv4) => ipv4.is_loopback() || ipv4.is_unspecified(),
-            IpAddr::V6(ipv6) => ipv6.is_loopback() || ipv6.is_unspecified(),
-        };
+        return is_loopback_ip(ip);
     }
     false
 }
@@ -121,6 +153,88 @@ pub fn is_destination_allowed(
         }
     }
     Ok(())
+}
+
+/// Destination policy applied to *resolved* socket addresses, right before a
+/// connection is opened. The string checks above only see what the client
+/// wrote; a hostname with an A record of 127.0.0.1 / 169.254.169.254 (or
+/// `nip.io`-style names, decimal IPs resolved by libc) passes them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ResolvedDestinationPolicy {
+    pub block_metadata: bool,
+    pub block_loopback: bool,
+}
+
+impl ResolvedDestinationPolicy {
+    pub fn check(&self, addr: &SocketAddr) -> Result<(), &'static str> {
+        let ip = addr.ip();
+        if self.block_metadata && is_cloud_metadata_ip(ip) {
+            return Err("cloud metadata destination blocked by security policy");
+        }
+        if self.block_loopback && is_loopback_ip(ip) {
+            return Err("loopback destination blocked by security policy");
+        }
+        Ok(())
+    }
+
+    /// Fails if *any* address is blocked: a name that mixes a public and a
+    /// forbidden address is treated as hostile rather than filtered.
+    pub fn check_all(&self, addrs: &[SocketAddr]) -> Result<(), &'static str> {
+        addrs.iter().try_for_each(|a| self.check(a))
+    }
+
+    /// Resolve `host:port` and return only addresses that passed the policy.
+    pub async fn resolve(&self, host: &str, port: u16) -> std::io::Result<Vec<SocketAddr>> {
+        let host = host.trim_start_matches('[').trim_end_matches(']');
+        let addrs: Vec<SocketAddr> = tokio::net::lookup_host((host, port)).await?.collect();
+        if addrs.is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "destination did not resolve",
+            ));
+        }
+        self.check_all(&addrs)
+            .map_err(|reason| std::io::Error::new(std::io::ErrorKind::PermissionDenied, reason))?;
+        Ok(addrs)
+    }
+}
+
+/// DNS resolver for the upstream `HttpConnector` that enforces
+/// [`ResolvedDestinationPolicy`] on every lookup, so the connection can only
+/// go to addresses that were checked (no check-then-resolve gap).
+#[derive(Clone, Debug)]
+pub struct SsrfGuardResolver {
+    policy: ResolvedDestinationPolicy,
+}
+
+impl SsrfGuardResolver {
+    pub fn new(policy: ResolvedDestinationPolicy) -> Self {
+        Self { policy }
+    }
+}
+
+impl tower_service::Service<hyper_util::client::legacy::connect::dns::Name> for SsrfGuardResolver {
+    type Response = std::vec::IntoIter<SocketAddr>;
+    type Error = std::io::Error;
+    type Future = std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>,
+    >;
+
+    fn poll_ready(
+        &mut self,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, name: hyper_util::client::legacy::connect::dns::Name) -> Self::Future {
+        let policy = self.policy;
+        Box::pin(async move {
+            // HttpConnector overrides the port of each returned address with the
+            // URI port, so 0 here is fine.
+            policy.resolve(name.as_str(), 0).await.map(Vec::into_iter)
+        })
+    }
 }
 
 #[cfg(test)]
@@ -191,6 +305,56 @@ mod tests {
 
         assert!(!is_loopback_host("example.com"));
         assert!(!is_loopback_host("1.1.1.1"));
+    }
+
+    #[test]
+    fn ipv4_mapped_and_aws_v6_metadata_are_blocked() {
+        assert!(is_cloud_metadata_host("[::ffff:169.254.169.254]"));
+        assert!(is_cloud_metadata_host("::ffff:a9fe:a9fe"));
+        assert!(is_cloud_metadata_host("[fd00:ec2::254]"));
+        assert!(is_cloud_metadata_host("[64:ff9b::a9fe:a9fe]"));
+        assert!(is_loopback_host("64:ff9b::7f00:1"));
+        assert!(is_destination_allowed("[::ffff:169.254.169.254]", 80, true, false, None).is_err());
+        assert!(is_loopback_host("[::ffff:127.0.0.1]"));
+        assert!(is_loopback_host("::127.0.0.1"));
+        assert!(!is_loopback_host("::ffff:8.8.8.8"));
+        assert!(!is_cloud_metadata_host("[2001:db8::1]"));
+    }
+
+    #[test]
+    fn resolved_policy_checks_addresses() {
+        let policy = ResolvedDestinationPolicy {
+            block_metadata: true,
+            block_loopback: true,
+        };
+        let a = |s: &str| s.parse::<SocketAddr>().unwrap();
+        assert!(policy.check(&a("93.184.216.34:80")).is_ok());
+        assert!(policy.check(&a("10.0.0.5:80")).is_ok());
+        assert!(policy.check(&a("169.254.169.254:80")).is_err());
+        assert!(policy.check(&a("[::ffff:169.254.169.254]:80")).is_err());
+        assert!(policy.check(&a("127.0.0.1:6379")).is_err());
+        assert!(policy.check(&a("[::1]:9090")).is_err());
+        assert!(policy.check(&a("0.0.0.0:80")).is_err());
+        // One bad address poisons the whole answer.
+        assert!(policy
+            .check_all(&[a("93.184.216.34:80"), a("127.0.0.1:80")])
+            .is_err());
+        let open = ResolvedDestinationPolicy::default();
+        assert!(open.check(&a("127.0.0.1:80")).is_ok());
+    }
+
+    #[tokio::test]
+    async fn resolve_rejects_names_pointing_at_loopback() {
+        let policy = ResolvedDestinationPolicy {
+            block_metadata: true,
+            block_loopback: true,
+        };
+        // `localhost` resolves via the hosts file, no network needed.
+        let err = policy.resolve("localhost", 80).await.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+        assert!(policy.resolve("127.0.0.1", 80).await.is_err());
+        let open = ResolvedDestinationPolicy::default();
+        assert!(!open.resolve("127.0.0.1", 80).await.unwrap().is_empty());
     }
 
     #[test]

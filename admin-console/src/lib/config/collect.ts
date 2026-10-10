@@ -237,6 +237,67 @@ function normalizeEnvValue(value: string): string {
 }
 
 /**
+ * Keys the control plane refuses in POST /api/config/apply (host-managed:
+ * tokens, trust anchors, code loading, file locations). They stay in
+ * `collectConfig` for export, but are never sent as a delta — the server
+ * would reject the whole apply.
+ */
+export const HOST_MANAGED_ENV_KEYS = [
+  'ACL_RULES_PATH',
+  'ACL_API_TOKEN',
+  'SEARCH_API_TOKEN',
+  'CONTROL_API_TOKEN',
+  'UPSTREAM_CA_CERT',
+  'WASM_ENABLED',
+  'WASM_MODULE_PATH',
+  'WASM_FAIL_OPEN',
+  'WASM_FUEL',
+  'CONFIG_ENV_PATH',
+  'CONFIG_RESTART_CMD',
+  // Destinations for decrypted traffic, credentials or telemetry, listener
+  // binds and the eBPF arming switch: host-managed until a dedicated
+  // security-scope token exists.
+  'EBPF_XDP_ENABLED',
+  'EBPF_XDP_IFACE',
+  'EBPF_XDP_MODE',
+  'ICAP_URL',
+  'LDAP_SERVERS',
+  'LDAP_BIND_DN',
+  'LDAP_BIND_PASSWORD',
+  'OIDC_ISSUER_URL',
+  'OIDC_CORP_ISSUER_URL',
+  'OIDC_CLIENT_SECRET',
+  'OIDC_CORP_CLIENT_SECRET',
+  'OIDC_GOOGLE_CLIENT_SECRET',
+  'KAFKA_BROKERS',
+  'CLICKHOUSE_URL',
+  'URLHAUS_API',
+  'PHISHTANK_API',
+  'RKN_SYNC_URL',
+  'THREAT_SCORE_POLL_URL',
+  'DOH_BIND',
+  'DOT_BIND',
+  'ICP_BIND',
+  'HTCP_BIND',
+  'CONTROL_GRPC_BIND',
+  'PEER_DISCOVERY_MULTICAST',
+  'REVERSE_PROXY_UPSTREAM',
+  'REDIS_URL',
+  'ALERT_WEBHOOK_URL',
+  'OLLAMA_URL',
+  'QDRANT_URL',
+  'PHISHTANK_API_KEY',
+  'HIERARCHY_PEERS_PATH',
+  'OIDC_REDIRECT_BASE',
+  'OIDC_REDIRECT_URI',
+  'OIDC_CORP_REDIRECT_URI',
+] as const
+
+function isHostManagedEnvKey(key: string): boolean {
+  return (HOST_MANAGED_ENV_KEYS as readonly string[]).includes(key)
+}
+
+/**
  * Build a **delta** env map for POST /api/config/apply.
  *
  * Full `collectConfig(form)` includes every form field with UI defaults. Applying
@@ -255,6 +316,7 @@ export function collectConfigDelta(
 
   for (const [key, raw] of Object.entries(full)) {
     const value = String(raw ?? '')
+    if (isHostManagedEnvKey(key)) continue
     if (isMaskedSecret(value)) continue
     if (isSecretEnvKey(key) && value === '') continue
 

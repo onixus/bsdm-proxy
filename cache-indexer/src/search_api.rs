@@ -184,8 +184,40 @@ fn check_bearer(expected: Option<&str>, auth_header: Option<&str>) -> bool {
     match expected {
         Some(expected) => auth_header
             .and_then(|v| v.strip_prefix("Bearer "))
-            .is_some_and(|token| token == expected),
+            .is_some_and(|token| constant_time_eq(token.as_bytes(), expected.as_bytes())),
         None => !search_api_fail_closed(),
+    }
+}
+
+/// Compares secrets without an early exit on the first differing byte, so
+/// response timing does not leak a token prefix (AS-16). Mirrors
+/// `bsdm_proxy::security_util::constant_time_eq`; only the length is revealed.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let diff = a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y));
+    std::hint::black_box(diff) == 0
+}
+
+/// Escapes one CSV cell (RFC 4180) and neutralises spreadsheet formulas
+/// (AS-17): a cell starting with `= + - @`, TAB or CR is prefixed with `'`
+/// so Excel/LibreOffice/Sheets treat it as text; cells containing `,` `"`
+/// CR or LF are quoted so injected line breaks cannot forge report rows.
+fn csv_field(value: &str) -> String {
+    let needs_guard = value
+        .chars()
+        .next()
+        .is_some_and(|c| matches!(c, '=' | '+' | '-' | '@' | '\t' | '\r'));
+    let guarded = if needs_guard {
+        format!("'{value}")
+    } else {
+        value.to_string()
+    };
+    if guarded.contains([',', '"', '\r', '\n']) {
+        format!("\"{}\"", guarded.replace('"', "\"\""))
+    } else {
+        guarded
     }
 }
 
@@ -282,13 +314,7 @@ fn hits_to_csv(hits: &[crate::store::SearchHit]) -> String {
         ];
         out.push_str(
             &row.iter()
-                .map(|v| {
-                    if v.contains(',') || v.contains('"') {
-                        format!("\"{}\"", v.replace('"', "\"\""))
-                    } else {
-                        v.clone()
-                    }
-                })
+                .map(|v| csv_field(v))
                 .collect::<Vec<_>>()
                 .join(","),
         );
@@ -316,6 +342,62 @@ mod tests {
         assert_eq!(parse_ingest_body(one).unwrap().len(), 1);
         let arr = format!("[{}]", std::str::from_utf8(one).unwrap());
         assert_eq!(parse_ingest_body(arr.as_bytes()).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn bearer_check_uses_exact_token_match() {
+        assert!(check_bearer(Some("s3cret"), Some("Bearer s3cret")));
+        assert!(!check_bearer(Some("s3cret"), Some("Bearer s3cre")));
+        assert!(!check_bearer(Some("s3cret"), Some("Bearer s3cret0")));
+        assert!(!check_bearer(Some("s3cret"), Some("Bearer S3cret")));
+        assert!(!check_bearer(Some("s3cret"), Some("s3cret")));
+        assert!(!check_bearer(Some("s3cret"), None));
+        assert!(constant_time_eq(b"", b""));
+        assert!(!constant_time_eq(b"a", b""));
+    }
+
+    #[test]
+    fn csv_field_neutralises_formulas_and_line_breaks() {
+        assert_eq!(csv_field("alice"), "alice");
+        assert_eq!(csv_field(""), "");
+        assert_eq!(
+            csv_field("=HYPERLINK(\"http://x\")"),
+            "\"'=HYPERLINK(\"\"http://x\"\")\""
+        );
+        assert_eq!(csv_field("+1"), "'+1");
+        assert_eq!(csv_field("-2+3"), "'-2+3");
+        assert_eq!(csv_field("@SUM(A1)"), "'@SUM(A1)");
+        assert_eq!(csv_field("\tx"), "'\tx");
+        assert_eq!(csv_field("a,b"), "\"a,b\"");
+        assert_eq!(csv_field("evil\r\n1,forged"), "\"evil\r\n1,forged\"");
+        assert_eq!(csv_field("\rx"), "\"'\rx\"");
+        assert_eq!(csv_field("a\nb"), "\"a\nb\"");
+        // Mid-cell operators are harmless and left alone.
+        assert_eq!(csv_field("a=b"), "a=b");
+    }
+
+    #[tokio::test]
+    async fn csv_export_escapes_injected_username() {
+        let memory = Arc::new(EventStore::Memory(crate::store::MemoryStore::new(100)));
+        let api = SearchApi::new(memory.clone(), SearchApiConfig::from_env());
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let event = format!(
+            r#"{{"url":"https://a/","method":"GET","status":200,"cache_key":"k","timestamp":{now},"client_ip":"1.1.1.1","domain":"a","response_size":0,"request_duration_ms":1,"event_id":"e1","username":"=cmd|' /C calc'!A0\n9,forged"}}"#
+        );
+        api.handle_ingest(event.as_bytes()).await.unwrap();
+        let mut query = HashMap::new();
+        query.insert("format".to_string(), "csv".to_string());
+        let (status, _, body) = api.handle_get(&query).await.unwrap();
+        assert_eq!(status, 200);
+        let csv = String::from_utf8(body).unwrap();
+        assert!(
+            csv.contains("\"'=cmd|' /C calc'!A0\n9,forged\""),
+            "unexpected CSV: {csv}"
+        );
+        assert!(!csv.contains(",=cmd"));
     }
 
     #[tokio::test]

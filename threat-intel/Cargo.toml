@@ -1,7 +1,8 @@
 [package]
 name = "threat-intel"
-version = "0.9.15"
+version = "1.0.0-rc.1"
 edition = "2021"
+publish = false
 license = "MIT"
 authors = ["BSDM-Proxy Contributors"]
 description = "Threat intelligence feed collector: scheduled IOC ingestion from phishing/malware feeds"

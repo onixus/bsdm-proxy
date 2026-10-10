@@ -19,6 +19,22 @@ fn upstream_base() -> String {
         .unwrap_or_else(|| "http://127.0.0.1:8080".to_string())
 }
 
+/// Credential the proxy presents to cache-indexer: `SEARCH_UPSTREAM_TOKEN`,
+/// falling back to `SEARCH_API_TOKEN` for co-located installs that share one env.
+fn upstream_token() -> Option<String> {
+    pick_upstream_token(
+        std::env::var("SEARCH_UPSTREAM_TOKEN").ok(),
+        std::env::var("SEARCH_API_TOKEN").ok(),
+    )
+}
+
+fn pick_upstream_token(explicit: Option<String>, shared: Option<String>) -> Option<String> {
+    explicit
+        .filter(|t| !t.trim().is_empty())
+        .or_else(|| shared.filter(|t| !t.trim().is_empty()))
+        .map(|t| t.trim().to_string())
+}
+
 /// Forward GET `/api/search*` and POST `/api/events` to cache-indexer.
 pub async fn proxy_search_request(
     method: &Method,
@@ -27,7 +43,27 @@ pub async fn proxy_search_request(
     headers: &HeaderMap,
     body: Bytes,
 ) -> Response<Body> {
-    let base = upstream_base();
+    proxy_search_to(
+        &upstream_base(),
+        upstream_token(),
+        method,
+        path,
+        query,
+        headers,
+        body,
+    )
+    .await
+}
+
+async fn proxy_search_to(
+    base: &str,
+    upstream_token: Option<String>,
+    method: &Method,
+    path: &str,
+    query: &str,
+    headers: &HeaderMap,
+    body: Bytes,
+) -> Response<Body> {
     let url = if query.is_empty() {
         format!("{base}{path}")
     } else {
@@ -57,10 +93,11 @@ pub async fn proxy_search_request(
         }
     };
 
-    if let Some(auth) = headers.get(hyper::header::AUTHORIZATION) {
-        if let Ok(v) = auth.to_str() {
-            req = req.header(reqwest::header::AUTHORIZATION, v);
-        }
+    // The caller's Authorization is the control-plane token — never hand it to
+    // a neighbouring service. The proxy authenticates to cache-indexer with
+    // its own credential instead.
+    if let Some(token) = upstream_token {
+        req = req.bearer_auth(token);
     }
     if let Some(ct) = headers.get(hyper::header::CONTENT_TYPE) {
         if let Ok(v) = ct.to_str() {
@@ -147,5 +184,54 @@ mod tests {
     fn default_upstream() {
         std::env::remove_var("SEARCH_UPSTREAM_URL");
         assert!(upstream_base().contains("8080"));
+    }
+
+    #[test]
+    fn upstream_token_prefers_explicit_and_ignores_blank() {
+        let s = |v: &str| Some(v.to_string());
+        assert_eq!(pick_upstream_token(s("a"), s("b")), s("a"));
+        assert_eq!(pick_upstream_token(s("  "), s("b")), s("b"));
+        assert_eq!(pick_upstream_token(None, None), None);
+    }
+
+    /// P1-D: the control-plane token of the caller must not reach cache-indexer;
+    /// only the proxy's own upstream credential is sent.
+    #[tokio::test]
+    async fn client_authorization_is_not_forwarded() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 8192];
+            let n = sock.read(&mut buf).await.unwrap();
+            sock.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}")
+                .await
+                .unwrap();
+            String::from_utf8_lossy(&buf[..n]).to_ascii_lowercase()
+        });
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            hyper::header::AUTHORIZATION,
+            "Bearer control-plane-secret".parse().unwrap(),
+        );
+        let resp = proxy_search_to(
+            &format!("http://{addr}"),
+            Some("indexer-token".to_string()),
+            &Method::GET,
+            "/api/search",
+            "q=x",
+            &headers,
+            Bytes::new(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let seen = server.await.unwrap();
+        assert!(!seen.contains("control-plane-secret"), "{seen}");
+        assert!(
+            seen.contains("authorization: bearer indexer-token"),
+            "{seen}"
+        );
     }
 }

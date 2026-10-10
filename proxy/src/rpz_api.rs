@@ -1010,21 +1010,39 @@ fn action_response(action: &RpzAction, cfg: &DnsSinkholeConfig) -> String {
     }
 }
 
+/// Upper bound for a downloaded RPZ feed.
+const MAX_FEED_BYTES: usize = 8 * 1024 * 1024;
+
 async fn fetch_url(url: &str) -> Result<String, String> {
+    fetch_url_limited(url, MAX_FEED_BYTES).await
+}
+
+/// Downloads `url`, aborting as soon as the body exceeds `max_bytes` (AS-14):
+/// the feed is streamed chunk by chunk instead of buffered whole, so a huge
+/// or endless body cannot exhaust proxy memory.
+async fn fetch_url_limited(url: &str, max_bytes: usize) -> Result<String, String> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
         .map_err(|e| e.to_string())?;
-    let resp = client.get(url).send().await.map_err(|e| e.to_string())?;
+    let mut resp = client.get(url).send().await.map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
         return Err(format!("HTTP {}", resp.status()));
     }
-    let text = resp.text().await.map_err(|e| e.to_string())?;
-    // Cap feed size (8 MiB)
-    if text.len() > 8 * 1024 * 1024 {
+    if resp
+        .content_length()
+        .is_some_and(|len| len > max_bytes as u64)
+    {
         return Err("feed too large".into());
     }
-    Ok(text)
+    let mut body = Vec::new();
+    while let Some(chunk) = resp.chunk().await.map_err(|e| e.to_string())? {
+        if body.len() + chunk.len() > max_bytes {
+            return Err("feed too large".into());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(String::from_utf8_lossy(&body).into_owned())
 }
 
 fn percent_decode(s: &str) -> String {
@@ -1057,6 +1075,77 @@ mod tests {
     use http_body_util::BodyExt;
     use std::sync::OnceLock;
     use tokio::sync::Mutex as AsyncMutex;
+
+    /// One-shot HTTP server: answers every connection with `head` followed
+    /// by `body_chunks` (written separately) and records bytes it sent.
+    async fn spawn_feed_server(
+        head: String,
+        chunk: Vec<u8>,
+        chunks: usize,
+    ) -> (String, Arc<std::sync::atomic::AtomicUsize>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let sent = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let sent_c = sent.clone();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let head = head.clone();
+                let chunk = chunk.clone();
+                let sent = sent_c.clone();
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    let _ = sock.read(&mut buf).await;
+                    if sock.write_all(head.as_bytes()).await.is_err() {
+                        return;
+                    }
+                    for _ in 0..chunks {
+                        if sock.write_all(&chunk).await.is_err() {
+                            return;
+                        }
+                        sent.fetch_add(chunk.len(), std::sync::atomic::Ordering::Relaxed);
+                    }
+                });
+            }
+        });
+        (format!("http://{addr}/feed.txt"), sent)
+    }
+
+    #[tokio::test]
+    async fn fetch_url_streams_and_rejects_oversized_feed_without_length() {
+        // 64 x 1 MiB with no Content-Length (read-until-close) vs a 2 MiB cap.
+        let head = "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n".to_string();
+        let (url, sent) = spawn_feed_server(head, vec![b'a'; 1024 * 1024], 64).await;
+        let err = fetch_url_limited(&url, 2 * 1024 * 1024).await.unwrap_err();
+        assert_eq!(err, "feed too large");
+        // Aborted early: the server did not get to push the whole 64 MiB.
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(sent.load(std::sync::atomic::Ordering::Relaxed) < 64 * 1024 * 1024);
+    }
+
+    #[tokio::test]
+    async fn fetch_url_rejects_declared_oversized_content_length() {
+        let head = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            MAX_FEED_BYTES + 1
+        );
+        let (url, _) = spawn_feed_server(head, Vec::new(), 0).await;
+        assert_eq!(fetch_url(&url).await.unwrap_err(), "feed too large");
+    }
+
+    #[tokio::test]
+    async fn fetch_url_accepts_feed_within_limit() {
+        let body = b"evil.example\nbad.test\n".to_vec();
+        let head = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        );
+        let (url, _) = spawn_feed_server(head, body, 1).await;
+        assert_eq!(
+            fetch_url_limited(&url, 64).await.unwrap(),
+            "evil.example\nbad.test\n"
+        );
+    }
 
     /// The threshold overrides below are process-global; sibling tests read
     /// them. Async mutex because the guard spans `.await` points.

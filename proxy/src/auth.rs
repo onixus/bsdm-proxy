@@ -408,6 +408,35 @@ pub fn verify_password_hash(stored: &str, password: &str) -> PasswordCheck {
     }
 }
 
+/// Max time a Basic-auth attempt waits for a free Argon2 slot before it is
+/// rejected as overloaded (AS-07).
+const PASSWORD_VERIFY_QUEUE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Default number of concurrent Argon2 verifications
+/// (`BASIC_AUTH_MAX_CONCURRENT_VERIFICATIONS`): one per available CPU.
+fn max_concurrent_verifications() -> usize {
+    std::env::var("BASIC_AUTH_MAX_CONCURRENT_VERIFICATIONS")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4)
+        })
+}
+
+/// Argon2id hash of a random throw-away secret, verified for unknown logins so
+/// they cost the same as a wrong password for a real user (no username
+/// enumeration via timing, AS-07). Generated once, lazily, off the async path.
+fn dummy_password_hash() -> &'static str {
+    static DUMMY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    DUMMY.get_or_init(|| {
+        let secret: [u8; 16] = rand::random();
+        hash_password_argon2(&hex::encode(secret)).unwrap_or_default()
+    })
+}
+
 fn hash_format_label(legacy: bool) -> &'static str {
     if legacy {
         "sha256_legacy"
@@ -489,6 +518,13 @@ pub struct AuthManager {
     /// Transparently upgrade legacy SHA-256 hashes on successful login
     /// (`BASIC_AUTH_REHASH_ON_LOGIN`, default on).
     rehash_on_login: bool,
+    /// Bounds concurrent Argon2 verifications (~19 MiB + one blocking thread
+    /// each) so a flood of bad passwords cannot exhaust memory (AS-07).
+    verify_permits: Arc<tokio::sync::Semaphore>,
+    /// Argon2 verifications currently running.
+    verify_in_flight: Arc<std::sync::atomic::AtomicUsize>,
+    #[cfg(test)]
+    verify_peak: Arc<std::sync::atomic::AtomicUsize>,
     metrics: Option<Arc<crate::metrics::Metrics>>,
 }
 
@@ -570,8 +606,65 @@ impl AuthManager {
             rehash_on_login: std::env::var("BASIC_AUTH_REHASH_ON_LOGIN")
                 .map(|v| !matches!(v.to_ascii_lowercase().as_str(), "0" | "false" | "no"))
                 .unwrap_or(true),
+            verify_permits: Arc::new(tokio::sync::Semaphore::new(max_concurrent_verifications())),
+            verify_in_flight: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            #[cfg(test)]
+            verify_peak: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             metrics: None,
         }
+    }
+
+    /// Runs [`verify_password_hash`] on the blocking pool, at most
+    /// `BASIC_AUTH_MAX_CONCURRENT_VERIFICATIONS` at a time. `None` = no slot
+    /// freed up within [`PASSWORD_VERIFY_QUEUE_TIMEOUT`] (overloaded).
+    async fn verify_password_bounded(
+        &self,
+        stored_hash: Option<String>,
+        password: &str,
+    ) -> Option<PasswordCheck> {
+        use std::sync::atomic::Ordering;
+        let permit = match tokio::time::timeout(
+            PASSWORD_VERIFY_QUEUE_TIMEOUT,
+            self.verify_permits.clone().acquire_owned(),
+        )
+        .await
+        {
+            Ok(Ok(p)) => p,
+            _ => return None,
+        };
+        let in_flight = self.verify_in_flight.clone();
+        let now = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+        #[cfg(test)]
+        self.verify_peak.fetch_max(now, Ordering::SeqCst);
+        if let Some(m) = &self.metrics {
+            m.auth_password_verifications_in_flight.set(now as f64);
+        }
+        let metrics = self.metrics.clone();
+        let password_owned = password.to_string();
+        let check = tokio::task::spawn_blocking(move || {
+            // Unknown login: burn the same Argon2 cost, then fail.
+            let check = match &stored_hash {
+                Some(h) => verify_password_hash(h, &password_owned),
+                None => {
+                    let _ = verify_password_hash(dummy_password_hash(), &password_owned);
+                    PasswordCheck::Invalid
+                }
+            };
+            // Release inside the blocking task so the slot is freed exactly
+            // when the CPU/memory work ends, even if the caller was dropped.
+            let left = in_flight.fetch_sub(1, Ordering::SeqCst) - 1;
+            if let Some(m) = &metrics {
+                m.auth_password_verifications_in_flight.set(left as f64);
+            }
+            drop(permit);
+            check
+        })
+        .await
+        .unwrap_or_else(|e| {
+            warn!("Password verification task failed: {}", e);
+            PasswordCheck::Invalid
+        });
+        Some(check)
     }
 
     /// Attach the Prometheus registry so basic-auth verification/rehash counters
@@ -873,27 +966,32 @@ impl AuthManager {
                 authenticated_at: Instant::now(),
             });
         }
-        let Some((stored_hash, role)) = guard
+        let user = guard
             .get(username)
-            .map(|u| (u.password_hash.clone(), u.role.clone()))
-        else {
-            // Keep the lock held for as short as possible: verification below is
-            // CPU-bound and must never run while holding the RwLock.
-            drop(guard);
+            .map(|u| (u.password_hash.clone(), u.role.clone()));
+        // Keep the lock held for as short as possible: verification below is
+        // CPU-bound and must never run while holding the RwLock.
+        drop(guard);
+        let Some((stored_hash, role)) = user else {
+            // Unknown login: spend the same Argon2 cost as a wrong password so
+            // response time does not reveal which usernames exist (AS-07).
+            let _ = self.verify_password_bounded(None, password).await;
             return Err("Invalid username or password".to_string());
         };
-        drop(guard);
 
         let legacy = is_legacy_sha256_hash(&stored_hash);
-        let password_owned = password.to_string();
-        let check = tokio::task::spawn_blocking(move || {
-            verify_password_hash(&stored_hash, &password_owned)
-        })
-        .await
-        .unwrap_or_else(|e| {
-            warn!("Password verification task failed: {}", e);
-            PasswordCheck::Invalid
-        });
+        let Some(check) = self
+            .verify_password_bounded(Some(stored_hash), password)
+            .await
+        else {
+            if let Some(m) = &self.metrics {
+                m.auth_password_verifications_total
+                    .with_label_values(&[hash_format_label(legacy), "overloaded"])
+                    .inc();
+            }
+            warn!("Basic auth overloaded: no Argon2 verification slot for {username}");
+            return Err("Authentication temporarily unavailable".to_string());
+        };
 
         match check {
             PasswordCheck::Valid { needs_rehash } => {
@@ -1662,6 +1760,88 @@ mod tests {
             on_disk.contains(&hash),
             "existing Argon2 hash must be left alone"
         );
+    }
+
+    fn argon2_manager(limit: usize, hash: &str) -> (AuthManager, tempfile::NamedTempFile) {
+        let file = users_file_with(hash);
+        let path = file.path().to_string_lossy().to_string();
+        let mut manager = AuthManager::new(AuthConfig {
+            enabled: true,
+            backend: AuthBackend::Basic,
+            basic_users_file: Some(path),
+            ..Default::default()
+        });
+        manager.verify_permits = Arc::new(tokio::sync::Semaphore::new(limit));
+        (manager, file)
+    }
+
+    /// AS-07: a flood of wrong passwords never runs more than the configured
+    /// number of Argon2 verifications at once.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn parallel_bad_passwords_are_bounded_by_verify_limit() {
+        use std::sync::atomic::Ordering;
+        let password = test_password();
+        let hash = hash_password_argon2(&password).expect("hash");
+        let (manager, _file) = argon2_manager(2, &hash);
+        let manager = Arc::new(manager);
+
+        let mut tasks = Vec::new();
+        for i in 0..24 {
+            let m = manager.clone();
+            tasks.push(tokio::spawn(async move {
+                m.authenticate("legacyuser", &format!("wrong-{i}")).await
+            }));
+        }
+        for t in tasks {
+            assert!(t.await.expect("join").is_err());
+        }
+        let peak = manager.verify_peak.load(Ordering::SeqCst);
+        assert!(
+            (1..=2).contains(&peak),
+            "peak concurrent verifications = {peak}"
+        );
+        assert_eq!(manager.verify_in_flight.load(Ordering::SeqCst), 0);
+        // Valid login still works after the flood.
+        assert!(manager.authenticate("legacyuser", &password).await.is_ok());
+    }
+
+    /// AS-07: unknown logins go through a (dummy) Argon2 verification, so
+    /// they are not answered measurably faster than a wrong password.
+    #[tokio::test]
+    async fn unknown_user_costs_an_argon2_verification() {
+        use std::sync::atomic::Ordering;
+        let password = test_password();
+        let hash = hash_password_argon2(&password).expect("hash");
+        let (manager, _file) = argon2_manager(4, &hash);
+        // Warm the lazily generated dummy hash.
+        let _ = dummy_password_hash();
+        assert!(dummy_password_hash().starts_with("$argon2id$"));
+
+        assert!(manager.authenticate("nobody", &password).await.is_err());
+        assert_eq!(
+            manager.verify_peak.load(Ordering::SeqCst),
+            1,
+            "unknown login must run a dummy Argon2 verification"
+        );
+    }
+
+    #[tokio::test]
+    async fn exhausted_verify_slots_reject_as_overloaded() {
+        let password = test_password();
+        let hash = hash_password_argon2(&password).expect("hash");
+        let (manager, _file) = argon2_manager(1, &hash);
+        let _held = manager
+            .verify_permits
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("permit");
+        tokio::time::pause();
+        let err = manager
+            .authenticate("legacyuser", &password)
+            .await
+            .unwrap_err();
+        assert!(err.contains("temporarily unavailable"), "{err}");
     }
 
     #[tokio::test]

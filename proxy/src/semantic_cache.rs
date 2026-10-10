@@ -279,6 +279,61 @@ pub fn normalize_llm_body(body: &[u8]) -> Vec<u8> {
 }
 
 /// Content-addressable cache key for LLM POST.
+/// Scope LLM cache entries to the caller's credentials: an answer obtained
+/// with one user's API key / session must not be served to another user who
+/// sends the same (or a similar) prompt. Returns `None` for anonymous requests.
+pub fn llm_credential_scope(
+    credentials: &[(&str, &[u8])],
+    username: Option<&str>,
+) -> Option<String> {
+    if credentials.is_empty() && username.is_none() {
+        return None;
+    }
+    let mut sorted: Vec<&(&str, &[u8])> = credentials.iter().collect();
+    sorted.sort();
+    let mut hasher = Sha256::new();
+    let mut field = |bytes: &[u8]| {
+        hasher.update((bytes.len() as u64).to_le_bytes());
+        hasher.update(bytes);
+    };
+    for (name, value) in sorted {
+        field(name.as_bytes());
+        field(value);
+    }
+    match username {
+        Some(user) => {
+            field(b"\0user");
+            field(user.as_bytes());
+        }
+        None => field(b"\0anon"),
+    }
+    Some(hex::encode(&hasher.finalize()[..16]))
+}
+
+/// Exact-match key, optionally prefixed by the credential scope.
+pub fn scoped_content_cache_key(
+    scope: Option<&str>,
+    method: &str,
+    url: &str,
+    normalized_body: &[u8],
+) -> Arc<str> {
+    let key = content_cache_key(method, url, normalized_body);
+    match scope {
+        Some(scope) => format!("{scope}:{key}").into(),
+        None => key,
+    }
+}
+
+/// Whether a semantic near-hit key belongs to the same credential scope.
+pub fn key_in_scope(key: &str, scope: Option<&str>) -> bool {
+    match scope {
+        Some(scope) => key
+            .strip_prefix(scope)
+            .is_some_and(|rest| rest.starts_with(':')),
+        None => !key.contains(':'),
+    }
+}
+
 pub fn content_cache_key(method: &str, url: &str, normalized_body: &[u8]) -> Arc<str> {
     let mut hasher = Sha256::new();
     hasher.update(method.as_bytes());
@@ -638,12 +693,17 @@ impl SemanticIndex {
 /// Store decision for LLM responses (ignores typical no-store/private from API providers).
 pub fn evaluate_llm_store(
     status: u16,
+    headers: &std::collections::HashMap<String, String>,
     body_size: usize,
     max_body_size: usize,
     ttl: Duration,
 ) -> crate::cache_freshness::CacheStoreDecision {
     use crate::cache_freshness::CacheStoreDecision;
     if status != 200 || body_size == 0 || body_size > max_body_size {
+        return CacheStoreDecision::bypass();
+    }
+    // Same rule as the HTTP cache: a cookie-setting response is per-client.
+    if crate::cache_freshness::header_value(headers, "set-cookie").is_some() {
         return CacheStoreDecision::bypass();
     }
     CacheStoreDecision {
@@ -659,6 +719,45 @@ pub fn evaluate_llm_store(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn llm_cache_is_scoped_by_credentials() {
+        let auth = |v: &'static [u8]| vec![("authorization", v)];
+        let a = llm_credential_scope(&auth(b"Bearer sk-a"), None);
+        let b = llm_credential_scope(&auth(b"Bearer sk-b"), None);
+        assert!(a.is_some() && a != b);
+        assert_eq!(llm_credential_scope(&[], None), None);
+        // Provider keys outside Authorization (Anthropic, Azure, Google).
+        let xa = llm_credential_scope(&[("x-api-key", b"k-a")], None);
+        let xb = llm_credential_scope(&[("x-api-key", b"k-b")], None);
+        assert!(xa.is_some() && xa != xb);
+        // Field boundaries and order are unambiguous.
+        assert_ne!(
+            llm_credential_scope(&[("authorization", b"ab"), ("cookie", b"c")], None),
+            llm_credential_scope(&[("authorization", b"a"), ("cookie", b"bc")], None)
+        );
+        assert_eq!(
+            llm_credential_scope(&[("a", b"1"), ("b", b"2")], None),
+            llm_credential_scope(&[("b", b"2"), ("a", b"1")], None)
+        );
+        let ka = scoped_content_cache_key(a.as_deref(), "POST", "u", b"{}");
+        let kb = scoped_content_cache_key(b.as_deref(), "POST", "u", b"{}");
+        let anon = scoped_content_cache_key(None, "POST", "u", b"{}");
+        assert_ne!(ka, kb);
+        assert_ne!(ka, anon);
+        assert!(key_in_scope(&ka, a.as_deref()));
+        assert!(!key_in_scope(&kb, a.as_deref()));
+        assert!(!key_in_scope(&ka, None));
+        assert!(key_in_scope(&anon, None));
+    }
+
+    #[test]
+    fn llm_store_skips_set_cookie_responses() {
+        let mut h = std::collections::HashMap::new();
+        h.insert("set-cookie".to_string(), "sid=1".to_string());
+        let d = evaluate_llm_store(200, &h, 10, 100, Duration::from_secs(60));
+        assert!(!d.store);
+    }
 
     #[test]
     fn path_prefix_matching() {
