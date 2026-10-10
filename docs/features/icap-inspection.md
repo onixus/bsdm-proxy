@@ -59,6 +59,7 @@ Streaming MISS (`STREAMING_MISS_ENABLED`) does **not** call RESPMOD — enable b
 Example:
 
 ```bash
+DEPLOYMENT_PROFILE=development MITM_CA_DIR=./certs \
 ICAP_ENABLED=true \
 ICAP_URL=icap://127.0.0.1:1344/echo \
 ICAP_FAIL_OPEN=true \
