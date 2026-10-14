@@ -1,0 +1,379 @@
+# APEX recipe derived from the GA production profile. See docs/APEX_DEPLOYMENT.md.
+# BSDM-Proxy — PRODUCTION profile (GA components only). Standalone file, NOT an
+# overlay: do not combine it with ../../docker-compose.yml or the lab overlays.
+#
+#   GA, always on : proxy (forward proxy, selective MITM, auth, ACL)
+#                   dns-sinkhole (RPZ-lite DNS first hop, UDP only)
+#   optional      : --profile analytics → cache-indexer (SQLite Search API,
+#                   fed by the proxy's HTTP event sink; no Kafka/ClickHouse)
+#   NOT included  : alert-worker, ml-worker, threat-intel collector, Kafka,
+#                   ClickHouse, Redis L2, ICAP, Prometheus/Grafana (Beta/Lab or
+#                   operator-provided).
+#   Explicitly OFF: eBPF/XDP, WASM hooks, ICAP, DLP, gRPC control plane, cache
+#                   hierarchy (ICP/HTCP/multicast discovery), PERF fast path,
+#                   ML threat-score blocking, threat-intel enforcement (shadow),
+#                   DoH/DoT; AWG is inert (no AWG_CONFIG_PATH/AWG_RELOAD_CMD,
+#                   read-only rootfs).
+#
+# One-time setup (from the repository root):
+#   cp deploy/compose/prod.env.example deploy/compose/prod.env   # then edit
+#   install -d -m 0700 deploy/compose/secrets
+#   for s in control_api_token metrics_auth_token search_api_token ingest_api_token; do
+#     openssl rand -hex 32 > "deploy/compose/secrets/$s"; done
+#   cp /path/to/basic-auth-users.json deploy/compose/secrets/basic_auth_users
+#     # generate with scripts/gen-basic-auth-user.sh; NEVER the shipped example
+#   ./scripts/gen-ca.sh            # or install your corporate sub-CA into ./certs
+#   # Containers run as uid/gid 1000 and plain (non-Swarm) Compose bind-mounts
+#   # secret files with their host owner/mode, so:
+#   sudo chown 1000:1000 deploy/compose/secrets/* certs/ca.key certs/ca.crt
+#   sudo chmod 0400 deploy/compose/secrets/* certs/ca.key
+#
+# Run:
+#   docker compose -f deploy/compose/docker-compose.prod.yml --env-file deploy/compose/prod.env pull
+#   docker compose -f deploy/compose/docker-compose.prod.yml --env-file deploy/compose/prod.env up -d
+#   # with the Search API / event index:
+#   docker compose -f deploy/compose/docker-compose.prod.yml --env-file deploy/compose/prod.env --profile analytics up -d
+#
+# Exposure: only the data planes are published — proxy :3128 on PROXY_BIND and
+# DNS :53/udp on DNS_BIND. The control plane (:9090 metrics/admin/REST API) is
+# published on 127.0.0.1 only; dns-sinkhole :8092 (unauthenticated zone reload)
+# and cache-indexer :8080 are never published.
+
+name: bsdm-proxy-apex
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+# Runtime hardening shared by every service. Each image runs as uid 1000
+# (Dockerfile runtime-base); every writable path is a named volume or tmpfs.
+x-hardened: &hardened
+  user: "1000:1000"
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=64m
+  restart: unless-stopped
+  logging: *logging
+  pull_policy: missing
+
+services:
+  proxy:
+    <<: *hardened
+    image: ${BSDM_PROXY_IMAGE:-ghcr.io/onixus/bsdm-proxy:${BSDM_IMAGE_TAG:?set BSDM_IMAGE_TAG (release version, e.g. 1.0.0)}}
+    # The proxy reads no *_FILE variables, so Docker secrets are exported into
+    # its environment by this wrapper (values never appear in `docker inspect`
+    # or in this file). A missing/empty mandatory secret aborts the start.
+    entrypoint:
+      - /usr/bin/dumb-init
+      - --
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        secret() {
+          f="/run/secrets/$$1"
+          if [ ! -s "$$f" ]; then echo "FATAL: secret $$1 missing or empty ($$f)" >&2; exit 1; fi
+          tr -d '\r\n' < "$$f"
+        }
+        CONTROL_API_TOKEN="$$(secret control_api_token)"; export CONTROL_API_TOKEN
+        METRICS_AUTH_TOKEN="$$(secret metrics_auth_token)"; export METRICS_AUTH_TOKEN
+        EVENT_SINK_TOKEN="$$(secret ingest_api_token)"; export EVENT_SINK_TOKEN
+        SEARCH_UPSTREAM_TOKEN="$$(secret search_api_token)"; export SEARCH_UPSTREAM_TOKEN
+        exec /usr/local/bin/proxy
+    ports:
+      # Data plane for clients. PROXY_BIND is mandatory: pick the client-facing
+      # interface deliberately (0.0.0.0 publishes on every interface).
+      - "${PROXY_BIND:?set PROXY_BIND to the client-facing IP}:${PROXY_HOST_PORT:-3128}:3128"
+      # Control plane: loopback only. Reach it via SSH tunnel / bastion /
+      # an authenticated reverse proxy on the management network.
+      - "127.0.0.1:${METRICS_HOST_PORT:-9090}:9090"
+    environment:
+      APEX_GATEWAY_URL: ${APEX_GATEWAY_URL:?required}
+      APEX_SERVICE_URL: ${APEX_SERVICE_URL:?required}
+      HTTP_PORT: "3128"
+      METRICS_PORT: "9090"
+      # Inside the container the listener must bind all container interfaces
+      # so the loopback-only port publish above and the healthcheck work.
+      METRICS_BIND: "0.0.0.0"
+
+      # --- Profile & policy (fail-closed) ---
+      DEPLOYMENT_PROFILE: production
+      POLICY_MODE: selective-mitm
+      MITM_ENABLED: "true"
+      MITM_CA_DIR: /certs
+      MITM_CATEGORIES: "${MITM_CATEGORIES:-malware,phishing,illegal-content}"
+      PINNING_EXCEPTIONS_PATH: /etc/bsdm-proxy/pinning-exceptions.json
+      PINNING_AUDIT_LOG_PATH: /var/log/bsdm-proxy/pinning-audit.jsonl
+      CONTROL_API_ALLOW_INSECURE: "false"
+      # (CONTROL_API_TOKEN / METRICS_AUTH_TOKEN come from secrets, see entrypoint)
+
+      # --- Authentication: mandatory, basic backend with a real users file ---
+      AUTH_ENABLED: "true"
+      # Never an anonymous proxy in this profile (the proxy refuses to start
+      # without auth unless this is true or a client-IP ACL exists).
+      ALLOW_ANONYMOUS_PROXY: "false"
+      AUTH_BACKEND: basic
+      AUTH_REALM: "${AUTH_REALM:-BSDM-Proxy}"
+      BASIC_AUTH_USERS_FILE: /run/secrets/basic_auth_users
+      # 0 behind a pooling downstream proxy / LB (one TCP conn = many users).
+      AUTH_CONN_CACHE_TTL_SECONDS: "${AUTH_CONN_CACHE_TTL_SECONDS:-300}"
+
+      # --- ACL ---
+      ACL_ENABLED: "true"
+      # The shipped rule set is a blocklist; see bsdm-proxy.env for why the
+      # fallback stays `allow`. The rules file's own default_action wins.
+      ACL_DEFAULT_ACTION: "${ACL_DEFAULT_ACTION:-allow}"
+      ACL_RULES_PATH: /etc/bsdm-proxy/acl-rules.json
+      # Rules are mounted read-only (GitOps): change the file + restart.
+      ACL_AUTO_RELOAD: "false"
+      CATEGORIZATION_ENABLED: "${CATEGORIZATION_ENABLED:-false}"
+      UT1_ENABLED: "false"
+      RKN_SYNC_ENABLED: "${RKN_SYNC_ENABLED:-false}"
+      # RKN_FALLBACK_URL deliberately unset: in the production profile that
+      # means no built-in third-party fallback list.
+
+      # --- SSRF guards ---
+      BLOCK_LOOPBACK_FORWARDING: "true"
+      BLOCK_CLOUD_METADATA: "true"
+      ALLOWED_CONNECT_PORTS: "${ALLOWED_CONNECT_PORTS:-443,8443}"
+      MAX_REQUEST_BODY_BYTES: "${MAX_REQUEST_BODY_BYTES:-67108864}"
+      UPSTREAM_CONNECT_TIMEOUT_MS: "10000"
+      UPSTREAM_RESPONSE_TIMEOUT_MS: "60000"
+
+      # --- Cache (L1 only; L2 Redis is not part of the GA profile) ---
+      CACHE_CAPACITY: "${CACHE_CAPACITY:-50000}"
+      CACHE_TTL_SECONDS: "${CACHE_TTL_SECONDS:-3600}"
+      MAX_CACHE_BODY_SIZE: "${MAX_CACHE_BODY_SIZE:-4194304}"
+      CACHE_SHARDS: "16"
+      CACHE_SPILL_DIR: /var/cache/bsdm-spill
+      CACHE_SPILL_THRESHOLD_BYTES: "262144"
+      CACHE_COMPRESSION: zstd
+      REDIS_L2_ENABLED: "false"
+      # Serves cache hits BEFORE auth/ACL — benchmarks only.
+      PERF_FAST_CACHE_HIT: "false"
+      BSM_PERF_MODE: "false"
+      WORKER_COUNT: "${WORKER_COUNT:-2}"
+
+      # --- Lab / Beta / frozen features: explicitly OFF ---
+      EBPF_XDP_ENABLED: "false"
+      EBPF_XDP_ALLOW_RUNTIME_ENABLE: "false"
+      WASM_ENABLED: "false"
+      WASM_FAIL_OPEN: "false"
+      ICAP_ENABLED: "false"
+      ICAP_FAIL_OPEN: "false"
+      DLP_ENABLED: "false"
+      CONTROL_GRPC_ENABLED: "false"
+      HIERARCHY_ENABLED: "false"
+      ICP_SERVER_ENABLED: "false"
+      HTCP_SERVER_ENABLED: "false"
+      PEER_DISCOVERY_ENABLED: "false"
+      SEMANTIC_CACHE_ENABLED: "false"
+      AI_CACHE_ENABLED: "false"
+      THREAT_SCORE_ENABLED: "false"
+      THREAT_SCORE_BLOCK_THRESHOLD: "0"
+      # Threat intel: no collector in the GA profile; enforcement stays shadow.
+      TI_SHADOW_MATCH_ENABLED: "false"
+      TI_ENFORCEMENT_MODE: shadow
+      TI_ENFORCE_ENABLED: "false"
+      TI_ENFORCEMENT_ENABLED: "false"
+      TI_ACL_FEED_ENABLED: "false"
+      # Agent enrolment, AmneziaWG and lab control-plane APIs (Beta/Lab).
+      AGENT_API_ENABLED: "false"
+      AWG_API_ENABLED: "false"
+      LAB_API_ENABLED: "false"
+
+      # --- DNS sinkhole integration (RPZ API → compiled zone → reload) ---
+      DNS_RPZ_STATE_DIR: /var/lib/bsdm-proxy/rpz
+      DNS_SINKHOLE_ZONE_PATH: /var/lib/bsdm-proxy/rpz/compiled.rpz
+      DNS_SINKHOLE_RELOAD_URL: http://dns-sinkhole:8092/api/zone/reload
+
+      # --- Events: analytics profile only (empty = no event export) ---
+      #   EVENT_SINK_URL=http://cache-indexer:8080/api/events
+      #   SEARCH_UPSTREAM_URL=http://cache-indexer:8080   (Admin Console search)
+      EVENT_SINK_URL: "${EVENT_SINK_URL:-}"
+      SEARCH_UPSTREAM_URL: "${SEARCH_UPSTREAM_URL:-}"
+      KAFKA_SAMPLE_RATE: "0"
+
+      # Admin Console "Apply" persists here (state volume), not in the image.
+      CONFIG_ENV_PATH: /var/lib/bsdm-proxy/bsdm-proxy.env
+      SHUTDOWN_TIMEOUT_SECONDS: "30"
+      RUST_LOG: "${PROXY_RUST_LOG:-info,bsdm_proxy=info}"
+      RUST_BACKTRACE: "0"
+    secrets:
+      - control_api_token
+      - metrics_auth_token
+      - ingest_api_token
+      - search_api_token
+      - basic_auth_users
+    volumes:
+      - ${BSDM_CERTS_DIR:-../../certs}:/certs:ro
+      - ${ACL_RULES_HOST:-../../config/bsdm-etc/acl-rules.json}:/etc/bsdm-proxy/acl-rules.json:ro
+      - ${PINNING_EXCEPTIONS_HOST:-../../config/pinning-exceptions.example.json}:/etc/bsdm-proxy/pinning-exceptions.json:ro
+      - proxy-state:/var/lib/bsdm-proxy
+      - rpz-state:/var/lib/bsdm-proxy/rpz
+      - proxy-spill:/var/cache/bsdm-spill
+      - proxy-audit:/var/log/bsdm-proxy
+    networks:
+      - edge
+      - backend
+    stop_grace_period: 50s
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:9090/health | grep -q ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    deploy:
+      resources:
+        limits:
+          cpus: "${PROXY_CPUS:-4.0}"
+          memory: ${PROXY_MEMORY:-4G}
+          pids: 2048
+        reservations:
+          cpus: "1.0"
+          memory: 1G
+
+  dns-sinkhole:
+    <<: *hardened
+    image: ${BSDM_DNS_SINKHOLE_IMAGE:-ghcr.io/onixus/bsdm-dns-sinkhole:${BSDM_IMAGE_TAG:?set BSDM_IMAGE_TAG (release version, e.g. 1.0.0)}}
+    ports:
+      # DNS data plane. Defaults to loopback: set DNS_BIND to the internal
+      # resolver interface. Never expose an open resolver to the Internet.
+      - "${DNS_BIND:-127.0.0.1}:${DNS_HOST_PORT:-53}:53/udp"
+      # :8092 (metrics + unauthenticated zone reload) is NOT published; the
+      # proxy reaches it over the internal `backend` network.
+    environment:
+      DNS_SINKHOLE_ENABLED: "true"
+      DNS_SINKHOLE_BIND: "0.0.0.0:53"
+      DNS_SINKHOLE_UPSTREAM: "${DNS_SINKHOLE_UPSTREAM:-1.1.1.1:53}"
+      # Compiled by the proxy's RPZ API; falls back to the image's
+      # /etc/bsdm-proxy/blocklist.rpz on first boot.
+      DNS_SINKHOLE_ZONE_PATH: /var/lib/bsdm-proxy/rpz/compiled.rpz
+      DNS_SINKHOLE_ACTION: "${DNS_SINKHOLE_ACTION:-sinkhole}"
+      DNS_SINKHOLE_A: "${DNS_SINKHOLE_A:-0.0.0.0}"
+      DNS_SINKHOLE_DOH_ENABLED: "false"
+      DNS_SINKHOLE_DOT_ENABLED: "false"
+      METRICS_PORT: "8092"
+      RUST_LOG: "info,dns_sinkhole=info"
+    # Port 53 as uid 1000 without any capability: allow unprivileged binds
+    # from 53 up inside this container's network namespace only.
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: "53"
+    volumes:
+      - rpz-state:/var/lib/bsdm-proxy/rpz:ro
+    networks:
+      - edge
+      - backend
+    depends_on:
+      proxy:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8092/health | grep -qx ok"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+          pids: 256
+        reservations:
+          memory: 64M
+
+  # Optional: event index + Search API for the Admin Console (SQLite store).
+  cache-indexer:
+    <<: *hardened
+    profiles: ["analytics"]
+    image: ${BSDM_CACHE_INDEXER_IMAGE:-ghcr.io/onixus/bsdm-cache-indexer:${BSDM_IMAGE_TAG:?set BSDM_IMAGE_TAG (release version, e.g. 1.0.0)}}
+    entrypoint:
+      - /usr/bin/dumb-init
+      - --
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        secret() {
+          f="/run/secrets/$$1"
+          if [ ! -s "$$f" ]; then echo "FATAL: secret $$1 missing or empty ($$f)" >&2; exit 1; fi
+          tr -d '\r\n' < "$$f"
+        }
+        SEARCH_API_TOKEN="$$(secret search_api_token)"; export SEARCH_API_TOKEN
+        INGEST_API_TOKEN="$$(secret ingest_api_token)"; export INGEST_API_TOKEN
+        exec /usr/local/bin/cache-indexer
+    # No ports: reachable only from the proxy (event sink, same-origin Search
+    # for the Admin Console) over the internal `backend` network.
+    environment:
+      INDEX_STORE: sqlite
+      SQLITE_PATH: /var/lib/cache-indexer/events.db
+      SQLITE_MAX_ROWS: "${SQLITE_MAX_ROWS:-5000000}"
+      METRICS_PORT: "8080"
+      SEARCH_API_ENABLED: "true"
+      SEARCH_API_ALLOW_INSECURE: "false"
+      SEARCH_API_DEFAULT_DAYS: "${SEARCH_API_DEFAULT_DAYS:-30}"
+      DEPLOYMENT_PROFILE: production
+      RUST_LOG: "info,cache_indexer=info"
+    secrets:
+      - search_api_token
+      - ingest_api_token
+    volumes:
+      - indexer-data:/var/lib/cache-indexer
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8080/health | grep -q ok"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+          pids: 512
+        reservations:
+          memory: 128M
+
+networks:
+  # Egress-capable network: proxy upstream traffic, DNS upstream, published
+  # data-plane ports.
+  edge:
+    driver: bridge
+  # No route outside the host: proxy <-> dns-sinkhole reload, proxy <->
+  # cache-indexer. Nothing on it can reach the Internet.
+  backend:
+    driver: bridge
+    internal: true
+
+# File-based secrets (plain Compose bind-mounts them at /run/secrets/<name>).
+# The directory is git-ignored (`secrets/` in .gitignore).
+secrets:
+  control_api_token:
+    file: ${BSDM_SECRETS_DIR:-./secrets}/control_api_token
+  metrics_auth_token:
+    file: ${BSDM_SECRETS_DIR:-./secrets}/metrics_auth_token
+  ingest_api_token:
+    file: ${BSDM_SECRETS_DIR:-./secrets}/ingest_api_token
+  search_api_token:
+    file: ${BSDM_SECRETS_DIR:-./secrets}/search_api_token
+  basic_auth_users:
+    file: ${BSDM_SECRETS_DIR:-./secrets}/basic_auth_users
+
+volumes:
+  proxy-state:
+  rpz-state:
+  proxy-spill:
+  proxy-audit:
+  indexer-data:
