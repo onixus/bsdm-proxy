@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "product_id": "bsdm-proxy",
+  "deployment_mode": "docker",
+  "required_environment": [
+    "BSDM_IMAGE_TAG",
+    "PROXY_BIND",
+    "BSDM_SECRETS_DIR",
+    "BSDM_CERTS_DIR"
+  ],
+  "gateway_url_variable": "APEX_GATEWAY_URL",
+  "service_url_variable": "APEX_SERVICE_URL",
+  "installation_guide": "docs/APEX_DEPLOYMENT.md",
+  "compose_file": "deploy/compose/docker-compose.apex.yml",
+  "health_service": "proxy"
+}
